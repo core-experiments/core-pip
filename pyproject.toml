@@ -1,0 +1,112 @@
+[project]
+name = "pip"
+version = "0.0.0"
+description = "The PyPA recommended tool for installing Python packages."
+license = "MIT"
+license-files = ["LICENSE.txt"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "Topic :: Software Development :: Build Tools",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Programming Language :: Python :: Implementation :: PyPy",
+]
+authors = [{ name = "The pip developers", email = "distutils-sig@python.org" }]
+
+# NOTE: requires-python is duplicated in __pip-runner__.py.
+# When changing this value, please change the other copy as well.
+requires-python = ">=3.10"
+dependencies = [
+    "msgpack",
+    "packaging",
+    "pyproject-hooks",
+]
+
+[project.scripts]
+pip = "pip.cli.main:main"
+pip3 = "pip.cli.main:main"
+pip-core = "pip.cli.main:main"
+
+[project.urls]
+Homepage = "https://pip.pypa.io/"
+Documentation = "https://pip.pypa.io"
+Source = "https://github.com/pypa/pip"
+
+[build-system]
+requires = [
+    "uv>=0.11.16,<0.12",
+    "uv_build>=0.11.16,<0.12",
+]
+build-backend = "uv_build"
+
+[dependency-groups]
+typing = ["ty"]
+test = [
+    "cryptography",
+    "installer",
+    "keyring",
+    "msgpack",
+    "proxy.py",
+    "pytest",
+    "pytest-cov",
+    "pytest-rerunfailures",
+    "pytest-subket",
+    "scripttest",
+    "tomli-w",
+    "uv",
+    "uv-build",
+    "virtualenv",
+    "werkzeug",
+]
+
+[tool.uv]
+default-groups = ["typing"]
+
+[tool.pip.architecture]
+domains = [
+    "core",
+    "platform",
+    "network",
+    "build",
+    "index",
+    "resolution",
+    "install",
+    "vcs",
+    "cli",
+]
+
+[tool.pip.architecture.dependencies]
+core = []
+platform = ["core"]
+build = ["core", "platform"]
+index = ["core", "build", "platform"]
+network = ["core", "platform", "build", "index"]
+vcs = ["core"]
+resolution = ["core", "index", "network", "vcs"]
+install = [
+    "core",
+    "platform",
+    "network",
+    "build",
+    "index",
+    "resolution",
+    "vcs",
+]
+cli = [
+    "core",
+    "platform",
+    "network",
+    "build",
+    "index",
+    "resolution",
+    "install",
+    "vcs",
+]

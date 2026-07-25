@@ -1,0 +1,63 @@
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+from .errors import CommandError
+from .packaging import canonicalize_name
+
+
+@dataclass
+class ReleaseControl:
+    all_releases: set[str] = field(default_factory=set)
+    only_final: set[str] = field(default_factory=set)
+    _ordered_args: list[tuple[str, str]] = field(default_factory=list, compare=False)
+
+    def apply(self, kind: str, value: str) -> None:
+        if kind not in {"all_releases", "only_final"}:
+            raise ValueError(f"unknown release control kind: {kind}")
+        if value.startswith("-"):
+            raise CommandError(
+                "--all-releases / --only-final option requires 1 argument."
+            )
+        entries = [item.strip() for item in value.split(",") if item.strip()]
+        if not entries:
+            return
+        if kind not in {"all_releases", "only_final"}:
+            raise ValueError(f"unknown release control kind: {kind}")
+        target = self.all_releases if kind == "all_releases" else self.only_final
+        opposite = self.only_final if kind == "all_releases" else self.all_releases
+        for entry in entries:
+            normalized = (
+                canonicalize_name(entry) if entry not in {":all:", ":none:"} else entry
+            )
+            self._ordered_args.append((kind, normalized))
+            if normalized == ":none:":
+                target.clear()
+                continue
+            if normalized == ":all:":
+                target.discard(":none:")
+                opposite.discard(":all:")
+                target.add(":all:")
+                continue
+            opposite.discard(normalized)
+            target.add(normalized)
+
+    def allows_prereleases(self, project_name: str) -> bool | None:
+        canonical = canonicalize_name(project_name)
+        if canonical in self.all_releases:
+            return True
+        if canonical in self.only_final:
+            return False
+        if ":all:" in self.only_final:
+            return False
+        if ":all:" in self.all_releases:
+            return True
+        return None
+
+    def get_ordered_args(self) -> list[tuple[str, str]]:
+        return list(self._ordered_args)
+
+    def handle_mutual_excludes(
+        self, value: str, target: set[str], other: set[str], attr_name: str
+    ) -> None:
+        self.apply(attr_name, value)

@@ -1,0 +1,28 @@
+# Mypy configuration for pip type checking
+#
+# This configuration is used by `nox -s typecheck` and represents the target
+# mypy configuration once the pip codebase has proper type annotations.
+# Eventually, this configuration should be moved to the main pyproject.toml
+# to replace the current [tool.mypy] section.
+
+[tool.mypy]
+mypy_path = ["src"]
+strict = true
+no_implicit_reexport = false
+disallow_subclassing_any = false
+disallow_untyped_calls = false
+warn_return_any = true
+ignore_missing_imports = false
+warn_redundant_casts = true
+
+exclude = [
+    "tests/cli/data",
+]
+
+[[tool.mypy.overrides]]
+module = "scripttest"  # v2.0.post1 doesn't yet ship with py.typed
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "virtualenv"
+ignore_missing_imports = true
