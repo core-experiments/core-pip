@@ -7,6 +7,7 @@ import os
 import re
 import shlex
 import sys
+
 try:
     import tomllib
 except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility
@@ -111,13 +112,9 @@ def parse_pylock(
             )
             direct = True
         elif isinstance(distribution, pylock.PackageWheel):
-            if (
-                provider is not None
-                and "binary"
-                not in (provider.format_control or FormatControl()).get_allowed_formats(
-                    package.name
-                )
-            ):
+            if provider is not None and "binary" not in (
+                provider.format_control or FormatControl()
+            ).get_allowed_formats(package.name):
                 if package.sdist is None:
                     raise InstallationError(
                         f"binaries are not permitted for package {package.name!r} and "
@@ -133,13 +130,9 @@ def parse_pylock(
             )
             requirement = f"{package.name}=={version}"
         else:
-            if (
-                provider is not None
-                and "source"
-                not in (provider.format_control or FormatControl()).get_allowed_formats(
-                    package.name
-                )
-            ):
+            if provider is not None and "source" not in (
+                provider.format_control or FormatControl()
+            ).get_allowed_formats(package.name):
                 raise InstallationError(
                     f"source distributions are not permitted for package {package.name!r} and "
                     f"there is no compatible wheel for it in {reference!r}"
@@ -251,7 +244,9 @@ def parse_requirements_internal(
                 except UnicodeDecodeError:
                     getencoding = getattr(locale, "getencoding", None)
                     encoding = (
-                        getencoding() if callable(getencoding) else locale.getpreferredencoding(False)
+                        getencoding()
+                        if callable(getencoding)
+                        else locale.getpreferredencoding(False)
                     )
                     logger.warning(
                         "unable to decode data from %s with default encoding %s, "
@@ -546,9 +541,7 @@ def parse_requirement_line(
         metadata.update(parsed_options)
     return [
         ParsedRequirement(
-            requirement=requirement_text
-            if option not in EDITABLE_OPTIONS
-            else value,
+            requirement=requirement_text if option not in EDITABLE_OPTIONS else value,
             comes_from=comes_from,
             is_editable=editable or option in EDITABLE_OPTIONS,
             constraint=constraint,

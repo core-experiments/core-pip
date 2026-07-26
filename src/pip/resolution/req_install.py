@@ -8,6 +8,7 @@ import os
 import subprocess
 import sys
 import tempfile
+
 try:
     import tomllib
 except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility
@@ -23,7 +24,7 @@ from pip.core.errors import (
     InstallationError,
     InvalidWheelFilename,
 )
-from pip.core.direct_url import ArchiveInfo, DirectUrl, DirInfo
+from pip.core.direct_url import ArchiveInfo, DirInfo
 from pip.core.hashes import Hashes
 from pip.index.links import Link
 from pip.core.packaging import (

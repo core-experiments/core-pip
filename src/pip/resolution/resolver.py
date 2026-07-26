@@ -30,7 +30,7 @@ from pip.core.packaging import (
     marker_applies,
     parse_requirement,
 )
-from pip.core.wheel import WheelCandidate, parse_wheel_filename, wheel_candidate
+from pip.core.wheel import WheelCandidate, wheel_candidate
 from pip.index.candidate_materialization import CandidateStream, LazyWheelCandidate
 from pip.index.links import Link
 from pip.index.provider import CandidateProvider
@@ -606,12 +606,15 @@ class Resolver:
                     constraints = self.constraints_by_name.get(
                         candidate.canonical_name, ()
                     )
-                    if any(
-                        not constraint.is_satisfied_by(
-                            candidate.version, allow_prereleases=True
+                    if (
+                        any(
+                            not constraint.is_satisfied_by(
+                                candidate.version, allow_prereleases=True
+                            )
+                            for constraint in constraints
                         )
-                        for constraint in constraints
-                    ) and candidate.source_kind in SOURCE_KINDS:
+                        and candidate.source_kind in SOURCE_KINDS
+                    ):
                         raise ResolutionError(
                             f"Cannot install {candidate.name} {candidate.version} "
                             "because it conflicts with a constraint."
@@ -1802,9 +1805,7 @@ class Resolver:
         allowed_versions = self.allowed_versions_cache.get(key)
         if allowed_versions is None:
             allowed_versions = frozenset(
-                version
-                for index, version in enumerate(versions)
-                if mask & (1 << index)
+                version for index, version in enumerate(versions) if mask & (1 << index)
             )
             self.allowed_versions_cache[key] = allowed_versions
         return mask, allowed_versions
@@ -2362,9 +2363,7 @@ class Resolver:
             if source_req is not None
             else ()
         )
-        provider_hashes = self.provider.hashes_by_name.get(
-            requirement.canonical_name
-        )
+        provider_hashes = self.provider.hashes_by_name.get(requirement.canonical_name)
         provider_hash_key = (
             tuple(
                 sorted(
@@ -2505,8 +2504,7 @@ class Resolver:
         candidates = self.candidate_cache[key]
         if source_req is not None and source_req.hash_options:
             allowed_sha256 = {
-                digest.lower()
-                for digest in source_req.hash_options.get("sha256", ())
+                digest.lower() for digest in source_req.hash_options.get("sha256", ())
             }
 
             def keep_hashed(candidate: WheelCandidate) -> bool:
@@ -2518,9 +2516,7 @@ class Resolver:
                 return digest is not None and digest.lower() in allowed_sha256
 
             if allowed_sha256:
-                candidates = candidates.prefer(
-                    keep_hashed, decisive=decisive_hashed
-                )
+                candidates = candidates.prefer(keep_hashed, decisive=decisive_hashed)
         logger.debug(
             "candidate cache ready requirement=%s",
             requirement.raw or requirement.name,

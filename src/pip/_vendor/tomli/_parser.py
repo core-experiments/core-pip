@@ -56,10 +56,10 @@ ILLEGAL_COMMENT_CHARS: Final = ILLEGAL_BASIC_STR_CHARS
 TOML_WS: Final = frozenset(" \t")
 TOML_WS_AND_NEWLINE: Final = TOML_WS | frozenset("\n")
 BARE_KEY_CHARS: Final = frozenset(
-    "abcdefghijklmnopqrstuvwxyz" "ABCDEFGHIJKLMNOPQRSTUVWXYZ" "0123456789" "-_"
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_"
 )
 KEY_INITIAL_CHARS: Final = BARE_KEY_CHARS | frozenset("\"'")
-HEXDIGIT_CHARS: Final = frozenset("abcdef" "ABCDEF" "0123456789")
+HEXDIGIT_CHARS: Final = frozenset("abcdefABCDEF0123456789")
 
 BASIC_STR_ESCAPE_REPLACEMENTS: Final = MappingProxyType(
     {

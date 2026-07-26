@@ -31,7 +31,9 @@ class ReleaseControl:
         opposite = self.only_final if kind == "all_releases" else self.all_releases
         for entry in entries:
             normalized = (
-                canonicalize_name(entry) if entry not in RELEASE_CONTROL_SENTINELS else entry
+                canonicalize_name(entry)
+                if entry not in RELEASE_CONTROL_SENTINELS
+                else entry
             )
             self.ordered_args.append((kind, normalized))
             if normalized == ":none:":

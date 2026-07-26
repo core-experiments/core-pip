@@ -19,6 +19,7 @@ from pip_test_support.server import (
 )
 from pip_test_support.venv import VirtualEnvironment
 
+
 def test_options_from_env_vars(script: PipTestEnvironment) -> None:
     """
     Test if ConfigOptionParser reads env vars (e.g. not using PyPI here)

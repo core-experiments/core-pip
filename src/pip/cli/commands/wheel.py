@@ -43,7 +43,9 @@ def create_parser() -> ArgumentParser:
         "--trusted-host", dest="trusted_hosts", action="append", default=[]
     )
     parser.add_argument("--proxy")
-    parser.add_argument("--use-feature", dest="use_features", action="append", default=[])
+    parser.add_argument(
+        "--use-feature", dest="use_features", action="append", default=[]
+    )
     parser.add_argument("--no-index", action="store_true")
     parser.add_argument("--no-build-isolation", action="store_true")
     parser.add_argument("--no-deps", action="store_true")

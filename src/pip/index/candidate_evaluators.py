@@ -168,10 +168,7 @@ class CandidateEvaluator:
                 RejectionReason.UNSUPPORTED_ARTIFACT,
                 "binary distributions are disabled",
             )
-        if (
-            link.kind in SOURCE_ARTIFACT_KINDS
-            and not allow_source
-        ):
+        if link.kind in SOURCE_ARTIFACT_KINDS and not allow_source:
             return CandidateEvaluator.reject(
                 link,
                 RejectionReason.UNSUPPORTED_ARTIFACT,

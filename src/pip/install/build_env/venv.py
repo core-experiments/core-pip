@@ -93,7 +93,13 @@ class VenvBuildEnvironment(BuildEnvironment):
                     if not key.startswith("PIP_") and key != "PYTHONPATH"
                 }
                 subprocess.run(
-                    [context.env_exec_cmd, "-m", "ensurepip", "--upgrade", "--default-pip"],
+                    [
+                        context.env_exec_cmd,
+                        "-m",
+                        "ensurepip",
+                        "--upgrade",
+                        "--default-pip",
+                    ],
                     check=True,
                     cwd=self.env_path_internal,
                     env=bootstrap_environment,
@@ -109,9 +115,7 @@ class VenvBuildEnvironment(BuildEnvironment):
                 raise VenvCreationError(detail)
         else:
             try:
-                virtualenv.cli_run(
-                    [self.env_path_internal, "--no-download", "--clear"]
-                )
+                virtualenv.cli_run([self.env_path_internal, "--no-download", "--clear"])
             except (OSError, RuntimeError) as e:
                 raise VenvCreationError(str(e))
 

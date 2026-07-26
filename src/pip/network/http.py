@@ -222,10 +222,7 @@ class NetworkSession:
                     ) from exc
                 time.sleep(0.25 * (2**attempt))
                 continue
-            if (
-                response.status_code in RETRY_STATUS_CODES
-                and attempt + 1 < attempts
-            ):
+            if response.status_code in RETRY_STATUS_CODES and attempt + 1 < attempts:
                 response.close()
                 time.sleep(0.25 * (2**attempt))
                 continue

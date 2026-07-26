@@ -397,9 +397,7 @@ class Link:
 
     @property
     def is_vcs(self) -> bool:
-        return self.scheme in VCS_SCHEMES or self.url.startswith(
-            VCS_SCHEMES_internal
-        )
+        return self.scheme in VCS_SCHEMES or self.url.startswith(VCS_SCHEMES_internal)
 
     @property
     def is_file(self) -> bool:

@@ -6,7 +6,7 @@ import logging
 import os
 import re
 import site
-from collections.abc import Container, Generator, Iterable
+from collections.abc import Generator, Iterable
 from dataclasses import dataclass, field
 from typing import NamedTuple
 

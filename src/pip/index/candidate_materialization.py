@@ -26,7 +26,6 @@ from pip.core.packaging import (
 from pip.core.wheel import WheelCandidate, validate_wheel, wheel_candidate
 from pip.index.artifacts import ArtifactLocator
 from pip.index.cache import origin_hashes, wheel_cache_path
-from pip.index.candidates import InstallationCandidate
 from pip.index.links import Link
 from pip.index.source_models import (
     ArtifactKind,
@@ -260,9 +259,7 @@ class LazyWheelCandidate(WheelCandidate):
                 shutil.rmtree(local, ignore_errors=True)
                 return None
             if local.is_file():
-                return {
-                    "sha256": hashlib.sha256(local.read_bytes()).hexdigest()
-                }
+                return {"sha256": hashlib.sha256(local.read_bytes()).hexdigest()}
             return None
         return None
 
@@ -339,9 +336,7 @@ class CandidateMaterializer:
         self.wheel_candidates: dict[
             tuple[str, int, int, frozenset[str]], WheelCandidate
         ] = {}
-        self.metadata_cache: dict[
-            tuple[str, frozenset[str]], CandidateMetadata
-        ] = {}
+        self.metadata_cache: dict[tuple[str, frozenset[str]], CandidateMetadata] = {}
         self.local_artifacts: dict[str, Path] = {}
 
     def ensure_local(

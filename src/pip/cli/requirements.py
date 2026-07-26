@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+
 try:
     import tomllib
 except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility
@@ -96,8 +97,7 @@ def load_source_config(command: str | None = None) -> SourceConfig:
     )
     no_index_value = configured("no-index")
     no_index = (
-        no_index_value is not None
-        and no_index_value.strip().lower() in NO_INDEX_VALUES
+        no_index_value is not None and no_index_value.strip().lower() in NO_INDEX_VALUES
     )
     if (value := os.environ.get("PIP_FIND_LINKS")) is not None:
         find_links = value.split()

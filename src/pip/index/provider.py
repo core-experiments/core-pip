@@ -239,7 +239,11 @@ class CandidateProvider:
         links: tuple[Link, ...] | None = None
         exact_version = self.exact_version_internal(requirement)
         catalog = self.package_catalog_cache.get(catalog_key)
-        if requirement.url is None and exact_version is not None and catalog is not None:
+        if (
+            requirement.url is None
+            and exact_version is not None
+            and catalog is not None
+        ):
             links = catalog.links_by_version.get(exact_version, ())
         elif requirement.url is None and catalog is not None:
             matching_versions = self.matching_versions(
@@ -296,9 +300,7 @@ class CandidateProvider:
             parsed = self.parsed_link_cache.get(link) if cache_parsed else None
             if parsed is None:
                 try:
-                    parsed = InstallationCandidate.from_link(
-                        link, target=self.target
-                    )
+                    parsed = InstallationCandidate.from_link(link, target=self.target)
                 except ValueError:
                     rejected.append(
                         RejectedCandidate(
@@ -424,10 +426,7 @@ class CandidateProvider:
         for link in self.catalog_links(requirement):
             if link.kind is ArtifactKind.WHEEL and not allow_binary:
                 continue
-            if (
-                link.kind in SOURCE_ARTIFACT_KINDS
-                and not allow_source
-            ):
+            if link.kind in SOURCE_ARTIFACT_KINDS and not allow_source:
                 continue
             if link.kind not in INSTALLABLE_ARTIFACT_KINDS:
                 continue
@@ -442,9 +441,7 @@ class CandidateProvider:
             parsed = self.parsed_link_cache.get(link)
             if parsed is None:
                 try:
-                    parsed = InstallationCandidate.from_link(
-                        link, target=self.target
-                    )
+                    parsed = InstallationCandidate.from_link(link, target=self.target)
                 except ValueError:
                     continue
                 self.parsed_link_cache[link] = parsed
@@ -468,9 +465,7 @@ class CandidateProvider:
         for summary in result:
             summaries_by_version.setdefault(summary.version, []).append(summary)
         self.package_catalog_cache[cache_key] = PackageCatalog(
-            links=tuple(
-                link for links in links_by_version.values() for link in links
-            ),
+            links=tuple(link for links in links_by_version.values() for link in links),
             summaries=result,
             summaries_by_version=MappingProxyType(
                 {
@@ -569,9 +564,7 @@ class CandidateProvider:
         seen_slots: set[tuple[str, bool]] = set()
         for candidate in accepted:
             slot = (
-                "source"
-                if candidate.link.kind in SOURCE_ARTIFACT_KINDS
-                else "wheel",
+                "source" if candidate.link.kind in SOURCE_ARTIFACT_KINDS else "wheel",
                 candidate.version.is_prerelease,
             )
             if slot in seen_slots:

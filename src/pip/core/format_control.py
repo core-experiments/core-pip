@@ -3,7 +3,9 @@ from __future__ import annotations
 from .packaging import canonicalize_name
 from .errors import CommandError
 
-FORMAT_CONTROL_KINDS = frozenset(("no_binary", "only_binary", "no-binary", "only-binary"))
+FORMAT_CONTROL_KINDS = frozenset(
+    ("no_binary", "only_binary", "no-binary", "only-binary")
+)
 ONLY_BINARY_KINDS = frozenset(("only_binary", "only-binary"))
 FORMAT_CONTROL_SENTINELS = frozenset((":all:", ":none:"))
 
@@ -35,7 +37,9 @@ class FormatControl:
         opposite = self.no_binary if only_binary else self.only_binary
         for entry in entries:
             normalized = (
-                canonicalize_name(entry) if entry not in FORMAT_CONTROL_SENTINELS else entry
+                canonicalize_name(entry)
+                if entry not in FORMAT_CONTROL_SENTINELS
+                else entry
             )
             if normalized == ":none:":
                 target.clear()
@@ -57,7 +61,9 @@ class FormatControl:
         entries = [item.strip() for item in value.split(",") if item.strip()]
         for entry in entries:
             normalized = (
-                canonicalize_name(entry) if entry not in FORMAT_CONTROL_SENTINELS else entry
+                canonicalize_name(entry)
+                if entry not in FORMAT_CONTROL_SENTINELS
+                else entry
             )
             if normalized == ":none:":
                 target.clear()
