@@ -3,6 +3,7 @@ import ssl
 import tempfile
 import textwrap
 from collections.abc import Callable
+from itertools import repeat
 from pathlib import Path
 
 import pytest
@@ -17,9 +18,6 @@ from pip_test_support.server import (
     server_running,
 )
 from pip_test_support.venv import VirtualEnvironment
-
-TEST_PYPI_INITOOLS = "https://test.pypi.org/simple/initools/"
-
 
 def test_options_from_env_vars(script: PipTestEnvironment) -> None:
     """
@@ -89,62 +87,87 @@ def test_env_vars_override_config_file(
 
 @pytest.mark.network
 def test_command_line_append_flags(
-    script: PipTestEnvironment, virtualenv: VirtualEnvironment, data: TestData
+    script: PipTestEnvironment,
+    virtualenv: VirtualEnvironment,
+    data: TestData,
+    mock_server: MockServer,
 ) -> None:
     """
     Test command line flags that append to defaults set by environmental
     variables.
 
     """
-    script.environ["PIP_FIND_LINKS"] = TEST_PYPI_INITOOLS
-    result = script.pip(
-        "install",
-        "-vvv",
-        "INITools",
-        "--trusted-host",
-        "test.pypi.org",
-    )
-    assert (
-        "Fetching project page and analyzing links: https://test.pypi.org"
-        in result.stdout
-    ), str(result)
-    virtualenv.clear()
-    result = script.pip(
-        "install",
-        "-vvv",
-        "--find-links",
-        data.find_links,
-        "INITools",
-        "--trusted-host",
-        "test.pypi.org",
-    )
-    assert (
-        "Fetching project page and analyzing links: https://test.pypi.org"
-        in result.stdout
-    )
+    index_url = f"http://{mock_server.host}:{mock_server.port}/simple/initools/"
+    page = package_page({"INITools-0.2.tar.gz": "/files/INITools-0.2.tar.gz"})
+    archive = file_response(data.packages / "INITools-0.2.tar.gz")
+
+    def response(environ: dict[str, object], start_response: Callable[..., object]):
+        if environ["PATH_INFO"] == "/simple/initools/":
+            return page(environ, start_response)
+        return archive(environ, start_response)
+
+    mock_server.set_responses(repeat(response))
+    mock_server.start()
+    try:
+        script.environ["PIP_FIND_LINKS"] = index_url
+        result = script.pip(
+            "install",
+            "-vvv",
+            "INITools",
+            "--trusted-host",
+            mock_server.host,
+        )
+        assert (
+            f"Fetching project page and analyzing links: {index_url}" in result.stdout
+        )
+        virtualenv.clear()
+        result = script.pip(
+            "install",
+            "-vvv",
+            "--find-links",
+            data.find_links,
+            "INITools",
+            "--trusted-host",
+            mock_server.host,
+        )
+        assert (
+            f"Fetching project page and analyzing links: {index_url}" in result.stdout
+        )
+    finally:
+        mock_server.stop()
 
 
 @pytest.mark.network
 def test_command_line_appends_correctly(
-    script: PipTestEnvironment, data: TestData
+    script: PipTestEnvironment, data: TestData, mock_server: MockServer
 ) -> None:
     """
     Test multiple appending options set by environmental variables.
 
     """
-    script.environ["PIP_FIND_LINKS"] = f"{TEST_PYPI_INITOOLS} {data.find_links}"
-    result = script.pip(
-        "install",
-        "-vvv",
-        "INITools",
-        "--trusted-host",
-        "test.pypi.org",
+    index_url = f"http://{mock_server.host}:{mock_server.port}/simple/initools/"
+    mock_server.set_responses(
+        [
+            package_page({"INITools-0.2.tar.gz": "/files/INITools-0.2.tar.gz"}),
+            file_response(data.packages / "INITools-0.2.tar.gz"),
+        ]
     )
+    mock_server.start()
+    try:
+        script.environ["PIP_FIND_LINKS"] = f"{index_url} {data.find_links}"
+        result = script.pip(
+            "install",
+            "-vvv",
+            "INITools",
+            "--trusted-host",
+            mock_server.host,
+        )
 
-    assert (
-        "Fetching project page and analyzing links: https://test.pypi.org"
-        in result.stdout
-    ), result.stdout
+        assert (
+            f"Fetching project page and analyzing links: {index_url}" in result.stdout
+        )
+    finally:
+        mock_server.stop()
 
 
 def test_config_file_override_stack(
