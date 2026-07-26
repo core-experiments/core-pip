@@ -193,7 +193,7 @@ def untar_file(filename: str, location: str) -> None:
         try:
             data_filter = tarfile.data_filter
         except AttributeError:
-            _untar_without_filter(filename, location, tar, leading)
+            untar_without_filter(filename, location, tar, leading)
         else:
             mask = os.umask(0)
             os.umask(mask)
@@ -270,7 +270,7 @@ def is_symlink_target_in_tar(tar: tarfile.TarFile, tarinfo: tarfile.TarInfo) -> 
         return False
 
 
-def _untar_without_filter(
+def untar_without_filter(
     filename: str,
     location: str,
     tar: tarfile.TarFile,
@@ -320,7 +320,11 @@ def _untar_without_filter(
                     message.format(filename, member.name, member.linkname)
                 )
             try:
-                tar._extract_member(member, path)
+                # Avoid tarfile's internal ``data_filter`` lookup here: it is
+                # absent on older Python versions and can also be deliberately
+                # disabled by callers testing the fallback path.
+                ensure_dir(os.path.dirname(path))
+                os.symlink(member.linkname, path)
             except Exception as exc:
                 # Some corrupt tar files seem to produce this
                 # (specifically bad symlinks)

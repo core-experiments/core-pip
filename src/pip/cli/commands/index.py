@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 
 from pip.cli.parser import ArgumentParser
-from pip.cli.requirements import _load_source_config
+from pip.cli.requirements import load_source_config
 from pip.core.format_control import FormatControl
 from pip.core.packaging import parse_requirement
 from pip.index.provider import CandidateProvider
@@ -30,7 +30,7 @@ def create_parser() -> ArgumentParser:
 def run_index(args: list[str]) -> int:
     options = create_parser().parse_args(args)
 
-    config = _load_source_config("index")
+    config = load_source_config("index")
     provider = CandidateProvider.from_options(
         index_url=options.index_url or config.index_url,
         extra_index_urls=options.extra_index_url or config.extra_index_urls,

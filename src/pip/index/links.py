@@ -22,10 +22,9 @@ from pip.core.urls import (
 from pip.index.hashes import SUPPORTED_HASHES, supported_hashes
 from pip.index.datetime import parse_iso_datetime
 from pip.index.paths import PathComponent
-from pip.index.vcs import VCS_SCHEMES
 from pip.index.source_models import ArtifactKind, MetadataFile
 
-_VCS_SCHEMES = tuple(f"{scheme}+" for scheme in VCS_SCHEMES)
+VCS_SCHEMES_internal = tuple(f"{scheme}+" for scheme in ("git", "hg", "svn", "bzr"))
 SOURCE_ARCHIVE_SUFFIXES = (
     ".tar.gz",
     ".tar.bz2",
@@ -36,8 +35,8 @@ SOURCE_ARCHIVE_SUFFIXES = (
 )
 WHEEL_EXTENSION = ".whl"
 SUPPORTED_EXTENSIONS = (WHEEL_EXTENSION, *SOURCE_ARCHIVE_SUFFIXES)
-_REQ_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
-_HASH_URL_FRAGMENT_RE = re.compile(
+REQ_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+HASH_URL_FRAGMENT_RE = re.compile(
     r"[#&]({choices})=([^&]*)".format(
         choices="|".join(re.escape(name) for name in SUPPORTED_HASHES)
     )
@@ -45,8 +44,8 @@ _HASH_URL_FRAGMENT_RE = re.compile(
 
 
 @functools.cache
-def _hash_from_url_fragment(url: str) -> tuple[str, str] | None:
-    match = _HASH_URL_FRAGMENT_RE.search(url)
+def hash_from_url_fragment(url: str) -> tuple[str, str] | None:
+    match = HASH_URL_FRAGMENT_RE.search(url)
     return match.groups() if match is not None else None
 
 
@@ -59,37 +58,37 @@ class InvalidEggFragment(DiagnosticPipError):
         super().__init__(message=message, hint_stmt=hint_stmt)
 
 
-def _clean_url_path_part(part: str) -> str:
+def clean_url_path_part(part: str) -> str:
     return urllib.parse.quote(urllib.parse.unquote(part))
 
 
-def _clean_file_url_path(part: str) -> str:
+def clean_file_url_path(part: str) -> str:
     ret = urllib.request.pathname2url(urllib.request.url2pathname(part))
     if ret.startswith("///"):
         ret = ret.removeprefix("//")
     return ret
 
 
-_reserved_chars_re = re.compile(r"(@|%2F)", re.IGNORECASE)
+reserved_chars_re = re.compile(r"(@|%2F)", re.IGNORECASE)
 
 
-def _clean_url_path(path: str, is_local_path: bool) -> str:
-    clean_func = _clean_file_url_path if is_local_path else _clean_url_path_part
-    parts = _reserved_chars_re.split(path)
+def clean_url_path(path: str, is_local_path: bool) -> str:
+    clean_func = clean_file_url_path if is_local_path else clean_url_path_part
+    parts = reserved_chars_re.split(path)
     cleaned: list[str] = []
     for to_clean, reserved in zip(parts[::2], parts[1::2] + [""]):
         cleaned.extend((clean_func(to_clean), reserved.upper()))
     return "".join(cleaned)
 
 
-def _ensure_quoted_url(url: str) -> str:
+def ensure_quoted_url(url: str) -> str:
     result = urllib.parse.urlsplit(url)
-    path = _clean_url_path(result.path, is_local_path=not result.netloc)
+    path = clean_url_path(result.path, is_local_path=not result.netloc)
     ret = urllib.parse.urlunsplit(result._replace(scheme="file", path=path))
     return result.scheme + ret[4:]
 
 
-def _absolute_link_url(base_url: str, url: str) -> str:
+def absolute_link_url(base_url: str, url: str) -> str:
     return (
         url
         if url.startswith(("https://", "http://"))
@@ -112,10 +111,11 @@ class LinkType(Enum):
 @functools.total_ordering
 class Link:
     __slots__ = [
-        "_parsed_url",
-        "_url",
-        "_path",
-        "_hashes",
+        "parsed_url_internal",
+        "url_internal",
+        "path_internal",
+        "file_path_internal",
+        "hashes_internal",
         "comes_from",
         "requires_python",
         "yanked_reason",
@@ -139,15 +139,28 @@ class Link:
         hashes: Mapping[str, str] | None = None,
         text: str = "",
         kind: ArtifactKind | None = None,
+        local_path_internal: str | None = None,
     ) -> None:
         if url.startswith("\\\\"):
             url = path_to_url(url)
-        self._parsed_url = urllib.parse.urlsplit(url)
-        self._url = url
-        self._path = urllib.parse.unquote(self._parsed_url.path)
-        link_hash = _hash_from_url_fragment(url)
+        self.parsed_url_internal = urllib.parse.urlsplit(url)
+        self.url_internal = url
+        self.path_internal = urllib.parse.unquote(self.parsed_url_internal.path)
+        if local_path_internal is not None:
+            self.file_path_internal = local_path_internal
+        else:
+            try:
+                self.file_path_internal = (
+                    url_to_path(url)
+                    if self.parsed_url_internal.scheme == "file"
+                    else None
+                )
+            except ValueError:
+                # Preserve deferred validation for non-local file URLs.
+                self.file_path_internal = None
+        link_hash = hash_from_url_fragment(url)
         hashes_from_link = {} if link_hash is None else {link_hash[0]: link_hash[1]}
-        self._hashes = (
+        self.hashes_internal = (
             hashes_from_link if hashes is None else {**hashes, **hashes_from_link}
         )
         self.comes_from = comes_from
@@ -156,13 +169,13 @@ class Link:
         self.metadata_file_data = metadata_file_data
         self.upload_time = upload_time
         self.cache_link_parsing = cache_link_parsing
-        self.egg_fragment = self._egg_fragment()
+        self.egg_fragment = self.egg_fragment_internal()
         self.text = text
-        self.kind = kind if kind is not None else self._artifact_kind()
+        self.kind = kind if kind is not None else self.artifact_kind()
 
     @property
     def scheme(self) -> str:
-        return self._parsed_url.scheme
+        return self.parsed_url_internal.scheme
 
     @classmethod
     def from_url(
@@ -194,15 +207,30 @@ class Link:
         )
 
     @classmethod
-    def from_path(cls, path: Path, *, source_url: str | None) -> "Link":
-        if path.is_dir():
-            return cls(
-                path.resolve().as_uri(),
-                comes_from=source_url,
-                text=path.name,
-                kind=ArtifactKind.SOURCE_TREE,
-            )
-        return cls.from_url(path.as_uri(), source_url=source_url)
+    def from_path(
+        cls,
+        path: Path,
+        *,
+        source_url: str | None,
+        is_dir: bool | None = None,
+    ) -> "Link":
+        if is_dir is None:
+            is_dir = path.is_dir()
+        # Keep the lexical path used by the caller.  Re-resolving temporary
+        # paths through a file URL can rewrite `/var` to `/private/var` on
+        # macOS, losing access to the project metadata.
+        local_path = path.absolute() if is_dir else path
+        return cls(
+            local_path.as_uri(),
+            comes_from=source_url,
+            text=path.name,
+            kind=(
+                ArtifactKind.SOURCE_TREE
+                if is_dir
+                else cls.artifact_kind_from_filename(path.name)
+            ),
+            local_path_internal=str(local_path),
+        )
 
     @classmethod
     def from_element(
@@ -211,7 +239,7 @@ class Link:
         href = attrs.get("href")
         if not href:
             return None
-        url = _ensure_quoted_url(_absolute_link_url(base_url, href))
+        url = ensure_quoted_url(absolute_link_url(base_url, href))
         metadata_info = attrs.get("data-core-metadata")
         if metadata_info is None:
             metadata_info = attrs.get("data-dist-info-metadata")
@@ -246,7 +274,7 @@ class Link:
         file_url = file_data.get("url")
         if file_url is None:
             return None
-        absolute = _ensure_quoted_url(_absolute_link_url(page_url, file_url))
+        absolute = ensure_quoted_url(absolute_link_url(page_url, file_url))
         requires_python = file_data.get("requires-python")
         yanked = file_data.get("yanked")
         hashes = file_data.get("hashes", {})
@@ -297,7 +325,7 @@ class Link:
     def is_yanked(self) -> bool:
         return self.yanked_reason is not None
 
-    def _artifact_kind(self) -> ArtifactKind:
+    def artifact_kind(self) -> ArtifactKind:
         is_source_tree = self.is_vcs
         if self.is_file:
             try:
@@ -306,7 +334,10 @@ class Link:
                 pass
         if is_source_tree:
             return ArtifactKind.SOURCE_TREE
-        filename = str(self.filename)
+        return self.artifact_kind_from_filename(str(self.filename))
+
+    @staticmethod
+    def artifact_kind_from_filename(filename: str) -> ArtifactKind:
         if filename.endswith(WHEEL_EXTENSION):
             return ArtifactKind.WHEEL
         if filename.endswith(".metadata"):
@@ -319,7 +350,7 @@ class Link:
 
     @property
     def url_without_fragment(self) -> str:
-        return urllib.parse.urlunsplit(self._parsed_url._replace(fragment=""))
+        return urllib.parse.urlunsplit(self.parsed_url_internal._replace(fragment=""))
 
     @property
     def filename(self) -> PathComponent:
@@ -332,7 +363,9 @@ class Link:
 
     @property
     def file_path(self) -> str:
-        return url_to_path(self.url)
+        if self.file_path_internal is None:
+            return url_to_path(self.url)
+        return self.file_path_internal
 
     @property
     def ext(self) -> str:
@@ -347,15 +380,15 @@ class Link:
 
     @property
     def hash_name(self) -> str | None:
-        return next(iter(self._hashes), None)
+        return next(iter(self.hashes_internal), None)
 
     @property
     def hashes(self) -> dict[str, str]:
-        return self._hashes
+        return self.hashes_internal
 
     @property
     def hash(self) -> str | None:
-        return next(iter(self._hashes.values()), None)
+        return next(iter(self.hashes_internal.values()), None)
 
     @property
     def subdirectory_fragment(self) -> str | None:
@@ -365,7 +398,7 @@ class Link:
     @property
     def is_vcs(self) -> bool:
         return self.scheme in {"git", "hg", "svn", "bzr"} or self.url.startswith(
-            _VCS_SCHEMES
+            VCS_SCHEMES_internal
         )
 
     @property
@@ -381,12 +414,12 @@ class Link:
             return False
         return any(
             hashes.is_hash_allowed(name, digest)
-            for name, digest in self._hashes.items()
+            for name, digest in self.hashes_internal.items()
         )
 
     @property
     def url(self) -> str:
-        return self._url
+        return self.url_internal
 
     @property
     def redacted_url(self) -> str:
@@ -394,11 +427,11 @@ class Link:
 
     @property
     def netloc(self) -> str:
-        return self._parsed_url.netloc
+        return self.parsed_url_internal.netloc
 
     @property
     def path(self) -> str:
-        return self._path
+        return self.path_internal
 
     @property
     def show_url(self) -> str:
@@ -406,17 +439,17 @@ class Link:
 
     @property
     def has_hash(self) -> bool:
-        return bool(self._hashes)
+        return bool(self.hashes_internal)
 
     def as_hashes(self) -> Hashes:
-        return Hashes({name: [value] for name, value in self._hashes.items()})
+        return Hashes({name: [value] for name, value in self.hashes_internal.items()})
 
-    def _egg_fragment(self) -> str | None:
-        match = re.search(r"[#&]egg=([^&]*)", self._url)
+    def egg_fragment_internal(self) -> str | None:
+        match = re.search(r"[#&]egg=([^&]*)", self.url_internal)
         if not match:
             return None
         name = match.group(1)
-        if not _REQ_NAME_RE.fullmatch(name):
+        if not REQ_NAME_RE.fullmatch(name):
             hint = (
                 r"Use 'name\[extra] @ URL'. Version specifiers are silently ignored "
                 "in egg fragments."

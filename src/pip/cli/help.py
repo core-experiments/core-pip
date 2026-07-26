@@ -2,16 +2,18 @@
 
 from __future__ import annotations
 
-import importlib.metadata
 import sys
-from pathlib import Path
 
 from pip.cli.commands.registry import COMMAND_SPECS, get_command, parser_for_command
 from pip.core.pip_version import get_pip_version
 
 
 def print_version(location: str | None = None) -> None:
+    from pathlib import Path
+
     if location is None:
+        import importlib.metadata
+
         location = str(importlib.metadata.distribution("pip").locate_file("pip"))
     print(
         f"pip {get_pip_version()} from {Path(location).resolve()} "

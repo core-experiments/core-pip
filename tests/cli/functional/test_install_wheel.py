@@ -172,7 +172,7 @@ def get_header_scheme_path_for_script(
     script: PipTestEnvironment, dist_name: str
 ) -> Path:
     command = (
-        "from pip.platform.locations._sysconfig import get_scheme;"
+        "from pip.platform.locations.sysconfig import get_scheme;"
         f"scheme = get_scheme({dist_name!r});"
         "print(scheme.headers);"
     )

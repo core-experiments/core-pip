@@ -78,7 +78,7 @@ class IndexPageParser:
         request = urllib.request.Request(url, headers=headers)
         parsed = urllib.parse.urlsplit(url)
         context = (
-            ssl._create_unverified_context()
+            ssl.create_unverified_context()
             if parsed.hostname and parsed.hostname.lower() in self.trusted_hosts
             else None
         )
@@ -89,7 +89,7 @@ class IndexPageParser:
             )
 
     def links_from_html(self, body: str, url: str) -> list[Link]:
-        parser = _LinkParser(url, self.link_factory)
+        parser = LinkParser(url, self.link_factory)
         parser.feed(body)
         return parser.links
 
@@ -103,7 +103,7 @@ class IndexPageParser:
             filename = file_data.get("filename")
             if not isinstance(file_url, str):
                 continue
-            absolute = urllib.parse.urljoin(_ensure_trailing_slash(url), file_url)
+            absolute = urllib.parse.urljoin(ensure_trailing_slash(url), file_url)
             hashes = file_data.get("hashes")
             yanked = file_data.get("yanked")
             links.append(
@@ -122,7 +122,7 @@ class IndexPageParser:
                         if yanked is True
                         else str(yanked)
                     ),
-                    metadata_file=_metadata_file_from_json(file_data),
+                    metadata_file=metadata_file_from_json(file_data),
                     upload_time=(
                         parse_iso_datetime(file_data["upload-time"])
                         if file_data.get("upload-time")
@@ -133,61 +133,61 @@ class IndexPageParser:
         return links
 
 
-class _LinkParser(HTMLParser):
+class LinkParser(HTMLParser):
     def __init__(self, page_url: str, link_factory: LinkFactory) -> None:
         super().__init__(convert_charrefs=True)
         self.page_url = page_url
         self.link_factory = link_factory
         self.links: list[Link] = []
-        self._current: dict[str, str | None] | None = None
-        self._text: list[str] = []
+        self.current_internal: dict[str, str | None] | None = None
+        self.text_internal: list[str] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         if tag.lower() != "a":
             return
-        self._current = {name.lower(): value for name, value in attrs}
-        self._text = []
+        self.current_internal = {name.lower(): value for name, value in attrs}
+        self.text_internal = []
 
     def handle_data(self, data: str) -> None:
-        if self._current is not None:
-            self._text.append(data)
+        if self.current_internal is not None:
+            self.text_internal.append(data)
 
     def handle_endtag(self, tag: str) -> None:
-        if tag.lower() != "a" or self._current is None:
+        if tag.lower() != "a" or self.current_internal is None:
             return
-        href = self._current.get("href")
+        href = self.current_internal.get("href")
         if href:
             self.links.append(
                 self.link_factory(
-                    urllib.parse.urljoin(_ensure_trailing_slash(self.page_url), href),
+                    urllib.parse.urljoin(ensure_trailing_slash(self.page_url), href),
                     source_url=self.page_url,
-                    text="".join(self._text).strip(),
-                    requires_python=self._current.get("data-requires-python"),
-                    yanked_reason=self._current.get("data-yanked"),
-                    metadata_file=_metadata_file_from_attrs(self._current),
+                    text="".join(self.text_internal).strip(),
+                    requires_python=self.current_internal.get("data-requires-python"),
+                    yanked_reason=self.current_internal.get("data-yanked"),
+                    metadata_file=metadata_file_from_attrs(self.current_internal),
                 )
             )
-        self._current = None
-        self._text = []
+        self.current_internal = None
+        self.text_internal = []
 
 
-def _metadata_file_from_attrs(attrs: dict[str, str | None]) -> MetadataFile | None:
+def metadata_file_from_attrs(attrs: dict[str, str | None]) -> MetadataFile | None:
     if "data-core-metadata" in attrs:
-        return _metadata_file_from_value(attrs.get("data-core-metadata"))
+        return metadata_file_from_value(attrs.get("data-core-metadata"))
     if "data-dist-info-metadata" in attrs:
-        return _metadata_file_from_value(attrs.get("data-dist-info-metadata"))
+        return metadata_file_from_value(attrs.get("data-dist-info-metadata"))
     return None
 
 
-def _metadata_file_from_json(file_data: dict[str, Any]) -> MetadataFile | None:
+def metadata_file_from_json(file_data: dict[str, Any]) -> MetadataFile | None:
     if "core-metadata" in file_data:
-        return _metadata_file_from_json_value(file_data["core-metadata"])
+        return metadata_file_from_json_value(file_data["core-metadata"])
     if "dist-info-metadata" in file_data:
-        return _metadata_file_from_json_value(file_data["dist-info-metadata"])
+        return metadata_file_from_json_value(file_data["dist-info-metadata"])
     return None
 
 
-def _metadata_file_from_json_value(value: Any) -> MetadataFile | None:
+def metadata_file_from_json_value(value: Any) -> MetadataFile | None:
     if isinstance(value, dict):
         return MetadataFile({str(name): str(hash_) for name, hash_ in value.items()})
     if value is True:
@@ -195,7 +195,7 @@ def _metadata_file_from_json_value(value: Any) -> MetadataFile | None:
     return None
 
 
-def _metadata_file_from_value(value: str | None) -> MetadataFile | None:
+def metadata_file_from_value(value: str | None) -> MetadataFile | None:
     if value is None:
         return None
     if value in {"", "true"}:
@@ -206,5 +206,5 @@ def _metadata_file_from_value(value: str | None) -> MetadataFile | None:
     )
 
 
-def _ensure_trailing_slash(url: str) -> str:
+def ensure_trailing_slash(url: str) -> str:
     return url if url.endswith("/") else url + "/"

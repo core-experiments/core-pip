@@ -60,7 +60,7 @@ def test_get_credentials_parses_correctly(
     input_url: str, url: str, username: str | None, password: str | None
 ) -> None:
     auth = MultiDomainBasicAuth()
-    get = auth._get_url_and_credentials
+    get = auth.get_url_and_credentials
 
     # Check URL parsing
     assert get(input_url) == (url, username, password)
@@ -77,7 +77,7 @@ def test_get_credentials_not_to_uses_cached_credentials() -> None:
     auth = MultiDomainBasicAuth()
     auth.passwords["example.com"] = ("user", "pass")
 
-    got = auth._get_url_and_credentials("http://foo:bar@example.com/path")
+    got = auth.get_url_and_credentials("http://foo:bar@example.com/path")
     expected = ("http://example.com/path", "foo", "bar")
     assert got == expected
 
@@ -86,7 +86,7 @@ def test_get_credentials_not_to_uses_cached_credentials_only_username() -> None:
     auth = MultiDomainBasicAuth()
     auth.passwords["example.com"] = ("user", "pass")
 
-    got = auth._get_url_and_credentials("http://foo@example.com/path")
+    got = auth.get_url_and_credentials("http://foo@example.com/path")
     expected = ("http://example.com/path", "foo", "")
     assert got == expected
 
@@ -95,7 +95,7 @@ def test_get_credentials_uses_cached_credentials() -> None:
     auth = MultiDomainBasicAuth()
     auth.passwords["example.com"] = ("user", "pass")
 
-    got = auth._get_url_and_credentials("http://example.com/path")
+    got = auth.get_url_and_credentials("http://example.com/path")
     expected = ("http://example.com/path", "user", "pass")
     assert got == expected
 
@@ -104,7 +104,7 @@ def test_get_credentials_uses_cached_credentials_only_username() -> None:
     auth = MultiDomainBasicAuth()
     auth.passwords["example.com"] = ("user", "pass")
 
-    got = auth._get_url_and_credentials("http://user@example.com/path")
+    got = auth.get_url_and_credentials("http://user@example.com/path")
     expected = ("http://example.com/path", "user", "pass")
     assert got == expected
 
@@ -117,7 +117,7 @@ def test_get_index_url_credentials() -> None:
         ]
     )
     get = functools.partial(
-        auth._get_new_credentials, allow_netrc=False, allow_keyring=False
+        auth.get_new_credentials, allow_netrc=False, allow_keyring=False
     )
 
     # Check resolution of indexes
@@ -133,7 +133,7 @@ def test_prioritize_longest_path_prefix_match_organization() -> None:
         ]
     )
     get = functools.partial(
-        auth._get_new_credentials, allow_netrc=False, allow_keyring=False
+        auth.get_new_credentials, allow_netrc=False, allow_keyring=False
     )
 
     # Inspired by Azure DevOps URL structure, GitLab should look similar
@@ -152,7 +152,7 @@ def test_prioritize_longest_path_prefix_match_project() -> None:
         ]
     )
     get = functools.partial(
-        auth._get_new_credentials, allow_netrc=False, allow_keyring=False
+        auth.get_new_credentials, allow_netrc=False, allow_keyring=False
     )
 
     # Inspired by Azure DevOps URL structure, GitLab should look similar
@@ -207,7 +207,7 @@ def test_keyring_get_password(
         keyring_provider="import",
     )
 
-    actual = auth._get_new_credentials(url, allow_netrc=False, allow_keyring=True)
+    actual = auth.get_new_credentials(url, allow_netrc=False, allow_keyring=True)
     assert actual == expect
 
 
@@ -221,7 +221,7 @@ def test_keyring_get_password_after_prompt(monkeypatch: pytest.MonkeyPatch) -> N
         return "user"
 
     monkeypatch.setattr("pip.network.auth.ask_input", ask_input)
-    actual = auth._prompt_for_password("example.com")
+    actual = auth.prompt_for_password("example.com")
     assert actual == ("user", "user!netloc", False)
 
 
@@ -242,7 +242,7 @@ def test_keyring_get_password_after_prompt_when_none(
 
     monkeypatch.setattr("pip.network.auth.ask_input", ask_input)
     monkeypatch.setattr("pip.network.auth.ask_password", ask_password)
-    actual = auth._prompt_for_password("unknown.com")
+    actual = auth.prompt_for_password("unknown.com")
     assert actual == ("user", "fake_password", True)
 
 
@@ -256,7 +256,7 @@ def test_keyring_get_password_username_in_index(
         keyring_provider="import",
     )
     get = functools.partial(
-        auth._get_new_credentials, allow_netrc=False, allow_keyring=True
+        auth.get_new_credentials, allow_netrc=False, allow_keyring=True
     )
 
     assert get("http://example.com/path2/path3") == ("user", "user!url")
@@ -288,8 +288,8 @@ def test_keyring_set_password(
     keyring = KeyringModuleV1()
     monkeypatch.setitem(sys.modules, "keyring", keyring)
     auth = MultiDomainBasicAuth(prompting=True, keyring_provider="import")
-    monkeypatch.setattr(auth, "_get_url_and_credentials", lambda u: (u, None, None))
-    monkeypatch.setattr(auth, "_prompt_for_password", lambda *a: creds)
+    monkeypatch.setattr(auth, "get_url_and_credentials", lambda u: (u, None, None))
+    monkeypatch.setattr(auth, "prompt_for_password", lambda *a: creds)
     if creds[2]:
         # when _prompt_for_password indicates to save, we should save
         def should_save_password_to_keyring(*a: Any) -> bool:
@@ -299,10 +299,12 @@ def test_keyring_set_password(
         # when _prompt_for_password indicates not to save, we should
         # never call this function
         def should_save_password_to_keyring(*a: Any) -> bool:
-            pytest.fail("_should_save_password_to_keyring should not be called")
+            pytest.fail("should_save_password_to_keyring_internal should not be called")
 
     monkeypatch.setattr(
-        auth, "_should_save_password_to_keyring", should_save_password_to_keyring
+        auth,
+        "should_save_password_to_keyring_internal",
+        should_save_password_to_keyring,
     )
 
     req = MockRequest("https://example.com")
@@ -310,7 +312,7 @@ def test_keyring_set_password(
     resp.url = req.url
     connection = MockConnection()
 
-    def _send(sent_req: MockRequest, **kwargs: Any) -> MockResponse:
+    def send_internal(sent_req: MockRequest, **kwargs: Any) -> MockResponse:
         assert sent_req is req
         assert "Authorization" in sent_req.headers
         r = MockResponse(b"")
@@ -318,7 +320,7 @@ def test_keyring_set_password(
         return r
 
     # https://github.com/python/mypy/issues/2427
-    connection._send = _send  # type: ignore[assignment]
+    connection.send_internal = send_internal  # type: ignore[assignment]
 
     resp.request = req
     resp.status_code = 401
@@ -422,7 +424,7 @@ def test_keyring_get_credential(
         keyring.add_credential("http://example.com/path2/", "username", "hunter3"),
     ):
         assert (
-            auth._get_new_credentials(url, allow_netrc=False, allow_keyring=True)
+            auth.get_new_credentials(url, allow_netrc=False, allow_keyring=True)
             == expect
         )
 
@@ -431,10 +433,10 @@ class KeyringModuleBroken:
     """Represents the current supported API of keyring, but broken"""
 
     def __init__(self) -> None:
-        self._call_count = 0
+        self.call_count_internal = 0
 
     def get_credential(self, system: str, username: str) -> None:
-        self._call_count += 1
+        self.call_count_internal += 1
         raise Exception("This keyring is broken!")
 
 
@@ -446,13 +448,14 @@ def test_broken_keyring_disables_keyring(monkeypatch: pytest.MonkeyPatch) -> Non
         index_urls=["http://example.com/"], keyring_provider="import"
     )
 
-    assert keyring_broken._call_count == 0
+    assert keyring_broken.call_count_internal == 0
     for i in range(5):
         url = "http://example.com/path" + str(i)
-        assert auth._get_new_credentials(
-            url, allow_netrc=False, allow_keyring=True
-        ) == (None, None)
-        assert keyring_broken._call_count == 1
+        assert auth.get_new_credentials(url, allow_netrc=False, allow_keyring=True) == (
+            None,
+            None,
+        )
+        assert keyring_broken.call_count_internal == 1
 
 
 class KeyringSubprocessResult(KeyringModuleV2):
@@ -484,8 +487,8 @@ class KeyringSubprocessResult(KeyringModuleV2):
             if not arg.startswith("--")
         ][0]
         subcommand_func = {
-            "get": self._get_subcommand,
-            "set": self._set_subcommand,
+            "get": self.get_subcommand,
+            "set": self.set_subcommand,
         }[subcommand]
 
         subcommand_func(
@@ -500,7 +503,7 @@ class KeyringSubprocessResult(KeyringModuleV2):
 
         return self
 
-    def _get_subcommand(
+    def get_subcommand(
         self,
         cmd: list[str],
         *,
@@ -548,7 +551,7 @@ class KeyringSubprocessResult(KeyringModuleV2):
                 }
             ).encode("utf-8")
 
-    def _set_subcommand(
+    def set_subcommand(
         self,
         cmd: list[str],
         *,
@@ -611,7 +614,7 @@ def test_keyring_cli_get_password(
             "http://example.com/path2/", "saved-user2", "pw2"
         ),
     ):
-        actual = auth._get_new_credentials(url, allow_netrc=False, allow_keyring=True)
+        actual = auth.get_new_credentials(url, allow_netrc=False, allow_keyring=True)
         assert actual == expect
 
 
@@ -642,8 +645,8 @@ def test_keyring_cli_set_password(
     keyring = KeyringSubprocessResult()
     monkeypatch.setattr(pip.network.auth.subprocess, "run", keyring)
     auth = MultiDomainBasicAuth(prompting=True, keyring_provider="subprocess")
-    monkeypatch.setattr(auth, "_get_url_and_credentials", lambda u: (u, None, None))
-    monkeypatch.setattr(auth, "_prompt_for_password", lambda *a: creds)
+    monkeypatch.setattr(auth, "get_url_and_credentials", lambda u: (u, None, None))
+    monkeypatch.setattr(auth, "prompt_for_password", lambda *a: creds)
     if save:
         # when _prompt_for_password indicates to save, we should save
         def should_save_password_to_keyring(*a: Any) -> bool:
@@ -653,10 +656,12 @@ def test_keyring_cli_set_password(
         # when _prompt_for_password indicates not to save, we should
         # never call this function
         def should_save_password_to_keyring(*a: Any) -> bool:
-            pytest.fail("_should_save_password_to_keyring should not be called")
+            pytest.fail("should_save_password_to_keyring_internal should not be called")
 
     monkeypatch.setattr(
-        auth, "_should_save_password_to_keyring", should_save_password_to_keyring
+        auth,
+        "should_save_password_to_keyring_internal",
+        should_save_password_to_keyring,
     )
 
     req = MockRequest("https://example.com")
@@ -664,7 +669,7 @@ def test_keyring_cli_set_password(
     resp.url = req.url
     connection = MockConnection()
 
-    def _send(sent_req: MockRequest, **kwargs: Any) -> MockResponse:
+    def send_internal(sent_req: MockRequest, **kwargs: Any) -> MockResponse:
         assert sent_req is req
         assert "Authorization" in sent_req.headers
         r = MockResponse(b"")
@@ -672,7 +677,7 @@ def test_keyring_cli_set_password(
         return r
 
     # https://github.com/python/mypy/issues/2427
-    connection._send = _send  # type: ignore[assignment]
+    connection.send_internal = send_internal  # type: ignore[assignment]
 
     resp.request = req
     resp.status_code = 401
@@ -730,7 +735,7 @@ def test_keyring_cli_outdated_version(
             "http://example.com/path2/", "saved-user2", "pw2"
         ),
     ):
-        actual = auth._get_new_credentials(url, allow_netrc=False, allow_keyring=True)
+        actual = auth.get_new_credentials(url, allow_netrc=False, allow_keyring=True)
 
         # Verify no password is returned
         assert actual[1] is None
@@ -774,13 +779,13 @@ def test_handle_401_extracts_credentials_embedded_in_url(
     sent_headers: dict[str, str] = {}
     connection = MockConnection()
 
-    def _send(sent_req: MockRequest, **kwargs: Any) -> MockResponse:
+    def send_internal(sent_req: MockRequest, **kwargs: Any) -> MockResponse:
         sent_headers.update(sent_req.headers)
         r = MockResponse(b"")
         r.status_code = 200
         return r
 
-    connection._send = _send  # type: ignore[assignment]
+    connection.send_internal = send_internal  # type: ignore[assignment]
     resp.connection = connection
 
     new_resp = auth.handle_401(resp)

@@ -16,13 +16,13 @@ from pip.build.check import (
 )
 from pip.build.metadata import InstalledDistributionStore
 from pip.cli.dependency_groups import parse_dependency_groups
-from pip.cli.context import target_prefix as _target_prefix
-from pip.cli.parser import ArgumentParser as _ArgumentParser
+from pip.cli.context import target_prefix as target_prefix_internal
+from pip.cli.parser import ArgumentParser as ArgumentParser_internal
 from pip.cli.requirements import (
-    _bundle_install_requirements,
-    _collect_requirements,
-    _load_source_config,
-    _requirements_from_script,
+    bundle_install_requirements,
+    collect_requirements,
+    load_source_config,
+    requirements_from_script,
 )
 from pip.core.appdirs import user_cache_dir
 from pip.core.errors import (
@@ -102,7 +102,7 @@ def run_install(args: list[str]) -> int:
         os.environ["PIP_QUIET"] = "1"
     else:
         os.environ.pop("PIP_QUIET", None)
-    config = _load_source_config("install")
+    config = load_source_config("install")
     explicit_index_url = any(arg in {"-i", "--index-url"} for arg in args)
     config_settings: dict[str, object] = {}
     for value in options.config_settings:
@@ -121,7 +121,7 @@ def run_install(args: list[str]) -> int:
     grouped_requirements = parse_dependency_groups(group_items)
     script_requirements: list[str] = []
     if options.requirements_from_scripts:
-        script_requirements = _requirements_from_script(
+        script_requirements = requirements_from_script(
             Path(options.requirements_from_scripts[0])
         )
     format_control = FormatControl()
@@ -209,7 +209,7 @@ def run_install(args: list[str]) -> int:
         elif token == "--pre":
             release_control_args.append(("pre", ":all:"))
         index += 1
-    bundle = _collect_requirements(
+    bundle = collect_requirements(
         requirements=[
             *options.requirements,
             *grouped_requirements,
@@ -289,7 +289,7 @@ def run_install(args: list[str]) -> int:
         abis=tuple(options.abi),
     )
     requirements = (
-        _bundle_install_requirements(bundle, target=target)
+        bundle_install_requirements(bundle, target=target)
         if bundle.requirements
         else []
     )
@@ -387,10 +387,11 @@ def run_install(args: list[str]) -> int:
             {
                 algorithm: [
                     digest
-                    for digest in left._allowed.get(algorithm, [])
-                    if digest in right._allowed.get(algorithm, [])
+                    for digest in left.allowed_internal.get(algorithm, [])
+                    if digest in right.allowed_internal.get(algorithm, [])
                 ]
-                for algorithm in left._allowed.keys() & right._allowed.keys()
+                for algorithm in left.allowed_internal.keys()
+                & right.allowed_internal.keys()
             }
         )
 
@@ -447,7 +448,7 @@ def run_install(args: list[str]) -> int:
             target=options.target,
             user=options.user,
             root=options.root,
-            prefix=options.prefix or _target_prefix(),
+            prefix=options.prefix or target_prefix_internal(),
         )
         WheelInstaller(
             target,
@@ -563,7 +564,7 @@ def run_install(args: list[str]) -> int:
                 target=options.target,
                 user=options.user,
                 root=options.root,
-                prefix=options.prefix or _target_prefix(),
+                prefix=options.prefix or target_prefix_internal(),
             )
             candidate_direct_urls: dict[str, Any] = {}
             for candidate in plan.candidates:
@@ -850,7 +851,7 @@ def run_install(args: list[str]) -> int:
         and not options.no_deps
         and not options.no_warn_conflicts
     ):
-        _warn_about_install_conflicts(newly_installed_names)
+        warn_about_install_conflicts(newly_installed_names)
     if installed and options.dry_run and not quiet:
         print(f"Would install {' '.join(installed)}")
     elif installed and not quiet:
@@ -869,7 +870,7 @@ def run_install(args: list[str]) -> int:
     return 0
 
 
-def _warn_about_install_conflicts(changed_names: set[str]) -> None:
+def warn_about_install_conflicts(changed_names: set[str]) -> None:
     """Warn about broken requirements affected by the current install."""
     distributions = InstalledDistributionStore().iter(skip={"pip"})
     package_set = {
@@ -920,7 +921,7 @@ def _warn_about_install_conflicts(changed_names: set[str]) -> None:
 
 
 def create_parser() -> argparse.ArgumentParser:
-    parser = _ArgumentParser(prog="pip install", allow_abbrev=False)
+    parser = ArgumentParser_internal(prog="pip install", allow_abbrev=False)
     parser.add_argument("requirements", nargs="*")
     parser.add_argument("--group", dest="groups", action="append", default=[])
     parser.add_argument(

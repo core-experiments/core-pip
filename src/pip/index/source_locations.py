@@ -16,12 +16,17 @@ from pip.index.directory_index import (
 from pip.index.links import Link
 from pip.index.page_parsing import IndexPageParser
 from pip.index.source_models import ArtifactKind
-from pip.index.vcs import vcs_scheme
 
 
 def is_supported_location(value: str) -> bool:
     scheme = urllib.parse.urlsplit(value).scheme
-    return scheme in {"http", "https", "file", "ftp"} or vcs_scheme(value) is not None
+    vcs_scheme = scheme.partition("+")[0]
+    return scheme in {"http", "https", "file", "ftp"} or vcs_scheme in {
+        "git",
+        "hg",
+        "svn",
+        "bzr",
+    }
 
 
 def resolve_source_location(location: str) -> tuple[str | None, str | None]:
@@ -45,13 +50,13 @@ class FindLinksSource:
     def collect_links(self, requirement: Requirement) -> list[Link]:
         links: list[Link] = []
         for link in self.links:
-            links.extend(self._links_from_find_link(link))
+            links.extend(self.links_from_find_link(link))
         return links
 
-    def _links_from_find_link(self, link: str) -> list[Link]:
+    def links_from_find_link(self, link: str) -> list[Link]:
         normalized, local = resolve_source_location(link)
         if local is not None:
-            return self._links_from_local_path(Path(local))
+            return self.links_from_local_path(Path(local))
         if normalized is None:
             return []
         candidate = Link.from_url(normalized, source_url=None)
@@ -63,7 +68,7 @@ class FindLinksSource:
             trusted_hosts=self.trusted_hosts, session=self.session
         ).links_from_url(normalized)
 
-    def _links_from_local_path(self, path: Path) -> list[Link]:
+    def links_from_local_path(self, path: Path) -> list[Link]:
         if path.is_file():
             if path.suffix.lower() in {".html", ".htm"}:
                 return IndexPageParser(
@@ -73,7 +78,7 @@ class FindLinksSource:
         if not path.is_dir():
             return []
         return [
-            Link.from_path(item, source_url=str(path))
+            Link.from_path(item, source_url=str(path), is_dir=False)
             for item in local_source_files(path)
         ]
 

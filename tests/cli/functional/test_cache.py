@@ -62,7 +62,7 @@ def populate_http_cache(http_cache_dir: str) -> list[tuple[str, str]]:
         ("ccccccccc", os.path.join(destination, "ccccccccc")),
     ]
 
-    for _name, filename in files:
+    for name_internal, filename in files:
         with open(filename, "w"):
             pass
 
@@ -81,7 +81,7 @@ def populate_wheel_cache(wheel_cache_dir: str) -> list[tuple[str, str]]:
         ("zzz-7.8.9", os.path.join(destination, "zzz-7.8.9-py3-none-any.whl")),
     ]
 
-    for _name, filename in files:
+    for name_internal, filename in files:
         with open(filename, "w"):
             pass
 
@@ -132,7 +132,7 @@ def remove_matches_http(http_cache_dir: str) -> RemoveMatches:
     `Removed <http files cache dir>/arbitrary/pathname/aaaaaaaaa`.
     """
 
-    def _remove_matches_http(http_filename: str, result: TestPipResult) -> bool:
+    def remove_matches_http_internal(http_filename: str, result: TestPipResult) -> bool:
         lines = result.stdout.splitlines()
 
         # The "/arbitrary/pathname/" bit is an implementation detail of how
@@ -146,7 +146,7 @@ def remove_matches_http(http_cache_dir: str) -> RemoveMatches:
         expected = f"Removed {path}"
         return expected in lines
 
-    return _remove_matches_http
+    return remove_matches_http_internal
 
 
 @pytest.fixture
@@ -158,7 +158,7 @@ def remove_matches_wheel(wheel_cache_dir: str) -> RemoveMatches:
     `Removed <wheel cache dir>/arbitrary/pathname/foo-1.2.3-py3-none-any.whl`.
     """
 
-    def _remove_matches_wheel(wheel_name: str, result: TestPipResult) -> bool:
+    def remove_matches_wheel_internal(wheel_name: str, result: TestPipResult) -> bool:
         lines = result.stdout.splitlines()
 
         wheel_filename = f"{wheel_name}-py3-none-any.whl"
@@ -174,7 +174,7 @@ def remove_matches_wheel(wheel_cache_dir: str) -> RemoveMatches:
         expected = f"Removed {path}"
         return expected in lines
 
-    return _remove_matches_wheel
+    return remove_matches_wheel_internal
 
 
 def test_cache_dir(script: PipTestEnvironment, cache_dir: str) -> None:
@@ -519,7 +519,7 @@ def test_cache_purge_with_mixed_content(
     result = script.pip("cache", "purge", "--verbose")
 
     # Verify wheels and empty directory were removed
-    for _name, filepath in populate_wheel_cache:
+    for name_internal, filepath in populate_wheel_cache:
         assert not os.path.exists(filepath)
     assert not os.path.exists(empty_dir)
 

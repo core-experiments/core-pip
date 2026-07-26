@@ -9,7 +9,7 @@ from zipfile import ZipFile
 
 from pip_test_support.wheel import (
     File,
-    _default,
+    default_internal,
     make_metadata_file,
     make_wheel,
     make_wheel_metadata_file,
@@ -34,10 +34,10 @@ def message_from_bytes(contents: bytes) -> Message:
 default_make_metadata = partial(
     make_metadata_file,
     name="simple",
-    value=_default,
+    value=default_internal,
     version="0.1.0",
-    updates=_default,
-    body=_default,
+    updates=default_internal,
+    body=default_internal,
 )
 
 
@@ -89,9 +89,9 @@ default_make_wheel_metadata = partial(
     make_wheel_metadata_file,
     name="simple",
     version="0.1.0",
-    value=_default,
+    value=default_internal,
     tags=tags,
-    updates=_default,
+    updates=default_internal,
 )
 
 

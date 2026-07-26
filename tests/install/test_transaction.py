@@ -33,6 +33,15 @@ def test_transaction_rejects_unowned_collision(tmp_path: Path) -> None:
     assert destination.read_text(encoding="utf-8") == "unrelated"
 
 
+def test_transaction_rejects_duplicate_destination(tmp_path: Path) -> None:
+    transaction = InstallTransaction()
+    destination = tmp_path / "demo.py"
+
+    transaction.add(tmp_path / "first.py", destination)
+    with pytest.raises(InstallationError, match="duplicate installation destination"):
+        transaction.add(tmp_path / "second.py", destination)
+
+
 def test_transaction_rolls_back_previous_changes_on_failure(tmp_path: Path) -> None:
     first = tmp_path / "first.py"
     first.write_text("old", encoding="utf-8")

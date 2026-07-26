@@ -22,7 +22,9 @@ MakeFakeWheel = Callable[[str, str, str], pathlib.Path]
 
 @pytest.fixture
 def make_fake_wheel(script: PipTestEnvironment) -> MakeFakeWheel:
-    def _make_fake_wheel(name: str, version: str, wheel_tag: str) -> pathlib.Path:
+    def make_fake_wheel_internal(
+        name: str, version: str, wheel_tag: str
+    ) -> pathlib.Path:
         wheel_house = script.scratch_path.joinpath("wheelhouse")
         wheel_house.mkdir()
         wheel_builder = make_wheel(
@@ -34,7 +36,7 @@ def make_fake_wheel(script: PipTestEnvironment) -> MakeFakeWheel:
         wheel_builder.save_to(wheel_path)
         return wheel_path
 
-    return _make_fake_wheel
+    return make_fake_wheel_internal
 
 
 def test_new_resolver_can_install(script: PipTestEnvironment) -> None:
@@ -945,7 +947,7 @@ if TYPE_CHECKING:
         ) -> str: ...
 
 
-def _local_with_setup(
+def local_with_setup(
     script: PipTestEnvironment,
     name: str,
     version: str,
@@ -963,7 +965,7 @@ def _local_with_setup(
     return str(path)
 
 
-def _direct_wheel(
+def direct_wheel(
     script: PipTestEnvironment,
     name: str,
     version: str,
@@ -981,7 +983,7 @@ def _direct_wheel(
     return str(path)
 
 
-def _wheel_from_index(
+def wheel_from_index(
     script: PipTestEnvironment,
     name: str,
     version: str,
@@ -1008,9 +1010,9 @@ class TestExtraMerge:
     @pytest.mark.parametrize(
         "pkg_builder",
         [
-            _local_with_setup,
-            _direct_wheel,
-            _wheel_from_index,
+            local_with_setup,
+            direct_wheel,
+            wheel_from_index,
         ],
     )
     def test_new_resolver_extra_merge_in_package(
@@ -2250,7 +2252,7 @@ def test_new_resolver_transitively_depends_on_unnamed_local(
     )
 
 
-def _to_localhost_uri(path: pathlib.Path) -> str:
+def to_localhost_uri(path: pathlib.Path) -> str:
     # Something like file://localhost/path/to/package
     return path.as_uri().replace("///", "//localhost/")
 
@@ -2259,7 +2261,7 @@ def _to_localhost_uri(path: pathlib.Path) -> str:
     "format_dep",
     [
         pytest.param(pathlib.Path.as_uri, id="emptyhost"),
-        pytest.param(_to_localhost_uri, id="localhost"),
+        pytest.param(to_localhost_uri, id="localhost"),
     ],
 )
 @pytest.mark.parametrize(
@@ -2267,7 +2269,7 @@ def _to_localhost_uri(path: pathlib.Path) -> str:
     [
         pytest.param(pathlib.Path, id="path"),
         pytest.param(pathlib.Path.as_uri, id="emptyhost"),
-        pytest.param(_to_localhost_uri, id="localhost"),
+        pytest.param(to_localhost_uri, id="localhost"),
     ],
 )
 def test_new_resolver_file_url_normalize(

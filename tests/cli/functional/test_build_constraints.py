@@ -23,7 +23,7 @@ INSTALLER_ARGS = [
 ]
 
 
-def _create_simple_test_package(script: PipTestEnvironment, name: str) -> Path:
+def create_simple_test_package(script: PipTestEnvironment, name: str) -> Path:
     """Create a simple test package with minimal setup."""
     return create_test_package_with_setup(
         script,
@@ -33,7 +33,7 @@ def _create_simple_test_package(script: PipTestEnvironment, name: str) -> Path:
     )
 
 
-def _create_constraints_file(
+def create_constraints_file(
     script: PipTestEnvironment, filename: str, content: str
 ) -> Path:
     """Create a constraints file with the given content."""
@@ -42,7 +42,7 @@ def _create_constraints_file(
     return constraints_file
 
 
-def _run_pip_install_with_build_constraints(
+def run_pip_install_with_build_constraints(
     script: PipTestEnvironment,
     data: TestData,
     project_dir: Path,
@@ -74,13 +74,13 @@ def test_build_constraints_basic_functionality_simple(
     script: PipTestEnvironment, data: TestData, tmpdir: Path
 ) -> None:
     """Test that build constraints options are accepted and processed."""
-    project_dir = _create_simple_test_package(
+    project_dir = create_simple_test_package(
         script=script, name="test_build_constraints"
     )
-    constraints_file = _create_constraints_file(
+    constraints_file = create_constraints_file(
         script=script, filename="constraints.txt", content="setuptools>=40.0.0\n"
     )
-    result = _run_pip_install_with_build_constraints(
+    result = run_pip_install_with_build_constraints(
         script=script,
         data=data,
         project_dir=project_dir,
@@ -103,10 +103,10 @@ def test_build_constraints_vs_regular_constraints_simple(
         py_modules=["test_isolation"],
         install_requires=["six"],
     )
-    build_constraints_file = _create_constraints_file(
+    build_constraints_file = create_constraints_file(
         script=script, filename="build_constraints.txt", content="setuptools>=40.0.0\n"
     )
-    regular_constraints_file = _create_constraints_file(
+    regular_constraints_file = create_constraints_file(
         script=script, filename="constraints.txt", content="six>=1.10.0\n"
     )
     result = script.pip(
@@ -128,11 +128,11 @@ def test_build_constraints_environment_isolation_simple(
     script: PipTestEnvironment, data: TestData, tmpdir: Path
 ) -> None:
     """Test that build constraints work correctly in isolated build environments."""
-    project_dir = _create_simple_test_package(script=script, name="test_env_isolation")
-    constraints_file = _create_constraints_file(
+    project_dir = create_simple_test_package(script=script, name="test_env_isolation")
+    constraints_file = create_constraints_file(
         script=script, filename="build_constraints.txt", content="setuptools>=40.0.0\n"
     )
-    result = _run_pip_install_with_build_constraints(
+    result = run_pip_install_with_build_constraints(
         script=script,
         data=data,
         project_dir=project_dir,
@@ -146,11 +146,11 @@ def test_build_constraints_file_not_found(
     script: PipTestEnvironment, data: TestData, tmpdir: Path
 ) -> None:
     """Test behavior when build constraints file doesn't exist."""
-    project_dir = _create_simple_test_package(
+    project_dir = create_simple_test_package(
         script=script, name="test_missing_constraints"
     )
     missing_constraints = script.scratch_path / "missing_constraints.txt"
-    result = _run_pip_install_with_build_constraints(
+    result = run_pip_install_with_build_constraints(
         script=script,
         data=data,
         project_dir=project_dir,
@@ -189,7 +189,7 @@ def test_constraints_dont_pass_through(
         version="1.0",
         py_modules=["test_isolation"],
     )
-    constraints = _create_constraints_file(
+    constraints = create_constraints_file(
         script=script, filename="constraints.txt", content="setuptools==2000\n"
     )
     script.environ["PIP_CONSTRAINT"] = path_to_url(str(constraints))
@@ -216,17 +216,17 @@ def test_constraints_dont_pass_through_with_build_constraints(
         py_modules=["test_isolation"],
     )
     # An impossible regular constraint that would break the build if it leaked.
-    constraints = _create_constraints_file(
+    constraints = create_constraints_file(
         script=script, filename="constraints.txt", content="setuptools==2000\n"
     )
     # A satisfiable build constraint.
-    build_constraints = _create_constraints_file(
+    build_constraints = create_constraints_file(
         script=script,
         filename="build_constraints.txt",
         content="setuptools>=40.0.0\n",
     )
     script.environ["PIP_CONSTRAINT"] = path_to_url(str(constraints))
-    result = _run_pip_install_with_build_constraints(
+    result = run_pip_install_with_build_constraints(
         script=script,
         data=data,
         project_dir=project_dir,
@@ -247,10 +247,10 @@ def test_build_constraint_is_enforced(
         version="1.0",
         py_modules=["test_isolation"],
     )
-    build_constraints = _create_constraints_file(
+    build_constraints = create_constraints_file(
         script=script, filename="build_constraints.txt", content="setuptools==2000\n"
     )
-    result = _run_pip_install_with_build_constraints(
+    result = run_pip_install_with_build_constraints(
         script=script,
         data=data,
         project_dir=project_dir,

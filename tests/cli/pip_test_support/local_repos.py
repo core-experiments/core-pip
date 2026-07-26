@@ -7,7 +7,7 @@ from pip.vcs.support import hide_url
 from pip.vcs.versioncontrol import vcs
 
 
-def _create_svn_initools_repo(initools_dir: str) -> None:
+def create_svn_initools_repo(initools_dir: str) -> None:
     """
     Create the SVN INITools repo.
     """
@@ -49,7 +49,7 @@ def local_checkout(
 
     if vcs_name == "svn":
         assert repository_name == "INITools"
-        _create_svn_initools_repo(repo_url_path)
+        create_svn_initools_repo(repo_url_path)
         repo_url_path = os.path.join(repo_url_path, "trunk")
     elif vcs_name == "git":
         # Don't use vcs_backend.obtain() here because we don't want a partial clone:

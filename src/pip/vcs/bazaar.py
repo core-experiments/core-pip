@@ -108,7 +108,7 @@ class Bazaar(VersionControl):
             for x in ("checkout of branch: ", "parent branch: "):
                 if line.startswith(x):
                     repo = line.split(x)[1]
-                    if cls._is_local_repository(repo):
+                    if cls.is_local_repository(repo):
                         return path_to_url(repo)
                     return repo
         raise RemoteNotFoundError

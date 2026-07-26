@@ -10,8 +10,8 @@ from pip_test_support import (
     PipTestEnvironment,
     ResolverVariant,
     TestData,
-    _create_test_package,
-    _create_test_package_with_subdirectory,
+    create_test_package,
+    create_test_package_with_subdirectory,
     create_basic_sdist_for_package,
     create_basic_wheel_for_package,
     need_svn,
@@ -23,10 +23,10 @@ from pip_test_support.local_repos import local_checkout
 class ArgRecordingSdist:
     def __init__(self, sdist_path: Path, args_path: Path) -> None:
         self.sdist_path = sdist_path
-        self._args_path = args_path
+        self.args_path_internal = args_path
 
     def args(self) -> Any:
-        return json.loads(self._args_path.read_text())
+        return json.loads(self.args_path_internal.read_text())
 
 
 class ArgRecordingSdistMaker(Protocol):
@@ -51,7 +51,7 @@ def arg_recording_sdist_maker(
     output_dir.mkdir(parents=True)
     script.environ["OUTPUT_DIR"] = str(output_dir)
 
-    def _arg_recording_sdist_maker(
+    def arg_recording_sdist_maker_internal(
         name: str,
         **kwargs: Any,
     ) -> ArgRecordingSdist:
@@ -65,7 +65,7 @@ def arg_recording_sdist_maker(
         args_path = output_dir / f"{name}.json"
         return ArgRecordingSdist(sdist_path, args_path)
 
-    return _arg_recording_sdist_maker
+    return arg_recording_sdist_maker_internal
 
 
 def test_requirements_file(script: PipTestEnvironment, data: TestData) -> None:
@@ -381,7 +381,7 @@ def test_install_collected_dependencies_first(script: PipTestEnvironment) -> Non
 
 @pytest.mark.network
 def test_install_local_editable_with_subdirectory(script: PipTestEnvironment) -> None:
-    version_pkg_path = _create_test_package_with_subdirectory(script, "version_subdir")
+    version_pkg_path = create_test_package_with_subdirectory(script, "version_subdir")
     result = script.pip(
         "install",
         "-e",
@@ -395,7 +395,7 @@ def test_install_local_editable_with_subdirectory(script: PipTestEnvironment) ->
 
 @pytest.mark.network
 def test_install_local_with_subdirectory(script: PipTestEnvironment) -> None:
-    version_pkg_path = _create_test_package_with_subdirectory(script, "version_subdir")
+    version_pkg_path = create_test_package_with_subdirectory(script, "version_subdir")
     result = script.pip(
         "install",
         "{uri}#egg=version_subpkg&subdirectory=version_subdir".format(
@@ -965,7 +965,7 @@ class TestEditableDirectURL:
     def test_install_local_git_repo(
         self, script: PipTestEnvironment, common_wheels: Path
     ) -> None:
-        repo_path = _create_test_package(script.scratch_path, "simple")
+        repo_path = create_test_package(script.scratch_path, "simple")
         url = "git+" + repo_path.as_uri()
         script.pip(
             "install", "--no-index", "-e", f"simple @ {url}", "-f", common_wheels

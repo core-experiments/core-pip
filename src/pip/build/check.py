@@ -36,17 +36,15 @@ class PackageDetails:
         return cls(version, tuple(dependencies), requested_extras)
 
 
-def _marker_allows(requirement: Requirement, requested_extras: frozenset[str]) -> bool:
+def marker_allows(requirement: Requirement, requested_extras: frozenset[str]) -> bool:
     if not requirement.marker:
         return True
     if not requested_extras:
-        return _evaluate_marker(requirement.marker, "")
-    return any(
-        _evaluate_marker(requirement.marker, extra) for extra in requested_extras
-    )
+        return evaluate_marker(requirement.marker, "")
+    return any(evaluate_marker(requirement.marker, extra) for extra in requested_extras)
 
 
-def _evaluate_marker(marker: str, extra: str) -> bool:
+def evaluate_marker(marker: str, extra: str) -> bool:
     text = marker.strip()
     if text.startswith("extra !="):
         value = text.split("!=", 1)[1].strip().strip("\"'")
@@ -67,7 +65,7 @@ def check_package_set(
     conflicting: dict[str, list[tuple[str, str, Requirement]]] = {}
     for name, details in package_set.items():
         for requirement in details.dependencies:
-            if not _marker_allows(requirement, details.requested_extras):
+            if not marker_allows(requirement, details.requested_extras):
                 continue
             canonical = canonicalize_name(requirement.name)
             dependency = package_set.get(canonical)
@@ -100,7 +98,7 @@ def metadata_errors(
     errors = []
     for dist in distributions:
         for value in dist.iter_raw_dependencies():
-            if _count_unquoted(value, ";") > 1:
+            if count_unquoted(value, ";") > 1:
                 errors.append(f"Error parsing dependencies of {dist.raw_name}")
                 break
             try:
@@ -135,7 +133,7 @@ def unsupported_distributions(
     return result
 
 
-def _count_unquoted(value: str, target: str) -> int:
+def count_unquoted(value: str, target: str) -> int:
     count = 0
     quote: str | None = None
     for char in value:

@@ -10,7 +10,7 @@ from .packaging import canonicalize_name
 class ReleaseControl:
     all_releases: set[str] = field(default_factory=set)
     only_final: set[str] = field(default_factory=set)
-    _ordered_args: list[tuple[str, str]] = field(default_factory=list, compare=False)
+    ordered_args: list[tuple[str, str]] = field(default_factory=list, compare=False)
 
     def apply(self, kind: str, value: str) -> None:
         if kind not in {"all_releases", "only_final"}:
@@ -30,7 +30,7 @@ class ReleaseControl:
             normalized = (
                 canonicalize_name(entry) if entry not in {":all:", ":none:"} else entry
             )
-            self._ordered_args.append((kind, normalized))
+            self.ordered_args.append((kind, normalized))
             if normalized == ":none:":
                 target.clear()
                 continue
@@ -55,7 +55,7 @@ class ReleaseControl:
         return None
 
     def get_ordered_args(self) -> list[tuple[str, str]]:
-        return list(self._ordered_args)
+        return list(self.ordered_args)
 
     def handle_mutual_excludes(
         self, value: str, target: set[str], other: set[str], attr_name: str

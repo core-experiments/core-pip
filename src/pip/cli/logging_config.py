@@ -27,18 +27,18 @@ class PipFormatter(logging.Formatter):
 def configure_logging(log_file: str | None = None) -> None:
     root = logging.getLogger()
     for handler in root.handlers:
-        if getattr(handler, "_pip_core_handler", False):
+        if getattr(handler, "pip_core_handler", False):
             root.setLevel(logging.INFO)
             break
     else:
         handler = logging.StreamHandler(sys.stderr)
-        handler._pip_core_handler = True
+        handler.pip_core_handler = True
         handler.setFormatter(PipFormatter())
         root.addHandler(handler)
         root.setLevel(logging.INFO)
     if log_file is not None:
         file_handler = logging.FileHandler(log_file)
-        file_handler._pip_core_log_file = True
+        file_handler.pip_core_log_file = True
         file_handler.setFormatter(PipFormatter())
         root.addHandler(file_handler)
     root.setLevel(logging.INFO)

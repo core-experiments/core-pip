@@ -12,7 +12,7 @@ from pip_test_support import PipTestEnvironment
 from pip_test_support.wheel import make_wheel
 
 
-def _create_test_index_with_invalid_wheels(
+def create_test_index_with_invalid_wheels(
     tmpdir: Path, package_name: str = "pkg"
 ) -> Path:
     """Create a test index with both valid and invalid wheel filenames.
@@ -76,7 +76,7 @@ def test_index_versions_ignores_invalid_wheel_names(
     tmpdir: Path,
 ) -> None:
     """Test that pip index versions ignores invalid wheel names."""
-    index_dir = _create_test_index_with_invalid_wheels(tmpdir)
+    index_dir = create_test_index_with_invalid_wheels(tmpdir)
 
     # Run pip index versions with JSON output
     result = script.pip(
@@ -98,7 +98,7 @@ def test_install_ignores_invalid_wheel_names(
     tmpdir: Path,
 ) -> None:
     """Test that pip install ignores invalid wheel names and installs valid ones."""
-    index_dir = _create_test_index_with_invalid_wheels(tmpdir)
+    index_dir = create_test_index_with_invalid_wheels(tmpdir)
 
     # Run pip install - should ignore invalid wheels and install the latest valid one
     result = script.pip(

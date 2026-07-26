@@ -103,7 +103,7 @@ class BackendRunner:
                     backend_path=self.spec.backend_path or None,
                     python_executable=sys.executable,
                 )
-                with _backend_environment(self.source_dir):
+                with backend_environment(self.source_dir):
                     yield caller, Path(metadata_dir)
             return
 
@@ -193,7 +193,7 @@ class BackendRunner:
                                     backend_path=self.spec.backend_path or None,
                                     python_executable=sys.executable,
                                 )
-                                with _backend_environment(self.source_dir):
+                                with backend_environment(self.source_dir):
                                     yield caller, Path(metadata_dir)
                             return
                     raise RuntimeError(detail or str(exc)) from exc
@@ -203,7 +203,7 @@ class BackendRunner:
                 backend_path=self.spec.backend_path or None,
                 python_executable=os.fspath(python),
             )
-            with _backend_environment(self.source_dir):
+            with backend_environment(self.source_dir):
                 yield caller, env_path
 
 
@@ -234,11 +234,11 @@ def prepare_metadata_for_build_wheel(
     config_settings: dict[str, Any] | None = None,
 ) -> str:
     project = ProjectMetadataReader(Path.cwd()).read()
-    dist_info = f"{_wheel_distribution(project.name)}-{project.version}.dist-info"
+    dist_info = f"{wheel_distribution(project.name)}-{project.version}.dist-info"
     target = Path(metadata_directory) / dist_info
     target.mkdir(parents=True, exist_ok=True)
-    (target / "METADATA").write_text(_metadata_text(project), encoding="utf-8")
-    (target / "WHEEL").write_text(_wheel_text(), encoding="utf-8")
+    (target / "METADATA").write_text(metadata_text(project), encoding="utf-8")
+    (target / "WHEEL").write_text(wheel_text_internal(), encoding="utf-8")
     return dist_info
 
 
@@ -259,7 +259,7 @@ def build_sdist(
     del config_settings
     source_dir = Path.cwd()
     project = ProjectMetadataReader(source_dir).read()
-    sdist_name = f"{_wheel_distribution(project.name)}-{project.version}.tar.gz"
+    sdist_name = f"{wheel_distribution(project.name)}-{project.version}.tar.gz"
     sdist_path = Path(sdist_directory) / sdist_name
     sdist_path.parent.mkdir(parents=True, exist_ok=True)
     root_name = sdist_name.removesuffix(".tar.gz")
@@ -297,7 +297,7 @@ class ProjectBuilder:
         self.source_dir = source_dir
         self.build_constraints = build_constraints
         self.build_isolation = build_isolation
-        self._backend_spec = BackendSpec.from_project(source_dir)
+        self.backend_spec = BackendSpec.from_project(source_dir)
 
     def build_wheel(
         self,
@@ -305,14 +305,12 @@ class ProjectBuilder:
         *,
         config_settings: dict[str, Any] | None = None,
     ) -> str:
-        backend = self._load_backend_hook("build_wheel")
-        if self._backend_spec is not None:
+        backend = self.load_backend_hook("build_wheel")
+        if self.backend_spec is not None:
             self.prepare_metadata()
-            return self._build_external(
-                wheel_directory, config_settings=config_settings
-            )
+            return self.build_external(wheel_directory, config_settings=config_settings)
         if callable(backend) and backend is not build_wheel:
-            with _backend_environment(self.source_dir):
+            with backend_environment(self.source_dir):
                 wheel_name = backend(
                     os.fspath(wheel_directory),
                     config_settings=config_settings,
@@ -321,7 +319,7 @@ class ProjectBuilder:
             if not isinstance(wheel_name, str):
                 raise BuildError("Build backend did not return a wheel filename")
             return wheel_name
-        return self._build_fallback_wheel(wheel_directory, editable=False)
+        return self.build_fallback_wheel(wheel_directory, editable=False)
 
     def build_editable(
         self,
@@ -329,21 +327,21 @@ class ProjectBuilder:
         *,
         config_settings: dict[str, Any] | None = None,
     ) -> str:
-        backend = self._load_backend_hook("build_editable")
+        backend = self.load_backend_hook("build_editable")
         if (
-            self._backend_spec is not None
-            and self._backend_spec.name.startswith("setuptools.build_meta")
+            self.backend_spec is not None
+            and self.backend_spec.name.startswith("setuptools.build_meta")
             and (self.source_dir / "setup.py").is_file()
         ):
-            return self._build_external(
+            return self.build_external(
                 wheel_directory, config_settings=config_settings, editable=False
             )
-        if self._backend_spec is not None:
-            return self._build_external(
+        if self.backend_spec is not None:
+            return self.build_external(
                 wheel_directory, config_settings=config_settings, editable=True
             )
         if callable(backend) and backend is not build_editable:
-            with _backend_environment(self.source_dir):
+            with backend_environment(self.source_dir):
                 wheel_name = backend(
                     os.fspath(wheel_directory),
                     config_settings=config_settings,
@@ -354,28 +352,28 @@ class ProjectBuilder:
                     "Build backend did not return an editable wheel filename"
                 )
             return wheel_name
-        return self._build_fallback_wheel(wheel_directory, editable=True)
+        return self.build_fallback_wheel(wheel_directory, editable=True)
 
-    def _load_backend_hook(self, name: str) -> object | None:
-        backend = _load_project_backend(self.source_dir)
+    def load_backend_hook(self, name: str) -> object | None:
+        backend = load_project_backend(self.source_dir)
         return getattr(backend, name, None) if backend is not None else None
 
-    def _build_external(
+    def build_external(
         self,
         wheel_directory: Path,
         *,
         config_settings: dict[str, Any] | None,
         editable: bool = False,
     ) -> str:
-        assert self._backend_spec is not None
+        assert self.backend_spec is not None
         from pyproject_hooks import HookMissing
 
         wheel_directory.mkdir(parents=True, exist_ok=True)
-        backend_name = self._backend_spec.name
+        backend_name = self.backend_spec.name
         try:
             with BackendRunner(
                 self.source_dir,
-                self._backend_spec,
+                self.backend_spec,
                 build_constraints=self.build_constraints,
                 build_isolation=self.build_isolation,
             ).caller() as (caller, _):
@@ -412,10 +410,10 @@ class ProjectBuilder:
             )
         return wheel_name
 
-    def _build_fallback_wheel(self, wheel_directory: Path, *, editable: bool) -> str:
+    def build_fallback_wheel(self, wheel_directory: Path, *, editable: bool) -> str:
         project = ProjectMetadataReader(self.source_dir).read()
         wheel_directory.mkdir(parents=True, exist_ok=True)
-        distribution = _wheel_distribution(project.name)
+        distribution = wheel_distribution(project.name)
         wheel_name = f"{distribution}-{project.version}-py3-none-any.whl"
         wheel_path = wheel_directory / wheel_name
         dist_info = f"{distribution}-{project.version}.dist-info"
@@ -441,25 +439,27 @@ class ProjectBuilder:
                     str(import_root.resolve()) + "\n",
                 )
             else:
-                for path, data in _iter_project_files(self.source_dir):
+                for path, data in iter_project_files(self.source_dir):
                     write_file(archive, path, data)
-            write_file(archive, f"{dist_info}/METADATA", _metadata_text(project))
-            write_file(archive, f"{dist_info}/WHEEL", _wheel_text())
-            entry_points = _entry_points_text(project)
+            write_file(archive, f"{dist_info}/METADATA", metadata_text(project))
+            write_file(archive, f"{dist_info}/WHEEL", wheel_text_internal())
+            entry_points = entry_points_text_internal(project)
             if entry_points:
                 write_file(archive, f"{dist_info}/entry_points.txt", entry_points)
-            archive.writestr(f"{dist_info}/RECORD", _record_text(records, dist_info))
+            archive.writestr(
+                f"{dist_info}/RECORD", record_text_internal(records, dist_info)
+            )
         return wheel_name
 
     def prepare_metadata(self, *, editable: bool = False) -> ProjectMetadata:
         """Read metadata through the project's declared build backend."""
-        if self._backend_spec is None:
+        if self.backend_spec is None:
             return ProjectMetadataReader(self.source_dir).read()
-        backend_name = self._backend_spec.name
+        backend_name = self.backend_spec.name
         try:
             with BackendRunner(
                 self.source_dir,
-                self._backend_spec,
+                self.backend_spec,
                 build_constraints=self.build_constraints,
                 build_isolation=self.build_isolation,
             ).caller() as (
@@ -530,7 +530,7 @@ def prepare_project_metadata(
         raise
 
 
-def _load_project_backend(source_dir: Path) -> object | None:
+def load_project_backend(source_dir: Path) -> object | None:
     pyproject = source_dir / "pyproject.toml"
     if not pyproject.is_file():
         return None
@@ -552,7 +552,7 @@ def _load_project_backend(source_dir: Path) -> object | None:
         if isinstance(path, str)
     )
     module_name, _, object_path = backend_name.partition(":")
-    with _backend_import_path(import_paths):
+    with backend_import_path(import_paths):
         importlib.invalidate_caches()
         sys.modules.pop(module_name, None)
         backend: object = importlib.import_module(module_name)
@@ -563,7 +563,7 @@ def _load_project_backend(source_dir: Path) -> object | None:
 
 
 @contextlib.contextmanager
-def _backend_import_path(paths: tuple[str, ...]) -> Iterator[None]:
+def backend_import_path(paths: tuple[str, ...]) -> Iterator[None]:
     sys.path[:0] = list(paths)
     try:
         yield
@@ -572,7 +572,7 @@ def _backend_import_path(paths: tuple[str, ...]) -> Iterator[None]:
 
 
 @contextlib.contextmanager
-def _backend_environment(source_dir: Path) -> Iterator[None]:
+def backend_environment(source_dir: Path) -> Iterator[None]:
     cwd = Path.cwd()
     os.chdir(source_dir)
     try:
@@ -662,13 +662,13 @@ class ProjectMetadataReader:
                     )
             setup_py = source_dir / "setup.py"
             if not setup_py.exists():
-                metadata = _read_legacy_metadata(source_dir)
+                metadata = read_legacy_metadata(source_dir)
                 if metadata is not None:
                     return metadata
-                metadata = _read_setup_cfg_metadata(source_dir)
+                metadata = read_setup_cfg_metadata(source_dir)
                 if metadata is not None:
                     return metadata
-                metadata = _infer_metadata_from_package_dir(source_dir)
+                metadata = infer_metadata_from_package_dir(source_dir)
                 if metadata is not None:
                     return metadata
                 if isinstance(project, dict):
@@ -682,7 +682,7 @@ class ProjectMetadataReader:
                 raise BuildError(
                     f"Cannot build {source_dir}: missing [project] metadata"
                 )
-            setup_cfg_metadata = _read_setup_cfg_metadata(source_dir)
+            setup_cfg_metadata = read_setup_cfg_metadata(source_dir)
             if setup_cfg_metadata is not None:
                 return setup_cfg_metadata
             raise BuildError(
@@ -691,17 +691,17 @@ class ProjectMetadataReader:
         else:
             setup_py = source_dir / "setup.py"
             if not setup_py.exists():
-                metadata = _read_legacy_metadata(source_dir)
+                metadata = read_legacy_metadata(source_dir)
                 if metadata is not None:
                     return metadata
-                metadata = _read_setup_cfg_metadata(source_dir)
+                metadata = read_setup_cfg_metadata(source_dir)
                 if metadata is not None:
                     return metadata
-                metadata = _infer_metadata_from_package_dir(source_dir)
+                metadata = infer_metadata_from_package_dir(source_dir)
                 if metadata is not None:
                     return metadata
                 raise BuildError(f"Cannot build {source_dir}: missing pyproject.toml")
-            setup_cfg_metadata = _read_setup_cfg_metadata(source_dir)
+            setup_cfg_metadata = read_setup_cfg_metadata(source_dir)
             if setup_cfg_metadata is not None:
                 return setup_cfg_metadata
             raise BuildError(
@@ -709,7 +709,7 @@ class ProjectMetadataReader:
             )
 
 
-def _read_setup_cfg_metadata(source_dir: Path) -> ProjectMetadata | None:
+def read_setup_cfg_metadata(source_dir: Path) -> ProjectMetadata | None:
     setup_cfg = source_dir / "setup.cfg"
     if not setup_cfg.is_file():
         return None
@@ -732,7 +732,7 @@ def _read_setup_cfg_metadata(source_dir: Path) -> ProjectMetadata | None:
     requires_python = (
         parser.get("options", "python_requires", fallback="").strip() or None
     )
-    dependencies = _setup_cfg_install_requires(parser)
+    dependencies = setup_cfg_install_requires(parser)
     return ProjectMetadata(
         name=name,
         version=version,
@@ -744,7 +744,7 @@ def _read_setup_cfg_metadata(source_dir: Path) -> ProjectMetadata | None:
     )
 
 
-def _setup_cfg_install_requires(
+def setup_cfg_install_requires(
     parser: configparser.ConfigParser,
 ) -> tuple[str, ...]:
     if not parser.has_option("options", "install_requires"):
@@ -759,7 +759,7 @@ def _setup_cfg_install_requires(
     return tuple(dependencies)
 
 
-def _infer_metadata_from_package_dir(source_dir: Path) -> ProjectMetadata | None:
+def infer_metadata_from_package_dir(source_dir: Path) -> ProjectMetadata | None:
     roots = []
     src_root = source_dir / "src"
     if src_root.is_dir():
@@ -790,7 +790,7 @@ def _infer_metadata_from_package_dir(source_dir: Path) -> ProjectMetadata | None
     return None
 
 
-def _read_legacy_metadata(source_dir: Path) -> ProjectMetadata | None:
+def read_legacy_metadata(source_dir: Path) -> ProjectMetadata | None:
     candidates = [
         source_dir / "PKG-INFO",
         source_dir / "METADATA",
@@ -841,7 +841,7 @@ def _read_legacy_metadata(source_dir: Path) -> ProjectMetadata | None:
     return None
 
 
-def _infer_name_version_from_path(source_dir: Path) -> tuple[str, str] | None:
+def infer_name_version_from_path(source_dir: Path) -> tuple[str, str] | None:
     name = source_dir.name
     if "-" not in name:
         return None
@@ -855,33 +855,33 @@ def _infer_name_version_from_path(source_dir: Path) -> tuple[str, str] | None:
     return pkg_name, version
 
 
-def _iter_project_files(source_dir: Path) -> Iterable[tuple[str, bytes]]:
+def iter_project_files(source_dir: Path) -> Iterable[tuple[str, bytes]]:
     src_root = source_dir / "src"
     if src_root.is_dir():
-        yield from _iter_package_files(src_root)
+        yield from iter_package_files(src_root)
         return
 
     for child in sorted(source_dir.iterdir()):
         if child.name.startswith("."):
             continue
         if child.is_dir() and (child / "__init__.py").is_file():
-            yield from _iter_package_files(child.parent, root=child)
+            yield from iter_package_files(child.parent, root=child)
         elif child.is_file() and child.suffix == ".py" and child.name != "setup.py":
             yield child.name, child.read_bytes()
 
 
-def _iter_package_files(
+def iter_package_files(
     base: Path, *, root: Path | None = None
 ) -> Iterable[tuple[str, bytes]]:
     search_root = root or base
     project_root = base.parent if base.name == "src" else base
     for path in sorted(search_root.rglob("*")):
-        if not _is_package_payload(path, project_root):
+        if not is_package_payload(path, project_root):
             continue
         yield path.relative_to(base).as_posix(), path.read_bytes()
 
 
-def _is_package_payload(path: Path, project_root: Path) -> bool:
+def is_package_payload(path: Path, project_root: Path) -> bool:
     if not path.is_file():
         return False
     try:
@@ -901,7 +901,7 @@ def _is_package_payload(path: Path, project_root: Path) -> bool:
     return True
 
 
-def _metadata_text(project: ProjectMetadata) -> str:
+def metadata_text(project: ProjectMetadata) -> str:
     lines = [
         "Metadata-Version: 2.1",
         f"Name: {project.name}",
@@ -926,7 +926,7 @@ def _metadata_text(project: ProjectMetadata) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _wheel_text() -> str:
+def wheel_text_internal() -> str:
     return "\n".join(
         [
             "Wheel-Version: 1.0",
@@ -938,7 +938,7 @@ def _wheel_text() -> str:
     )
 
 
-def _entry_points_text(project: ProjectMetadata) -> str:
+def entry_points_text_internal(project: ProjectMetadata) -> str:
     scripts = dict(project.scripts)
     if project.name == "pip" and not scripts:
         scripts = {"pip": "pip.cli.main:main"}
@@ -949,7 +949,7 @@ def _entry_points_text(project: ProjectMetadata) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _record_text(records: list[tuple[str, bytes]], dist_info: str) -> str:
+def record_text_internal(records: list[tuple[str, bytes]], dist_info: str) -> str:
     rows: list[tuple[str, str, str]] = []
     for path, data in records:
         digest = base64.urlsafe_b64encode(hashlib.sha256(data).digest()).rstrip(b"=")
@@ -960,6 +960,6 @@ def _record_text(records: list[tuple[str, bytes]], dist_info: str) -> str:
     return output.getvalue()
 
 
-def _wheel_distribution(name: str) -> str:
+def wheel_distribution(name: str) -> str:
     normalized = canonicalize_name(name).replace("-", "_")
     return re.sub(r"[^A-Za-z0-9_.]+", "_", normalized)

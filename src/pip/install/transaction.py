@@ -23,35 +23,36 @@ class InstallTransaction:
     """Validate, apply, and roll back a set of filesystem replacements."""
 
     def __init__(self, *, owned_paths: Iterable[str | Path] = ()) -> None:
-        self._owned = {_normalized(path) for path in owned_paths}
-        self._staged: list[StagedFile] = []
-        self._deletions: set[Path] = set()
-        self._backups: list[tuple[Path, Path]] = []
-        self._created: list[Path] = []
-        self._temporary = Path(tempfile.mkdtemp(prefix="pip-install-stage-"))
-        self._finished = False
+        self.owned = {normalized_internal(path) for path in owned_paths}
+        self.staged_internal: list[StagedFile] = []
+        self.staged_destinations: set[Path] = set()
+        self.deletions: set[Path] = set()
+        self.backups: list[tuple[Path, Path]] = []
+        self.created_internal: list[Path] = []
+        self.temporary_internal = Path(tempfile.mkdtemp(prefix="pip-install-stage-"))
+        self.finished = False
 
     def add(
         self, source: str | Path, destination: str | Path, *, mode: int | None = None
     ) -> None:
         destination_path = Path(destination)
-        if any(item.destination == destination_path for item in self._staged):
+        if destination_path in self.staged_destinations:
             raise InstallationError(
                 f"duplicate installation destination: {destination_path}"
             )
-        self._staged.append(StagedFile(Path(source), destination_path, mode))
+        self.staged_internal.append(StagedFile(Path(source), destination_path, mode))
+        self.staged_destinations.add(destination_path)
 
     def delete(self, path: str | Path) -> None:
-        self._deletions.add(Path(path))
+        self.deletions.add(Path(path))
 
     def validate(self) -> None:
-        destinations = {item.destination for item in self._staged}
-        for item in self._staged:
+        for item in self.staged_internal:
             if not item.source.is_file():
                 raise InstallationError(f"staged file does not exist: {item.source}")
             if (
                 item.destination.exists()
-                and _normalized(item.destination) not in self._owned
+                and normalized_internal(item.destination) not in self.owned
             ):
                 if (
                     item.destination.is_file()
@@ -62,63 +63,63 @@ class InstallTransaction:
                     f"Cannot install {item.destination} from {item.source}: "
                     "an unrelated file already exists"
                 )
-        overlap = destinations & self._deletions
+        overlap = self.staged_destinations & self.deletions
         if overlap:
             raise InstallationError(
                 f"installation both replaces and deletes: {next(iter(overlap))}"
             )
 
     def commit(self, *, finalize: bool = True) -> None:
-        if self._finished:
+        if self.finished:
             raise RuntimeError("installation transaction has already finished")
         try:
             self.validate()
-            for item in self._staged:
-                self._backup_if_needed(item.destination)
+            for item in self.staged_internal:
+                self.backup_if_needed(item.destination)
                 item.destination.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(item.source, item.destination)
+                shutil.move(os.fspath(item.source), os.fspath(item.destination))
                 if item.mode is not None:
                     item.destination.chmod(item.mode)
-                self._created.append(item.destination)
-            for path in sorted(self._deletions, key=os.fspath):
+                self.created_internal.append(item.destination)
+            for path in sorted(self.deletions, key=os.fspath):
                 if path.exists() or path.is_symlink():
-                    self._backup_if_needed(path)
-                self._remove_empty_parents(path.parent)
+                    self.backup_if_needed(path)
+                self.remove_empty_parents(path.parent)
             if finalize:
-                self._finish_successfully()
+                self.finish_successfully()
         except Exception:
             self.rollback()
             raise
 
     def rollback(self) -> None:
-        for path in reversed(self._created):
+        for path in reversed(self.created_internal):
             if path.exists() or path.is_symlink():
                 if path.is_dir() and not path.is_symlink():
                     shutil.rmtree(path)
                 else:
                     path.unlink()
-        for original, backup in reversed(self._backups):
+        for original, backup in reversed(self.backups):
             if backup.exists():
                 original.parent.mkdir(parents=True, exist_ok=True)
                 if original.exists() or original.is_symlink():
                     original.unlink()
                 shutil.move(os.fspath(backup), os.fspath(original))
-        self._finish_successfully()
+        self.finish_successfully()
 
     def finalize(self) -> None:
         """Discard retained rollback state after a batch succeeds."""
-        if not self._finished:
-            self._finish_successfully()
+        if not self.finished:
+            self.finish_successfully()
 
-    def _backup_if_needed(self, path: Path) -> None:
+    def backup_if_needed(self, path: Path) -> None:
         if not path.exists() and not path.is_symlink():
             return
-        backup = self._temporary / str(len(self._backups))
+        backup = self.temporary_internal / str(len(self.backups))
         backup.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(os.fspath(path), os.fspath(backup))
-        self._backups.append((path, backup))
+        self.backups.append((path, backup))
 
-    def _remove_empty_parents(self, directory: Path) -> None:
+    def remove_empty_parents(self, directory: Path) -> None:
         current = directory
         while current != current.parent:
             try:
@@ -127,17 +128,17 @@ class InstallTransaction:
                 return
             current = current.parent
 
-    def _finish_successfully(self) -> None:
-        shutil.rmtree(self._temporary, ignore_errors=True)
-        self._finished = True
+    def finish_successfully(self) -> None:
+        shutil.rmtree(self.temporary_internal, ignore_errors=True)
+        self.finished = True
 
     def __enter__(self) -> InstallTransaction:
         return self
 
     def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
-        if not self._finished:
+        if not self.finished:
             self.rollback()
 
 
-def _normalized(path: str | Path) -> str:
+def normalized_internal(path: str | Path) -> str:
     return os.path.normcase(os.path.realpath(os.fspath(path)))

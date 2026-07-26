@@ -11,7 +11,7 @@ from pip.install.target import InstallTarget
 from pip.install.wheel_transaction import WheelInstaller
 
 
-def _wheel(directory: Path) -> Path:
+def wheel_internal(directory: Path) -> Path:
     path = directory / "demo-1.0-py3-none-any.whl"
     with zipfile.ZipFile(path, "w") as archive:
         archive.writestr("demo/__init__.py", "value = 1\n")
@@ -27,7 +27,7 @@ def _wheel(directory: Path) -> Path:
     return path
 
 
-def _install(path: Path, target: Path) -> None:
+def install_internal(path: Path, target: Path) -> None:
     WheelInstaller(
         InstallTarget.from_options("demo", target=str(target)),
         pycompile=False,
@@ -38,7 +38,7 @@ def _install(path: Path, target: Path) -> None:
 
 def test_uninstall_preserves_unrelated_and_unsafe_record_paths(tmp_path: Path) -> None:
     target = tmp_path / "site-packages"
-    _install(_wheel(tmp_path), target)
+    install_internal(wheel_internal(tmp_path), target)
     outside = tmp_path / "outside.txt"
     outside.write_text("keep", encoding="utf-8")
     record = target / "demo-1.0.dist-info" / "RECORD"
@@ -51,7 +51,7 @@ def test_uninstall_preserves_unrelated_and_unsafe_record_paths(tmp_path: Path) -
 
 def test_uninstall_removes_symlink_without_following_target(tmp_path: Path) -> None:
     target = tmp_path / "site-packages"
-    _install(_wheel(tmp_path), target)
+    install_internal(wheel_internal(tmp_path), target)
     outside = tmp_path / "outside.txt"
     outside.write_text("keep", encoding="utf-8")
     link = target / "demo-link"
@@ -68,7 +68,7 @@ def test_uninstall_removes_symlink_without_following_target(tmp_path: Path) -> N
 
 def test_uninstall_requires_record(tmp_path: Path) -> None:
     target = tmp_path / "site-packages"
-    _install(_wheel(tmp_path), target)
+    install_internal(wheel_internal(tmp_path), target)
     (target / "demo-1.0.dist-info" / "RECORD").unlink()
 
     with pytest.raises(InstallationError, match="no RECORD file was found"):

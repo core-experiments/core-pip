@@ -15,13 +15,13 @@ from typing import Any, TypeVar
 from pip.core.misc import enum
 
 logger = logging.getLogger(__name__)
-_T = TypeVar("_T", bound="TempDirectory")
+T_internal = TypeVar("T_internal", bound="TempDirectory")
 
 
 def rmtree(path: str, ignore_errors: bool = False, onexc=None) -> None:
     if onexc is None:
 
-        def onexc(_func, _filename, exc):
+        def onexc(func_internal, filename_internal, exc):
             raise exc
 
     for root, dirs, files in os.walk(path, topdown=False):
@@ -53,72 +53,74 @@ def rmtree(path: str, ignore_errors: bool = False, onexc=None) -> None:
 tempdir_kinds = enum(
     BUILD_ENV="build-env", EPHEM_WHEEL_CACHE="ephem-wheel-cache", REQ_BUILD="req-build"
 )
-_tempdir_manager: ExitStack | None = None
+tempdir_manager: ExitStack | None = None
 
 
 @contextmanager
 def global_tempdir_manager() -> Generator[None, None, None]:
-    global _tempdir_manager
+    global tempdir_manager
     with ExitStack() as stack:
-        old_tempdir_manager, _tempdir_manager = _tempdir_manager, stack
+        old_tempdir_manager, tempdir_manager = tempdir_manager, stack
         try:
             yield
         finally:
-            _tempdir_manager = old_tempdir_manager
+            tempdir_manager = old_tempdir_manager
 
 
-class _Default:
+class Default_internal:
     pass
 
 
-_default = _Default()
+default_internal = Default_internal()
 
 
 class TempDirectory:
     def __init__(
         self,
         path: str | None = None,
-        delete: bool | None | _Default = _default,
+        delete: bool | None | Default_internal = default_internal,
         kind: str = "temp",
         globally_managed: bool = False,
         ignore_cleanup_errors: bool = True,
     ):
-        if delete is _default:
+        if delete is default_internal:
             delete = False if path is not None else None
         if path is None:
-            path = self._create(kind)
-        self._path = path
-        self._deleted = False
+            path = self.create_internal(kind)
+        self.path_internal = path
+        self.deleted_internal = False
         self.delete = delete
         self.kind = kind
         self.ignore_cleanup_errors = ignore_cleanup_errors
         if globally_managed:
-            assert _tempdir_manager is not None
-            _tempdir_manager.enter_context(self)
+            assert tempdir_manager is not None
+            tempdir_manager.enter_context(self)
 
     @property
     def path(self) -> str:
-        assert not self._deleted, f"Attempted to access deleted path: {self._path}"
-        return self._path
+        assert not self.deleted_internal, (
+            f"Attempted to access deleted path: {self.path_internal}"
+        )
+        return self.path_internal
 
     def __repr__(self) -> str:
         return f"<{self.__class__.__name__} {self.path!r}>"
 
-    def __enter__(self: _T) -> _T:
+    def __enter__(self: T_internal) -> T_internal:
         return self
 
     def __exit__(self, exc: Any, value: Any, tb: Any) -> None:
         if self.delete is not None and self.delete or self.delete is None:
             self.cleanup()
 
-    def _create(self, kind: str) -> str:
+    def create_internal(self, kind: str) -> str:
         path = os.path.realpath(tempfile.mkdtemp(prefix=f"pip-{kind}-"))
         logger.debug("Created temporary directory: %s", path)
         return path
 
     def cleanup(self) -> None:
-        self._deleted = True
-        if not os.path.exists(self._path):
+        self.deleted_internal = True
+        if not os.path.exists(self.path_internal):
             return
         errors: list[BaseException] = []
 
@@ -135,16 +137,16 @@ class TempDirectory:
 
         if self.ignore_cleanup_errors:
             try:
-                rmtree(self._path, ignore_errors=False)
+                rmtree(self.path_internal, ignore_errors=False)
             except OSError:
-                rmtree(self._path, onexc=onerror)
+                rmtree(self.path_internal, onexc=onerror)
             if errors:
                 logger.warning(
                     "Failed to remove contents in a temporary directory '%s'.",
-                    self._path,
+                    self.path_internal,
                 )
         else:
-            rmtree(self._path)
+            rmtree(self.path_internal)
 
 
 class AdjacentTempDirectory(TempDirectory):
@@ -155,7 +157,7 @@ class AdjacentTempDirectory(TempDirectory):
         super().__init__(delete=delete)
 
     @classmethod
-    def _generate_names(cls, name: str) -> Generator[str, None, None]:
+    def generate_names(cls, name: str) -> Generator[str, None, None]:
         for i in range(1, len(name)):
             for candidate in itertools.combinations_with_replacement(
                 cls.LEADING_CHARS, i - 1
@@ -171,9 +173,9 @@ class AdjacentTempDirectory(TempDirectory):
                 if new_name != name:
                     yield new_name
 
-    def _create(self, kind: str) -> str:
+    def create_internal(self, kind: str) -> str:
         root, name = os.path.split(self.original)
-        for candidate in self._generate_names(name):
+        for candidate in self.generate_names(name):
             path = os.path.join(root, candidate)
             try:
                 os.mkdir(path)

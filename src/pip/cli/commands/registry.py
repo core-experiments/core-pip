@@ -60,12 +60,12 @@ COMMAND_SPECS = (
     CommandSpec("help", visible=False),
 )
 
-_COMMANDS = {spec.name: spec for spec in COMMAND_SPECS}
-COMMANDS = tuple(_COMMANDS)
+COMMANDS_internal = {spec.name: spec for spec in COMMAND_SPECS}
+COMMANDS = tuple(COMMANDS_internal)
 
 
 def get_command(command: str) -> CommandSpec | None:
-    return _COMMANDS.get(command)
+    return COMMANDS_internal.get(command)
 
 
 def get_command_runner(command: str) -> CommandRunner | None:

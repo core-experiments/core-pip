@@ -25,7 +25,7 @@ from pip.network.http import NetworkSession
 from pip.resolution.req_install import install_req_from_editable, install_req_from_line
 
 logger = logging.getLogger(__name__)
-_CODING_RE = re.compile(rb"^[ \t\f]*#.*?coding[:=][ \t]*([-\w.]+)")
+CODING_RE = re.compile(rb"^[ \t\f]*#.*?coding[:=][ \t]*([-\w.]+)")
 COMMENT_RE = re.compile(r"(^|\s+)#.*$")
 
 
@@ -47,13 +47,13 @@ class ParsedRequirement:
     locked_name: str | None = None
 
 
-def _is_pylock_reference(value: str) -> bool:
+def is_pylock_reference(value: str) -> bool:
     parsed = urllib.parse.urlparse(value)
     path = parsed.path or value
     return Path(path).name.startswith("pylock") and path.endswith(".toml")
 
 
-def _pylock_location(reference: str, path: str | None) -> str:
+def pylock_location(reference: str, path: str | None) -> str:
     if path is None:
         raise InstallationError("pylock package is missing its path")
     parsed = urllib.parse.urlparse(reference)
@@ -62,7 +62,7 @@ def _pylock_location(reference: str, path: str | None) -> str:
     return path_to_url(str((Path(reference).parent / path).resolve()))
 
 
-def _parse_pylock(
+def parse_pylock(
     reference: str,
     content: str,
     *,
@@ -85,11 +85,11 @@ def _parse_pylock(
         link: str
         direct = False
         if isinstance(distribution, pylock.PackageDirectory):
-            link = _pylock_location(reference, distribution.path)
+            link = pylock_location(reference, distribution.path)
             requirement = link
             direct = True
         elif isinstance(distribution, pylock.PackageArchive):
-            link = _pylock_location(reference, distribution.path or distribution.url)
+            link = pylock_location(reference, distribution.path or distribution.url)
             requirement = f"{package.name} @ {link}"
             direct = True
         elif isinstance(distribution, pylock.PackageVcs):
@@ -110,14 +110,10 @@ def _parse_pylock(
                         f"there is no source distribution for it in {reference!r}"
                     )
                 distribution = package.sdist
-                link = _pylock_location(
-                    reference, distribution.path or distribution.url
-                )
+                link = pylock_location(reference, distribution.path or distribution.url)
                 hashes = {name: [value] for name, value in distribution.hashes.items()}
             else:
-                link = _pylock_location(
-                    reference, distribution.path or distribution.url
-                )
+                link = pylock_location(reference, distribution.path or distribution.url)
             _, version, _, _ = parse_wheel_filename(
                 distribution.name or Path(link).name
             )
@@ -132,7 +128,7 @@ def _parse_pylock(
                     f"source distributions are not permitted for package {package.name!r} and "
                     f"there is no compatible wheel for it in {reference!r}"
                 )
-            link = _pylock_location(reference, distribution.path or distribution.url)
+            link = pylock_location(reference, distribution.path or distribution.url)
             _, version = parse_sdist_filename(distribution.name or Path(link).name)
             requirement = f"{package.name}=={version}"
         results.append(
@@ -158,7 +154,7 @@ def parse_requirements(
     options: Any = None,
     constraint: bool = False,
 ) -> list[ParsedRequirement]:
-    return _parse_requirements(
+    return parse_requirements_internal(
         filename,
         session,
         provider=provider,
@@ -168,7 +164,7 @@ def parse_requirements(
     )
 
 
-def _parse_requirements(
+def parse_requirements_internal(
     filename: str,
     session: NetworkSession,
     *,
@@ -177,7 +173,7 @@ def _parse_requirements(
     constraint: bool,
     stack: list[str],
 ) -> list[ParsedRequirement]:
-    normalized = _normalize_reference(filename, None)
+    normalized = normalize_reference(filename, None)
     if normalized in stack:
         previous = stack[-1] if stack else normalized
         raise RequirementsFileParseError(
@@ -196,7 +192,7 @@ def _parse_requirements(
     else:
         path = Path(normalized)
         if not path.exists():
-            if _is_pylock_reference(normalized):
+            if is_pylock_reference(normalized):
                 raise InstallationError(
                     f"Error reading pylock file {normalized!r}: file does not exist"
                 )
@@ -227,7 +223,7 @@ def _parse_requirements(
         if content is None:
             cookie = None
             for line in data.splitlines()[:2]:
-                match = _CODING_RE.match(line)
+                match = CODING_RE.match(line)
                 if match is not None:
                     cookie = match.group(1).decode("ascii", "replace")
                     break
@@ -249,13 +245,13 @@ def _parse_requirements(
                         encoding,
                     )
                     content = data.decode(encoding)
-    if _is_pylock_reference(normalized):
+    if is_pylock_reference(normalized):
         print(
             "WARNING: Using pylock.toml as a requirements source is an experimental "
             "feature.",
             file=sys.stderr,
         )
-        return _parse_pylock(normalized, content, provider=provider)
+        return parse_pylock(normalized, content, provider=provider)
     results: list[ParsedRequirement] = []
     next_stack = [*stack, normalized]
     processed: list[tuple[int, str]] = []
@@ -288,7 +284,7 @@ def _parse_requirements(
             line = line.split(" #", 1)[0].rstrip()
         if not line:
             continue
-        parsed = _parse_line(
+        parsed = parse_line(
             normalized,
             line_number,
             line,
@@ -302,7 +298,7 @@ def _parse_requirements(
     return results
 
 
-def _parse_line(
+def parse_line(
     filename: str,
     line_number: int,
     line: str,
@@ -324,7 +320,7 @@ def _parse_line(
             token = tokens[index]
             if not token.startswith("-"):
                 results.extend(
-                    _parse_line(
+                    parse_line(
                         filename,
                         line_number,
                         " ".join(tokens[index:]),
@@ -351,9 +347,9 @@ def _parse_line(
                 value = " ".join([value, *tokens[index + 1 :]])
                 index = len(tokens) - 1
             if option in {"-r", "--requirement"}:
-                nested = _normalize_reference(value, filename, as_path=True)
+                nested = normalize_reference(value, filename, as_path=True)
                 results.extend(
-                    _parse_requirements(
+                    parse_requirements_internal(
                         nested,
                         session,
                         provider=provider,
@@ -363,9 +359,9 @@ def _parse_line(
                     )
                 )
             elif option in {"-c", "--constraint"}:
-                nested = _normalize_reference(value, filename, as_path=True)
+                nested = normalize_reference(value, filename, as_path=True)
                 results.extend(
-                    _parse_requirements(
+                    parse_requirements_internal(
                         nested,
                         session,
                         provider=provider,
@@ -376,14 +372,14 @@ def _parse_line(
                 )
             elif option in {"-f", "--find-links"}:
                 if provider is not None:
-                    normalized = _normalize_reference(value, filename, as_path=True)
+                    normalized = normalize_reference(value, filename, as_path=True)
                     if os.path.exists(normalized):
                         provider.find_links.append(normalized)
                     else:
                         provider.find_links.append(value)
             elif option in {"-i", "--index-url"}:
                 if provider is not None and not provider.no_index:
-                    provider.index_urls[:] = [_normalize_reference(value, filename)]
+                    provider.index_urls[:] = [normalize_reference(value, filename)]
                 auth = session.auth
                 if auth is not None:
                     auth.index_urls = (
@@ -391,7 +387,7 @@ def _parse_line(
                     )
             elif option == "--extra-index-url":
                 if provider is not None and not provider.no_index:
-                    provider.index_urls.append(_normalize_reference(value, filename))
+                    provider.index_urls.append(normalize_reference(value, filename))
                 auth = session.auth
                 if auth is not None:
                     auth.index_urls = (
@@ -405,7 +401,7 @@ def _parse_line(
                 if auth is not None:
                     auth.index_urls = []
             elif option == "--trusted-host":
-                session.adapters[f"https://{value}/"] = session._trusted_host_adapter
+                session.adapters[f"https://{value}/"] = session.trusted_host_adapter
                 logger.info(
                     "adding trusted host: %r (from line %d of %s)",
                     value,
@@ -437,7 +433,7 @@ def _parse_line(
                     )
             elif option in {"-e", "--editable"}:
                 results.extend(
-                    _parse_requirement_line(
+                    parse_requirement_line(
                         filename,
                         line_number,
                         value,
@@ -451,7 +447,7 @@ def _parse_line(
                 )
             index += 1
         return results
-    return _parse_requirement_line(
+    return parse_requirement_line(
         filename,
         line_number,
         line,
@@ -459,7 +455,7 @@ def _parse_line(
     )
 
 
-def _parse_requirement_line(
+def parse_requirement_line(
     filename: str,
     line_number: int,
     line: str,
@@ -494,18 +490,18 @@ def _parse_requirement_line(
                 if index + 1 >= len(tokens):
                     raise RequirementsFileParseError(f"{token} requires a value")
                 index += 1
-                _merge_config_setting(config_settings, tokens[index])
+                merge_config_setting(config_settings, tokens[index])
             elif token.startswith(config_setting_options):
-                _merge_config_setting(config_settings, token.split("=", 1)[1])
+                merge_config_setting(config_settings, token.split("=", 1)[1])
             elif token == "--hash":
                 if index + 1 >= len(tokens):
                     raise RequirementsFileParseError(requirement_line)
                 index += 1
-                _add_hash_option(
+                add_hash_option(
                     hash_options, tokens[index], original_line=requirement_line
                 )
             elif token.startswith("--hash="):
-                _add_hash_option(
+                add_hash_option(
                     hash_options, token.split("=", 1)[1], original_line=requirement_line
                 )
             else:
@@ -517,7 +513,7 @@ def _parse_requirement_line(
         if hash_options:
             parsed_options["hashes"] = hash_options
         requirement_text = " ".join(requirement_tokens)
-    requirement_text = _expand_env_variables(requirement_text)
+    requirement_text = expand_env_variables(requirement_text)
     try:
         if editable or option in {"-e", "--editable"}:
             install_req_from_editable(value)
@@ -543,7 +539,7 @@ def _parse_requirement_line(
     ]
 
 
-def _add_hash_option(
+def add_hash_option(
     target: dict[str, list[str]], raw: str, *, original_line: str
 ) -> None:
     name, sep, digest = raw.partition(":")
@@ -552,7 +548,7 @@ def _add_hash_option(
     target.setdefault(name, []).append(digest)
 
 
-def _merge_config_setting(target: dict[str, object], raw: str) -> None:
+def merge_config_setting(target: dict[str, object], raw: str) -> None:
     key, _, value = raw.partition("=")
     key = key.strip()
     existing = target.get(key)
@@ -565,8 +561,8 @@ def _merge_config_setting(target: dict[str, object], raw: str) -> None:
         target[key] = [existing, value if _ else ""]
 
 
-def _normalize_reference(value: str, base: str | None, *, as_path: bool = False) -> str:
-    value = _expand_env_variables(value.strip())
+def normalize_reference(value: str, base: str | None, *, as_path: bool = False) -> str:
+    value = expand_env_variables(value.strip())
     parsed = urllib.parse.urlparse(value)
     base_parsed = urllib.parse.urlparse(base) if base else None
     base_directory = base.rsplit("/", 1)[0] + "/" if base else None
@@ -588,7 +584,7 @@ def _normalize_reference(value: str, base: str | None, *, as_path: bool = False)
     return os.path.normcase(os.path.abspath(os.path.normpath(os.fspath(path))))
 
 
-def _expand_env_variables(value: str) -> str:
+def expand_env_variables(value: str) -> str:
     def replace(match: re.Match[str]) -> str:
         name = match.group(1)
         replacement = os.getenv(name)

@@ -48,6 +48,7 @@ requires = [
 build-backend = "uv_build"
 
 [dependency-groups]
+benchmark = ["asv>=0.6.5"]
 typing = ["ty"]
 test = [
     "cryptography",

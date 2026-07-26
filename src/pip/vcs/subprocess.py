@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
-import subprocess as _subprocess
+import subprocess as subprocess_internal
 from collections.abc import Iterable, Mapping
 from typing import Any, Literal, Protocol
 
@@ -52,11 +52,13 @@ def call_subprocess(
         command_desc,
     )
     try:
-        process = _subprocess.Popen(
+        process = subprocess_internal.Popen(
             command_args_to_argv(cmd),
-            stdin=_subprocess.PIPE,
-            stdout=_subprocess.PIPE,
-            stderr=_subprocess.PIPE if stdout_only else _subprocess.STDOUT,
+            stdin=subprocess_internal.PIPE,
+            stdout=subprocess_internal.PIPE,
+            stderr=subprocess_internal.PIPE
+            if stdout_only
+            else subprocess_internal.STDOUT,
             cwd=cwd,
             env=env,
             encoding="locale",

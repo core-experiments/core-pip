@@ -6,19 +6,19 @@ import os
 from pathlib import Path
 
 
-_pip_runner: str | None = None
+pip_runner: str | None = None
 
 
 def set_pip_runner(path: str) -> None:
     """Set the runner path when pip is executing from a source checkout."""
-    global _pip_runner
-    _pip_runner = path
+    global pip_runner
+    pip_runner = path
 
 
 def get_runnable_pip() -> str:
     """Return the pip runner script used for isolated build dependencies."""
-    if _pip_runner is not None:
-        return _pip_runner
+    if pip_runner is not None:
+        return pip_runner
     runner = Path(
         importlib.metadata.distribution("pip").locate_file("pip/__pip-runner__.py")
     )

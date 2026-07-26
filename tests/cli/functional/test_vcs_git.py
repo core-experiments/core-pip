@@ -10,7 +10,7 @@ import pathlib
 from unittest.mock import Mock, patch
 
 import pytest
-from pip_test_support import PipTestEnvironment, _create_test_package, _git_commit
+from pip_test_support import PipTestEnvironment, create_test_package, git_commit
 from pip.vcs.git import Git, RemoteNotFoundError
 from pip.vcs.support import HiddenText
 from pip.vcs.versioncontrol import vcs
@@ -43,7 +43,7 @@ def checkout_new_branch(script: PipTestEnvironment, repo_dir: str, branch: str) 
 
 
 def do_commit(script: PipTestEnvironment, dest: str) -> str:
-    _git_commit(dest, message="test commit", allow_empty=True)
+    git_commit(dest, message="test commit", allow_empty=True)
     return get_head_sha(script, dest)
 
 
@@ -222,7 +222,7 @@ def test_is_commit_id_equal(script: PipTestEnvironment) -> None:
     """
     Test Git.is_commit_id_equal().
     """
-    version_pkg_path = os.fspath(_create_test_package(script.scratch_path))
+    version_pkg_path = os.fspath(create_test_package(script.scratch_path))
     script.run("git", "branch", "branch0.1", cwd=version_pkg_path)
     commit = script.run("git", "rev-parse", "HEAD", cwd=version_pkg_path).stdout.strip()
 
@@ -235,7 +235,7 @@ def test_is_commit_id_equal(script: PipTestEnvironment) -> None:
 
 
 def test_is_immutable_rev_checkout(script: PipTestEnvironment) -> None:
-    version_pkg_path = os.fspath(_create_test_package(script.scratch_path))
+    version_pkg_path = os.fspath(create_test_package(script.scratch_path))
     commit = script.run("git", "rev-parse", "HEAD", cwd=version_pkg_path).stdout.strip()
     assert Git().is_immutable_rev_checkout(
         "git+https://g.c/o/r@" + commit, version_pkg_path
@@ -247,7 +247,7 @@ def test_is_immutable_rev_checkout(script: PipTestEnvironment) -> None:
 
 
 def test_get_repository_root(script: PipTestEnvironment) -> None:
-    version_pkg_path = _create_test_package(script.scratch_path)
+    version_pkg_path = create_test_package(script.scratch_path)
     tests_path = version_pkg_path.joinpath("tests")
     tests_path.mkdir()
 
@@ -297,7 +297,7 @@ def test_resolve_commit_not_on_branch(
     )
 
 
-def _initialize_clonetest_server(
+def initialize_clonetest_server(
     repo_path: pathlib.Path, script: PipTestEnvironment, enable_partial_clone: bool
 ) -> pathlib.Path:
     repo_path.mkdir()
@@ -349,7 +349,7 @@ def test_git_parse_fail_warning(
 def test_partial_clone(script: PipTestEnvironment, tmp_path: pathlib.Path) -> None:
     """Test partial clone w/ a git-server that supports it"""
     repo_path = tmp_path / "repo"
-    repo_file = _initialize_clonetest_server(
+    repo_file = initialize_clonetest_server(
         repo_path, script, enable_partial_clone=True
     )
     clone_path1 = repo_path / "clone1"
@@ -393,7 +393,7 @@ def test_partial_clone_without_server_support(
 ) -> None:
     """Test partial clone w/ a git-server that does not support it"""
     repo_path = tmp_path / "repo"
-    repo_file = _initialize_clonetest_server(
+    repo_file = initialize_clonetest_server(
         repo_path, script, enable_partial_clone=False
     )
     clone_path1 = repo_path / "clone1"
@@ -436,7 +436,7 @@ def test_clone_without_partial_clone_support(
 ) -> None:
     """Older git clients don't support partial clone. Test the fallback path"""
     repo_path = tmp_path / "repo"
-    repo_file = _initialize_clonetest_server(
+    repo_file = initialize_clonetest_server(
         repo_path, script, enable_partial_clone=True
     )
     clone_path = repo_path / "clone1"

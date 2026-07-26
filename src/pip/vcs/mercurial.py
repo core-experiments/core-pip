@@ -110,7 +110,7 @@ class Mercurial(VersionControl):
             stdout_only=True,
             cwd=location,
         ).strip()
-        if cls._is_local_repository(url):
+        if cls.is_local_repository(url):
             url = path_to_url(url)
         return url.strip()
 

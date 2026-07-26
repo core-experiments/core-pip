@@ -73,20 +73,20 @@ class SourceMetadataPreparation:
         check_build_deps: bool,
     ) -> None:
         # Set up the backend environment after the requirement loads its project data.
-        self._prepare_build_env(build_isolation, build_env_installer)
+        self.prepare_build_env(build_isolation, build_env_installer)
 
         # Set up the build isolation, if this requirement should be isolated
         if build_isolation != "off":
             # Setup an isolated environment and install the build backend static
             # requirements in it.
-            self._prepare_build_backend()
+            self.prepare_build_backend()
             # Check that the build backend supports PEP 660. This cannot be done
             # earlier because we need to setup the build backend to verify it
             # supports build_editable, nor can it be done later, because we want
             # to avoid installing build requirements needlessly.
             self.req.editable_sanity_check()
             # Install the dynamic build requirements.
-            self._install_build_reqs(build_env_installer)
+            self.install_build_reqs(build_env_installer)
         else:
             # When not using build isolation, we still need to check that
             # the build backend supports PEP 660.
@@ -99,12 +99,12 @@ class SourceMetadataPreparation:
                 pyproject_requires
             )
             if conflicting:
-                self._raise_conflicts("the backend dependencies", conflicting)
+                self.raise_conflicts("the backend dependencies", conflicting)
             if missing:
-                self._raise_missing_reqs(missing)
+                self.raise_missing_reqs(missing)
         self.req.prepare_metadata()
 
-    def _prepare_build_env(
+    def prepare_build_env(
         self,
         build_isolation: BuildIsolationMode,
         build_env_installer: BuildEnvironmentInstaller,
@@ -114,7 +114,7 @@ class SourceMetadataPreparation:
 
         self.req.configure_backend(self.req.build_env.python_executable)
 
-    def _prepare_build_backend(self) -> None:
+    def prepare_build_backend(self) -> None:
         # Install the pyproject.toml declared build-time requirements.
         pyproject_requires = self.req.pyproject_requires
         assert pyproject_requires is not None
@@ -131,7 +131,7 @@ class SourceMetadataPreparation:
             self.req.requirements_to_check
         )
         if conflicting:
-            self._raise_conflicts("PEP 517/518 supported requirements", conflicting)
+            self.raise_conflicts("PEP 517/518 supported requirements", conflicting)
         if missing:
             logger.warning(
                 "Missing build requirements in pyproject.toml for %s.",
@@ -143,7 +143,7 @@ class SourceMetadataPreparation:
                 " and ".join(map(repr, sorted(missing))),
             )
 
-    def _get_build_requires(self, editable: bool) -> Iterable[str]:
+    def get_build_requires(self, editable: bool) -> Iterable[str]:
         kind = "editable" if editable else "wheel"
         with self.req.build_env:
             runner = runner_with_message(f"Getting requirements to build {kind}")
@@ -154,7 +154,7 @@ class SourceMetadataPreparation:
                     return backend.get_requires_for_build_editable()
                 return backend.get_requires_for_build_wheel()
 
-    def _install_build_reqs(
+    def install_build_reqs(
         self, build_env_installer: BuildEnvironmentInstaller
     ) -> None:
         # Install any extra build dependencies that the backend requests.
@@ -165,18 +165,18 @@ class SourceMetadataPreparation:
             and self.req.permit_editable_wheels
             and self.req.supports_pyproject_editable
         ):
-            build_reqs = self._get_build_requires(editable=True)
+            build_reqs = self.get_build_requires(editable=True)
         else:
-            build_reqs = self._get_build_requires(editable=False)
+            build_reqs = self.get_build_requires(editable=False)
         conflicting, missing = self.req.build_env.check_requirements(build_reqs)
         if conflicting:
-            self._raise_conflicts("the backend dependencies", conflicting)
+            self.raise_conflicts("the backend dependencies", conflicting)
         with self.req.build_env:
             self.req.build_env.install_requirements(
                 missing, "normal", kind="backend dependencies", for_req=self.req
             )
 
-    def _raise_conflicts(
+    def raise_conflicts(
         self, conflicting_with: str, conflicting_reqs: set[tuple[str, str]]
     ) -> None:
         format_string = (
@@ -193,7 +193,7 @@ class SourceMetadataPreparation:
         )
         raise InstallationError(error_message)
 
-    def _raise_missing_reqs(self, missing: set[str]) -> None:
+    def raise_missing_reqs(self, missing: set[str]) -> None:
         format_string = (
             "Some build dependencies for {requirement} are missing: {missing}."
         )

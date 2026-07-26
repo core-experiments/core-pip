@@ -57,7 +57,7 @@ class WheelInstaller:
         direct_url: DirectUrl | None = None,
         transaction_sink: list[InstallTransaction] | None = None,
     ) -> WheelCandidate:
-        return _install_wheel(
+        return install_wheel_internal(
             path,
             target=self.target,
             pycompile=self.pycompile,
@@ -70,10 +70,10 @@ class WheelInstaller:
         )
 
     def validate_batch(self, paths: Iterable[str | Path]) -> tuple[WheelCandidate, ...]:
-        return _validate_wheel_batch(paths, target=self.target)
+        return validate_wheel_batch(paths, target=self.target)
 
 
-def _install_wheel(
+def install_wheel_internal(
     path: str | Path,
     *,
     target: InstallTarget,
@@ -106,13 +106,15 @@ def _install_wheel(
         record_destination: Path | None = None
         record_source: Path | None = None
         dist_info: str | None = None
+        resolved_directories: dict[tuple[Path, PurePosixPath], Path] = {}
+        record_metadata: dict[Path, tuple[str, str]] = {}
 
         with zipfile.ZipFile(path) as archive:
             parse_wheel(archive, Path(path).name[:-4].split("-", 1)[0])
             for member in archive.infolist():
                 if member.is_dir():
                     continue
-                relative = _validate_member(member.filename)
+                relative = validate_member(member.filename)
                 if relative.parts and relative.parts[0].endswith(".dist-info"):
                     dist_info = relative.parts[0]
                 source = stage_root / Path(*relative.parts)
@@ -127,10 +129,14 @@ def _install_wheel(
                             contents = "".join(lines).encode("utf-8")
                             break
                 source.write_bytes(contents)
-                if _is_script_member(relative):
-                    _rewrite_shebang(source, script_executable)
-                destination = _destination(target, relative)
-                mode = _zip_mode(member)
+                if is_script_member(relative):
+                    rewrite_shebang(source, script_executable)
+                else:
+                    record_metadata[source] = record_metadata_internal(contents)
+                destination = destination_internal(
+                    target, relative, resolved_directories=resolved_directories
+                )
+                mode = zip_mode(member)
                 staged.append((source, destination, mode))
                 if relative.name == "RECORD" and relative.parts:
                     record_destination = destination
@@ -173,7 +179,7 @@ def _install_wheel(
                 )
             )
 
-        scripts = _entry_point_scripts(stage_root / dist_info / "entry_points.txt")
+        scripts = entry_point_scripts(stage_root / dist_info / "entry_points.txt")
         script_destinations = {
             target.scripts / generated
             for name in scripts
@@ -188,7 +194,7 @@ def _install_wheel(
             source = stage_root / ".pip-scripts" / name
             source.parent.mkdir(parents=True, exist_ok=True)
             source.write_text(
-                _script_text(target_ref, script_executable), encoding="utf-8"
+                script_text(target_ref, script_executable), encoding="utf-8"
             )
             source.chmod(
                 source.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
@@ -196,7 +202,7 @@ def _install_wheel(
             staged.append((source, target.scripts / name, source.stat().st_mode))
 
         if pycompile:
-            staged.extend(_compiled_files(stage_root, staged))
+            staged.extend(compiled_files(stage_root, staged))
 
         record_rows = []
         for source, destination, _ in staged:
@@ -205,26 +211,26 @@ def _install_wheel(
                     (os.path.relpath(destination, target.purelib), "", "")
                 )
                 continue
-            digest = base64.urlsafe_b64encode(
-                hashlib.sha256(source.read_bytes()).digest()
-            )
+            metadata = record_metadata.get(source)
+            if metadata is None:
+                metadata = record_metadata_internal(source.read_bytes())
             record_rows.append(
                 (
                     os.path.relpath(destination, target.purelib),
-                    f"sha256={digest.rstrip(b'=').decode('ascii')}",
-                    str(source.stat().st_size),
+                    metadata[0],
+                    metadata[1],
                 )
             )
         record_rows.sort()
         with record_source.open("w", newline="", encoding="utf-8") as file:
             csv.writer(file).writerows(record_rows)
 
-        owned_paths, old_paths = _existing_paths(existing)
+        owned_paths, old_paths = existing_paths(existing)
         if preserve_existing and existing is not None:
             old_paths = set()
         for _, destination, _ in staged:
             if destination.parent == target.scripts and destination.exists():
-                if _script_matches(destination, scripts):
+                if script_matches(destination, scripts):
                     owned_paths.add(destination)
         new_destinations = {destination for _, destination, _ in staged}
         transaction = InstallTransaction(owned_paths=owned_paths)
@@ -244,7 +250,7 @@ def _install_wheel(
     return candidate
 
 
-def _validate_wheel_batch(
+def validate_wheel_batch(
     paths: Iterable[str | Path],
     *,
     target: InstallTarget,
@@ -259,7 +265,9 @@ def _validate_wheel_batch(
             for member in archive.infolist():
                 if member.is_dir():
                     continue
-                destination = _destination(target, _validate_member(member.filename))
+                destination = destination_internal(
+                    target, validate_member(member.filename)
+                )
                 if destination in destinations:
                     raise InstallationError(
                         f"Cannot install {canonicalize_name(candidate.name)}: "
@@ -316,10 +324,10 @@ class DistributionUninstaller:
         self.paths = paths
 
     def uninstall(self, name: str) -> bool:
-        return _uninstall_distribution(name, paths=self.paths)
+        return uninstall_distribution(name, paths=self.paths)
 
 
-def _uninstall_distribution(
+def uninstall_distribution(
     name: str,
     *,
     paths: list[str] | None = None,
@@ -412,7 +420,7 @@ def _uninstall_distribution(
     return True
 
 
-def _validate_member(name: str) -> PurePosixPath:
+def validate_member(name: str) -> PurePosixPath:
     if "\\" in name:
         raise InstallationError(f"wheel member uses an invalid separator: {name!r}")
     relative = PurePosixPath(name)
@@ -423,7 +431,12 @@ def _validate_member(name: str) -> PurePosixPath:
     return relative
 
 
-def _destination(target: InstallTarget, relative: PurePosixPath) -> Path:
+def destination_internal(
+    target: InstallTarget,
+    relative: PurePosixPath,
+    *,
+    resolved_directories: dict[tuple[Path, PurePosixPath], Path] | None = None,
+) -> Path:
     parts = relative.parts
     if parts and parts[0].endswith(".data"):
         if len(parts) < 3 or parts[1] not in {
@@ -444,31 +457,60 @@ def _destination(target: InstallTarget, relative: PurePosixPath) -> Path:
                 "headers": target.headers,
             }.get(parts[index + 1])
             if base is not None:
-                return _safe_destination(base, PurePosixPath(*parts[index + 2 :]))
-    return _safe_destination(target.purelib, relative)
+                return safe_destination(
+                    base,
+                    PurePosixPath(*parts[index + 2 :]),
+                    resolved_directories=resolved_directories,
+                )
+    return safe_destination(
+        target.purelib,
+        relative,
+        resolved_directories=resolved_directories,
+    )
 
 
-def _safe_destination(root: Path, relative: PurePosixPath) -> Path:
-    destination = (root / Path(*relative.parts)).resolve(strict=False)
-    try:
-        destination.relative_to(root.resolve(strict=False))
-    except ValueError as exc:
-        raise InstallationError(
-            f"wheel member escapes installation root: {relative}"
-        ) from exc
-    return destination
+def safe_destination(
+    root: Path,
+    relative: PurePosixPath,
+    *,
+    resolved_directories: dict[tuple[Path, PurePosixPath], Path] | None = None,
+) -> Path:
+    parent = relative.parent
+    cache_key = (root, parent)
+    resolved_parent = (
+        resolved_directories.get(cache_key)
+        if resolved_directories is not None
+        else None
+    )
+    if resolved_parent is None:
+        resolved_root = root.resolve(strict=False)
+        resolved_parent = (root / Path(*parent.parts)).resolve(strict=False)
+        try:
+            resolved_parent.relative_to(resolved_root)
+        except ValueError as exc:
+            raise InstallationError(
+                f"wheel member escapes installation root: {relative}"
+            ) from exc
+        if resolved_directories is not None:
+            resolved_directories[cache_key] = resolved_parent
+    return resolved_parent / relative.name
 
 
-def _zip_mode(info: zipfile.ZipInfo) -> int | None:
+def zip_mode(info: zipfile.ZipInfo) -> int | None:
     mode = info.external_attr >> 16
     return mode if mode and stat.S_ISREG(mode) else None
 
 
-def _is_script_member(relative: PurePosixPath) -> bool:
+def record_metadata_internal(contents: bytes) -> tuple[str, str]:
+    digest = base64.urlsafe_b64encode(hashlib.sha256(contents).digest())
+    return f"sha256={digest.rstrip(b'=').decode('ascii')}", str(len(contents))
+
+
+def is_script_member(relative: PurePosixPath) -> bool:
     return len(relative.parts) >= 2 and relative.parts[-2] == "scripts"
 
 
-def _rewrite_shebang(path: Path, executable: str | None) -> None:
+def rewrite_shebang(path: Path, executable: str | None) -> None:
     contents = path.read_bytes()
     if contents.startswith(b"#!python\n"):
         path.write_bytes(
@@ -477,7 +519,7 @@ def _rewrite_shebang(path: Path, executable: str | None) -> None:
         )
 
 
-def _entry_point_scripts(path: Path) -> dict[str, str]:
+def entry_point_scripts(path: Path) -> dict[str, str]:
     if not path.is_file():
         return {}
     active = False
@@ -492,7 +534,7 @@ def _entry_point_scripts(path: Path) -> dict[str, str]:
     return result
 
 
-def _script_text(target_ref: str, executable: str | None) -> str:
+def script_text(target_ref: str, executable: str | None) -> str:
     module, _, attribute = target_ref.partition(":")
     entry = attribute or "main"
     return (
@@ -505,7 +547,7 @@ def _script_text(target_ref: str, executable: str | None) -> str:
     )
 
 
-def _script_matches(path: Path, scripts: dict[str, str]) -> bool:
+def script_matches(path: Path, scripts: dict[str, str]) -> bool:
     target_ref = scripts.get(path.name)
     if target_ref is None:
         return False
@@ -518,7 +560,7 @@ def _script_matches(path: Path, scripts: dict[str, str]) -> bool:
     return f"from {module} import {entry}" in text
 
 
-def _compiled_files(
+def compiled_files(
     stage_root: Path,
     staged: Iterable[tuple[Path, Path, int | None]],
 ) -> list[tuple[Path, Path, int | None]]:
@@ -537,7 +579,7 @@ def _compiled_files(
     return result
 
 
-def _existing_paths(
+def existing_paths(
     distribution: InstalledMetadataDistribution | None,
 ) -> tuple[set[Path], set[Path]]:
     if distribution is None:
@@ -558,7 +600,7 @@ def _existing_paths(
     return existing, existing
 
 
-def _is_within(path: Path, root: Path) -> bool:
+def is_within(path: Path, root: Path) -> bool:
     try:
         path.relative_to(root)
     except ValueError:

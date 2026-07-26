@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 ORIGIN_JSON_NAME = "origin.json"
 
 
-def _hash_dict(d: dict[str, str]) -> str:
+def hash_dict(d: dict[str, str]) -> str:
     """Return a stable sha224 of a dictionary."""
     s = json.dumps(d, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
     return hashlib.sha224(s.encode("ascii")).hexdigest()
@@ -32,12 +32,12 @@ class WheelCache:
     def __init__(self, cache_dir: str) -> None:
         assert not cache_dir or os.path.isabs(cache_dir)
         self.cache_dir = cache_dir or None
-        self._temp_dir = TempDirectory(
+        self.temp_dir_internal = TempDirectory(
             kind=tempdir_kinds.EPHEM_WHEEL_CACHE,
             globally_managed=True,
         )
 
-    def _get_cache_path_parts(self, link: Any) -> list[str]:
+    def get_cache_path_parts(self, link: Any) -> list[str]:
         """Get the path components for a link's persistent cache entry."""
         key_parts = {"url": link.url_without_fragment}
         if link.hash_name is not None and link.hash is not None:
@@ -46,16 +46,16 @@ class WheelCache:
             key_parts["subdirectory"] = link.subdirectory_fragment
         key_parts["interpreter_name"] = interpreter_name()
         key_parts["interpreter_version"] = interpreter_version()
-        hashed = _hash_dict(key_parts)
+        hashed = hash_dict(key_parts)
         return [hashed[:2], hashed[2:4], hashed[4:6], hashed[6:]]
 
     def get_path_for_link(self, link: Any) -> str:
         assert self.cache_dir
-        return os.path.join(self.cache_dir, "wheels", *self._get_cache_path_parts(link))
+        return os.path.join(self.cache_dir, "wheels", *self.get_cache_path_parts(link))
 
     def get_ephem_path_for_link(self, link: Any) -> str:
         return os.path.join(
-            self._temp_dir.path, "wheels", *self._get_cache_path_parts(link)
+            self.temp_dir_internal.path, "wheels", *self.get_cache_path_parts(link)
         )
 
     @staticmethod

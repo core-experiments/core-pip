@@ -5,11 +5,11 @@ import os
 import shutil
 import sysconfig
 import textwrap
-import venv as _venv
+import venv as venv_internal
 from pathlib import Path
 from typing import Literal
 
-import virtualenv as _virtualenv
+import virtualenv as virtualenv_internal
 
 VirtualEnvironmentType = Literal["virtualenv", "venv"]
 
@@ -28,20 +28,20 @@ class VirtualEnvironment:
     ) -> None:
         self.location = location
         assert template is None or venv_type is None
-        self._venv_type: VirtualEnvironmentType
+        self.venv_type_internal: VirtualEnvironmentType
         if template is not None:
-            self._venv_type = template._venv_type
+            self.venv_type_internal = template.venv_type_internal
         elif venv_type is not None:
-            self._venv_type = venv_type
+            self.venv_type_internal = venv_type
         else:
-            self._venv_type = "virtualenv"
-        self._user_site_packages = False
-        self._template = template
-        self._sitecustomize: str | None = None
-        self._update_paths()
-        self._create()
+            self.venv_type_internal = "virtualenv"
+        self.user_site_packages_internal = False
+        self.template_internal = template
+        self.sitecustomize_internal: str | None = None
+        self.update_paths()
+        self.create_internal()
 
-    def _update_paths(self) -> None:
+    def update_paths(self) -> None:
         bases = {
             "installed_base": self.location,
             "installed_platbase": self.location,
@@ -56,41 +56,43 @@ class VirtualEnvironment:
     def __repr__(self) -> str:
         return f"<VirtualEnvironment {self.location}>"
 
-    def _create(self, clear: bool = False) -> None:
+    def create_internal(self, clear: bool = False) -> None:
         if clear:
             shutil.rmtree(self.location)
-        if self._template:
+        if self.template_internal:
             # Clone virtual environment from template.
-            shutil.copytree(self._template.location, self.location, symlinks=True)
-            self._sitecustomize = self._template.sitecustomize
-            self._user_site_packages = self._template.user_site_packages
+            shutil.copytree(
+                self.template_internal.location, self.location, symlinks=True
+            )
+            self.sitecustomize_internal = self.template_internal.sitecustomize
+            self.user_site_packages_internal = self.template_internal.user_site_packages
         else:
             # Create a new virtual environment.
-            if self._venv_type == "virtualenv":
-                _virtualenv.cli_run(
+            if self.venv_type_internal == "virtualenv":
+                virtualenv_internal.cli_run(
                     [
                         "--no-pip",
                         "--no-setuptools",
                         os.fspath(self.location),
                     ],
                 )
-            elif self._venv_type == "venv":
-                builder = _venv.EnvBuilder()
+            elif self.venv_type_internal == "venv":
+                builder = venv_internal.EnvBuilder()
                 context = builder.ensure_directories(os.fspath(self.location))
                 builder.create_configuration(context)
                 builder.setup_python(context)
                 self.site.mkdir(parents=True, exist_ok=True)
             else:
-                raise RuntimeError(f"Unsupported venv type {self._venv_type!r}")
-            self.sitecustomize = self._sitecustomize
-            self.user_site_packages = self._user_site_packages
+                raise RuntimeError(f"Unsupported venv type {self.venv_type_internal!r}")
+            self.sitecustomize = self.sitecustomize_internal
+            self.user_site_packages = self.user_site_packages_internal
 
-    def _customize_site(self) -> None:
+    def customize_site(self) -> None:
         # Enable user site (before system).
         contents = textwrap.dedent(f"""
             import os, site, sys
             if not os.environ.get('PYTHONNOUSERSITE', False):
-                site.ENABLE_USER_SITE = {self._user_site_packages}
+                site.ENABLE_USER_SITE = {self.user_site_packages_internal}
                 # First, drop system-sites related paths.
                 original_sys_path = sys.path[:]
                 # To discover system-sites related paths, clear sys.path
@@ -104,20 +106,20 @@ class VirtualEnvironment:
                         original_sys_path.remove(path)
                 sys.path = original_sys_path
                 # Second, add user-site.
-                if {self._user_site_packages}:
+                if {self.user_site_packages_internal}:
                     site.addsitedir(site.getusersitepackages())
                 # Third, add back system-sites related paths.
                 for path in site.getsitepackages():
                     site.addsitedir(path)
             """).strip()
-        if self._sitecustomize is not None:
-            contents += "\n" + self._sitecustomize
+        if self.sitecustomize_internal is not None:
+            contents += "\n" + self.sitecustomize_internal
         sitecustomize = self.site / "sitecustomize.py"
         sitecustomize.write_text(contents)
         # Make sure bytecode is up-to-date too.
         assert compileall.compile_file(str(sitecustomize), quiet=1, force=True)
 
-    def _rewrite_pyvenv_cfg(self, replacements: dict[str, str]) -> None:
+    def rewrite_pyvenv_cfg(self, replacements: dict[str, str]) -> None:
         pyvenv_cfg = self.location.joinpath("pyvenv.cfg")
         lines = pyvenv_cfg.read_text(encoding="utf-8").splitlines()
 
@@ -133,30 +135,30 @@ class VirtualEnvironment:
         pyvenv_cfg.write_text("\n".join(lines), encoding="utf-8")
 
     def clear(self) -> None:
-        self._create(clear=True)
+        self.create_internal(clear=True)
 
     def move(self, location: Path | str) -> None:
         shutil.move(os.fspath(self.location), location)
         self.location = Path(location)
-        self._update_paths()
+        self.update_paths()
 
     @property
     def sitecustomize(self) -> str | None:
-        return self._sitecustomize
+        return self.sitecustomize_internal
 
     @sitecustomize.setter
     def sitecustomize(self, value: str | None) -> None:
-        self._sitecustomize = value
-        self._customize_site()
+        self.sitecustomize_internal = value
+        self.customize_site()
 
     @property
     def user_site_packages(self) -> bool:
-        return self._user_site_packages
+        return self.user_site_packages_internal
 
     @user_site_packages.setter
     def user_site_packages(self, value: bool) -> None:
-        self._user_site_packages = value
-        self._rewrite_pyvenv_cfg(
+        self.user_site_packages_internal = value
+        self.rewrite_pyvenv_cfg(
             {"include-system-site-packages": str(bool(value)).lower()}
         )
-        self._customize_site()
+        self.customize_site()

@@ -3,7 +3,7 @@ import pytest
 from pip_test_support import PipTestEnvironment, TestData, TestPipResult
 
 
-def _assert_requested_present(
+def assert_requested_present(
     script: PipTestEnvironment, result: TestPipResult, name: str, version: str
 ) -> None:
     dist_info = script.site_packages / f"{name}-{version}.dist-info"
@@ -12,7 +12,7 @@ def _assert_requested_present(
     assert requested in result.files_created
 
 
-def _assert_requested_absent(
+def assert_requested_absent(
     script: PipTestEnvironment, result: TestPipResult, name: str, version: str
 ) -> None:
     dist_info = script.site_packages / f"{name}-{version}.dist-info"
@@ -30,9 +30,9 @@ def test_install_requested_basic(script: PipTestEnvironment, data: TestData) -> 
         data.find_links,
         "require_simple",
     )
-    _assert_requested_present(script, result, "require_simple", "1.0")
+    assert_requested_present(script, result, "require_simple", "1.0")
     # dependency is not REQUESTED
-    _assert_requested_absent(script, result, "simple", "3.0")
+    assert_requested_absent(script, result, "simple", "3.0")
 
 
 def test_install_requested_requirements(
@@ -48,8 +48,8 @@ def test_install_requested_requirements(
         "-r",
         script.scratch_path / "requirements.txt",
     )
-    _assert_requested_present(script, result, "require_simple", "1.0")
-    _assert_requested_absent(script, result, "simple", "3.0")
+    assert_requested_present(script, result, "require_simple", "1.0")
+    assert_requested_absent(script, result, "simple", "3.0")
 
 
 def test_install_requested_dep_in_requirements(
@@ -67,9 +67,9 @@ def test_install_requested_dep_in_requirements(
         "-r",
         script.scratch_path / "requirements.txt",
     )
-    _assert_requested_present(script, result, "require_simple", "1.0")
+    assert_requested_present(script, result, "require_simple", "1.0")
     # simple must have REQUESTED because it is in requirements.txt
-    _assert_requested_present(script, result, "simple", "2.0")
+    assert_requested_present(script, result, "simple", "2.0")
 
 
 def test_install_requested_reqs_and_constraints(
@@ -88,9 +88,9 @@ def test_install_requested_reqs_and_constraints(
         "-c",
         script.scratch_path / "constraints.txt",
     )
-    _assert_requested_present(script, result, "require_simple", "1.0")
+    assert_requested_present(script, result, "require_simple", "1.0")
     # simple must not have REQUESTED because it is merely a constraint
-    _assert_requested_absent(script, result, "simple", "2.0")
+    assert_requested_absent(script, result, "simple", "2.0")
 
 
 def test_install_requested_in_reqs_and_constraints(
@@ -111,9 +111,9 @@ def test_install_requested_in_reqs_and_constraints(
         "-c",
         script.scratch_path / "constraints.txt",
     )
-    _assert_requested_present(script, result, "require_simple", "1.0")
+    assert_requested_present(script, result, "require_simple", "1.0")
     # simple must have REQUESTED because it is in requirements.txt
-    _assert_requested_present(script, result, "simple", "2.0")
+    assert_requested_present(script, result, "simple", "2.0")
 
 
 def test_install_requested_from_cli_with_constraint(
@@ -131,7 +131,7 @@ def test_install_requested_from_cli_with_constraint(
         "simple",
     )
     # simple must have REQUESTED because it was provided on the command line
-    _assert_requested_present(script, result, "simple", "2.0")
+    assert_requested_present(script, result, "simple", "2.0")
 
 
 @pytest.mark.network
@@ -150,4 +150,4 @@ def test_install_requested_from_cli_with_url_constraint(
         "pip-test-package",
     )
     # pip-test-package must have REQUESTED because it was provided on the command line
-    _assert_requested_present(script, result, "pip_test_package", "0.1.1")
+    assert_requested_present(script, result, "pip_test_package", "0.1.1")

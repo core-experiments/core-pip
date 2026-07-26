@@ -152,9 +152,9 @@ class InprocessBuildEnvironmentInstaller:
         from pip.install.preparer import RequirementPreparer
         from pip.index.provider import CandidateProvider
 
-        self._build_constraints = build_constraints
-        self._wheel_cache = wheel_cache
-        self._provider = CandidateProvider.from_options(
+        self.build_constraints_internal = build_constraints
+        self.wheel_cache_internal = wheel_cache
+        self.provider_internal = CandidateProvider.from_options(
             find_links=options.find_links,
             index_url=options.index_urls[0] if options.index_urls else None,
             extra_index_urls=options.index_urls[1:],
@@ -164,7 +164,7 @@ class InprocessBuildEnvironmentInstaller:
         )
 
         build_dir = TempDirectory(kind="build-env-install", globally_managed=True)
-        self._preparer = RequirementPreparer(
+        self.preparer_internal = RequirementPreparer(
             build_isolation_installer=self,
             # Inherited options or state.
             session=options.session,
@@ -198,7 +198,7 @@ class InprocessBuildEnvironmentInstaller:
 
         try:
             with capture_ctx as stream:
-                self._install_impl(requirements, prefix)
+                self.install_impl(requirements, prefix)
 
         except DiagnosticPipError as exc:
             # Format similar to a nested subprocess error, where the
@@ -220,7 +220,7 @@ class InprocessBuildEnvironmentInstaller:
                 for_req, requirements, cause=exc, log_lines=logs
             )
 
-    def _install_impl(self, requirements: Iterable[str], prefix: Prefix) -> None:
+    def install_impl(self, requirements: Iterable[str], prefix: Prefix) -> None:
         """Core build dependency install logic."""
         from pip.install.requirements import RequirementInstaller
         from pip.resolution.req_install import install_req_from_line
@@ -228,20 +228,20 @@ class InprocessBuildEnvironmentInstaller:
         from pip.install.wheel_builder import WheelBuilder
 
         ireqs = [install_req_from_line(req, user_supplied=True) for req in requirements]
-        ireqs.extend(self._build_constraints)
+        ireqs.extend(self.build_constraints_internal)
 
         from pip.resolution.resolver import Resolver
 
-        resolver = Resolver(provider=self._provider, ignore_installed=True)
+        resolver = Resolver(provider=self.provider_internal, ignore_installed=True)
         resolved_set = resolver.resolve_requirement_set(ireqs)
-        self._preparer.prepare_linked_requirements_more(
+        self.preparer_internal.prepare_linked_requirements_more(
             resolved_set.requirements.values()
         )
 
         reqs_to_build = [
             r for r in resolved_set.requirements_to_install if not r.is_wheel
         ]
-        _, build_failures = WheelBuilder(self._wheel_cache, verify=True).build(
+        _, build_failures = WheelBuilder(self.wheel_cache_internal, verify=True).build(
             reqs_to_build
         )
         if build_failures:

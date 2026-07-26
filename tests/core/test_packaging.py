@@ -25,6 +25,31 @@ def test_parse_requirement_with_extras_specifier_and_marker() -> None:
     assert requirement.is_satisfied_by("1.2")
 
 
+def test_standard_requirement_skips_url_parsing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_url_parse(value: str) -> None:
+        raise AssertionError(f"parsed colon-free requirement as a URL: {value}")
+
+    monkeypatch.setattr("pip.core.packaging.urllib.parse.urlparse", fail_url_parse)
+
+    requirement = parse_requirement("demo-pkg>=1")
+
+    assert requirement.name == "demo-pkg"
+
+
+def test_parse_requirement_reuses_immutable_result() -> None:
+    parse_requirement.cache_clear()
+
+    first = parse_requirement("demo-pkg>=1")
+    second = parse_requirement("demo-pkg>=1")
+
+    assert second is first
+    cache = parse_requirement.cache_info()
+    assert cache.misses == 1
+    assert cache.hits == 1
+
+
 def test_canonicalize_requirement() -> None:
     assert (
         canonicalize_requirement('Demo_Pkg[SSL,PDF] >= 1.0; python_version >= "3.11"')
@@ -40,6 +65,40 @@ def test_version_orders_prerelease_before_final() -> None:
 def test_version_comparison_ignores_trailing_release_zeros() -> None:
     assert Version("1.3") == Version("1.3.0")
     assert SpecifierSet("==1.3").contains("1.3.0")
+
+
+@pytest.mark.parametrize(
+    "specifier, expected_lower, expected_upper",
+    [
+        (">=1,<2", (Version("1"), True), (Version("2"), False)),
+        (">1,<=2", (Version("1"), False), (Version("2"), True)),
+        ("==1.2", (Version("1.2"), True), (Version("1.2"), True)),
+        ("~=1.2", (Version("1.2"), True), (Version("2"), False)),
+        ("!=1.5", None, None),
+        ("==1.*", None, None),
+    ],
+)
+def test_specifier_set_bounds(
+    specifier: str,
+    expected_lower: tuple[Version, bool] | None,
+    expected_upper: tuple[Version, bool] | None,
+) -> None:
+    assert SpecifierSet(specifier).bounds() == (expected_lower, expected_upper)
+
+
+@pytest.mark.parametrize(
+    "specifier, version, expected",
+    [
+        ("==5.0.*", "5.0.1", True),
+        ("==5.0.*", "5.1", False),
+        ("!=5.0.*", "5.0.1", False),
+        ("!=5.0.*", "5.1", True),
+    ],
+)
+def test_wildcard_specifier_contains(
+    specifier: str, version: str, expected: bool
+) -> None:
+    assert SpecifierSet(specifier).contains(version) is expected
 
 
 @pytest.mark.parametrize(

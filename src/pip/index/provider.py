@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime
 import urllib.parse
+from bisect import bisect_left, bisect_right
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -9,7 +10,7 @@ from typing import Any
 from pip.core.format_control import FormatControl
 from pip.core.errors import InstallationError
 from pip.core.hashes import Hashes
-from pip.core.packaging import Requirement
+from pip.core.packaging import Requirement, Version
 from pip.core.release_control import ReleaseControl
 from pip.core.wheel import TargetContext
 from pip.index.candidate_evaluators import CandidateEvaluator
@@ -51,9 +52,34 @@ class CandidateProvider:
     locked_links: dict[str, Link] = field(default_factory=dict)
     session: Any = None
     uploaded_prior_to: datetime.datetime | None = None
+    compute_source_hashes: bool = False
     hashes_by_name: dict[str, Hashes] = field(default_factory=dict)
-    _link_cache: dict[str, tuple[Link, ...]] = field(
+    link_cache: dict[str, tuple[Link, ...]] = field(
         default_factory=dict, init=False, repr=False
+    )
+    find_links_cache: tuple[Link, ...] | None = field(
+        default=None, init=False, repr=False
+    )
+    find_links_by_name_cache: dict[str, tuple[Link, ...]] | None = field(
+        default=None, init=False, repr=False
+    )
+    parsed_link_cache: dict[Link, InstallationCandidate | RejectedCandidate] = field(
+        default_factory=dict, init=False, repr=False
+    )
+    available_versions_cache: dict[
+        tuple[str, bool, bool], tuple[CandidateSummary, ...]
+    ] = field(default_factory=dict, init=False, repr=False)
+    available_versions_by_version_cache: dict[
+        tuple[str, bool, bool, Version], tuple[CandidateSummary, ...]
+    ] = field(default_factory=dict, init=False, repr=False)
+    matching_versions_cache: dict[
+        tuple[str, bool, bool, str, bool], tuple[CandidateSummary, ...]
+    ] = field(default_factory=dict, init=False, repr=False)
+    links_by_version_cache: dict[tuple[str, bool, bool, Version], tuple[Link, ...]] = (
+        field(default_factory=dict, init=False, repr=False)
+    )
+    materializer_internal: CandidateMaterializer | None = field(
+        default=None, init=False, repr=False
     )
 
     @classmethod
@@ -125,17 +151,22 @@ class CandidateProvider:
             return [Link.from_path(path, source_url=None)] if path.exists() else []
         links: list[Link] = []
         cache_key = requirement.canonical_name
-        cached = self._link_cache.get(cache_key)
+        cached = self.link_cache.get(cache_key)
         if cached is not None:
             return list(cached)
         seen: set[str] = set()
         sources: list[PackageSource] = []
         if self.find_links:
-            sources.append(
-                FindLinksSource(
+            if self.find_links_cache is None:
+                source = FindLinksSource(
                     tuple(self.find_links), self.trusted_hosts, self.session
                 )
-            )
+                self.find_links_cache = tuple(source.collect_links(requirement))
+            for link in self.find_links_cache:
+                if link.url in seen:
+                    continue
+                seen.add(link.url)
+                links.append(link)
         sources.extend(
             SimpleIndexSource(url, self.trusted_hosts, self.session)
             for url in self.index_urls
@@ -146,14 +177,83 @@ class CandidateProvider:
                     continue
                 seen.add(link.url)
                 links.append(link)
-        self._link_cache[cache_key] = tuple(links)
+        self.link_cache[cache_key] = tuple(links)
+        return links
+
+    def catalog_links(self, requirement: Requirement) -> list[Link]:
+        """Return project links without rescanning unrelated find-links entries."""
+        if (
+            requirement.canonical_name in self.locked_links
+            or requirement.url is not None
+            or looks_like_path_requirement(requirement.raw)
+        ):
+            return self.collect_links(requirement)
+        cached_links = self.link_cache.get(requirement.canonical_name)
+        if cached_links is not None:
+            return list(cached_links)
+        if self.find_links_cache is None:
+            source = FindLinksSource(
+                tuple(self.find_links), self.trusted_hosts, self.session
+            )
+            self.find_links_cache = tuple(source.collect_links(requirement))
+        if self.find_links_by_name_cache is None:
+            grouped: dict[str, list[Link]] = {}
+            for link in self.find_links_cache:
+                parsed = self.parsed_link_cache.get(link)
+                if parsed is None:
+                    parsed = InstallationCandidate.from_link(link, target=self.target)
+                    self.parsed_link_cache[link] = parsed
+                if isinstance(parsed, InstallationCandidate):
+                    grouped.setdefault(parsed.canonical_name, []).append(link)
+            self.find_links_by_name_cache = {
+                name: tuple(links) for name, links in grouped.items()
+            }
+
+        links = list(self.find_links_by_name_cache.get(requirement.canonical_name, ()))
+        seen = {link.url for link in links}
+        for index_url in self.index_urls:
+            source = SimpleIndexSource(index_url, self.trusted_hosts, self.session)
+            for link in source.collect_links(requirement):
+                if link.url not in seen:
+                    seen.add(link.url)
+                    links.append(link)
+        self.link_cache[requirement.canonical_name] = tuple(links)
         return links
 
     def evaluate_links(self, requirement: Requirement) -> CandidateSelection:
         accepted: list[InstallationCandidate] = []
         rejected: list[RejectedCandidate] = []
-        allow_binary, allow_source = self._allowed_formats(requirement)
-        for link in self.collect_links(requirement):
+        allow_binary, allow_source = self.allowed_formats_internal(requirement)
+        catalog_key = (
+            requirement.canonical_name,
+            allow_binary,
+            allow_source,
+        )
+        links: list[Link] | None = None
+        exact_version = self.exact_version_internal(requirement)
+        if exact_version is not None:
+            cached_links = self.links_by_version_cache.get(
+                (*catalog_key, exact_version)
+            )
+            if cached_links is not None:
+                links = list(cached_links)
+        elif requirement.url is None and catalog_key in self.available_versions_cache:
+            matching_versions = self.matching_versions(
+                requirement,
+                allow_prereleases=True,
+            )
+            matching_links = tuple(
+                link
+                for summary in matching_versions
+                for link in self.links_by_version_cache.get(
+                    (*catalog_key, summary.version), ()
+                )
+            )
+            if matching_links:
+                links = list(dict.fromkeys(matching_links))
+        if links is None:
+            links = self.catalog_links(requirement)
+        for link in links:
             if self.uploaded_prior_to is not None:
                 # Upload timestamps describe index-hosted artifacts. Local
                 # files, directories, and VCS checkouts are already under the
@@ -188,13 +288,21 @@ class CandidateProvider:
                             )
                         )
                         continue
-            result = CandidateEvaluator.evaluate_link(
+            cache_parsed = not CandidateEvaluator.is_unnamed_direct_requirement(
+                requirement
+            )
+            parsed = self.parsed_link_cache.get(link) if cache_parsed else None
+            if parsed is None:
+                parsed = InstallationCandidate.from_link(link, target=self.target)
+                if cache_parsed:
+                    self.parsed_link_cache[link] = parsed
+            result = CandidateEvaluator.evaluate_parsed_link(
                 link,
+                parsed,
                 requirement,
                 allow_yanked=self.allow_yanked,
                 allow_binary=allow_binary,
                 allow_source=allow_source,
-                target=self.target,
             )
             if isinstance(result, InstallationCandidate):
                 accepted.append(result)
@@ -206,7 +314,12 @@ class CandidateProvider:
         )
         return CandidateSelection(tuple(accepted), tuple(rejected))
 
-    def find_candidates(self, requirement: Requirement) -> CandidateStream:
+    def find_candidates(
+        self,
+        requirement: Requirement,
+        *,
+        allowed_versions: frozenset[Version] | None = None,
+    ) -> CandidateStream:
         selection = self.evaluate_links(requirement)
         accepted = selection.accepted
         if not accepted and requirement.url is not None:
@@ -227,7 +340,15 @@ class CandidateProvider:
                 ).hostname
                 if host not in {"pypi.org", "pypi.python.org"}:
                     raise InstallationError(upload_rejection.detail)
-        if requirement.url is None:
+        if allowed_versions is not None:
+            accepted = tuple(
+                candidate
+                for candidate in accepted
+                if candidate.version in allowed_versions
+            )
+        if requirement.url is None and any(
+            candidate.version.is_prerelease for candidate in accepted
+        ):
             accepted = tuple(
                 CandidateEvaluator.create(
                     requirement.name,
@@ -239,10 +360,10 @@ class CandidateProvider:
                 ).get_applicable_candidates(list(accepted))
             )
         hashes = self.hashes_by_name.get(requirement.canonical_name)
-        if hashes is not None and hashes._allowed:
+        if hashes is not None and hashes.allowed_internal:
             allowed = {
                 digest.lower()
-                for digests in hashes._allowed.values()
+                for digests in hashes.allowed_internal.values()
                 for digest in digests
             }
             matching = tuple(
@@ -256,26 +377,37 @@ class CandidateProvider:
             )
             if matching and len(matching) != len(accepted):
                 accepted = matching
-        preferred = self._best_accepted_candidates(requirement, accepted)
+        preferred = self.best_accepted_candidates(accepted)
         preferred_set = set(preferred)
         ordered = preferred + tuple(
             candidate for candidate in accepted if candidate not in preferred_set
         )
-        materializer = CandidateMaterializer(
-            build_options=self.build_options,
-            build_constraints=self.build_constraints,
-            wheel_cache_dir=self.wheel_cache_dir,
-            build_isolation=self.build_isolation,
-            session=self.session,
-        )
-        return materializer.materialize(requirement, ordered)
+        if self.materializer_internal is None:
+            self.materializer_internal = CandidateMaterializer(
+                build_options=self.build_options,
+                build_constraints=self.build_constraints,
+                wheel_cache_dir=self.wheel_cache_dir,
+                build_isolation=self.build_isolation,
+                compute_source_hashes=self.compute_source_hashes,
+                session=self.session,
+            )
+        return self.materializer_internal.materialize(requirement, ordered)
 
     def available_versions(
         self, requirement: Requirement
     ) -> tuple[CandidateSummary, ...]:
+        allow_binary, allow_source = self.allowed_formats_internal(requirement)
+        cache_key = (
+            requirement.canonical_name,
+            allow_binary,
+            allow_source,
+        )
+        cached = self.available_versions_cache.get(cache_key)
+        if cached is not None:
+            return cached
         versions: dict[tuple[str, bool], CandidateSummary] = {}
-        allow_binary, allow_source = self._allowed_formats(requirement)
-        for link in self.collect_links(requirement):
+        links_by_version: dict[Version, list[Link]] = {}
+        for link in self.catalog_links(requirement):
             if link.kind is ArtifactKind.WHEEL and not allow_binary:
                 continue
             if (
@@ -297,24 +429,110 @@ class CandidateProvider:
                         continue
                 except ValueError:
                     continue
-            parsed = InstallationCandidate.from_link(link, target=self.target)
+            parsed = self.parsed_link_cache.get(link)
+            if parsed is None:
+                parsed = InstallationCandidate.from_link(link, target=self.target)
+                self.parsed_link_cache[link] = parsed
             if not isinstance(parsed, InstallationCandidate):
                 continue
             if not CandidateEvaluator.is_unnamed_direct_requirement(requirement) and (
                 parsed.canonical_name != requirement.canonical_name
             ):
                 continue
+            links_by_version.setdefault(parsed.version, []).append(link)
             key = (str(parsed.version), link.is_yanked)
             versions[key] = CandidateSummary(
                 version=parsed.version,
                 is_yanked=link.is_yanked,
                 yanked_reason=link.yanked_reason,
             )
-        return tuple(
+        result = tuple(
             sorted(versions.values(), key=lambda item: (item.version, item.is_yanked))
         )
+        self.available_versions_cache[cache_key] = result
+        summaries_by_version: dict[Version, list[CandidateSummary]] = {}
+        for summary in result:
+            summaries_by_version.setdefault(summary.version, []).append(summary)
+        for version, summaries in summaries_by_version.items():
+            self.available_versions_by_version_cache[(*cache_key, version)] = tuple(
+                summaries
+            )
+        for version, links in links_by_version.items():
+            self.links_by_version_cache[(*cache_key, version)] = tuple(links)
+        return result
 
-    def _allowed_formats(self, requirement: Requirement) -> tuple[bool, bool]:
+    def available_versions_for(
+        self, requirement: Requirement, version: Version
+    ) -> tuple[CandidateSummary, ...]:
+        allow_binary, allow_source = self.allowed_formats_internal(requirement)
+        catalog_key = (
+            requirement.canonical_name,
+            allow_binary,
+            allow_source,
+        )
+        if catalog_key not in self.available_versions_cache:
+            self.available_versions(requirement)
+        return self.available_versions_by_version_cache.get(
+            (*catalog_key, version),
+            (),
+        )
+
+    def matching_versions(
+        self,
+        requirement: Requirement,
+        *,
+        allow_prereleases: bool,
+    ) -> tuple[CandidateSummary, ...]:
+        allow_binary, allow_source = self.allowed_formats_internal(requirement)
+        key = (
+            requirement.canonical_name,
+            allow_binary,
+            allow_source,
+            str(requirement.specifier),
+            allow_prereleases,
+        )
+        cached = self.matching_versions_cache.get(key)
+        if cached is not None:
+            return cached
+        available = self.available_versions(requirement)
+        lower, upper = requirement.specifier.bounds()
+        start = 0
+        stop = len(available)
+
+        def version_key(summary: CandidateSummary) -> Version:
+            return summary.version
+
+        if lower is not None:
+            start = (
+                bisect_left(available, lower[0], key=version_key)
+                if lower[1]
+                else bisect_right(available, lower[0], key=version_key)
+            )
+        if upper is not None:
+            stop = (
+                bisect_right(available, upper[0], key=version_key)
+                if upper[1]
+                else bisect_left(available, upper[0], key=version_key)
+            )
+        result = tuple(
+            summary
+            for summary in available[start:stop]
+            if requirement.is_satisfied_by(
+                summary.version,
+                allow_prereleases=allow_prereleases,
+            )
+        )
+        self.matching_versions_cache[key] = result
+        return result
+
+    @staticmethod
+    def exact_version_internal(requirement: Requirement) -> Version | None:
+        for specifier in requirement.specifier.specifiers:
+            if specifier.operator == "==" and not specifier.version.endswith(".*"):
+                return specifier.parsed_version
+        return None
+
+    def allowed_formats_internal(self, requirement: Requirement) -> tuple[bool, bool]:
         if self.format_control is None:
             return True, True
         if requirement.url is not None or requirement.raw.startswith((".", "/", "~")):
@@ -322,17 +540,12 @@ class CandidateProvider:
         return self.format_control.allowed_formats(requirement.name)
 
     @staticmethod
-    def _best_accepted_candidates(
-        requirement: Requirement,
+    def best_accepted_candidates(
         accepted: tuple[InstallationCandidate, ...],
     ) -> tuple[InstallationCandidate, ...]:
         selected: list[InstallationCandidate] = []
         seen_slots: set[tuple[str, bool]] = set()
         for candidate in accepted:
-            if not requirement.is_satisfied_by(
-                candidate.version, allow_prereleases=True
-            ):
-                continue
             slot = (
                 "source"
                 if candidate.link.kind in {ArtifactKind.SDIST, ArtifactKind.SOURCE_TREE}

@@ -11,7 +11,7 @@ import tomllib
 WORKSPACE_ROOT = Path(__file__).parents[1]
 
 
-def _policy() -> tuple[tuple[str, ...], dict[str, set[str]]]:
+def policy_internal() -> tuple[tuple[str, ...], dict[str, set[str]]]:
     with (WORKSPACE_ROOT / "pyproject.toml").open("rb") as file:
         config = tomllib.load(file)["tool"]["pip"]["architecture"]
     return (
@@ -20,11 +20,11 @@ def _policy() -> tuple[tuple[str, ...], dict[str, set[str]]]:
     )
 
 
-def _source(domain: str) -> Path:
+def source_internal(domain: str) -> Path:
     return WORKSPACE_ROOT / "src" / "pip" / domain
 
 
-def _imports(path: Path) -> set[str]:
+def imports_internal(path: Path) -> set[str]:
     tree = ast.parse(path.read_text(encoding="utf-8"))
     imports: set[str] = set()
     for node in ast.walk(tree):
@@ -40,11 +40,11 @@ def _imports(path: Path) -> set[str]:
     return imports
 
 
-def _graph(domains: tuple[str, ...]) -> dict[str, set[str]]:
+def graph_internal(domains: tuple[str, ...]) -> dict[str, set[str]]:
     graph = {domain: set() for domain in domains}
     for domain in domains:
-        for path in _source(domain).rglob("*.py"):
-            for imported in _imports(path):
+        for path in source_internal(domain).rglob("*.py"):
+            for imported in imports_internal(path):
                 dependency = imported.removeprefix("pip.")
                 if dependency in graph and dependency != domain:
                     graph[domain].add(dependency)
@@ -56,8 +56,8 @@ def test_source_has_no_legacy_internal_tree() -> None:
 
 
 def test_source_dependency_graph_is_declared_and_acyclic() -> None:
-    domains, policy = _policy()
-    graph = _graph(domains)
+    domains, policy = policy_internal()
+    graph = graph_internal(domains)
     assert set(graph) == set(policy)
     for domain, dependencies in graph.items():
         assert dependencies <= policy[domain]
@@ -80,14 +80,14 @@ def test_source_dependency_graph_is_declared_and_acyclic() -> None:
 
 
 def test_source_domains_are_importable() -> None:
-    for domain in _policy()[0]:
+    for domain in policy_internal()[0]:
         importlib.import_module(f"pip.{domain}")
 
 
 def test_source_has_no_standalone_or_legacy_pip_imports() -> None:
     violations = []
-    for domain in _policy()[0]:
-        for path in _source(domain).rglob("*.py"):
+    for domain in policy_internal()[0]:
+        for path in source_internal(domain).rglob("*.py"):
             source = path.read_text(encoding="utf-8")
             if "pip._internal" in source or "pip_*" in source:
                 violations.append(str(path.relative_to(WORKSPACE_ROOT)))

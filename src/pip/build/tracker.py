@@ -51,12 +51,12 @@ class BuildTracker:
     This stops fork bombs embedded in malicious packages."""
 
     def __init__(self, root: str) -> None:
-        self._root = root
-        self._entries: dict[TrackerId, Any] = {}
-        logger.debug("Created build tracker: %s", self._root)
+        self.root_internal = root
+        self.entries_internal: dict[TrackerId, Any] = {}
+        logger.debug("Created build tracker: %s", self.root_internal)
 
     def __enter__(self) -> BuildTracker:
-        logger.debug("Entered build tracker: %s", self._root)
+        logger.debug("Entered build tracker: %s", self.root_internal)
         return self
 
     def __exit__(
@@ -67,15 +67,15 @@ class BuildTracker:
     ) -> None:
         self.cleanup()
 
-    def _entry_path(self, key: TrackerId) -> str:
+    def entry_path_internal(self, key: TrackerId) -> str:
         hashed = hashlib.sha224(key.encode()).hexdigest()
-        return os.path.join(self._root, hashed)
+        return os.path.join(self.root_internal, hashed)
 
     def add(self, req: Any, key: TrackerId) -> None:
         """Add an InstallRequirement to build tracking."""
 
         # Get the file to write information about this requirement.
-        entry_path = self._entry_path(key)
+        entry_path = self.entry_path_internal(key)
 
         # Try reading from the file. If it exists and can be read from, a build
         # is already in progress, so a LookupError is raised.
@@ -89,29 +89,29 @@ class BuildTracker:
             raise LookupError(message)
 
         # If we're here, req should really not be building already.
-        assert key not in self._entries
+        assert key not in self.entries_internal
 
         # Start tracking this requirement.
         with open(entry_path, "w", encoding="utf-8") as fp:
             fp.write(str(req))
-        self._entries[key] = req
+        self.entries_internal[key] = req
 
-        logger.debug("Added %s to build tracker %r", req, self._root)
+        logger.debug("Added %s to build tracker %r", req, self.root_internal)
 
     def remove(self, req: Any, key: TrackerId) -> None:
         """Remove an InstallRequirement from build tracking."""
 
         # Delete the created file and the corresponding entry.
-        os.unlink(self._entry_path(key))
-        del self._entries[key]
+        os.unlink(self.entry_path_internal(key))
+        del self.entries_internal[key]
 
-        logger.debug("Removed %s from build tracker %r", req, self._root)
+        logger.debug("Removed %s from build tracker %r", req, self.root_internal)
 
     def cleanup(self) -> None:
-        for key, req in list(self._entries.items()):
+        for key, req in list(self.entries_internal.items()):
             self.remove(req, key)
 
-        logger.debug("Removed build tracker: %r", self._root)
+        logger.debug("Removed build tracker: %r", self.root_internal)
 
     @contextlib.contextmanager
     def track(self, req: Any, key: str) -> Generator[None, None, None]:

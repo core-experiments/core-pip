@@ -13,7 +13,7 @@ from pip.build.list import (
 )
 from pip.cli.context import target_paths
 from pip.cli.parser import ArgumentParser
-from pip.cli.requirements import _load_source_config
+from pip.cli.requirements import load_source_config
 from pip.core.format_control import FormatControl
 from pip.core.metadata import stdlib_pkgs, user_lib_path
 from pip.core.packaging import parse_requirement
@@ -82,7 +82,7 @@ def run_list(args: list[str]) -> int:
 
     latest: dict[str, tuple[Any, str]] = {}
     if options.outdated or options.uptodate:
-        config = _load_source_config("list")
+        config = load_source_config("list")
         provider = CandidateProvider.from_options(
             find_links=options.find_links or config.find_links,
             index_url=options.index_url or config.index_url,

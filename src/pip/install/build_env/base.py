@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Literal, Protocol
 from pip.build.metadata import InstalledDistributionStore
 
 from pip.core.packaging import Version, marker_applies, parse_requirement
-from pip.platform.locations._sysconfig import get_scheme
+from pip.platform.locations.sysconfig import get_scheme
 
 if TYPE_CHECKING:
     from pip.resolution.req_install import InstallRequirement
@@ -50,7 +50,7 @@ class BuildEnvironment(ContextManager[None], metaclass=abc.ABCMeta):
 
     lib_dirs: list[str] | None
     python_executable: str
-    _save_env: dict[str, str | None]
+    save_env: dict[str, str | None]
 
     @abc.abstractmethod
     def __init__(self, installer: BuildEnvironmentInstaller): ...
@@ -61,7 +61,7 @@ class BuildEnvironment(ContextManager[None], metaclass=abc.ABCMeta):
         exc_val: BaseException | None,
         exc_tb: TracebackType | None,
     ) -> None:
-        for varname, old_value in self._save_env.items():
+        for varname, old_value in self.save_env.items():
             if old_value is None:
                 os.environ.pop(varname, None)
             else:

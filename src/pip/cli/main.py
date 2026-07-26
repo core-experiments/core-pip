@@ -2,13 +2,7 @@ from __future__ import annotations
 
 import os
 import sys
-import traceback
-from pathlib import Path
-from pip.cli.commands.registry import (
-    get_command,
-    get_command_runner,
-)
-from pip.cli.help import print_help, print_version, run_help
+
 from pip.cli.logging_config import BrokenStdoutLoggingError, configure_logging
 from pip.cli.options import extract_global_options, extract_python_option
 from pip.cli.status_codes import BROKEN_STDOUT, VIRTUALENV_NOT_FOUND
@@ -34,7 +28,7 @@ def main(
     if location is not None:
         from pip.install.runner import set_pip_runner
 
-        set_pip_runner(str(Path(location).with_name("__pip-runner__.py")))
+        set_pip_runner(os.path.join(os.path.dirname(location), "__pip-runner__.py"))
     try:
         argv = list(sys.argv[1:] if args is None else args)
         argv, verbosity, require_virtualenv, log_file = extract_global_options(argv)
@@ -57,6 +51,8 @@ def main(
             pass
         print("ERROR: Pipe to stdout was broken", file=sys.stderr)
         if verbosity > 0:
+            import traceback
+
             try:
                 raise BrokenStdoutLoggingError() from exc
             except BrokenStdoutLoggingError:
@@ -80,15 +76,23 @@ def run(
     args: list[str], *, require_virtualenv: bool = False, location: str | None = None
 ) -> int:
     if not args:
+        from pip.cli.help import print_help
+
         print_help()
         return 0
     if args[0] in {"-V", "--version"}:
+        from pip.cli.help import print_version
+
         print_version(location)
         return 0
     if args[0] in {"-h", "--help"}:
+        from pip.cli.help import print_help
+
         print_help()
         return 0
     if args[0] == "help":
+        from pip.cli.help import run_help
+
         return run_help(args[1:])
     if require_virtualenv:
         from pip.platform.virtualenv import running_under_virtualenv
@@ -96,6 +100,8 @@ def run(
         if not running_under_virtualenv():
             print("Could not find an activated virtualenv (required).", file=sys.stderr)
             return VIRTUALENV_NOT_FOUND
+    from pip.cli.commands.registry import get_command, get_command_runner
+
     command = args[0]
     if get_command(command) is None:
         print(f"ERROR: Unknown command: {command}", file=sys.stderr)

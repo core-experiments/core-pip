@@ -53,7 +53,7 @@ def command_args_to_argv(
     ]
 
 
-def _decode_output(data: bytes) -> str:
+def decode_output(data: bytes) -> str:
     encoding = locale.getpreferredencoding(False) or "utf-8"
     return data.decode(encoding, errors="backslashreplace")
 
@@ -85,8 +85,8 @@ def call_subprocess(
         text=False,
     )
     stdout, stderr = proc.communicate()
-    out_text = _decode_output(stdout)
-    err_text = _decode_output(stderr)
+    out_text = decode_output(stdout)
+    err_text = decode_output(stderr)
     combined = out_text if stdout_only else out_text + err_text
 
     for line in out_text.splitlines():

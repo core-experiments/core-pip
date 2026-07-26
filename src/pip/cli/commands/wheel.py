@@ -8,7 +8,7 @@ from pathlib import Path
 from pip.build.build import build_wheel_from_source
 from pip.cli.dependency_groups import parse_dependency_groups
 from pip.cli.parser import ArgumentParser
-from pip.cli.requirements import _collect_requirements, _load_source_config
+from pip.cli.requirements import collect_requirements, load_source_config
 from pip.core.errors import CommandError
 from pip.core.format_control import FormatControl
 from pip.core.wheel import wheel_candidate
@@ -58,14 +58,14 @@ def create_parser() -> ArgumentParser:
 def run_wheel(args: list[str]) -> int:
     options = create_parser().parse_args(args)
 
-    config = _load_source_config("wheel")
+    config = load_source_config("wheel")
     config_settings: dict[str, object] = {}
     for value in options.config_settings:
         key, separator, payload = value.partition("=")
         config_settings[key] = payload if separator else ""
     group_items = [("pyproject.toml", group) for group in options.groups]
     grouped_requirements = parse_dependency_groups(group_items)
-    bundle = _collect_requirements(
+    bundle = collect_requirements(
         requirements=[*options.requirements, *grouped_requirements],
         requirement_files=options.requirement_files,
         constraint_files=options.constraint_files,

@@ -28,16 +28,16 @@ def test_unpack_url_with_urllib_response_without_content_type(data: TestData) ->
     """
     It should download and unpack files even if no Content-Type header exists
     """
-    _real_session = NetworkSession()
+    real_session = NetworkSession()
 
-    def _fake_session_get(*args: Any, **kwargs: Any) -> HttpResponse:
-        resp = _real_session.get(*args, **kwargs)
+    def fake_session_get(*args: Any, **kwargs: Any) -> HttpResponse:
+        resp = real_session.get(*args, **kwargs)
         del resp.headers["Content-Type"]
         return resp
 
     session = Mock()
     session.resume_retries = 0
-    session.get = _fake_session_get
+    session.get = fake_session_get
     download = Downloader(session, progress_bar="on")
 
     uri = data.packages.joinpath("simple-1.0.tar.gz").as_uri()
@@ -139,7 +139,7 @@ class Test_unpack_url:
             )
 
 
-def _metadata(*lines: str, name: str = "pkg", version: str = "1.0") -> str:
+def metadata_internal(*lines: str, name: str = "pkg", version: str = "1.0") -> str:
     metadata = [
         "Metadata-Version: 2.1",
         f"Name: {name}",
@@ -149,7 +149,7 @@ def _metadata(*lines: str, name: str = "pkg", version: str = "1.0") -> str:
     return "\n".join(metadata) + "\n"
 
 
-def _make_distribution(metadata: str) -> MetadataDistribution:
+def make_distribution(metadata: str) -> MetadataDistribution:
     return MetadataDistribution.from_metadata_file_contents(
         metadata.encode("utf-8"), "pkg"
     )
@@ -160,119 +160,119 @@ class TestCheckSidecarMatchesWheel:
     fields it cross-checks between a PEP 658 sidecar and a downloaded wheel.
     """
 
-    def _req(self) -> Mock:
+    def req_internal(self) -> Mock:
         # The helper only uses the ``req`` argument to build the resulting
         # exception, so a stand-in object is enough.
         return Mock()
 
     def test_matching_metadata_does_not_raise(self) -> None:
-        dist = _make_distribution(
-            _metadata(
+        dist = make_distribution(
+            metadata_internal(
                 "Requires-Python: >=3.9",
                 "Requires-Dist: requests>=2.0",
                 "Provides-Extra: extra",
             )
         )
-        check_sidecar_matches_wheel(self._req(), dist, dist)
+        check_sidecar_matches_wheel(self.req_internal(), dist, dist)
 
     def test_requires_dist_canonicalization_is_tolerated(self) -> None:
-        sidecar = _make_distribution(_metadata("Requires-Dist: Requests >= 2.0"))
-        wheel = _make_distribution(_metadata("Requires-Dist: requests>=2.0"))
-        check_sidecar_matches_wheel(self._req(), sidecar, wheel)
+        sidecar = make_distribution(metadata_internal("Requires-Dist: Requests >= 2.0"))
+        wheel = make_distribution(metadata_internal("Requires-Dist: requests>=2.0"))
+        check_sidecar_matches_wheel(self.req_internal(), sidecar, wheel)
 
     def test_folded_requires_dist_header_is_tolerated(self) -> None:
         # For a folded Requires-Dist header, the email parser preserves a
         # leading newline in the raw value on Python versions without the
         # python/cpython#124452 fix (3.10, 3.11, <3.12.8, 3.13.0). The check
         # must strip it, like iter_dependencies() does.
-        dist = _make_distribution(
-            _metadata(
+        dist = make_distribution(
+            metadata_internal(
                 "Requires-Dist:",
                 " some-package-with-a-very-long-name[extra-one]>=2.31.0,<3.0.0",
             )
         )
-        check_sidecar_matches_wheel(self._req(), dist, dist)
+        check_sidecar_matches_wheel(self.req_internal(), dist, dist)
 
     def test_requires_dist_mismatch_raises(self) -> None:
-        sidecar = _make_distribution(_metadata("Requires-Dist: shadow-pkg"))
-        wheel = _make_distribution(_metadata())
+        sidecar = make_distribution(metadata_internal("Requires-Dist: shadow-pkg"))
+        wheel = make_distribution(metadata_internal())
         with pytest.raises(SidecarMetadataInconsistent) as excinfo:
-            check_sidecar_matches_wheel(self._req(), sidecar, wheel)
+            check_sidecar_matches_wheel(self.req_internal(), sidecar, wheel)
         assert excinfo.value.field == "Requires-Dist"
         assert excinfo.value.f_val == "shadow-pkg"
         assert excinfo.value.m_val == ""
 
     def test_requires_dist_diff_reports_only_differences(self) -> None:
-        sidecar = _make_distribution(
-            _metadata(
+        sidecar = make_distribution(
+            metadata_internal(
                 "Requires-Dist: shared-a",
                 "Requires-Dist: shared-b",
                 "Requires-Dist: only-in-sidecar",
             )
         )
-        wheel = _make_distribution(
-            _metadata(
+        wheel = make_distribution(
+            metadata_internal(
                 "Requires-Dist: shared-a",
                 "Requires-Dist: shared-b",
                 "Requires-Dist: only-in-wheel",
             )
         )
         with pytest.raises(SidecarMetadataInconsistent) as excinfo:
-            check_sidecar_matches_wheel(self._req(), sidecar, wheel)
+            check_sidecar_matches_wheel(self.req_internal(), sidecar, wheel)
         assert excinfo.value.field == "Requires-Dist"
         assert excinfo.value.f_val == "only-in-sidecar"
         assert excinfo.value.m_val == "only-in-wheel"
 
     def test_requires_python_mismatch_raises(self) -> None:
-        sidecar = _make_distribution(_metadata("Requires-Python: >=3.9"))
-        wheel = _make_distribution(_metadata())
+        sidecar = make_distribution(metadata_internal("Requires-Python: >=3.9"))
+        wheel = make_distribution(metadata_internal())
         with pytest.raises(SidecarMetadataInconsistent) as excinfo:
-            check_sidecar_matches_wheel(self._req(), sidecar, wheel)
+            check_sidecar_matches_wheel(self.req_internal(), sidecar, wheel)
         assert excinfo.value.field == "Requires-Python"
         assert excinfo.value.f_val == ">=3.9"
         assert excinfo.value.m_val == ""
 
     def test_provides_extra_mismatch_raises(self) -> None:
-        sidecar = _make_distribution(_metadata("Provides-Extra: extra"))
-        wheel = _make_distribution(_metadata())
+        sidecar = make_distribution(metadata_internal("Provides-Extra: extra"))
+        wheel = make_distribution(metadata_internal())
         with pytest.raises(SidecarMetadataInconsistent) as excinfo:
-            check_sidecar_matches_wheel(self._req(), sidecar, wheel)
+            check_sidecar_matches_wheel(self.req_internal(), sidecar, wheel)
         assert excinfo.value.field == "Provides-Extra"
         assert excinfo.value.f_val == "extra"
         assert excinfo.value.m_val == ""
 
     def test_name_mismatch_raises(self) -> None:
-        sidecar = _make_distribution(_metadata(name="other-pkg"))
-        wheel = _make_distribution(_metadata(name="pkg"))
+        sidecar = make_distribution(metadata_internal(name="other-pkg"))
+        wheel = make_distribution(metadata_internal(name="pkg"))
         with pytest.raises(SidecarMetadataInconsistent) as excinfo:
-            check_sidecar_matches_wheel(self._req(), sidecar, wheel)
+            check_sidecar_matches_wheel(self.req_internal(), sidecar, wheel)
         assert excinfo.value.field == "Name"
         assert excinfo.value.f_val == "other-pkg"
         assert excinfo.value.m_val == "pkg"
 
     def test_name_canonicalization_is_tolerated(self) -> None:
-        sidecar = _make_distribution(_metadata(name="Pkg_Name"))
-        wheel = _make_distribution(_metadata(name="pkg-name"))
-        check_sidecar_matches_wheel(self._req(), sidecar, wheel)
+        sidecar = make_distribution(metadata_internal(name="Pkg_Name"))
+        wheel = make_distribution(metadata_internal(name="pkg-name"))
+        check_sidecar_matches_wheel(self.req_internal(), sidecar, wheel)
 
     def test_version_mismatch_raises(self) -> None:
-        sidecar = _make_distribution(_metadata(version="1.0"))
-        wheel = _make_distribution(_metadata(version="2.0"))
+        sidecar = make_distribution(metadata_internal(version="1.0"))
+        wheel = make_distribution(metadata_internal(version="2.0"))
         with pytest.raises(SidecarMetadataInconsistent) as excinfo:
-            check_sidecar_matches_wheel(self._req(), sidecar, wheel)
+            check_sidecar_matches_wheel(self.req_internal(), sidecar, wheel)
         assert excinfo.value.field == "Version"
         assert excinfo.value.f_val == "1.0"
         assert excinfo.value.m_val == "2.0"
 
     def test_version_normalization_is_tolerated(self) -> None:
-        sidecar = _make_distribution(_metadata(version="1.0"))
-        wheel = _make_distribution(_metadata(version="1.0.0"))
-        check_sidecar_matches_wheel(self._req(), sidecar, wheel)
+        sidecar = make_distribution(metadata_internal(version="1.0"))
+        wheel = make_distribution(metadata_internal(version="1.0.0"))
+        check_sidecar_matches_wheel(self.req_internal(), sidecar, wheel)
 
     def test_invalid_requires_dist_raises_metadata_invalid(self) -> None:
-        sidecar = _make_distribution(
-            _metadata("Requires-Dist: not a valid requirement")
+        sidecar = make_distribution(
+            metadata_internal("Requires-Dist: not a valid requirement")
         )
-        wheel = _make_distribution(_metadata())
+        wheel = make_distribution(metadata_internal())
         with pytest.raises(MetadataInvalid):
-            check_sidecar_matches_wheel(self._req(), sidecar, wheel)
+            check_sidecar_matches_wheel(self.req_internal(), sidecar, wheel)

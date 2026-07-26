@@ -18,14 +18,14 @@ def test_retry_no_error() -> None:
 def test_retry_no_error_after_retry() -> None:
     raised = False
 
-    def _raise_once() -> str:
+    def raise_once() -> str:
         nonlocal raised
         if not raised:
             raised = True
             raise RuntimeError("ham")
         return "daylily"
 
-    function = Mock(wraps=_raise_once)
+    function = Mock(wraps=raise_once)
     wrapped = retry(wait=0, stop_after_delay=0.01)(function)
     assert wrapped() == "daylily"
     assert function.call_count == 2
@@ -34,12 +34,12 @@ def test_retry_no_error_after_retry() -> None:
 def test_retry_last_error_is_reraised() -> None:
     errors = []
 
-    def _raise_error() -> NoReturn:
+    def raise_error() -> NoReturn:
         error = RuntimeError(random.random())
         errors.append(error)
         raise error
 
-    function = Mock(wraps=_raise_error)
+    function = Mock(wraps=raise_error)
     wrapped = retry(wait=0, stop_after_delay=0.01)(function)
     with pytest.raises(RuntimeError) as exc_info:
         wrapped()
@@ -60,13 +60,13 @@ def test_retry_ignores_base_exception(exc: type[BaseException]) -> None:
 def create_timestamped_callable(sleep_per_call: float = 0) -> tuple[Mock, list[float]]:
     timestamps = []
 
-    def _raise_error() -> NoReturn:
+    def raise_error() -> NoReturn:
         timestamps.append(perf_counter())
         if sleep_per_call:
             sleep(sleep_per_call)
         raise RuntimeError
 
-    return Mock(wraps=_raise_error), timestamps
+    return Mock(wraps=raise_error), timestamps
 
 
 @pytest.mark.skipif(

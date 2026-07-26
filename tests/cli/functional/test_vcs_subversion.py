@@ -5,7 +5,7 @@ import pytest
 from pip.vcs.subversion import Subversion
 from pip.vcs.versioncontrol import RemoteNotFoundError
 
-from pip_test_support import PipTestEnvironment, _create_svn_repo, need_svn
+from pip_test_support import PipTestEnvironment, create_svn_repo, need_svn
 
 
 @need_svn
@@ -14,7 +14,7 @@ def test_get_remote_url__no_remote(script: PipTestEnvironment, tmpdir: Path) -> 
     repo_path.mkdir()
     repo_dir = str(repo_path)
 
-    _create_svn_repo(script.scratch_path, repo_dir)
+    create_svn_repo(script.scratch_path, repo_dir)
 
     with pytest.raises(RemoteNotFoundError):
         Subversion().get_remote_url(repo_dir)
@@ -30,7 +30,7 @@ def test_get_remote_url__no_remote_with_setup(
     setup.touch()
     repo_dir = str(repo_path)
 
-    _create_svn_repo(script.scratch_path, repo_dir)
+    create_svn_repo(script.scratch_path, repo_dir)
 
     with pytest.raises(RemoteNotFoundError):
         Subversion().get_remote_url(repo_dir)

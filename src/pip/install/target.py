@@ -10,7 +10,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-from pip.platform.locations._sysconfig import get_scheme
+from pip.platform.locations.sysconfig import get_scheme
 from pip.core.metadata import default_scripts_path
 from pip.platform.scheme import Scheme
 
@@ -60,7 +60,7 @@ class InstallTarget:
                 data=os.fspath(target_path),
             )
             if root is not None:
-                scheme = _apply_root(scheme, Path(root))
+                scheme = apply_root(scheme, Path(root))
             return cls.from_scheme(scheme)
         return cls.from_scheme(
             get_scheme(
@@ -93,7 +93,7 @@ class InstallTarget:
         return destination
 
 
-def _apply_root(scheme: Scheme, root: Path) -> Scheme:
+def apply_root(scheme: Scheme, root: Path) -> Scheme:
     def relocate(path: str) -> str:
         value = Path(path)
         if value.is_absolute():

@@ -16,7 +16,7 @@ class NoOpBuildEnvironment(BuildEnvironment):
     def __init__(self) -> None:
         self.python_executable = sys.executable
         self.lib_dirs = None
-        self._save_env = {}
+        self.save_env = {}
 
     def __enter__(self) -> None:
         pass

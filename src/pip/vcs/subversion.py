@@ -25,10 +25,10 @@ from .versioncontrol import (
 
 logger = logging.getLogger(__name__)
 
-_svn_xml_url_re = re.compile('url="([^"]+)"')
-_svn_rev_re = re.compile(r'committed-rev="(\d+)"')
-_svn_info_xml_rev_re = re.compile(r'\s*revision="(\d+)"')
-_svn_info_xml_url_re = re.compile(r"<url>(.*)</url>")
+svn_xml_url_re = re.compile('url="([^"]+)"')
+svn_rev_re = re.compile(r'committed-rev="(\d+)"')
+svn_info_xml_rev_re = re.compile(r'\s*revision="(\d+)"')
+svn_info_xml_url_re = re.compile(r"<url>(.*)</url>")
 
 
 class Subversion(VersionControl):
@@ -63,7 +63,7 @@ class Subversion(VersionControl):
                 # FIXME: should we warn?
                 continue
 
-            dirurl, localrev = cls._get_svn_url_rev(base)
+            dirurl, localrev = cls.get_svn_url_rev(base)
 
             if base == location:
                 assert dirurl is not None
@@ -125,14 +125,14 @@ class Subversion(VersionControl):
                 )
                 raise RemoteNotFoundError
 
-        url, _rev = cls._get_svn_url_rev(location)
+        url, rev_internal = cls.get_svn_url_rev(location)
         if url is None:
             raise RemoteNotFoundError
 
         return url
 
     @classmethod
-    def _get_svn_url_rev(cls, location: str) -> tuple[str | None, int]:
+    def get_svn_url_rev(cls, location: str) -> tuple[str | None, int]:
         entries_path = os.path.join(location, cls.dirname, "entries")
         if os.path.exists(entries_path):
             with open(entries_path) as f:
@@ -147,11 +147,11 @@ class Subversion(VersionControl):
             url = entries[0][3]
             revs = [int(d[9]) for d in entries if len(d) > 9 and d[9]] + [0]
         elif data.startswith("<?xml"):
-            match = _svn_xml_url_re.search(data)
+            match = svn_xml_url_re.search(data)
             if not match:
                 raise ValueError(f"Badly formatted data: {data!r}")
             url = match.group(1)  # get repository URL
-            revs = [int(m.group(1)) for m in _svn_rev_re.finditer(data)] + [0]
+            revs = [int(m.group(1)) for m in svn_rev_re.finditer(data)] + [0]
         else:
             try:
                 # subversion >= 1.7
@@ -165,10 +165,10 @@ class Subversion(VersionControl):
                     show_stdout=False,
                     stdout_only=True,
                 )
-                match = _svn_info_xml_url_re.search(xml)
+                match = svn_info_xml_url_re.search(xml)
                 assert match is not None
                 url = match.group(1)
-                revs = [int(m.group(1)) for m in _svn_info_xml_rev_re.finditer(xml)]
+                revs = [int(m.group(1)) for m in svn_info_xml_rev_re.finditer(xml)]
             except InstallationError:
                 url, revs = None, []
 
@@ -194,7 +194,7 @@ class Subversion(VersionControl):
         # Special value definitions:
         #   None: Not evaluated yet.
         #   Empty tuple: Could not parse version.
-        self._vcs_version: tuple[int, ...] | None = None
+        self.vcs_version_internal: tuple[int, ...] | None = None
 
         super().__init__()
 
@@ -236,14 +236,14 @@ class Subversion(VersionControl):
             ``()`` if the version returned from ``svn`` could not be parsed.
         :raises: BadCommand: If ``svn`` is not installed.
         """
-        if self._vcs_version is not None:
+        if self.vcs_version_internal is not None:
             # Use cached version, if available.
             # If parsing the version failed previously (empty tuple),
             # do not attempt to parse it again.
-            return self._vcs_version
+            return self.vcs_version_internal
 
         vcs_version = self.call_vcs_version()
-        self._vcs_version = vcs_version
+        self.vcs_version_internal = vcs_version
         return vcs_version
 
     def get_remote_call_options(self) -> CommandArgs:

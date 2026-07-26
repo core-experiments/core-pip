@@ -74,14 +74,14 @@ logger = logging.getLogger(__name__)
 
 
 # NOTE: Maybe use the optionx attribute to normalize keynames.
-def _normalize_name(name: str) -> str:
+def normalize_name(name: str) -> str:
     """Make a name consistent regardless of source (environment or file)"""
     name = name.lower().replace("_", "-")
     name = name.removeprefix("--")  # only prefer long opts
     return name
 
 
-def _disassemble_key(name: str) -> list[str]:
+def disassemble_key(name: str) -> list[str]:
     if "." not in name:
         error_message = (
             "Key does not contain dot separated section and key. "
@@ -137,26 +137,26 @@ class Configuration:
         self.load_only = load_only
 
         # Because we keep track of where we got the data from
-        self._parsers: dict[Kind, list[tuple[str, RawConfigParser]]] = {
+        self.parsers_internal: dict[Kind, list[tuple[str, RawConfigParser]]] = {
             variant: [] for variant in OVERRIDE_ORDER
         }
-        self._config: dict[Kind, dict[str, dict[str, Any]]] = {
+        self.config_internal: dict[Kind, dict[str, dict[str, Any]]] = {
             variant: {} for variant in OVERRIDE_ORDER
         }
-        self._modified_parsers: list[tuple[str, RawConfigParser]] = []
+        self.modified_parsers: list[tuple[str, RawConfigParser]] = []
 
     def load(self) -> None:
         """Loads configuration from configuration files and environment"""
-        self._load_config_files()
+        self.load_config_files()
         if not self.isolated:
-            self._load_environment_vars()
+            self.load_environment_vars()
 
     def get_file_to_edit(self) -> str | None:
         """Returns the file with highest priority in configuration"""
         assert self.load_only is not None, "Need to be specified a file to be editing"
 
         try:
-            return self._get_parser_to_modify()[0]
+            return self.get_parser_to_modify()[0]
         except IndexError:
             return None
 
@@ -164,60 +164,60 @@ class Configuration:
         """Returns key-value pairs like dict.items() representing the loaded
         configuration
         """
-        return self._dictionary.items()
+        return self.dictionary.items()
 
     def get_value(self, key: str) -> Any:
         """Get a value from the configuration."""
         orig_key = key
-        key = _normalize_name(key)
+        key = normalize_name(key)
         try:
             clean_config: dict[str, Any] = {}
-            for file_values in self._dictionary.values():
+            for file_values in self.dictionary.values():
                 clean_config.update(file_values)
             return clean_config[key]
         except KeyError:
             # disassembling triggers a more useful error message than simply
             # "No such key" in the case that the key isn't in the form command.option
-            _disassemble_key(key)
+            disassemble_key(key)
             raise ConfigurationError(f"No such key - {orig_key}")
 
     def set_value(self, key: str, value: Any) -> None:
         """Modify a value in the configuration."""
-        key = _normalize_name(key)
-        self._ensure_have_load_only()
+        key = normalize_name(key)
+        self.ensure_have_load_only()
 
         assert self.load_only
-        fname, parser = self._get_parser_to_modify()
+        fname, parser = self.get_parser_to_modify()
 
         if parser is not None:
-            section, name = _disassemble_key(key)
+            section, name = disassemble_key(key)
 
             # Modify the parser and the configuration
             if not parser.has_section(section):
                 parser.add_section(section)
             parser.set(section, name, value)
 
-        self._config[self.load_only].setdefault(fname, {})
-        self._config[self.load_only][fname][key] = value
-        self._mark_as_modified(fname, parser)
+        self.config_internal[self.load_only].setdefault(fname, {})
+        self.config_internal[self.load_only][fname][key] = value
+        self.mark_as_modified(fname, parser)
 
     def unset_value(self, key: str) -> None:
         """Unset a value in the configuration."""
         orig_key = key
-        key = _normalize_name(key)
-        self._ensure_have_load_only()
+        key = normalize_name(key)
+        self.ensure_have_load_only()
 
         assert self.load_only
-        fname, parser = self._get_parser_to_modify()
+        fname, parser = self.get_parser_to_modify()
 
         if (
-            key not in self._config[self.load_only][fname]
-            and key not in self._config[self.load_only]
+            key not in self.config_internal[self.load_only][fname]
+            and key not in self.config_internal[self.load_only]
         ):
             raise ConfigurationError(f"No such key - {orig_key}")
 
         if parser is not None:
-            section, name = _disassemble_key(key)
+            section, name = disassemble_key(key)
             if not (
                 parser.has_section(section) and parser.remove_option(section, name)
             ):
@@ -229,17 +229,17 @@ class Configuration:
             # The section may be empty after the option was removed.
             if not parser.items(section):
                 parser.remove_section(section)
-            self._mark_as_modified(fname, parser)
+            self.mark_as_modified(fname, parser)
         try:
-            del self._config[self.load_only][fname][key]
+            del self.config_internal[self.load_only][fname][key]
         except KeyError:
-            del self._config[self.load_only][key]
+            del self.config_internal[self.load_only][key]
 
     def save(self) -> None:
         """Save the current in-memory state."""
-        self._ensure_have_load_only()
+        self.ensure_have_load_only()
 
-        for fname, parser in self._modified_parsers:
+        for fname, parser in self.modified_parsers:
             logger.info("Writing to %s", fname)
 
             # Ensure directory exists.
@@ -259,24 +259,24 @@ class Configuration:
     # Private routines
     #
 
-    def _ensure_have_load_only(self) -> None:
+    def ensure_have_load_only(self) -> None:
         if self.load_only is None:
             raise ConfigurationError("Needed a specific file to be modifying.")
         logger.debug("Will be working with %s variant only", self.load_only)
 
     @property
-    def _dictionary(self) -> dict[str, dict[str, Any]]:
+    def dictionary(self) -> dict[str, dict[str, Any]]:
         """A dictionary representing the loaded configuration."""
         # NOTE: Dictionaries are not populated if not loaded. So, conditionals
         #       are not needed here.
         retval = {}
 
         for variant in OVERRIDE_ORDER:
-            retval.update(self._config[variant])
+            retval.update(self.config_internal[variant])
 
         return retval
 
-    def _load_config_files(self) -> None:
+    def load_config_files(self) -> None:
         """Loads configuration from configuration files"""
         config_files = dict(self.iter_config_files())
         if config_files[kinds.ENV][0:1] == [os.devnull]:
@@ -294,23 +294,25 @@ class Configuration:
                     logger.debug("Skipping file '%s' (variant: %s)", fname, variant)
                     continue
 
-                parser = self._load_file(variant, fname)
+                parser = self.load_file(variant, fname)
 
                 # Keeping track of the parsers used
-                self._parsers[variant].append((fname, parser))
+                self.parsers_internal[variant].append((fname, parser))
 
-    def _load_file(self, variant: Kind, fname: str) -> RawConfigParser:
+    def load_file(self, variant: Kind, fname: str) -> RawConfigParser:
         logger.verbose("For variant '%s', will try loading '%s'", variant, fname)
-        parser = self._construct_parser(fname)
+        parser = self.construct_parser(fname)
 
         for section in parser.sections():
             items = parser.items(section)
-            self._config[variant].setdefault(fname, {})
-            self._config[variant][fname].update(self._normalized_keys(section, items))
+            self.config_internal[variant].setdefault(fname, {})
+            self.config_internal[variant][fname].update(
+                self.normalized_keys(section, items)
+            )
 
         return parser
 
-    def _construct_parser(self, fname: str) -> RawConfigParser:
+    def construct_parser(self, fname: str) -> RawConfigParser:
         parser = configparser.RawConfigParser()
         # If there is no such file, don't bother reading it but create the
         # parser anyway, to hold the data.
@@ -331,14 +333,14 @@ class Configuration:
                 raise ConfigurationFileCouldNotBeLoaded(error=error)
         return parser
 
-    def _load_environment_vars(self) -> None:
+    def load_environment_vars(self) -> None:
         """Loads configuration from environment variables"""
-        self._config[kinds.ENV_VAR].setdefault(":env:", {})
-        self._config[kinds.ENV_VAR][":env:"].update(
-            self._normalized_keys(":env:", self.get_environ_vars())
+        self.config_internal[kinds.ENV_VAR].setdefault(":env:", {})
+        self.config_internal[kinds.ENV_VAR][":env:"].update(
+            self.normalized_keys(":env:", self.get_environ_vars())
         )
 
-    def _normalized_keys(
+    def normalized_keys(
         self, section: str, items: Iterable[tuple[str, Any]]
     ) -> dict[str, Any]:
         """Normalizes items to construct a dictionary with normalized keys.
@@ -348,7 +350,7 @@ class Configuration:
         """
         normalized = {}
         for name, val in items:
-            key = section + "." + _normalize_name(name)
+            key = section + "." + normalize_name(name)
             normalized[key] = val
         return normalized
 
@@ -395,12 +397,12 @@ class Configuration:
 
     def get_values_in_config(self, variant: Kind) -> dict[str, Any]:
         """Get values present in a config file"""
-        return self._config[variant]
+        return self.config_internal[variant]
 
-    def _get_parser_to_modify(self) -> tuple[str, RawConfigParser]:
+    def get_parser_to_modify(self) -> tuple[str, RawConfigParser]:
         # Determine which parser to modify
         assert self.load_only
-        parsers = self._parsers[self.load_only]
+        parsers = self.parsers_internal[self.load_only]
         if not parsers:
             # This should not happen if everything works correctly.
             raise ConfigurationError(
@@ -411,10 +413,10 @@ class Configuration:
         return parsers[-1]
 
     # XXX: This is patched in the tests.
-    def _mark_as_modified(self, fname: str, parser: RawConfigParser) -> None:
+    def mark_as_modified(self, fname: str, parser: RawConfigParser) -> None:
         file_parser_tuple = (fname, parser)
-        if file_parser_tuple not in self._modified_parsers:
-            self._modified_parsers.append(file_parser_tuple)
+        if file_parser_tuple not in self.modified_parsers:
+            self.modified_parsers.append(file_parser_tuple)
 
     def __repr__(self) -> str:
-        return f"{self.__class__.__name__}({self._dictionary!r})"
+        return f"{self.__class__.__name__}({self.dictionary!r})"

@@ -10,9 +10,9 @@ from pathlib import Path
 from pip.build.build import build_wheel_from_source
 from pip.cli.parser import ArgumentParser
 from pip.cli.requirements import (
-    _bundle_install_requirements,
-    _collect_requirements,
-    _load_source_config,
+    bundle_install_requirements,
+    collect_requirements,
+    load_source_config,
 )
 from pip.core.format_control import FormatControl
 from pip.index.artifacts import ArtifactLocator
@@ -50,8 +50,8 @@ def create_parser() -> ArgumentParser:
 
 def run_download(args: list[str]) -> int:
     options = create_parser().parse_args(args)
-    config = _load_source_config("download")
-    bundle = _collect_requirements(
+    config = load_source_config("download")
+    bundle = collect_requirements(
         requirements=options.requirements,
         requirement_files=options.requirement_files,
         constraint_files=options.constraint_files,
@@ -77,7 +77,7 @@ def run_download(args: list[str]) -> int:
         provider=provider,
         constraints=bundle.constraints,
         ignore_installed=True,
-    ).resolve(_bundle_install_requirements(bundle))
+    ).resolve(bundle_install_requirements(bundle))
     destination = Path(options.dest)
     destination.mkdir(parents=True, exist_ok=True)
     names: list[str] = []

@@ -9,14 +9,14 @@ from typing import Literal, TypeVar
 
 class RateLimiter:
     def __init__(self, min_update_interval_seconds: float) -> None:
-        self._interval = min_update_interval_seconds
-        self._last_update = 0.0
+        self.interval = min_update_interval_seconds
+        self.last_update = 0.0
 
     def ready(self) -> bool:
-        return time.time() - self._last_update >= self._interval
+        return time.time() - self.last_update >= self.interval
 
     def reset(self) -> None:
-        self._last_update = time.time()
+        self.last_update = time.time()
 
 
 T = TypeVar("T")
@@ -24,7 +24,7 @@ ProgressRenderer = Callable[[Iterable[T]], Iterator[T]]
 BarType = Literal["on", "off", "raw"]
 
 
-def _raw_progress_bar(
+def raw_progress_bar(
     iterable: Iterable[bytes],
     *,
     size: int | None,
@@ -56,7 +56,7 @@ def get_download_progress_renderer(
     """
     if bar_type == "raw":
         return functools.partial(
-            _raw_progress_bar,
+            raw_progress_bar,
             size=size,
             initial_progress=initial_progress,
         )

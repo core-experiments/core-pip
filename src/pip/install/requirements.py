@@ -38,7 +38,7 @@ class RequirementInstaller:
         self.use_user_site = use_user_site
         self.pycompile = pycompile
         self.script_executable = script_executable
-        self._uninstaller = DistributionUninstaller()
+        self.uninstaller_internal = DistributionUninstaller()
 
     def check_if_exists(self, requirement: InstallRequirement) -> None:
         """Attach installed-distribution state before installing."""
@@ -58,7 +58,9 @@ class RequirementInstaller:
     def uninstall(self, name: str, *, paths: list[str] | None = None) -> bool:
         """Uninstall an installed distribution using its recorded files."""
         uninstaller = (
-            self._uninstaller if paths is None else DistributionUninstaller(paths)
+            self.uninstaller_internal
+            if paths is None
+            else DistributionUninstaller(paths)
         )
         return uninstaller.uninstall(name)
 

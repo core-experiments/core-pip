@@ -6,7 +6,7 @@ from os.path import isdir, isfile, normcase
 
 import pytest
 
-from .test_install_user import _patch_dist_in_site_packages
+from .test_install_user import patch_dist_in_site_packages
 from pip_test_support import PipTestEnvironment, TestData, assert_all_changes
 from pip_test_support.venv import VirtualEnvironment
 from pip_test_support.wheel import make_wheel
@@ -41,7 +41,7 @@ class Tests_UninstallUserSite:
             extra_metadata_files={"entry_points.txt": entry_points_txt},
         ).save_to_dir(script.scratch_path)
 
-        _patch_dist_in_site_packages(virtualenv)
+        patch_dist_in_site_packages(virtualenv)
 
         script.pip(
             "install",

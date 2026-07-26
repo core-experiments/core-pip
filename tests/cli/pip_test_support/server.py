@@ -9,12 +9,12 @@ from typing import TYPE_CHECKING, Any
 from unittest.mock import Mock, patch
 
 from werkzeug.serving import BaseWSGIServer, WSGIRequestHandler
-from werkzeug.serving import make_server as _make_server
+from werkzeug.serving import make_server as make_server_internal
 
 from .compat import blocked_signals
 
 if TYPE_CHECKING:
-    from _typeshed.wsgi import StartResponse, WSGIApplication, WSGIEnvironment
+    from typeshed.wsgi import StartResponse, WSGIApplication, WSGIEnvironment
 
 Body = Iterable[bytes]
 
@@ -32,11 +32,11 @@ def patch_getfqdn() -> Iterator[None]:
         yield
 
 
-class _MockServer(BaseWSGIServer):
+class MockServer_internal(BaseWSGIServer):
     mock: Mock = Mock()
 
 
-class _RequestHandler(WSGIRequestHandler):
+class RequestHandler(WSGIRequestHandler):
     def make_environ(self) -> dict[str, Any]:
         environ = super().make_environ()
 
@@ -61,7 +61,7 @@ class _RequestHandler(WSGIRequestHandler):
         return environ
 
 
-def _mock_wsgi_adapter(
+def mock_wsgi_adapter(
     mock: Callable[["WSGIEnvironment", "StartResponse"], "WSGIApplication"],
 ) -> "WSGIApplication":
     """Uses a mock to record function arguments and provide
@@ -78,7 +78,7 @@ def _mock_wsgi_adapter(
     return adapter
 
 
-def make_mock_server(**kwargs: Any) -> _MockServer:
+def make_mock_server(**kwargs: Any) -> MockServer_internal:
     """Creates a mock HTTP(S) server listening on a random port on localhost.
 
     The `mock` property of the returned server provides and records all WSGI
@@ -108,12 +108,12 @@ def make_mock_server(**kwargs: Any) -> _MockServer:
     Note also for pip interactions that "localhost" is a "secure origin", so
     be careful using this for failure tests of `--trusted-host`.
     """
-    kwargs.setdefault("request_handler", _RequestHandler)
+    kwargs.setdefault("request_handler", RequestHandler)
 
     mock = Mock()
-    app = _mock_wsgi_adapter(mock)
+    app = mock_wsgi_adapter(mock)
     with patch_getfqdn():
-        server = _make_server("localhost", 0, app=app, **kwargs)
+        server = make_server_internal("localhost", 0, app=app, **kwargs)
     server.mock = mock
     return server
 
@@ -205,43 +205,43 @@ def authorization_response(path: pathlib.Path) -> "WSGIApplication":
 
 
 class MockServer:
-    def __init__(self, server: _MockServer) -> None:
-        self._server = server
-        self._running = False
+    def __init__(self, server: MockServer_internal) -> None:
+        self.server_internal = server
+        self.running = False
         self.context = ExitStack()
 
     @property
     def port(self) -> int:
-        return self._server.port
+        return self.server_internal.port
 
     @property
     def host(self) -> str:
-        return self._server.host
+        return self.server_internal.host
 
     def set_responses(self, responses: Iterable["WSGIApplication"]) -> None:
-        assert not self._running, "responses cannot be set on running server"
-        self._server.mock.side_effect = responses
+        assert not self.running, "responses cannot be set on running server"
+        self.server_internal.mock.side_effect = responses
 
     def start(self) -> None:
-        assert not self._running, "running server cannot be started"
-        self.context.enter_context(server_running(self._server))
-        self.context.enter_context(self._set_running())
+        assert not self.running, "running server cannot be started"
+        self.context.enter_context(server_running(self.server_internal))
+        self.context.enter_context(self.set_running())
 
     @contextmanager
-    def _set_running(self) -> Iterator[None]:
-        self._running = True
+    def set_running(self) -> Iterator[None]:
+        self.running = True
         try:
             yield
         finally:
-            self._running = False
+            self.running = False
 
     def stop(self) -> None:
-        assert self._running, "idle server cannot be stopped"
+        assert self.running, "idle server cannot be stopped"
         self.context.close()
 
     def get_requests(self) -> list[dict[str, str]]:
         """Get environ for each received request."""
-        assert not self._running, "cannot get mock from running server"
+        assert not self.running, "cannot get mock from running server"
         # Legacy: replace call[0][0] with call.args[0]
         # when pip drops support for python3.7
-        return [call[0][0] for call in self._server.mock.call_args_list]
+        return [call[0][0] for call in self.server_internal.mock.call_args_list]

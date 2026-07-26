@@ -101,27 +101,29 @@ def test_as_pep440_requirement_vcs() -> None:
 
 @mock.patch("pip.vcs.git.Git.get_revision")
 def test_from_link_vcs(mock_get_backend_for_scheme: mock.Mock) -> None:
-    _direct_url_from_link = partial(direct_url_from_link, source_dir="...")
-    direct_url = _direct_url_from_link(Link("git+https://g.c/u/p.git"))
+    direct_url_from_link_internal = partial(direct_url_from_link, source_dir="...")
+    direct_url = direct_url_from_link_internal(Link("git+https://g.c/u/p.git"))
     assert direct_url.url == "https://g.c/u/p.git"
     assert direct_url.vcs_info
     assert direct_url.vcs_info.vcs == "git"
-    direct_url = _direct_url_from_link(Link("git+https://g.c/u/p.git#egg=pkg"))
+    direct_url = direct_url_from_link_internal(Link("git+https://g.c/u/p.git#egg=pkg"))
     assert direct_url.url == "https://g.c/u/p.git"
-    direct_url = _direct_url_from_link(
+    direct_url = direct_url_from_link_internal(
         Link("git+https://g.c/u/p.git#egg=pkg&subdirectory=subdir")
     )
     assert direct_url.url == "https://g.c/u/p.git"
     assert direct_url.subdirectory == "subdir"
-    direct_url = _direct_url_from_link(Link("git+https://g.c/u/p.git@branch"))
+    direct_url = direct_url_from_link_internal(Link("git+https://g.c/u/p.git@branch"))
     assert direct_url.url == "https://g.c/u/p.git"
     assert direct_url.vcs_info
     assert direct_url.vcs_info.requested_revision == "branch"
-    direct_url = _direct_url_from_link(Link("git+https://g.c/u/p.git@branch#egg=pkg"))
+    direct_url = direct_url_from_link_internal(
+        Link("git+https://g.c/u/p.git@branch#egg=pkg")
+    )
     assert direct_url.url == "https://g.c/u/p.git"
     assert direct_url.vcs_info
     assert direct_url.vcs_info.requested_revision == "branch"
-    direct_url = _direct_url_from_link(Link("git+https://token@g.c/u/p.git"))
+    direct_url = direct_url_from_link_internal(Link("git+https://token@g.c/u/p.git"))
     assert direct_url.to_dict_compat()["url"] == "https://g.c/u/p.git"
 
 

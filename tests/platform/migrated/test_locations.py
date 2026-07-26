@@ -11,7 +11,7 @@ import tempfile
 from typing import Any
 from unittest.mock import Mock
 
-from pip.platform.locations._sysconfig import get_scheme
+from pip.platform.locations.sysconfig import get_scheme
 from pip.platform.scheme import SCHEME_KEYS
 
 if sys.platform == "win32":
@@ -20,7 +20,7 @@ else:
     import pwd
 
 
-def _get_scheme_dict(*args: Any, **kwargs: Any) -> dict[str, str]:
+def get_scheme_dict(*args: Any, **kwargs: Any) -> dict[str, str]:
     scheme = get_scheme(*args, **kwargs)
     return {k: getattr(scheme, k) for k in SCHEME_KEYS}
 
@@ -88,8 +88,8 @@ class TestLocations:
         root = os.path.normcase(
             os.path.abspath(os.path.join(os.path.sep, "somewhere", "else"))
         )
-        norm_scheme = _get_scheme_dict("example")
-        root_scheme = _get_scheme_dict("example", root=root)
+        norm_scheme = get_scheme_dict("example")
+        root_scheme = get_scheme_dict("example", root=root)
 
         for key, value in norm_scheme.items():
             drive, path = os.path.splitdrive(os.path.abspath(value))
@@ -99,12 +99,12 @@ class TestLocations:
     def test_prefix_modifies_appropriately(self) -> None:
         prefix = os.path.abspath(os.path.join("somewhere", "else"))
 
-        normal_scheme = _get_scheme_dict("example")
-        prefix_scheme = _get_scheme_dict("example", prefix=prefix)
+        normal_scheme = get_scheme_dict("example")
+        prefix_scheme = get_scheme_dict("example", prefix=prefix)
 
-        def _calculate_expected(value: str) -> str:
+        def calculate_expected(value: str) -> str:
             path = os.path.join(prefix, os.path.relpath(value, sys.prefix))
             return os.path.normpath(path)
 
-        expected = {k: _calculate_expected(v) for k, v in normal_scheme.items()}
+        expected = {k: calculate_expected(v) for k, v in normal_scheme.items()}
         assert prefix_scheme == expected

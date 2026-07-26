@@ -9,7 +9,7 @@ from packaging.utils import canonicalize_name
 from pip_test_support import PipTestEnvironment, TestData
 
 
-def _install_dict(report: dict[str, Any]) -> dict[str, Any]:
+def install_dict_internal(report: dict[str, Any]) -> dict[str, Any]:
     return {canonicalize_name(i["metadata"]["name"]): i for i in report["install"]}
 
 
@@ -30,7 +30,7 @@ def test_install_report_basic(
     report = json.loads(report_path.read_text())
     assert "install" in report
     assert len(report["install"]) == 1
-    simplewheel_report = _install_dict(report)["simplewheel"]
+    simplewheel_report = install_dict_internal(report)["simplewheel"]
     assert simplewheel_report["metadata"]["name"] == "simplewheel"
     assert simplewheel_report["requested"] is True
     assert simplewheel_report["is_direct"] is False
@@ -61,8 +61,8 @@ def test_install_report_dep(
     )
     report = json.loads(report_path.read_text())
     assert len(report["install"]) == 2
-    assert _install_dict(report)["require-simple"]["requested"] is True
-    assert _install_dict(report)["simple"]["requested"] is False
+    assert install_dict_internal(report)["require-simple"]["requested"] is True
+    assert install_dict_internal(report)["simple"]["requested"] is False
 
 
 def test_yanked_version(
@@ -86,7 +86,7 @@ def test_yanked_version(
         allow_stderr_warning=True,
     )
     report = json.loads(report_path.read_text())
-    simple_report = _install_dict(report)["simple"]
+    simple_report = install_dict_internal(report)["simple"]
     assert simple_report["requested"] is True
     assert simple_report["is_direct"] is False
     assert simple_report["is_yanked"] is True
@@ -113,7 +113,7 @@ def test_skipped_yanked_version(
         str(report_path),
     )
     report = json.loads(report_path.read_text())
-    simple_report = _install_dict(report)["simple"]
+    simple_report = install_dict_internal(report)["simple"]
     assert simple_report["requested"] is True
     assert simple_report["is_direct"] is False
     assert simple_report["is_yanked"] is False
@@ -145,7 +145,7 @@ def test_install_report_index(
     )
     report = json.loads(report_path.read_text())
     assert len(report["install"]) == 2
-    install_dict = _install_dict(report)
+    install_dict = install_dict_internal(report)
     assert install_dict["paste"]["requested"] is True
     assert install_dict["python-openid"]["requested"] is False
     paste_report = install_dict["paste"]
@@ -176,7 +176,7 @@ def test_install_report_index_multiple_extras(
         str(report_path),
     )
     report = json.loads(report_path.read_text())
-    install_dict = _install_dict(report)
+    install_dict = install_dict_internal(report)
     assert "paste" in install_dict
     assert install_dict["paste"]["requested_extras"] == ["openid", "subprocess"]
 
@@ -197,7 +197,7 @@ def test_install_report_direct_archive(
     report = json.loads(report_path.read_text())
     assert "install" in report
     assert len(report["install"]) == 1
-    simplewheel_report = _install_dict(report)["simplewheel"]
+    simplewheel_report = install_dict_internal(report)["simplewheel"]
     assert simplewheel_report["metadata"]["name"] == "simplewheel"
     assert simplewheel_report["requested"] is True
     assert simplewheel_report["is_direct"] is True

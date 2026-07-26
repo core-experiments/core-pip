@@ -26,12 +26,12 @@ from pip.vcs.versioncontrol import vcs
 logger = logging.getLogger(__name__)
 
 
-_egg_info_re = re.compile(r"([a-z0-9_.]+)-([a-z0-9_.!+-]+)", re.IGNORECASE)
+egg_info_re = re.compile(r"([a-z0-9_.]+)-([a-z0-9_.!+-]+)", re.IGNORECASE)
 
 BuildResult = tuple[list[InstallRequirement], list[InstallRequirement]]
 
 
-def _should_cache(
+def should_cache(
     req: InstallRequirement,
 ) -> bool:
     """
@@ -58,14 +58,14 @@ def _should_cache(
 
     assert req.link
     base, ext = req.link.splitext()
-    if _egg_info_re.search(base):
+    if egg_info_re.search(base):
         return True
 
     # Otherwise, do not cache.
     return False
 
 
-def _verify_one(req: InstallRequirement, wheel_path: str) -> None:
+def verify_one(req: InstallRequirement, wheel_path: str) -> None:
     canonical_name = canonicalize_name(req.name or "")
     w = Wheel(os.path.basename(wheel_path))
     if w.name != canonical_name:
@@ -94,7 +94,7 @@ def _verify_one(req: InstallRequirement, wheel_path: str) -> None:
         )
 
 
-def _build_one(
+def build_one(
     req: InstallRequirement,
     output_dir: str,
     verify: bool,
@@ -118,17 +118,17 @@ def _build_one(
 
     # Install build deps into temporary directory (PEP 518)
     with req.build_env:
-        wheel_path = _build_one_inside_env(req, output_dir, editable)
+        wheel_path = build_one_inside_env(req, output_dir, editable)
     if wheel_path and verify:
         try:
-            _verify_one(req, wheel_path)
+            verify_one(req, wheel_path)
         except (InvalidWheelFilename, UnsupportedWheel) as e:
             logger.warning("Built %s for %s is invalid: %s", artifact, req.name, e)
             return None
     return wheel_path
 
 
-def _build_one_inside_env(
+def build_one_inside_env(
     req: InstallRequirement,
     output_dir: str,
     editable: bool,
@@ -181,14 +181,14 @@ class WheelBuilder:
         self.verify = verify
 
     def build(self, requirements: Iterable[InstallRequirement]) -> BuildResult:
-        return _build(
+        return build_internal(
             requirements,
             wheel_cache=self.wheel_cache,
             verify=self.verify,
         )
 
 
-def _build(
+def build_internal(
     requirements: Iterable[InstallRequirement],
     wheel_cache: WheelCache,
     verify: bool,
@@ -212,11 +212,11 @@ def _build(
     for req in requirements:
         assert req.name
         assert req.link
-        if wheel_cache.cache_dir and _should_cache(req):
+        if wheel_cache.cache_dir and should_cache(req):
             cache_dir = wheel_cache.get_path_for_link(req.link)
         else:
             cache_dir = wheel_cache.get_ephem_path_for_link(req.link)
-        wheel_file = _build_one(
+        wheel_file = build_one(
             req,
             cache_dir,
             verify,

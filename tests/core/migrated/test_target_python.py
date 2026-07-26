@@ -36,7 +36,7 @@ class TestTargetPython:
         target_python = TargetPython(py_version_info=py_version_info)
 
         # The _given_py_version_info attribute should be set as is.
-        assert target_python._given_py_version_info == py_version_info
+        assert target_python.given_py_version_info == py_version_info
 
         assert target_python.py_version_info == expected_py_version_info
         assert target_python.py_version == expected_py_version
@@ -47,7 +47,7 @@ class TestTargetPython:
         """
         target_python = TargetPython(py_version_info=None)
 
-        assert target_python._given_py_version_info is None
+        assert target_python.given_py_version_info is None
 
         assert target_python.py_version_info == CURRENT_PY_VERSION_INFO
         assert target_python.py_version == pyversion
@@ -114,14 +114,14 @@ class TestTargetPython:
         assert mock_get_supported.call_args[1]["version"] == expected_version
 
         # Check that the value was cached.
-        assert target_python._valid_tags == dummy_tags
+        assert target_python.valid_tags == dummy_tags
 
     def test_get_unsorted_tags__uses_cached_value(self) -> None:
         """
         Test that get_unsorted_tags() uses the cached value.
         """
         target_python = TargetPython(py_version_info=None)
-        target_python._valid_tags_set = {
+        target_python.valid_tags_set = {
             WheelTag("py2", "none", "any"),
             WheelTag("py3", "none", "any"),
         }

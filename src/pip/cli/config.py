@@ -12,7 +12,7 @@ from pip.core.errors import ConfigurationError
 CONFIG_BASENAME = "pip.conf" if os.name != "nt" else "pip.ini"
 
 
-class _RawConfigParser(configparser.RawConfigParser):
+class RawConfigParser_internal(configparser.RawConfigParser):
     def optionxform(self, optionstr: str) -> str:
         return optionstr
 
@@ -32,35 +32,35 @@ class ConfigDebugView:
 
 class ConfigurationStore:
     def __init__(self) -> None:
-        self._parser = _new_parser()
-        self._env: dict[str, str] = {}
+        self.parser_internal = new_parser()
+        self.env_internal: dict[str, str] = {}
 
     def load(self) -> None:
-        self._parser = _new_parser()
-        self._env = {}
+        self.parser_internal = new_parser()
+        self.env_internal = {}
         for key, value in os.environ.items():
             if not key.startswith("PIP_"):
                 continue
             if key in {"PIP_VERSION", "PIP_HELP", "PIP_CONFIG_FILE"}:
                 continue
-            self._env[key[4:].lower().replace("_", "-")] = value
+            self.env_internal[key[4:].lower().replace("_", "-")] = value
         for location in config_locations():
             if location.path.is_file():
                 try:
-                    self._parser.read(location.path, encoding="utf-8")
+                    self.parser_internal.read(location.path, encoding="utf-8")
                 except configparser.Error as exc:
                     raise ConfigurationError(str(exc)) from exc
 
     def get(self, key: str) -> str:
         if key.startswith(":env:."):
             option = key[len(":env:.") :]
-            if option in self._env:
-                return self._env[option]
+            if option in self.env_internal:
+                return self.env_internal[option]
             raise ConfigurationError(f"No such key - {key}")
-        section, option = _split_key(key)
-        for candidate in _option_spellings(option):
-            if self._parser.has_option(section, candidate):
-                return self._parser.get(section, candidate)
+        section, option = split_key(key)
+        for candidate in option_spellings(option):
+            if self.parser_internal.has_option(section, candidate):
+                return self.parser_internal.get(section, candidate)
         raise ConfigurationError(f"No such key - {key}")
 
     def get_optional(self, key: str) -> str | None:
@@ -70,38 +70,38 @@ class ConfigurationStore:
             return None
 
     def set(self, location: ConfigLocation, key: str, value: str) -> None:
-        parser = self._read_single(location.path)
-        section, option = _split_key(key)
+        parser = self.read_single(location.path)
+        section, option = split_key(key)
         if not parser.has_section(section):
             parser.add_section(section)
         parser.set(section, option.replace("_", "-"), value)
-        _write_parser(location.path, parser)
+        write_parser(location.path, parser)
 
     def unset(self, location: ConfigLocation, key: str) -> None:
-        parser = self._read_single(location.path)
-        section, option = _split_key(key)
+        parser = self.read_single(location.path)
+        section, option = split_key(key)
         if not parser.has_section(section):
             raise ConfigurationError(f"No such key - {key}")
         removed = False
-        for candidate in _option_spellings(option):
+        for candidate in option_spellings(option):
             removed = parser.remove_option(section, candidate) or removed
         if not removed:
             raise ConfigurationError(f"No such key - {key}")
         if not list(parser.items(section)):
             parser.remove_section(section)
-        _write_parser(location.path, parser)
+        write_parser(location.path, parser)
 
     def items(self) -> list[tuple[str, str]]:
         values: dict[str, str] = {}
-        for section in self._parser.sections():
-            for option, value in self._parser.items(section):
+        for section in self.parser_internal.sections():
+            for option, value in self.parser_internal.items(section):
                 values[f"{section}.{option.replace('_', '-')}"] = value
         return sorted(values.items())
 
     def debug_view(self) -> ConfigDebugView:
         values: list[tuple[str, str, str]] = []
         for location in config_locations():
-            parser = self._read_single(location.path)
+            parser = self.read_single(location.path)
             for section in parser.sections():
                 for option, value in parser.items(section):
                     values.append(
@@ -124,8 +124,8 @@ class ConfigurationStore:
             values=tuple(values),
         )
 
-    def _read_single(self, path: Path) -> _RawConfigParser:
-        parser = _new_parser()
+    def read_single(self, path: Path) -> RawConfigParser_internal:
+        parser = new_parser()
         if path.is_file():
             parser.read(path, encoding="utf-8")
         return parser
@@ -139,7 +139,7 @@ def config_locations() -> list[ConfigLocation]:
         global_path = Path("/etc") / "pip.conf"
     locations = [ConfigLocation("global", global_path)]
     env_config = os.environ.get("PIP_CONFIG_FILE")
-    locations.append(ConfigLocation("user", _user_config_path()))
+    locations.append(ConfigLocation("user", user_config_path()))
     prefix = os.environ.get("VIRTUAL_ENV") or sys.prefix
     executable_prefix = Path(sys.executable).parent.parent
     if (executable_prefix / "pyvenv.cfg").is_file():
@@ -162,7 +162,7 @@ def config_locations() -> list[ConfigLocation]:
     return locations
 
 
-def _split_key(key: str) -> tuple[str, str]:
+def split_key(key: str) -> tuple[str, str]:
     if "." not in key:
         raise ConfigurationError(
             "Key does not contain dot separated section and key. "
@@ -174,7 +174,7 @@ def _split_key(key: str) -> tuple[str, str]:
     return section, option
 
 
-def _option_spellings(option: str) -> tuple[str, ...]:
+def option_spellings(option: str) -> tuple[str, ...]:
     dotted = option.replace("_", "-")
     underscored = option.replace("-", "_")
     if dotted == underscored:
@@ -182,17 +182,17 @@ def _option_spellings(option: str) -> tuple[str, ...]:
     return (dotted, underscored)
 
 
-def _write_parser(path: Path, parser: _RawConfigParser) -> None:
+def write_parser(path: Path, parser: RawConfigParser_internal) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", encoding="utf-8") as file:
         parser.write(file)
 
 
-def _new_parser() -> _RawConfigParser:
-    return _RawConfigParser()
+def new_parser() -> RawConfigParser_internal:
+    return RawConfigParser_internal()
 
 
-def _user_config_path() -> Path:
+def user_config_path() -> Path:
     xdg = os.environ.get("XDG_CONFIG_HOME")
     if xdg:
         return Path(xdg) / "pip" / CONFIG_BASENAME

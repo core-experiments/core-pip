@@ -5,19 +5,19 @@ from __future__ import annotations
 import importlib.metadata
 
 
-_pip_version: str | None = None
+pip_version_internal: str | None = None
 
 
 def set_pip_version(version: str) -> None:
     """Set pip's version for source-runner execution."""
-    global _pip_version
-    _pip_version = version
+    global pip_version_internal
+    pip_version_internal = version
 
 
 def get_pip_version() -> str:
     """Return pip's version from the application context or distribution metadata."""
-    if _pip_version is not None:
-        return _pip_version
+    if pip_version_internal is not None:
+        return pip_version_internal
     try:
         return importlib.metadata.version("pip")
     except importlib.metadata.PackageNotFoundError:

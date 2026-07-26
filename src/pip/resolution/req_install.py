@@ -78,10 +78,10 @@ class DownloadInfo:
     vcs_info: VcsInfo | None = None
 
 
-class _NoOpBuildEnvironment:
+class NoOpBuildEnvironment_internal:
     python_executable = sys.executable
 
-    def __enter__(self) -> _NoOpBuildEnvironment:
+    def __enter__(self) -> NoOpBuildEnvironment_internal:
         return self
 
     def __exit__(self, *exc_info: object) -> None:
@@ -102,7 +102,7 @@ class InstallRequirement:
     req: ParsedRequirement | None
     comes_from: InstallRequirement | str | None = None
     link: Link | None = None
-    _marker: str | None = None
+    marker_internal: str | None = None
     editable: bool = False
     isolated: bool = False
     hash_options: dict[str, list[str]] = field(default_factory=dict)
@@ -112,22 +112,22 @@ class InstallRequirement:
     permit_editable_wheels: bool = False
     original_link: Link | None = None
     satisfied_by: MetadataProvider | None = None
-    _extras_override: set[str] | None = None
+    extras_override: set[str] | None = None
     source_dir: str | None = None
     local_file_path: str | None = None
     download_info: DownloadInfo | None = None
     is_wheel_from_cache: bool = False
     cached_wheel_source_link: Link | None = None
-    _metadata: email.message.Message | None = None
-    _distribution: MetadataProvider | None = None
-    _archive_source: Path | None = None
+    metadata_internal: email.message.Message | None = None
+    distribution_internal: MetadataProvider | None = None
+    archive_source_internal: Path | None = None
     needs_more_preparation: bool = False
-    build_env: object = field(default_factory=_NoOpBuildEnvironment)
+    build_env: object = field(default_factory=NoOpBuildEnvironment_internal)
     pyproject_requires: list[str] | None = None
     requirements_to_check: list[str] = field(default_factory=list)
     metadata_directory: str | None = None
     pyproject_data: dict[str, object] | None = None
-    pep517_backend: _ConfiguredBuildBackend | None = None
+    pep517_backend: ConfiguredBuildBackend | None = None
     should_reinstall: bool = False
     install_succeeded: bool | None = None
 
@@ -139,8 +139,8 @@ class InstallRequirement:
 
     @property
     def extras(self) -> set[str]:
-        if self._extras_override is not None:
-            return set(self._extras_override)
+        if self.extras_override is not None:
+            return set(self.extras_override)
         return set(self.req.extras) if self.req is not None else set()
 
     @property
@@ -155,8 +155,8 @@ class InstallRequirement:
 
     @property
     def markers(self) -> str | None:
-        if self._marker is not None:
-            return self._marker
+        if self.marker_internal is not None:
+            return self.marker_internal
         return self.req.marker if self.req is not None else None
 
     @property
@@ -232,15 +232,15 @@ class InstallRequirement:
             )
 
     def needs_unpacked_archive(self, archive_source: Path) -> None:
-        if self._archive_source is not None:
+        if self.archive_source_internal is not None:
             raise AssertionError("archive source already set")
-        self._archive_source = archive_source
+        self.archive_source_internal = archive_source
 
     def ensure_pristine_source_checkout(self) -> None:
         """Populate or validate the source directory before preparation."""
         if self.source_dir is None:
             raise InstallationError(f"No source directory for {self}")
-        if self._archive_source is not None:
+        if self.archive_source_internal is not None:
             return
         if os.path.isfile(
             os.path.join(self.source_dir, "pyproject.toml")
@@ -251,25 +251,25 @@ class InstallRequirement:
             )
 
     def set_dist(self, distribution: MetadataProvider) -> None:
-        self._distribution = distribution
+        self.distribution_internal = distribution
 
     def get_dist(self) -> MetadataProvider:
-        if self._distribution is None:
+        if self.distribution_internal is None:
             raise AssertionError(f"InstallRequirement {self} has no distribution")
-        return self._distribution
+        return self.distribution_internal
 
     @property
     def metadata(self) -> email.message.Message:
-        if self._metadata is None:
+        if self.metadata_internal is None:
             distribution = self.get_dist()
-            self._metadata = distribution.metadata
-        return self._metadata
+            self.metadata_internal = distribution.metadata
+        return self.metadata_internal
 
     def assert_source_matches_version(self) -> None:
-        if self.req is None or self._metadata is None:
+        if self.req is None or self.metadata_internal is None:
             return
         requested = str(self.req.specifier)
-        actual = self._metadata.get("version")
+        actual = self.metadata_internal.get("version")
         if requested and actual and requested != f"=={actual}":
             logger.warning(
                 "Requested %s%s, but installing version %s",
@@ -280,9 +280,9 @@ class InstallRequirement:
 
     def warn_on_mismatching_name(self) -> None:
         """Normalize the requirement name to generated distribution metadata."""
-        if self.req is None or self._metadata is None:
+        if self.req is None or self.metadata_internal is None:
             return
-        metadata_name = self._metadata.get("name")
+        metadata_name = self.metadata_internal.get("name")
         if not metadata_name:
             return
         if canonicalize_name(self.req.name) == canonicalize_name(metadata_name):
@@ -332,7 +332,7 @@ class InstallRequirement:
                     requirement=repr(item),
                     error="build requirements must be strings",
                 )
-            if _looks_like_path(item) or item.startswith(
+            if looks_like_path(item) or item.startswith(
                 ("git+", "hg+", "svn+", "bzr+")
             ):
                 raise InvalidPyProjectBuildRequires(
@@ -375,7 +375,7 @@ class InstallRequirement:
                 )
         if backend is None:
             backend = "setuptools.build_meta:__legacy__"
-        self.pep517_backend = _ConfiguredBuildBackend(
+        self.pep517_backend = ConfiguredBuildBackend(
             source_dir=Path(self.source_dir),
             backend=backend,
             backend_path=backend_path,
@@ -399,7 +399,7 @@ class InstallRequirement:
             if self.editable and self.permit_editable_wheels
             else "prepare_metadata_for_build_wheel"
         )
-        metadata_name = self.pep517_backend._call_hook(
+        metadata_name = self.pep517_backend.call_hook(
             hook,
             os.fspath(metadata_root),
             self.config_settings,
@@ -455,7 +455,7 @@ class InstallRequirement:
         return self.unpacked_source_directory / "pyproject.toml"
 
 
-class _ConfiguredBuildBackend:
+class ConfiguredBuildBackend:
     def __init__(
         self,
         *,
@@ -475,14 +475,14 @@ class _ConfiguredBuildBackend:
         config_settings: dict[str, object] | None = None,
         metadata_directory: str | None = None,
     ) -> object:
-        return self._call_hook(
+        return self.call_hook(
             "build_wheel",
             wheel_directory,
             config_settings,
             metadata_directory,
         )
 
-    def _call_hook(self, hook: str, *args: object) -> object:
+    def call_hook(self, hook: str, *args: object) -> object:
         payload = {
             "backend": self.backend,
             "hook": hook,
@@ -498,7 +498,7 @@ class _ConfiguredBuildBackend:
         if pythonpath:
             env["PYTHONPATH"] = os.pathsep.join(pythonpath)
         process = subprocess.run(
-            [os.fspath(self.python_executable), "-c", _BACKEND_CALLER],
+            [os.fspath(self.python_executable), "-c", BACKEND_CALLER],
             cwd=self.source_dir,
             env=env,
             input=json.dumps(payload),
@@ -516,7 +516,7 @@ class _ConfiguredBuildBackend:
         return json.loads(output[-1])["result"]
 
 
-_BACKEND_CALLER = r"""
+BACKEND_CALLER = r"""
 import importlib
 import json
 import sys
@@ -554,7 +554,7 @@ def install_req_from_line(
             item.strip() for item in extras_text.split(",") if item.strip()
         )
         if extras and (
-            _looks_like_path(maybe_path)
+            looks_like_path(maybe_path)
             or os.path.isdir(maybe_path)
             or os.path.exists(maybe_path)
         ):
@@ -581,7 +581,7 @@ def install_req_from_line(
                     parsed,
                     comes_from=comes_from,
                     link=Link(parsed.url),
-                    _marker=marker,
+                    marker_internal=marker,
                     isolated=isolated,
                     user_supplied=user_supplied,
                     hash_options=hash_options or {},
@@ -605,7 +605,7 @@ def install_req_from_line(
             parsed,
             comes_from=comes_from,
             link=Link(url),
-            _marker=marker,
+            marker_internal=marker,
             isolated=isolated,
             user_supplied=user_supplied,
             hash_options=hash_options or {},
@@ -613,8 +613,8 @@ def install_req_from_line(
             config_settings=config_settings,
             permit_editable_wheels=permit_editable_wheels,
         )
-    if _looks_like_path(path_text):
-        url = _get_url_from_path(path_text, path_text)
+    if looks_like_path(path_text):
+        url = get_url_from_path(path_text, path_text)
         if url is None:
             raise InstallationError(
                 f"Invalid requirement: {text!r}. It looks like a path."
@@ -691,7 +691,7 @@ def install_req_from_line(
         link=(
             Link(parsed.url) if parsed.url else Link(text) if "://" in text else None
         ),
-        _marker=marker,
+        marker_internal=marker,
         isolated=isolated,
         user_supplied=user_supplied,
         hash_options=hash_options or {},
@@ -732,7 +732,7 @@ def install_req_from_editable(
         parsed,
         comes_from=comes_from,
         link=Link(url),
-        _marker=marker or parsed.marker,
+        marker_internal=marker or parsed.marker,
         editable=True,
         isolated=isolated,
         user_supplied=user_supplied,
@@ -764,7 +764,7 @@ def parse_editable(value: str) -> tuple[str | None, str, set[str]]:
             ]
         )
         url = base + (f"#{remaining_fragment}" if remaining_fragment else "")
-        url = _normalize_file_url_reference(stripped) or stripped
+        url = normalize_file_url_reference(stripped) or stripped
         if "[" in egg and egg.endswith("]"):
             name, extras_text = egg[:-1].split("[", 1)
             return (
@@ -779,11 +779,11 @@ def parse_editable(value: str) -> tuple[str | None, str, set[str]]:
         path_part, extras_text = stripped[:-1].split("[", 1)
         extras = {item.strip() for item in extras_text.split(",") if item.strip()}
     if (
-        _looks_like_path(path_part)
+        looks_like_path(path_part)
         or os.path.isdir(path_part)
         or os.path.exists(path_part)
     ):
-        normalized = _normalize_file_url_reference(path_part)
+        normalized = normalize_file_url_reference(path_part)
         if normalized is not None:
             return None, normalized, extras
         return (
@@ -794,7 +794,7 @@ def parse_editable(value: str) -> tuple[str | None, str, set[str]]:
     return None, stripped, extras
 
 
-def _looks_like_path(value: str) -> bool:
+def looks_like_path(value: str) -> bool:
     return (
         value.startswith((".", "/", "~"))
         or os.sep in value
@@ -804,12 +804,12 @@ def _looks_like_path(value: str) -> bool:
     )
 
 
-def _get_url_from_path(path: str, name: str) -> str | None:
+def get_url_from_path(path: str, name: str) -> str | None:
     parsed = urllib.parse.urlparse(path)
     if parsed.scheme == "file":
-        local_path = _path_from_file_url(parsed)
+        local_path = path_from_file_url(parsed)
         if local_path.is_file():
-            return _file_url_with_fragment(local_path, parsed.fragment)
+            return file_url_with_fragment(local_path, parsed.fragment)
         if local_path.is_dir():
             setup_py = local_path / "setup.py"
             pyproject = local_path / "pyproject.toml"
@@ -817,7 +817,7 @@ def _get_url_from_path(path: str, name: str) -> str | None:
                 raise InstallationError(
                     "Neither 'setup.py' nor 'pyproject.toml' found."
                 )
-            return _file_url_with_fragment(local_path, parsed.fragment)
+            return file_url_with_fragment(local_path, parsed.fragment)
         return None
     if " @ " in path or "@git+" in path or "://" in path and not Path(path).exists():
         return None
@@ -832,25 +832,31 @@ def _get_url_from_path(path: str, name: str) -> str | None:
     return None
 
 
-def _normalize_file_url_reference(value: str) -> str | None:
+def normalize_file_url_reference(value: str) -> str | None:
     parsed = urllib.parse.urlparse(value)
     if parsed.scheme != "file":
         return None
-    return _file_url_with_fragment(_path_from_file_url(parsed), parsed.fragment)
+    return file_url_with_fragment(path_from_file_url(parsed), parsed.fragment)
 
 
-def _path_from_file_url(parsed: urllib.parse.ParseResult) -> Path:
+def path_from_file_url(parsed: urllib.parse.ParseResult) -> Path:
     path = Path(urllib.request.url2pathname(parsed.path))
     if not path.is_absolute():
         path = Path.cwd() / path
     return path.resolve(strict=False)
 
 
-def _file_url_with_fragment(path: Path, fragment: str) -> str:
+def file_url_with_fragment(path: Path, fragment: str) -> str:
     url = path.resolve(strict=False).as_uri()
     return f"{url}#{fragment}" if fragment else url
 
 
 def file_hashes(path: str | Path) -> dict[str, str]:
-    digest = hashlib.sha256(Path(path).read_bytes()).hexdigest()
-    return {"sha256": digest}
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as stream:
+        size = os.fstat(stream.fileno()).st_size
+        buffer = bytearray(max(1, min(size, 1024 * 1024)))
+        view = memoryview(buffer)
+        while read := stream.readinto(buffer):
+            digest.update(view[:read])
+    return {"sha256": digest.hexdigest()}

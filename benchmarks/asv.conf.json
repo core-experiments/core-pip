@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "project": "pip",
+  "project_url": "https://pip.pypa.io/",
+  "repo": "..",
+  "branches": ["core-pip"],
+  "benchmark_dir": ".",
+  "environment_type": "virtualenv",
+  "build_command": "python -m pip wheel --no-deps -w {build_cache_dir} {build_dir}",
+  "uninstall_command": [],
+  "pythons": ["3.12"],
+  "matrix": {
+    "req": {
+      "uv": ["0.11.28"]
+    }
+  },
+  "env_dir": ".asv/env",
+  "results_dir": ".asv/results",
+  "html_dir": ".asv/html",
+  "default_benchmark_timeout": 180
+}

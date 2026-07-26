@@ -10,11 +10,11 @@ import pytest
 from pip.core import wheel
 from pip.core.errors import UnsupportedWheel
 
-_ZipDir = Callable[[Path], ZipFile]
+ZipDir = Callable[[Path], ZipFile]
 
 
 @pytest.fixture
-def zip_dir() -> Iterator[_ZipDir]:
+def zip_dir() -> Iterator[ZipDir]:
     def make_zip(path: Path) -> ZipFile:
         buf = BytesIO()
         with ZipFile(buf, "w", allowZip64=True) as z:
@@ -34,7 +34,7 @@ def zip_dir() -> Iterator[_ZipDir]:
         yield make_zip
 
 
-def test_wheel_dist_info_dir_found(tmp_path: Path, zip_dir: _ZipDir) -> None:
+def test_wheel_dist_info_dir_found(tmp_path: Path, zip_dir: ZipDir) -> None:
     expected = "simple-0.1.dist-info"
     dist_info_dir = tmp_path / expected
     dist_info_dir.mkdir()
@@ -42,7 +42,7 @@ def test_wheel_dist_info_dir_found(tmp_path: Path, zip_dir: _ZipDir) -> None:
     assert wheel.wheel_dist_info_dir(zip_dir(tmp_path), "simple") == expected
 
 
-def test_wheel_dist_info_dir_multiple(tmp_path: Path, zip_dir: _ZipDir) -> None:
+def test_wheel_dist_info_dir_multiple(tmp_path: Path, zip_dir: ZipDir) -> None:
     dist_info_dir_1 = tmp_path / "simple-0.1.dist-info"
     dist_info_dir_1.mkdir()
     dist_info_dir_1.joinpath("WHEEL").touch()
@@ -54,13 +54,13 @@ def test_wheel_dist_info_dir_multiple(tmp_path: Path, zip_dir: _ZipDir) -> None:
     assert "multiple .dist-info directories found" in str(e.value)
 
 
-def test_wheel_dist_info_dir_none(tmp_path: Path, zip_dir: _ZipDir) -> None:
+def test_wheel_dist_info_dir_none(tmp_path: Path, zip_dir: ZipDir) -> None:
     with pytest.raises(UnsupportedWheel) as e:
         wheel.wheel_dist_info_dir(zip_dir(tmp_path), "simple")
     assert "directory not found" in str(e.value)
 
 
-def test_wheel_dist_info_dir_wrong_name(tmp_path: Path, zip_dir: _ZipDir) -> None:
+def test_wheel_dist_info_dir_wrong_name(tmp_path: Path, zip_dir: ZipDir) -> None:
     dist_info_dir = tmp_path / "unrelated-0.1.dist-info"
     dist_info_dir.mkdir()
     dist_info_dir.joinpath("WHEEL").touch()
@@ -74,7 +74,7 @@ def test_wheel_version_ok() -> None:
 
 
 def test_parse_wheel_validates_and_returns_metadata(
-    tmp_path: Path, zip_dir: _ZipDir
+    tmp_path: Path, zip_dir: ZipDir
 ) -> None:
     dist_info_dir = tmp_path / "simple-0.1.dist-info"
     dist_info_dir.mkdir()
@@ -86,7 +86,22 @@ def test_parse_wheel_validates_and_returns_metadata(
     assert metadata["Wheel-Version"] == "1.0"
 
 
-def test_wheel_metadata_fails_missing_wheel(tmp_path: Path, zip_dir: _ZipDir) -> None:
+def test_validate_wheel_skips_email_metadata_parser(
+    tmp_path: Path, zip_dir: ZipDir, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    dist_info_dir = tmp_path / "simple-0.1.dist-info"
+    dist_info_dir.mkdir()
+    dist_info_dir.joinpath("WHEEL").write_text("Wheel-Version: 1.0\n")
+
+    def fail_parser() -> None:
+        raise AssertionError("constructed an email parser")
+
+    monkeypatch.setattr(wheel, "Parser", fail_parser)
+
+    assert wheel.validate_wheel(zip_dir(tmp_path), "simple") == dist_info_dir.name
+
+
+def test_wheel_metadata_fails_missing_wheel(tmp_path: Path, zip_dir: ZipDir) -> None:
     dist_info_dir = tmp_path / "simple-0.1.0.dist-info"
     dist_info_dir.mkdir()
     dist_info_dir.joinpath("METADATA").touch()
@@ -96,7 +111,7 @@ def test_wheel_metadata_fails_missing_wheel(tmp_path: Path, zip_dir: _ZipDir) ->
     assert "could not read" in str(e.value)
 
 
-def test_wheel_metadata_fails_on_bad_encoding(tmp_path: Path, zip_dir: _ZipDir) -> None:
+def test_wheel_metadata_fails_on_bad_encoding(tmp_path: Path, zip_dir: ZipDir) -> None:
     dist_info_dir = tmp_path / "simple-0.1.0.dist-info"
     dist_info_dir.mkdir()
     dist_info_dir.joinpath("METADATA").touch()

@@ -75,7 +75,7 @@ class TestSafeFileCache:
     def test_cache_hashes_are_same(self, cache_tmpdir: Path) -> None:
         cache = SafeFileCache(os.fspath(cache_tmpdir))
         key = "test key"
-        assert cache._get_cache_path(key).endswith(
+        assert cache.get_cache_path(key).endswith(
             hashlib.sha224(key.encode()).hexdigest()
         )
 
@@ -94,7 +94,7 @@ class TestSafeFileCache:
         with chmod(cache_tmpdir, perms):
             cache = SafeFileCache(os.fspath(cache_tmpdir))
             cache.set(key, b"bar")
-        assert (os.stat(cache._get_cache_path(key)).st_mode & 0o777) == expected_perms
+        assert (os.stat(cache.get_cache_path(key)).st_mode & 0o777) == expected_perms
 
     @pytest.mark.skipif("sys.platform == 'win32'")
     def test_cache_not_inherit_perms(
@@ -108,4 +108,4 @@ class TestSafeFileCache:
         with chmod(cache_tmpdir, 0o777):
             cache = SafeFileCache(os.fspath(cache_tmpdir))
             cache.set(key, b"bar")
-        assert (os.stat(cache._get_cache_path(key)).st_mode & 0o777) == 0o600
+        assert (os.stat(cache.get_cache_path(key)).st_mode & 0o777) == 0o600

@@ -363,7 +363,7 @@ def test_build_env_console_scripts_use_venv_python(
         )
 
     # Check that the console script import its own library.
-    console_script = shutil.which("goldfish", path=build_env._bin_path)
+    console_script = shutil.which("goldfish", path=build_env.bin_path_internal)
     assert console_script is not None, "console script wasn't found?!"
     result = script.run(console_script)
     assert result.stdout == "hello, world\n"

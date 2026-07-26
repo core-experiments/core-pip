@@ -44,7 +44,7 @@ class Default(Enum):
     token = 0
 
 
-_default = Default.token
+default_internal = Default.token
 
 T = TypeVar("T")
 
@@ -89,7 +89,7 @@ def make_metadata_file(
 
     path = dist_info_path(name, version, "METADATA")
 
-    if value is not _default:
+    if value is not default_internal:
         return File(path, ensure_binary(value))
 
     metadata: CaseInsensitiveDict[HeaderValue] = CaseInsensitiveDict(
@@ -99,11 +99,11 @@ def make_metadata_file(
             "Version": version,
         }
     )
-    if updates is not _default:
+    if updates is not default_internal:
         metadata.update(updates)
 
     message = message_from_dict(metadata)
-    if body is not _default:
+    if body is not default_internal:
         message.set_payload(body)
 
     return File(path, message.as_bytes())
@@ -121,7 +121,7 @@ def make_wheel_metadata_file(
 
     path = dist_info_path(name, version, "WHEEL")
 
-    if value is not _default:
+    if value is not default_internal:
         return File(path, ensure_binary(value))
 
     wheel_info: dict[str, HeaderValue] = {
@@ -132,7 +132,7 @@ def make_wheel_metadata_file(
     }
     metadata: CaseInsensitiveDict[HeaderValue] = CaseInsensitiveDict(wheel_info)
 
-    if updates is not _default:
+    if updates is not default_internal:
         metadata.update(updates)
 
     return File(path, message_from_dict(metadata).as_bytes())
@@ -144,15 +144,15 @@ def make_entry_points_file(
     entry_points: Defaulted[dict[str, list[str]]],
     console_scripts: Defaulted[list[str]],
 ) -> File | None:
-    if entry_points is _default and console_scripts is _default:
+    if entry_points is default_internal and console_scripts is default_internal:
         return None
 
-    if entry_points is _default:
+    if entry_points is default_internal:
         entry_points_data = {}
     else:
         entry_points_data = deepcopy(entry_points)
 
-    if console_scripts is not _default:
+    if console_scripts is not default_internal:
         entry_points_data["console_scripts"] = console_scripts
 
     lines = []
@@ -214,7 +214,7 @@ def record_file_maker_wrapper(
 
     record_path = dist_info_path(name, version, "RECORD")
 
-    if record is not _default:
+    if record is not default_internal:
         yield File(record_path, ensure_binary(record))
         return
 
@@ -252,8 +252,8 @@ class WheelBuilder:
     """A wheel that can be saved or converted to several formats."""
 
     def __init__(self, name: str, files: Iterable[File]) -> None:
-        self._name = name
-        self._files = files
+        self.name_internal = name
+        self.files_internal = files
 
     def save_to_dir(self, path: Path | str) -> str:
         """Generate wheel file with correct name and save into the provided
@@ -261,7 +261,7 @@ class WheelBuilder:
 
         :returns the wheel file path
         """
-        p = Path(path) / self._name
+        p = Path(path) / self.name_internal
         p.write_bytes(self.as_bytes())
         return str(p)
 
@@ -278,7 +278,7 @@ class WheelBuilder:
     def as_bytes(self) -> bytes:
         with BytesIO() as buf:
             with ZipFile(buf, "w") as z:
-                for file in self._files:
+                for file in self.files_internal:
                     z.writestr(file.name, file.contents)
             return buf.getvalue()
 
@@ -290,24 +290,24 @@ class WheelBuilder:
             return MetadataDistribution.from_wheel_archive(
                 archive,
                 canonicalize_name(name),
-                self._name,
+                self.name_internal,
             )
 
 
 def make_wheel(
     name: str,
     version: str,
-    wheel_metadata: Defaulted[AnyStr | None] = _default,
-    wheel_metadata_updates: Defaulted[dict[str, HeaderValue]] = _default,
-    metadata: Defaulted[AnyStr | None] = _default,
-    metadata_body: Defaulted[AnyStr] = _default,
-    metadata_updates: Defaulted[dict[str, HeaderValue]] = _default,
-    extra_files: Defaulted[dict[str, bytes | str]] = _default,
-    extra_metadata_files: Defaulted[dict[str, AnyStr]] = _default,
-    extra_data_files: Defaulted[dict[str, AnyStr]] = _default,
-    console_scripts: Defaulted[list[str]] = _default,
-    entry_points: Defaulted[dict[str, list[str]]] = _default,
-    record: Defaulted[AnyStr | None] = _default,
+    wheel_metadata: Defaulted[AnyStr | None] = default_internal,
+    wheel_metadata_updates: Defaulted[dict[str, HeaderValue]] = default_internal,
+    metadata: Defaulted[AnyStr | None] = default_internal,
+    metadata_body: Defaulted[AnyStr] = default_internal,
+    metadata_updates: Defaulted[dict[str, HeaderValue]] = default_internal,
+    extra_files: Defaulted[dict[str, bytes | str]] = default_internal,
+    extra_metadata_files: Defaulted[dict[str, AnyStr]] = default_internal,
+    extra_data_files: Defaulted[dict[str, AnyStr]] = default_internal,
+    console_scripts: Defaulted[list[str]] = default_internal,
+    entry_points: Defaulted[dict[str, list[str]]] = default_internal,
+    record: Defaulted[AnyStr | None] = default_internal,
 ) -> WheelBuilder:
     """
     Helper function for generating test wheels which are compliant by default.
@@ -382,13 +382,13 @@ def make_wheel(
         make_entry_points_file(name, version, entry_points, console_scripts),
     ]
 
-    if extra_files is not _default:
+    if extra_files is not default_internal:
         possible_files.extend(make_files(extra_files))
 
-    if extra_metadata_files is not _default:
+    if extra_metadata_files is not default_internal:
         possible_files.extend(make_metadata_files(name, version, extra_metadata_files))
 
-    if extra_data_files is not _default:
+    if extra_data_files is not default_internal:
         possible_files.extend(make_data_files(name, version, extra_data_files))
 
     actual_files = filter(None, possible_files)

@@ -2,25 +2,44 @@
 
 from __future__ import annotations
 
-import shutil
-import tempfile
 import urllib.parse
 import urllib.request
-import atexit
 import hashlib
 import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from pip.index.vcs import materialize_vcs, vcs_scheme
 from pip.core.errors import InstallationError
 
 logger = logging.getLogger(__name__)
 
 
-_DOWNLOAD_DIR = Path(tempfile.mkdtemp(prefix="pip-index-downloads-"))
-atexit.register(shutil.rmtree, _DOWNLOAD_DIR, ignore_errors=True)
+DOWNLOAD_DIR: Path | None = None
+
+
+def vcs_scheme(url: str) -> str | None:
+    from pip.index.vcs import vcs_scheme as parse_vcs_scheme
+
+    return parse_vcs_scheme(url)
+
+
+def materialize_vcs(url: str, *, prompting: bool = True) -> Path:
+    from pip.index.vcs import materialize_vcs as materialize
+
+    return materialize(url, prompting=prompting)
+
+
+def download_dir_internal() -> Path:
+    import atexit
+    import shutil
+    import tempfile
+
+    global DOWNLOAD_DIR
+    if DOWNLOAD_DIR is None:
+        DOWNLOAD_DIR = Path(tempfile.mkdtemp(prefix="pip-index-downloads-"))
+        atexit.register(shutil.rmtree, DOWNLOAD_DIR, ignore_errors=True)
+    return DOWNLOAD_DIR
 
 
 @dataclass(frozen=True)
@@ -29,13 +48,23 @@ class ArtifactLocator:
 
     session: Any = None
 
-    def ensure_local(self, url_or_path: str) -> Path:
-        if vcs_scheme(url_or_path) is not None:
+    def ensure_local(
+        self,
+        url_or_path: str,
+        *,
+        is_vcs: bool | None = None,
+        local_path: str | Path | None = None,
+    ) -> Path:
+        if is_vcs is None:
+            is_vcs = vcs_scheme(url_or_path) is not None
+        if is_vcs:
             prompting = True
             if self.session is not None:
                 prompting = getattr(self.session.auth, "prompting", True)
             return materialize_vcs(url_or_path, prompting=prompting)
-        local = self.local_path(url_or_path)
+        local = (
+            Path(local_path) if local_path is not None else self.local_path(url_or_path)
+        )
         if local is not None:
             return local
 
@@ -44,12 +73,16 @@ class ArtifactLocator:
         # The URL digest preserves the original filename while preventing
         # same-basename artifacts from overwriting one another.
         target = (
-            _DOWNLOAD_DIR / hashlib.sha256(url_or_path.encode()).hexdigest() / filename
+            download_dir_internal()
+            / hashlib.sha256(url_or_path.encode()).hexdigest()
+            / filename
         )
         target.parent.mkdir(parents=True, exist_ok=True)
         parsed = urllib.parse.urlparse(url_or_path)
         url = parsed._replace(fragment="").geturl()
         if self.session is None:
+            import shutil
+
             response = urllib.request.urlopen(url)
             try:
                 with open(target, "wb") as file:

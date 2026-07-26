@@ -207,10 +207,10 @@ def pytest_collection_modifyitems(config: Config, items: list[pytest.Function]) 
         else:
             raise RuntimeError(f"Unknown test type (filename = {module_path})")
 
-    _shard_collected_items(config, items)
+    shard_collected_items(config, items)
 
 
-def _shard_collected_items(config: Config, items: list[pytest.Function]) -> None:
+def shard_collected_items(config: Config, items: list[pytest.Function]) -> None:
     """Keep only the tests belonging to the configured CI shard.
 
     Tests are assigned to a group by a stable hash of their node id, which keeps
@@ -505,7 +505,7 @@ def pip_editable_parts(
     return (pth, dist_info)
 
 
-def _common_wheel_editable_install(
+def common_wheel_editable_install(
     tmpdir_factory: pytest.TempPathFactory, common_wheels: Path, package: str
 ) -> Path:
     wheel_candidates = list(common_wheels.glob(f"{package}-*.whl"))
@@ -544,19 +544,19 @@ def _common_wheel_editable_install(
 def setuptools_install(
     tmpdir_factory: pytest.TempPathFactory, common_wheels: Path
 ) -> Path:
-    return _common_wheel_editable_install(tmpdir_factory, common_wheels, "setuptools")
+    return common_wheel_editable_install(tmpdir_factory, common_wheels, "setuptools")
 
 
 @pytest.fixture(scope="session")
 def coverage_install(
     tmpdir_factory: pytest.TempPathFactory, common_wheels: Path
 ) -> Path:
-    return _common_wheel_editable_install(tmpdir_factory, common_wheels, "coverage")
+    return common_wheel_editable_install(tmpdir_factory, common_wheels, "coverage")
 
 
 @pytest.fixture(scope="session")
 def socket_install(tmpdir_factory: pytest.TempPathFactory, common_wheels: Path) -> Path:
-    lib_dir = _common_wheel_editable_install(
+    lib_dir = common_wheel_editable_install(
         tmpdir_factory, common_wheels, "pytest_subket"
     )
     # pytest-subket is only included so it can intercept and block unexpected
@@ -1091,10 +1091,10 @@ class OneTimeDownloadHandler(http.server.SimpleHTTPRequestHandler):
     """Serve files from the current directory, but error if a file is downloaded more
     than once."""
 
-    _seen_paths: ClassVar[set[str]] = set()
+    seen_paths: ClassVar[set[str]] = set()
 
     def do_GET(self) -> None:
-        if self.path in self._seen_paths:
+        if self.path in self.seen_paths:
             self.send_error(
                 http.HTTPStatus.NOT_FOUND,
                 f"File {self.path} not available more than once!",
@@ -1102,7 +1102,7 @@ class OneTimeDownloadHandler(http.server.SimpleHTTPRequestHandler):
             return
         super().do_GET()
         if not (self.path.endswith("/") or self.path.endswith(".metadata")):
-            self._seen_paths.add(self.path)
+            self.seen_paths.add(self.path)
 
 
 @pytest.fixture
@@ -1125,7 +1125,7 @@ def html_index_with_onetime_server(
             )
 
     class Handler(OneTimeDownloadHandler):
-        _seen_paths: ClassVar[set[str]] = set()
+        seen_paths: ClassVar[set[str]] = set()
 
     with patch_getfqdn(), InDirectoryServer(("", 8000), Handler) as httpd:
         server_thread = threading.Thread(target=httpd.serve_forever)

@@ -10,8 +10,8 @@ import pytest
 from pip.index.links import Link
 from pip.network.download import (
     Downloader,
-    _get_http_response_size,
-    _log_download,
+    get_http_response_size,
+    log_download,
     parse_content_disposition,
     sanitize_content_filename,
 )
@@ -28,7 +28,7 @@ from pip_test_support.requests_mocks import BrokenStream, MockResponse
 from pip_test_support.server import Body, MockServer
 
 if TYPE_CHECKING:
-    from _typeshed.wsgi import StartResponse, WSGIEnvironment
+    from typeshed.wsgi import StartResponse, WSGIEnvironment
 
 
 @pytest.mark.parametrize(
@@ -100,8 +100,8 @@ def test_log_download(
     if from_cache:
         resp.from_cache = from_cache
     link = Link(url)
-    total_length = _get_http_response_size(resp)
-    _log_download(
+    total_length = get_http_response_size(resp)
+    log_download(
         resp,
         link,
         progress_bar="on",
@@ -130,7 +130,7 @@ def test_log_download(
 def test_get_http_response_size(content_length: str, expected: int | None) -> None:
     resp = MockResponse(b"")
     resp.headers["content-length"] = content_length
-    assert _get_http_response_size(resp) == expected
+    assert get_http_response_size(resp) == expected
 
 
 @pytest.mark.parametrize(
@@ -352,9 +352,9 @@ def test_downloader(
         resp.headers.update(headers)
         resp.status_code = status_code
         responses.append(resp)
-    _http_get_mock = MagicMock(side_effect=responses)
+    http_get_mock = MagicMock(side_effect=responses)
 
-    with patch.object(Downloader, "_http_get", _http_get_mock):
+    with patch.object(Downloader, "http_get", http_get_mock):
         if expected_bytes is None:
             remove = MagicMock(return_value=None)
             with patch("os.remove", remove):
@@ -376,7 +376,7 @@ def test_downloader(
         calls.append(call(link, headers))
 
     # Make sure that the downloader makes additional requests for resumption
-    _http_get_mock.assert_has_calls(calls)
+    http_get_mock.assert_has_calls(calls)
 
 
 def test_downloader_resumes_on_protocol_error(tmp_path: Path) -> None:
@@ -396,9 +396,9 @@ def test_downloader_resumes_on_protocol_error(tmp_path: Path) -> None:
     resume_resp.headers.update({"content-length": "12"})
     resume_resp.status_code = 206
 
-    _http_get_mock = MagicMock(side_effect=[broken_resp, resume_resp])
+    http_get_mock = MagicMock(side_effect=[broken_resp, resume_resp])
 
-    with patch.object(Downloader, "_http_get", _http_get_mock):
+    with patch.object(Downloader, "http_get", http_get_mock):
         filepath, _ = downloader(link, str(tmp_path))
 
     with open(filepath, "rb") as f:
@@ -431,12 +431,12 @@ def test_downloader_retries_low_level_errors_during_resume(
     resume_resp.headers.update({"content-length": "12"})
     resume_resp.status_code = 206
 
-    _http_get_mock = MagicMock(side_effect=[broken_resp, resume_error, resume_resp])
+    http_get_mock = MagicMock(side_effect=[broken_resp, resume_error, resume_resp])
 
-    with patch.object(Downloader, "_http_get", _http_get_mock):
+    with patch.object(Downloader, "http_get", http_get_mock):
         filepath, _ = downloader(link, str(tmp_path))
 
-    assert _http_get_mock.call_count == 3
+    assert http_get_mock.call_count == 3
     with open(filepath, "rb") as f:
         assert f.read() == b"0cfa7e9d-1868-4dd7-9fb3-f2561d5dfd89"
 
@@ -478,12 +478,12 @@ def test_downloader_retries_diagnostic_connection_errors_during_resume(
     resume_resp.headers.update({"content-length": "12"})
     resume_resp.status_code = 206
 
-    _http_get_mock = MagicMock(side_effect=[broken_resp, resume_error, resume_resp])
+    http_get_mock = MagicMock(side_effect=[broken_resp, resume_error, resume_resp])
 
-    with patch.object(Downloader, "_http_get", _http_get_mock):
+    with patch.object(Downloader, "http_get", http_get_mock):
         filepath, _ = downloader(link, str(tmp_path))
 
-    assert _http_get_mock.call_count == 3
+    assert http_get_mock.call_count == 3
     with open(filepath, "rb") as f:
         assert f.read() == b"0cfa7e9d-1868-4dd7-9fb3-f2561d5dfd89"
 
@@ -499,13 +499,13 @@ def test_downloader_does_not_retry_on_ssl_missing_error(tmp_path: Path) -> None:
     broken_resp.status_code = 200
     resume_error = SSLMissingError("https://example.com/foo.tgz")
 
-    _http_get_mock = MagicMock(side_effect=[broken_resp, resume_error])
+    http_get_mock = MagicMock(side_effect=[broken_resp, resume_error])
 
-    with patch.object(Downloader, "_http_get", _http_get_mock):
+    with patch.object(Downloader, "http_get", http_get_mock):
         with pytest.raises(type(resume_error)):
             downloader(link, str(tmp_path))
 
-    assert _http_get_mock.call_count == 2
+    assert http_get_mock.call_count == 2
 
 
 def test_downloader_resumes_on_truncated_http_stream(
@@ -563,8 +563,8 @@ def test_downloader_crashes_on_mismatched_resume_offset(tmp_path: Path) -> None:
     )
     mismatched.status_code = 206
 
-    _http_get_mock = MagicMock(side_effect=[first, mismatched])
-    with patch.object(Downloader, "_http_get", _http_get_mock):
+    http_get_mock = MagicMock(side_effect=[first, mismatched])
+    with patch.object(Downloader, "http_get", http_get_mock):
         with pytest.raises(IncompleteDownloadError):
             downloader(link, str(tmp_path))
 
@@ -580,12 +580,12 @@ def test_downloader_without_content_length(tmp_path: Path) -> None:
     resp = MockResponse(body)
     resp.status_code = 200
 
-    assert _get_http_response_size(resp) is None
+    assert get_http_response_size(resp) is None
 
     session = NetworkSession(resume_retries=0)
     downloader = Downloader(session, "on")
     link = Link("http://example.com/foo.tgz")
-    with patch.object(Downloader, "_http_get", MagicMock(return_value=resp)):
+    with patch.object(Downloader, "http_get", MagicMock(return_value=resp)):
         filepath, _ = downloader(link, str(tmp_path))
 
     with open(filepath, "rb") as downloaded_file:
@@ -609,9 +609,9 @@ def test_resumed_download_caching(tmp_path: Path) -> None:
     resume_resp.status_code = 206
 
     responses = [incomplete_resp, resume_resp]
-    _http_get_mock = MagicMock(side_effect=responses)
+    http_get_mock = MagicMock(side_effect=responses)
 
-    with patch.object(Downloader, "_http_get", _http_get_mock):
+    with patch.object(Downloader, "http_get", http_get_mock):
         # Perform the download (incomplete then resumed)
         filepath, _ = downloader(link, str(tmp_path))
 

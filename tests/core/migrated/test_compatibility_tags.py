@@ -14,12 +14,12 @@ class Testcompatibility_tags:
         """
         get_config_var = sysconfig.get_config_var
 
-        def _mock_get_config_var(var: str) -> Any:
+        def mock_get_config_var_internal(var: str) -> Any:
             if var in kwd:
                 return kwd[var]
             return get_config_var(var)
 
-        return _mock_get_config_var
+        return mock_get_config_var_internal
 
     def test_no_hyphen_tag(self) -> None:
         """

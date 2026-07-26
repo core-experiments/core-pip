@@ -79,7 +79,7 @@ class DistributionPreparer:
                     self.build_isolation,
                     self.check_build_deps,
                 )
-            distribution = req._distribution
+            distribution = req.distribution_internal
             if distribution is None:
                 directory = req.metadata_directory
                 if directory is None:
@@ -95,7 +95,7 @@ class DistributionPreparer:
         return MetadataDistribution.from_wheel(path, name)
 
 
-def _canonical_requires(
+def canonical_requires(
     req: InstallRequirement, dist: MetadataView, source: str
 ) -> frozenset[str]:
     canonical: set[str] = set()
@@ -125,10 +125,10 @@ def check_sidecar_matches_wheel(
             req, "Version", str(sidecar_dist.version), str(wheel_dist.version)
         )
 
-    sidecar_requires = _canonical_requires(
+    sidecar_requires = canonical_requires(
         req, sidecar_dist, "the PEP 658 .metadata file"
     )
-    wheel_requires = _canonical_requires(req, wheel_dist, "the wheel's METADATA")
+    wheel_requires = canonical_requires(req, wheel_dist, "the wheel's METADATA")
     if sidecar_requires != wheel_requires:
         raise SidecarMetadataInconsistent(
             req,

@@ -18,10 +18,10 @@ from pip.core.errors import InstallationError
 from pip.core.packaging import InvalidVersion, canonicalize_name
 
 logger = logging.getLogger(__name__)
-_VALID_NAME = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$")
+VALID_NAME = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$")
 
 
-class _EditableInfo(NamedTuple):
+class EditableInfo(NamedTuple):
     requirement: str
     comments: list[str]
 
@@ -44,7 +44,7 @@ def freeze(
         user_site=site.getusersitepackages(),
     ).iter(local_only=local_only, user_only=user_only)
     for dist in dists:
-        if _VALID_NAME.fullmatch(dist.raw_name) is None:
+        if VALID_NAME.fullmatch(dist.raw_name) is None:
             logger.warning(
                 "Ignoring invalid distribution %s (%s)",
                 dist.canonical_name,
@@ -174,7 +174,7 @@ def freeze(
             yield str(installation).rstrip() + "\n"
 
 
-def _format_as_name_version(dist: InstalledMetadataDistribution) -> str:
+def format_as_name_version(dist: InstalledMetadataDistribution) -> str:
     try:
         dist_version = dist.version
     except InvalidVersion:
@@ -184,7 +184,7 @@ def _format_as_name_version(dist: InstalledMetadataDistribution) -> str:
         return f"{dist.raw_name}=={dist_version}"
 
 
-def _get_editable_info(dist: InstalledMetadataDistribution) -> _EditableInfo:
+def get_editable_info(dist: InstalledMetadataDistribution) -> EditableInfo:
     """
     Compute and return values (req, comments) for use in
     FrozenRequirement.from_dist().
@@ -199,13 +199,13 @@ def _get_editable_info(dist: InstalledMetadataDistribution) -> _EditableInfo:
     vcs_backend = vcs.get_backend_for_dir(location)
 
     if vcs_backend is None:
-        display = _format_as_name_version(dist)
+        display = format_as_name_version(dist)
         logger.debug(
             'No VCS found for editable requirement "%s" in: %r',
             display,
             location,
         )
-        return _EditableInfo(
+        return EditableInfo(
             requirement=location,
             comments=[f"# Editable install with no version control ({display})"],
         )
@@ -215,14 +215,14 @@ def _get_editable_info(dist: InstalledMetadataDistribution) -> _EditableInfo:
     try:
         req = vcs_backend.get_src_requirement(location, dist.raw_name)
     except RemoteNotFoundError:
-        display = _format_as_name_version(dist)
-        return _EditableInfo(
+        display = format_as_name_version(dist)
+        return EditableInfo(
             requirement=location,
             comments=[f"# Editable {vcs_name} install with no remote ({display})"],
         )
     except RemoteNotValidError as ex:
-        display = _format_as_name_version(dist)
-        return _EditableInfo(
+        display = format_as_name_version(dist)
+        return EditableInfo(
             requirement=location,
             comments=[
                 f"# Editable {vcs_name} install ({display}) with either a deleted "
@@ -237,15 +237,15 @@ def _get_editable_info(dist: InstalledMetadataDistribution) -> _EditableInfo:
             location,
             vcs_backend.name,
         )
-        return _EditableInfo(requirement=location, comments=[])
+        return EditableInfo(requirement=location, comments=[])
     except InstallationError as exc:
         logger.warning("Error when trying to get requirement for VCS system %s", exc)
     else:
-        return _EditableInfo(requirement=req, comments=[])
+        return EditableInfo(requirement=req, comments=[])
 
     logger.warning("Could not determine repository location of %s", location)
 
-    return _EditableInfo(
+    return EditableInfo(
         requirement=location,
         comments=["## !! Could not determine repository location"],
     )
@@ -266,7 +266,7 @@ class FrozenRequirement:
     def from_dist(cls, dist: InstalledMetadataDistribution) -> FrozenRequirement:
         editable = dist.editable
         if editable:
-            req, comments = _get_editable_info(dist)
+            req, comments = get_editable_info(dist)
         else:
             comments = []
             direct_url = dist.direct_url
@@ -275,7 +275,7 @@ class FrozenRequirement:
                 req = direct_url.as_pep440_direct_reference(dist.raw_name)
             else:
                 # name==version requirement
-                req = _format_as_name_version(dist)
+                req = format_as_name_version(dist)
 
         return cls(dist.raw_name, req, editable, comments=comments)
 

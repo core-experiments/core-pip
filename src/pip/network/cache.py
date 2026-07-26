@@ -53,14 +53,14 @@ class SafeFileCache:
         super().__init__()
         self.directory = directory
 
-    def _get_cache_path(self, name: str) -> str:
+    def get_cache_path(self, name: str) -> str:
         hashed = hashlib.sha224(name.encode()).hexdigest()
         parts = list(hashed[:5]) + [hashed]
         return os.path.join(self.directory, *parts)
 
     def get(self, key: str) -> bytes | None:
         # The cache entry is only valid if both metadata and body exist.
-        metadata_path = self._get_cache_path(key)
+        metadata_path = self.get_cache_path(key)
         body_path = metadata_path + ".body"
         if not (os.path.exists(metadata_path) and os.path.exists(body_path)):
             return None
@@ -68,7 +68,7 @@ class SafeFileCache:
             with open(metadata_path, "rb") as f:
                 return f.read()
 
-    def _write_to_file(self, path: str, writer_func: Callable[[BinaryIO], Any]) -> None:
+    def write_to_file(self, path: str, writer_func: Callable[[BinaryIO], Any]) -> None:
         """Common file writing logic with proper permissions and atomic replacement."""
         with suppressed_cache_errors():
             ensure_dir(os.path.dirname(path))
@@ -81,20 +81,20 @@ class SafeFileCache:
 
             replace(f.name, path)
 
-    def _write(self, path: str, data: bytes) -> None:
-        self._write_to_file(path, lambda f: f.write(data))
+    def write_internal(self, path: str, data: bytes) -> None:
+        self.write_to_file(path, lambda f: f.write(data))
 
-    def _write_from_io(self, path: str, source_file: BinaryIO) -> None:
-        self._write_to_file(path, lambda f: shutil.copyfileobj(source_file, f))
+    def write_from_io(self, path: str, source_file: BinaryIO) -> None:
+        self.write_to_file(path, lambda f: shutil.copyfileobj(source_file, f))
 
     def set(
         self, key: str, value: bytes, expires: int | datetime | None = None
     ) -> None:
-        path = self._get_cache_path(key)
-        self._write(path, value)
+        path = self.get_cache_path(key)
+        self.write_internal(path, value)
 
     def delete(self, key: str) -> None:
-        path = self._get_cache_path(key)
+        path = self.get_cache_path(key)
         with suppressed_cache_errors():
             os.remove(path)
         with suppressed_cache_errors():
@@ -102,7 +102,7 @@ class SafeFileCache:
 
     def get_body(self, key: str) -> BinaryIO | None:
         # The cache entry is only valid if both metadata and body exist.
-        metadata_path = self._get_cache_path(key)
+        metadata_path = self.get_cache_path(key)
         body_path = metadata_path + ".body"
         if not (os.path.exists(metadata_path) and os.path.exists(body_path)):
             return None
@@ -110,10 +110,10 @@ class SafeFileCache:
             return open(body_path, "rb")
 
     def set_body(self, key: str, body: bytes) -> None:
-        path = self._get_cache_path(key) + ".body"
-        self._write(path, body)
+        path = self.get_cache_path(key) + ".body"
+        self.write_internal(path, body)
 
     def set_body_from_io(self, key: str, body_file: BinaryIO) -> None:
         """Set the body of the cache entry from a file object."""
-        path = self._get_cache_path(key) + ".body"
-        self._write_from_io(path, body_file)
+        path = self.get_cache_path(key) + ".body"
+        self.write_from_io(path, body_file)

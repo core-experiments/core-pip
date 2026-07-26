@@ -9,11 +9,11 @@ from pip.resolution.req_install import InstallRequirement
 
 @dataclass
 class RequirementSet:
-    _named: dict[str, InstallRequirement] = field(default_factory=dict)
-    _unnamed: list[InstallRequirement] = field(default_factory=list)
+    named_internal: dict[str, InstallRequirement] = field(default_factory=dict)
+    unnamed: list[InstallRequirement] = field(default_factory=list)
 
     @staticmethod
-    def _name(requirement: InstallRequirement) -> str | None:
+    def name_internal(requirement: InstallRequirement) -> str | None:
         name = requirement.name
         if name is not None:
             return name
@@ -21,35 +21,38 @@ class RequirementSet:
         return parsed.name if parsed is not None else None
 
     def add_named_requirement(self, requirement: InstallRequirement) -> None:
-        name = self._name(requirement)
+        name = self.name_internal(requirement)
         if not name:
             raise ValueError("named requirements must define a parsed requirement")
-        self._named[canonicalize_name(name)] = requirement
+        self.named_internal[canonicalize_name(name)] = requirement
 
     def add_unnamed_requirement(self, requirement: InstallRequirement) -> None:
-        self._unnamed.append(requirement)
+        self.unnamed.append(requirement)
 
     def has_requirement(self, name: str) -> bool:
         normalized = canonicalize_name(name)
-        return normalized in self._named and not self._named[normalized].constraint
+        return (
+            normalized in self.named_internal
+            and not self.named_internal[normalized].constraint
+        )
 
     def get_requirement(self, name: str) -> InstallRequirement:
         normalized = canonicalize_name(name)
-        if normalized in self._named:
-            return self._named[normalized]
+        if normalized in self.named_internal:
+            return self.named_internal[normalized]
         raise KeyError(f"No project with the name {name!r}")
 
     @property
     def requirements(self) -> dict[str, InstallRequirement]:
-        return dict(self._named)
+        return dict(self.named_internal)
 
     @property
     def unnamed_requirements(self) -> list[InstallRequirement]:
-        return list(self._unnamed)
+        return list(self.unnamed)
 
     @property
     def all_requirements(self) -> list[InstallRequirement]:
-        return [*self._named.values(), *self._unnamed]
+        return [*self.named_internal.values(), *self.unnamed]
 
     @property
     def requirements_to_install(self) -> list[InstallRequirement]:

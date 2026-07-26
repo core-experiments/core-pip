@@ -56,7 +56,7 @@ class VenvCreationError(DiagnosticPipError):
         )
 
 
-def _get_venv_path_from_sysconfig(name: str, env_dir: str) -> str:
+def get_venv_path_from_sysconfig(name: str, env_dir: str) -> str:
     vars = {
         "base": env_dir,
         "platbase": env_dir,
@@ -75,34 +75,38 @@ class VenvBuildEnvironment(BuildEnvironment):
         except ImportError:
             raise VenvImportError
 
-        self._env_path = TempDirectory(
+        self.env_path_internal = TempDirectory(
             kind=tempdir_kinds.BUILD_ENV, globally_managed=True
         ).path
         # Use symlinks to support relocatable Python installations on POSIX, including
         # python-build-standalone. This matches upstream venv CLI's behaviour.
         env = venv.EnvBuilder(symlinks=(os.name != "nt"))
         try:
-            context = env.ensure_directories(self._env_path)
-            env.create(self._env_path)
+            context = env.ensure_directories(self.env_path_internal)
+            env.create(self.env_path_internal)
         except OSError as e:
             raise VenvCreationError(str(e))
 
         if sys.version_info >= (3, 12):
             # The context object was only documented in Python 3.12
             self.lib_dirs = [context.lib_path]
-            self._bin_path = context.bin_path
+            self.bin_path_internal = context.bin_path
         elif sys.version_info[:2] == (3, 11):
             # On Python 3.11, we can use sysconfig.
-            self.lib_dirs = [_get_venv_path_from_sysconfig("purelib", self._env_path)]
-            self._bin_path = _get_venv_path_from_sysconfig("scripts", self._env_path)
+            self.lib_dirs = [
+                get_venv_path_from_sysconfig("purelib", self.env_path_internal)
+            ]
+            self.bin_path_internal = get_venv_path_from_sysconfig(
+                "scripts", self.env_path_internal
+            )
         else:
             # Otherwise, we need to manually construct all the paths... sigh.
             if sys.platform == "win32":
-                libpath = os.path.join(self._env_path, "Lib", "site-packages")
+                libpath = os.path.join(self.env_path_internal, "Lib", "site-packages")
             else:
                 python = "pypy" if sys.implementation.name == "pypy" else "python"
                 libpath = os.path.join(
-                    self._env_path,
+                    self.env_path_internal,
                     "lib",
                     f"{python}{sys.version_info.major}.{sys.version_info.minor}",
                     "site-packages",
@@ -110,10 +114,12 @@ class VenvBuildEnvironment(BuildEnvironment):
             self.lib_dirs = [libpath]
             # Same reasoning for try-except as for python_executable below.
             try:
-                self._bin_path = context.bin_path
+                self.bin_path_internal = context.bin_path
             except AttributeError:
                 scripts_dir = "Scripts" if os.name == "nt" else "bin"
-                self._bin_path = os.path.join(self._env_path, scripts_dir)
+                self.bin_path_internal = os.path.join(
+                    self.env_path_internal, scripts_dir
+                )
 
         # There are enough ways trying to construct the Python executable path can go
         # wrong that we're better off assuming that the context object has the right
@@ -128,10 +134,12 @@ class VenvBuildEnvironment(BuildEnvironment):
                 self.python_executable = context.env_exe
             except AttributeError:
                 executable_name = "python.exe" if os.name == "nt" else "python"
-                self.python_executable = os.path.join(self._bin_path, executable_name)
+                self.python_executable = os.path.join(
+                    self.bin_path_internal, executable_name
+                )
 
-        self._save_env: dict[str, str | None] = {}
-        self._installer = installer
+        self.save_env: dict[str, str | None] = {}
+        self.installer_internal = installer
 
         if not os.path.exists(self.python_executable):
             # This error is only likely on Windows due to interference from AV software.
@@ -142,12 +150,12 @@ class VenvBuildEnvironment(BuildEnvironment):
     def __enter__(self) -> None:
         # We want backend calls to be able to use binaries installed as if this
         # virtual environment was "activated".
-        self._save_env = {
+        self.save_env = {
             name: os.environ.get(name, None) for name in ("PATH", "PYTHONPATH")
         }
 
-        new_path = [self._bin_path]
-        if old_path := self._save_env["PATH"]:
+        new_path = [self.bin_path_internal]
+        if old_path := self.save_env["PATH"]:
             new_path.extend(old_path.split(os.pathsep))
         # However, we don't want a pre-existing PYTHONPATH to influence the
         # backend calls.
@@ -166,5 +174,9 @@ class VenvBuildEnvironment(BuildEnvironment):
 
         # TODO: when better support for installing to arbitrary Python environments
         # is added, replace this prefix hack with that.
-        prefix = Prefix(self._env_path, python_executable=self.python_executable)
-        self._installer.install(requirements, prefix, kind=kind, for_req=for_req)
+        prefix = Prefix(
+            self.env_path_internal, python_executable=self.python_executable
+        )
+        self.installer_internal.install(
+            requirements, prefix, kind=kind, for_req=for_req
+        )

@@ -42,7 +42,7 @@ def test_install_from_index_with_invalid_specifier(
     assert "Would install require-invalid-version-0.1" in result.stdout
 
 
-def _install_invalid_version(script: PipTestEnvironment, data: TestData) -> None:
+def install_invalid_version(script: PipTestEnvironment, data: TestData) -> None:
     """
     Install a package with an invalid version.
     """
@@ -52,9 +52,7 @@ def _install_invalid_version(script: PipTestEnvironment, data: TestData) -> None
         zf.extractall(script.site_packages_path)
 
 
-def _install_require_invalid_version(
-    script: PipTestEnvironment, data: TestData
-) -> None:
+def install_require_invalid_version(script: PipTestEnvironment, data: TestData) -> None:
     """
     Install a package with an invalid version.
     """
@@ -68,7 +66,7 @@ def test_uninstall_invalid_version(script: PipTestEnvironment, data: TestData) -
     """
     Test that it is possible to uninstall a distribution with an invalid version.
     """
-    _install_invalid_version(script, data)
+    install_invalid_version(script, data)
     script.pip("uninstall", "-y", "invalid-version")
 
 
@@ -77,7 +75,7 @@ def test_upgrade_invalid_version(script: PipTestEnvironment, data: TestData) -> 
     """
     Test that it is possible to upgrade a distribution with an invalid version.
     """
-    _install_invalid_version(script, data)
+    install_invalid_version(script, data)
     index_url = data.index_url("invalid-version")
     script.pip("install", "--index-url", index_url, "invalid-version")
 
@@ -89,7 +87,7 @@ def test_upgrade_require_invalid_version(
     """
     Test that it is possible to upgrade a distribution with an invalid metadata.
     """
-    _install_require_invalid_version(script, data)
+    install_require_invalid_version(script, data)
     index_url = data.index_url("require-invalid-version")
     script.pip("install", "--index-url", index_url, "require-invalid-version")
 
@@ -101,7 +99,7 @@ def test_list_invalid_version(
     """
     Test that pip can list an environment containing a package with a legacy version.
     """
-    _install_invalid_version(script, data)
+    install_invalid_version(script, data)
     script.pip("list", f"--format={format}")
 
 
@@ -109,7 +107,7 @@ def test_freeze_invalid_version(script: PipTestEnvironment, data: TestData) -> N
     """
     Test that pip can freeze an environment containing a package with a legacy version.
     """
-    _install_invalid_version(script, data)
+    install_invalid_version(script, data)
     result = script.pip("freeze")
     assert "invalid-version===2010i\n" in result.stdout
 
@@ -118,7 +116,7 @@ def test_show_invalid_version(script: PipTestEnvironment, data: TestData) -> Non
     """
     Test that pip can show an installed distribution with a legacy version.
     """
-    _install_invalid_version(script, data)
+    install_invalid_version(script, data)
     result = script.pip("show", "invalid-version")
     assert "Name: invalid-version\nVersion: 2010i\n" in result.stdout
 
@@ -129,7 +127,7 @@ def test_show_require_invalid_version(
     """
     Test that pip can show an installed distribution with a legacy specifier.
     """
-    _install_require_invalid_version(script, data)
+    install_require_invalid_version(script, data)
     result = script.pip("show", "require-invalid-version")
     assert "Name: require-invalid-version\nVersion: 1.0\n" in result.stdout
     assert "Requires: invalid-version ==2010i\n" in result.stdout

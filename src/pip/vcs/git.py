@@ -188,7 +188,7 @@ class Git(VersionControl):
         return (sha, False)
 
     @classmethod
-    def _should_fetch(cls, dest: str, rev: str) -> bool:
+    def should_fetch(cls, dest: str, rev: str) -> bool:
         """
         Return true if rev is a ref or is a commit that we don't have locally.
 
@@ -242,7 +242,7 @@ class Git(VersionControl):
                 rev,
             )
 
-        if not cls._should_fetch(dest, rev):
+        if not cls.should_fetch(dest, rev):
             return rev_options
 
         # fetch the requested revision
@@ -423,10 +423,10 @@ class Git(VersionControl):
                 found_remote = remote
                 break
         url = found_remote.split(" ")[1]
-        return cls._git_remote_to_pip_url(url.strip())
+        return cls.git_remote_to_pip_url(url.strip())
 
     @staticmethod
-    def _git_remote_to_pip_url(url: str) -> str:
+    def git_remote_to_pip_url(url: str) -> str:
         """
         Convert a remote url from what git uses to what pip accepts.
 

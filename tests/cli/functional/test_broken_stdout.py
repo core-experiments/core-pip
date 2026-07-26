@@ -2,7 +2,7 @@ import os
 import subprocess
 from pathlib import Path
 
-_BROKEN_STDOUT_RETURN_CODE = 120
+BROKEN_STDOUT_RETURN_CODE = 120
 
 
 def setup_broken_stdout_test(
@@ -42,7 +42,7 @@ def test_broken_stdout_pipe(deprecated_python: bool) -> None:
     assert "raise BrokenStdoutLoggingError()" not in stderr
     assert stderr.count("Traceback") == 0
 
-    assert returncode == _BROKEN_STDOUT_RETURN_CODE
+    assert returncode == BROKEN_STDOUT_RETURN_CODE
 
 
 def test_broken_stdout_pipe__log_option(deprecated_python: bool, tmpdir: Path) -> None:
@@ -59,7 +59,7 @@ def test_broken_stdout_pipe__log_option(deprecated_python: bool, tmpdir: Path) -
     assert "raise BrokenStdoutLoggingError()" not in stderr
     assert stderr.count("Traceback") == 0
 
-    assert returncode == _BROKEN_STDOUT_RETURN_CODE
+    assert returncode == BROKEN_STDOUT_RETURN_CODE
 
 
 def test_broken_stdout_pipe__verbose(deprecated_python: bool) -> None:
@@ -76,4 +76,4 @@ def test_broken_stdout_pipe__verbose(deprecated_python: bool) -> None:
     assert "raise BrokenStdoutLoggingError()" in stderr
     assert 1 <= stderr.count("Traceback") <= 2
 
-    assert returncode == _BROKEN_STDOUT_RETURN_CODE
+    assert returncode == BROKEN_STDOUT_RETURN_CODE

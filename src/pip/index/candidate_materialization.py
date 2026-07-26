@@ -19,59 +19,70 @@ from pip.core.packaging import (
     canonicalize_name,
     parse_requirement,
 )
-from pip.core.wheel import WheelCandidate, parse_wheel, wheel_candidate
+from pip.core.wheel import WheelCandidate, validate_wheel, wheel_candidate
 from pip.index.artifacts import ArtifactLocator
 from pip.index.cache import origin_hashes, wheel_cache_path
 from pip.index.candidates import InstallationCandidate
 from pip.index.links import Link
 from pip.index.source_models import ArtifactKind
-from pip.index.vcs import is_immutable_vcs_link, vcs_reference, vcs_scheme
 
 logger = logging.getLogger(__name__)
+
+
+def is_immutable_vcs_link_internal(url: str) -> bool:
+    from pip.index.vcs import is_immutable_vcs_link
+
+    return is_immutable_vcs_link(url)
+
+
+def vcs_scheme(url: str) -> str | None:
+    from pip.index.vcs import vcs_scheme as parse_vcs_scheme
+
+    return parse_vcs_scheme(url)
 
 
 class CandidateStream(Sequence[WheelCandidate]):
     """A replayable sequence that materializes candidates on demand."""
 
     def __init__(self, source: Iterator[WheelCandidate]) -> None:
-        self._source = source
-        self._items: list[WheelCandidate] = []
-        self._exhausted = False
-        self._error: Exception | None = None
+        self.source_internal = source
+        self.items_internal: list[WheelCandidate] = []
+        self.exhausted = False
+        self.error_internal: Exception | None = None
 
-    def _advance(self) -> bool:
-        if self._error is not None:
-            raise self._error
-        if self._exhausted:
+    def advance(self) -> bool:
+        if self.error_internal is not None:
+            raise self.error_internal
+        if self.exhausted:
             return False
         try:
-            item = next(self._source)
+            item = next(self.source_internal)
         except StopIteration:
-            self._exhausted = True
+            self.exhausted = True
             return False
         except Exception as exc:
-            self._error = exc
+            self.error_internal = exc
             raise
-        self._items.append(item)
+        self.items_internal.append(item)
         return True
 
     def __iter__(self) -> Iterator[WheelCandidate]:
         index = 0
         while True:
-            if index < len(self._items):
-                yield self._items[index]
+            if index < len(self.items_internal):
+                yield self.items_internal[index]
                 index += 1
                 continue
-            if not self._advance():
+            if not self.advance():
                 return
 
     def __bool__(self) -> bool:
-        return bool(self._items) or self._advance()
+        return bool(self.items_internal) or self.advance()
 
     def __len__(self) -> int:
-        while self._advance():
+        while self.advance():
             pass
-        return len(self._items)
+        return len(self.items_internal)
 
     @overload
     def __getitem__(self, index: int) -> WheelCandidate: ...
@@ -79,9 +90,7 @@ class CandidateStream(Sequence[WheelCandidate]):
     @overload
     def __getitem__(self, index: slice) -> list[WheelCandidate]: ...
 
-    def __getitem__(
-        self, index: int | slice
-    ) -> WheelCandidate | list[WheelCandidate]:
+    def __getitem__(self, index: int | slice) -> WheelCandidate | list[WheelCandidate]:
         if isinstance(index, slice):
             if (
                 index.stop is None
@@ -91,15 +100,15 @@ class CandidateStream(Sequence[WheelCandidate]):
             ):
                 len(self)
             else:
-                while len(self._items) < index.stop and self._advance():
+                while len(self.items_internal) < index.stop and self.advance():
                     pass
-            return self._items[index]
+            return self.items_internal[index]
         if index < 0:
             len(self)
         else:
-            while len(self._items) <= index and self._advance():
+            while len(self.items_internal) <= index and self.advance():
                 pass
-        return self._items[index]
+        return self.items_internal[index]
 
     def prefer(
         self,
@@ -148,7 +157,7 @@ def source_hashes_for_link(link: Link) -> dict[str, str]:
     return {}
 
 
-def _cache_identity(url: str) -> str:
+def cache_identity(url: str) -> str:
     """Return a stable cache identity for an artifact URL.
 
     VCS URLs may carry package-name and subdirectory fragments, and callers
@@ -156,6 +165,8 @@ def _cache_identity(url: str) -> str:
     do not change the source at an immutable revision, so they must not create
     separate built-wheel cache entries.
     """
+    from pip.index.vcs import is_immutable_vcs_link, vcs_reference
+
     if is_immutable_vcs_link(url):
         reference = vcs_reference(url)
         return f"{reference.vcs}+{reference.repo_url}@{reference.requested_revision}"
@@ -170,12 +181,14 @@ class CandidateMaterializer:
         build_constraints: list[str] | None = None,
         wheel_cache_dir: Path | None = None,
         build_isolation: bool = True,
+        compute_source_hashes: bool = False,
         session: Any = None,
     ) -> None:
         self.build_options = build_options
         self.build_constraints = build_constraints
         self.wheel_cache_dir = wheel_cache_dir
         self.build_isolation = build_isolation
+        self.compute_source_hashes = compute_source_hashes
         self.artifacts = ArtifactLocator(session)
         self.invalid_links: set[str] = set()
 
@@ -184,9 +197,9 @@ class CandidateMaterializer:
         requirement: Requirement,
         accepted: tuple[InstallationCandidate, ...],
     ) -> CandidateStream:
-        return CandidateStream(self._iter_materialize(requirement, accepted))
+        return CandidateStream(self.iter_materialize(requirement, accepted))
 
-    def _iter_materialize(
+    def iter_materialize(
         self,
         requirement: Requirement,
         accepted: tuple[InstallationCandidate, ...],
@@ -196,19 +209,25 @@ class CandidateMaterializer:
         for candidate in accepted:
             from_cache = False
             cache_hashes: dict[str, str] | None = None
-            path = self.artifacts.ensure_local(candidate.link.url)
+            local_path = (
+                Path(candidate.link.file_path) if candidate.link.is_file else None
+            )
+            path = self.artifacts.ensure_local(
+                candidate.link.url,
+                is_vcs=candidate.link.is_vcs,
+                local_path=local_path,
+            )
             source_hashes = dict(candidate.link.hashes)
             if (
-                not source_hashes
-                and candidate.link.is_file
-                and Path(candidate.link.file_path).is_file()
+                self.compute_source_hashes
+                and not source_hashes
+                and local_path is not None
+                and local_path.is_file()
             ):
                 source_hashes["sha256"] = hashlib.sha256(
-                    Path(candidate.link.file_path).read_bytes()
+                    local_path.read_bytes()
                 ).hexdigest()
-            materialized_vcs_path = (
-                path if vcs_scheme(candidate.link.url) is not None else None
-            )
+            materialized_vcs_path = path if candidate.link.is_vcs else None
             if (
                 candidate.link.kind is ArtifactKind.SOURCE_TREE
                 and candidate.link.subdirectory_fragment
@@ -218,7 +237,7 @@ class CandidateMaterializer:
                 candidate.link.kind is ArtifactKind.SDIST and not candidates
             ) or (
                 candidate.link.kind is ArtifactKind.SOURCE_TREE
-                and is_immutable_vcs_link(candidate.link.url)
+                and is_immutable_vcs_link_internal(candidate.link.url)
                 and not candidates
             )
             if candidate.link.kind in {ArtifactKind.SDIST, ArtifactKind.SOURCE_TREE}:
@@ -229,9 +248,7 @@ class CandidateMaterializer:
                 )
                 if requirement.name is None:
                     display_name = candidate.name
-                cached = _cached_wheel_for_link(
-                    self.wheel_cache_dir, candidate.link.url
-                )
+                cached = cached_wheel_for_link(self.wheel_cache_dir, candidate.link.url)
                 if cached is not None:
                     path, cache_hashes = cached
                     from_cache = True
@@ -244,7 +261,7 @@ class CandidateMaterializer:
                     emit_build_message(f"Using cached {cached_name}")
                 else:
                     emit_build_message("Preparing build dependencies")
-                    _validate_build_requirements(path)
+                    validate_build_requirements(path)
                     key = requirement.raw
                     from pip.build.build import build_wheel_from_source
 
@@ -274,19 +291,33 @@ class CandidateMaterializer:
                             display_name,
                             candidate.link.url,
                         )
-                        _cache_built_wheel(self.wheel_cache_dir, candidate, path)
-            if candidate.link.kind is ArtifactKind.WHEEL:
-                try:
-                    with zipfile.ZipFile(path) as archive:
-                        parse_wheel(archive, Path(path).name[:-4].split("-", 1)[0])
-                except UnsupportedWheel as exc:
-                    if ".dist-info directory" not in str(exc):
-                        self.invalid_links.add(candidate.link.url)
-                        logger.warning("%s", exc)
-                        continue
-                    raise
+                        cache_built_wheel_internal(
+                            self.wheel_cache_dir, candidate, path
+                        )
             try:
-                built = wheel_candidate(path, set(requirement.extras))
+                if candidate.link.kind is ArtifactKind.WHEEL:
+                    with (
+                        path.open("rb", buffering=32768) as stream,
+                        zipfile.ZipFile(stream) as archive,
+                    ):
+                        dist_info_dir = validate_wheel(
+                            archive, Path(path).name[:-4].split("-", 1)[0]
+                        )
+                        built = wheel_candidate(
+                            path,
+                            set(requirement.extras),
+                            archive=archive,
+                            filename_info=(candidate.name, candidate.version),
+                            dist_info_dir=dist_info_dir,
+                        )
+                else:
+                    built = wheel_candidate(path, set(requirement.extras))
+            except UnsupportedWheel as exc:
+                if ".dist-info directory" not in str(exc):
+                    self.invalid_links.add(candidate.link.url)
+                    logger.warning("%s", exc)
+                    continue
+                raise
             except ValueError:
                 self.invalid_links.add(candidate.link.url)
                 print(
@@ -320,7 +351,9 @@ class CandidateMaterializer:
                 if cache_hashes is not None
                 else source_hashes,
                 source_kind=candidate.link.kind.value,
-                source_vcs=vcs_scheme(candidate.link.url),
+                source_vcs=vcs_scheme(candidate.link.url)
+                if candidate.link.is_vcs
+                else None,
                 from_cache=from_cache,
                 yanked_reason=candidate.link.yanked_reason,
             )
@@ -354,7 +387,7 @@ class CandidateMaterializer:
         return candidates
 
 
-def _validate_build_requirements(source: Path) -> None:
+def validate_build_requirements(source: Path) -> None:
     pyproject = source / "pyproject.toml"
     if not pyproject.is_file():
         return
@@ -398,12 +431,12 @@ def _validate_build_requirements(source: Path) -> None:
                 )
 
 
-def _cached_wheel_for_link(
+def cached_wheel_for_link(
     wheel_cache_dir: Path | None, url: str
 ) -> tuple[Path, dict[str, str] | None] | None:
     if wheel_cache_dir is None:
         return None
-    entry_dir = wheel_cache_path(wheel_cache_dir, _cache_identity(url))
+    entry_dir = wheel_cache_path(wheel_cache_dir, cache_identity(url))
     if not entry_dir.is_dir():
         return None
     wheels = sorted(entry_dir.glob("*.whl"))
@@ -412,12 +445,12 @@ def _cached_wheel_for_link(
     return wheels[0], origin_hashes(entry_dir / "origin.json")
 
 
-def _cache_built_wheel(
+def cache_built_wheel_internal(
     wheel_cache_dir: Path | None, candidate: InstallationCandidate, wheel: Path
 ) -> None:
     if wheel_cache_dir is None:
         return
-    entry_dir = wheel_cache_path(wheel_cache_dir, _cache_identity(candidate.link.url))
+    entry_dir = wheel_cache_path(wheel_cache_dir, cache_identity(candidate.link.url))
     entry_dir.mkdir(parents=True, exist_ok=True)
     shutil.copy2(wheel, entry_dir / wheel.name)
     origin = {

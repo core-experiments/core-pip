@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
 import sys
 import sysconfig
@@ -8,6 +9,7 @@ import zipfile
 from dataclasses import dataclass
 from email.message import Message
 from email.parser import Parser
+from functools import cache, lru_cache
 from pathlib import Path
 
 from .errors import InstallationError, InvalidWheelFilename, UnsupportedWheel
@@ -87,7 +89,7 @@ class Wheel:
             raise InvalidWheelFilename(f"Invalid wheel filename: {filename}")
         self.name = wheel.name
         self.version = str(wheel.version)
-        self.build_tag = _legacy_build_tag(wheel.build_tag)
+        self.build_tag = legacy_build_tag(wheel.build_tag)
         self.file_tags = frozenset(wheel.tags)
 
     def get_formatted_file_tags(self) -> list[str]:
@@ -115,6 +117,26 @@ class TargetContext:
 VERSION_COMPATIBLE = (1, 0)
 logger = logging.getLogger(__name__)
 
+RESOLUTION_METADATA_HEADERS = frozenset(
+    {"name", "version", "requires-dist", "provides-extra", "requires-python"}
+)
+WHEEL_METADATA_CACHE_SIZE = 1024
+
+
+@dataclass(frozen=True)
+class WheelResolutionMetadata:
+    name: str
+    version: Version
+    dependencies: tuple[Requirement, ...]
+    provided_extras: frozenset[str]
+    requires_python: str | None
+
+
+wheel_metadata_cache: dict[tuple[str, int, int], WheelResolutionMetadata] = {}
+wheel_dependency_cache: dict[
+    tuple[tuple[str, int, int], frozenset[str]], tuple[Requirement, ...]
+] = {}
+
 
 def parse_wheel_file(path: str | Path) -> WheelFile | None:
     name = Path(path).name
@@ -132,15 +154,10 @@ def parse_wheel_file(path: str | Path) -> WheelFile | None:
     if build_tag is not None and "_" in build_tag:
         return None
     try:
-        parsed_version = Version(version)
+        parsed_version = parsed_wheel_version(version)
     except InvalidVersion:
         return None
-    tags = tuple(
-        WheelTag(interpreter, abi, platform)
-        for interpreter in python_tags.split(".")
-        for abi in abi_tags.split(".")
-        for platform in platform_tags.split(".")
-    )
+    tags = parsed_wheel_tags(python_tags, abi_tags, platform_tags)
     if not tags:
         return None
     return WheelFile(
@@ -151,6 +168,23 @@ def parse_wheel_file(path: str | Path) -> WheelFile | None:
     )
 
 
+@lru_cache(maxsize=4096)
+def parsed_wheel_version(value: str) -> Version:
+    return Version(value)
+
+
+@lru_cache(maxsize=1024)
+def parsed_wheel_tags(
+    python_tags: str, abi_tags: str, platform_tags: str
+) -> tuple[WheelTag, ...]:
+    return tuple(
+        WheelTag(interpreter, abi, platform)
+        for interpreter in python_tags.split(".")
+        for abi in abi_tags.split(".")
+        for platform in platform_tags.split(".")
+    )
+
+
 def parse_wheel_filename(path: str | Path) -> tuple[str, str] | None:
     wheel = parse_wheel_file(path)
     if wheel is None:
@@ -158,6 +192,7 @@ def parse_wheel_filename(path: str | Path) -> tuple[str, str] | None:
     return wheel.name, str(wheel.version)
 
 
+@cache
 def supported_wheel_tags(target: TargetContext | None = None) -> tuple[WheelTag, ...]:
     if target is None:
         major = sys.version_info.major
@@ -189,6 +224,7 @@ def supported_wheel_tags(target: TargetContext | None = None) -> tuple[WheelTag,
     )
 
 
+@lru_cache(maxsize=4096)
 def wheel_tag_rank(
     tags: tuple[WheelTag, ...], supported_tags: tuple[WheelTag, ...] | None = None
 ) -> int | None:
@@ -197,80 +233,239 @@ def wheel_tag_rank(
         index
         for index, supported_tag in enumerate(supported)
         for tag in tags
-        if _tag_matches(supported_tag, tag)
+        if tag_matches(supported_tag, tag)
     ]
     if not ranks:
         return None
     return min(ranks)
 
 
-def wheel_candidate(path: str | Path, extras: set[str] | None = None) -> WheelCandidate:
+def wheel_archive_identity(
+    path: Path, archive: zipfile.ZipFile | None, dist_info_dir: str | None
+) -> tuple[str, int, int] | None:
+    try:
+        if archive is not None and dist_info_dir is not None:
+            metadata = archive.getinfo(f"{dist_info_dir}/METADATA")
+            path_key = str(path) if path.is_absolute() else os.path.abspath(path)
+            return path_key, metadata.CRC, metadata.file_size
+        stat = path.stat()
+        path_key = str(path) if path.is_absolute() else os.path.abspath(path)
+        return path_key, stat.st_size, stat.st_mtime_ns
+    except (KeyError, OSError):
+        return None
+
+
+def bounded_cache_put(cache: dict, key: object, value: object) -> None:
+    if len(cache) >= WHEEL_METADATA_CACHE_SIZE:
+        cache.clear()
+    cache[key] = value
+
+
+def project_wheel_dependencies(
+    metadata: WheelResolutionMetadata,
+    identity: tuple[str, int, int] | None,
+    extras: frozenset[str],
+) -> tuple[Requirement, ...]:
+    key = (identity, extras) if identity is not None else None
+    dependencies = wheel_dependency_cache.get(key) if key is not None else None
+    if dependencies is not None:
+        return dependencies
+    dependencies = tuple(
+        requirement
+        for requirement in metadata.dependencies
+        if marker_applies(requirement.marker, extras=extras)
+    )
+    if key is not None:
+        bounded_cache_put(wheel_dependency_cache, key, dependencies)
+    return dependencies
+
+
+def wheel_candidate(
+    path: str | Path,
+    extras: set[str] | None = None,
+    *,
+    archive: zipfile.ZipFile | None = None,
+    filename_info: tuple[str, str | Version] | None = None,
+    dist_info_dir: str | None = None,
+) -> WheelCandidate:
     wheel_path = Path(path)
-    parsed = parse_wheel_filename(wheel_path)
+    parsed = filename_info or parse_wheel_filename(wheel_path)
     if parsed is None:
         raise InvalidWheelFilename(f"Invalid wheel filename: {wheel_path}")
     name, version = parsed
-    metadata = read_wheel_metadata(wheel_path)
-    metadata_name = metadata.get("Name") or name
-    metadata_version = metadata.get("Version") or version
-    dependencies: list[Requirement] = []
-    for value in metadata.get_all("Requires-Dist", []):
-        req = parse_requirement(value)
-        if marker_applies(req.marker, extras=extras or set()):
-            dependencies.append(req)
+    identity = wheel_archive_identity(wheel_path, archive, dist_info_dir)
+    metadata = wheel_metadata_cache.get(identity) if identity is not None else None
+    if metadata is None:
+        if archive is not None and dist_info_dir is not None:
+            headers = read_core_metadata_headers(archive, wheel_path, dist_info_dir)
+
+            def get_header(name: str) -> str | None:
+                values = headers.get(name.casefold())
+                return values[0] if values else None
+
+            def get_all_headers(name: str) -> list[str]:
+                return headers.get(name.casefold(), [])
+
+        else:
+            message = (
+                read_wheel_metadata_internal(
+                    archive,
+                    wheel_path,
+                    expected_name=name,
+                    dist_info_dir=dist_info_dir,
+                )
+                if archive is not None
+                else read_wheel_metadata(wheel_path)
+            )
+
+            def get_header(name: str) -> str | None:
+                return message.get(name)
+
+            def get_all_headers(name: str) -> list[str]:
+                return message.get_all(name, [])
+
+        metadata_name = get_header("Name") or name
+        metadata_version = get_header("Version") or str(version)
+        parsed_metadata_version = (
+            version
+            if isinstance(version, Version) and metadata_version == str(version)
+            else Version(metadata_version)
+        )
+        metadata = WheelResolutionMetadata(
+            name=metadata_name,
+            version=parsed_metadata_version,
+            dependencies=tuple(
+                parse_requirement(value) for value in get_all_headers("Requires-Dist")
+            ),
+            provided_extras=frozenset(
+                value.strip()
+                for value in get_all_headers("Provides-Extra")
+                if value.strip()
+            ),
+            requires_python=get_header("Requires-Python"),
+        )
+        if identity is not None:
+            bounded_cache_put(wheel_metadata_cache, identity, metadata)
+    requested_extras = frozenset(extras or ())
+    dependencies = project_wheel_dependencies(metadata, identity, requested_extras)
     return WheelCandidate(
-        name=metadata_name,
-        version=Version(metadata_version),
+        name=metadata.name,
+        version=metadata.version,
         path=wheel_path,
-        dependencies=tuple(dependencies),
-        provided_extras=frozenset(
-            value.strip()
-            for value in metadata.get_all("Provides-Extra", [])
-            if value.strip()
-        ),
-        requires_python=metadata.get("Requires-Python"),
+        dependencies=dependencies,
+        provided_extras=metadata.provided_extras,
+        requires_python=metadata.requires_python,
     )
+
+
+def read_core_metadata_headers(
+    archive: zipfile.ZipFile,
+    path: str | Path,
+    dist_info_dir: str,
+) -> dict[str, list[str]]:
+    """Read core metadata headers needed during candidate resolution."""
+    metadata_path = f"{dist_info_dir}/METADATA"
+    try:
+        contents = archive.read(metadata_path).decode("utf-8")
+    except KeyError as exc:
+        raise InstallationError(f"Wheel has no METADATA: {path}") from exc
+    except UnicodeDecodeError as exc:
+        raise InstallationError(
+            f"Error decoding metadata for {path}: {metadata_path}"
+        ) from exc
+
+    separators = (
+        offset
+        for marker in ("\n\n", "\r\n\r\n")
+        if (offset := contents.find(marker)) >= 0
+    )
+    header_end = min(separators, default=len(contents))
+    headers: dict[str, list[str]] = {}
+    current_values: list[str] | None = None
+    saw_header = False
+    for line in contents[:header_end].splitlines():
+        if line[:1].isspace():
+            if current_values is None:
+                if not saw_header:
+                    break
+            else:
+                current_values[-1] += f"\n{line}"
+            continue
+        name, separator, value = line.partition(":")
+        if not separator:
+            break
+        saw_header = True
+        normalized_name = name.casefold()
+        if normalized_name in RESOLUTION_METADATA_HEADERS:
+            current_values = headers.setdefault(normalized_name, [])
+            current_values.append(value.lstrip())
+        else:
+            current_values = None
+    return headers
 
 
 def read_wheel_metadata(path: str | Path):
     with zipfile.ZipFile(path) as archive:
-        metadata_names = [
+        return read_wheel_metadata_internal(archive, path)
+
+
+def read_wheel_metadata_internal(
+    archive: zipfile.ZipFile,
+    path: str | Path,
+    *,
+    expected_name: str | None = None,
+    dist_info_dir: str | None = None,
+) -> Message:
+    metadata_names = (
+        [f"{dist_info_dir}/METADATA"]
+        if dist_info_dir is not None
+        else [
             name
             for name in archive.namelist()
             if re.search(r"\.dist-info/METADATA$", name)
         ]
-        if not metadata_names:
-            raise InstallationError(f"Wheel has no METADATA: {path}")
+    )
+    if not metadata_names:
+        raise InstallationError(f"Wheel has no METADATA: {path}")
+    if expected_name is None:
         parsed = parse_wheel_filename(path)
-        if parsed is not None:
-            expected = canonicalize_name(parsed[0]).replace("-", "_")
-            matching = [
-                name
-                for name in metadata_names
-                if name.count("/") == 1
-                and name.rsplit("/", 1)[0]
-                .split(".", 1)[0]
-                .casefold()
-                .startswith(expected.casefold())
-            ]
-            if matching:
-                metadata_names = matching
-        with archive.open(metadata_names[0]) as file:
-            try:
-                contents = file.read().decode("utf-8")
-            except UnicodeDecodeError as exc:
-                raise InstallationError(
-                    f"Error decoding metadata for {path}: {metadata_names[0]}"
-                ) from exc
-            return Parser().parsestr(contents)
+        expected_name = parsed[0] if parsed is not None else None
+    if expected_name is not None:
+        expected = canonicalize_name(expected_name).replace("-", "_")
+        matching = [
+            name
+            for name in metadata_names
+            if name.count("/") == 1
+            and name.rsplit("/", 1)[0]
+            .split(".", 1)[0]
+            .casefold()
+            .startswith(expected.casefold())
+        ]
+        if matching:
+            metadata_names = matching
+    try:
+        metadata_file = archive.open(metadata_names[0])
+    except KeyError as exc:
+        raise InstallationError(f"Wheel has no METADATA: {path}") from exc
+    with metadata_file as file:
+        try:
+            contents = file.read().decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise InstallationError(
+                f"Error decoding metadata for {path}: {metadata_names[0]}"
+            ) from exc
+        return Parser().parsestr(contents)
 
 
 def wheel_dist_info_dir(source: zipfile.ZipFile, name: str) -> str:
+    # ZipFile already builds this filename index while reading the central
+    # directory. Iterating it avoids another ZipInfo lookup for every member,
+    # which is significant for wheels containing thousands of files.
     matches = sorted(
         {
-            entry.split("/", 1)[0]
-            for entry in source.namelist()
-            if entry.endswith(".dist-info/WHEEL") and entry.count("/") == 1
+            filename.split("/", 1)[0]
+            for filename in source.NameToInfo
+            if filename.endswith(".dist-info/WHEEL") and filename.count("/") == 1
         }
     )
     if not matches:
@@ -315,6 +510,24 @@ def wheel_version(metadata: Message) -> tuple[int, ...]:
         raise UnsupportedWheel(f"invalid Wheel-Version: {version!r}") from exc
 
 
+def wheel_version_from_text(text: str) -> tuple[int, ...]:
+    """Read Wheel-Version without constructing an email Message."""
+    value: str | None = None
+    for line in text.splitlines():
+        if not line:
+            break
+        name, separator, header_value = line.partition(":")
+        if separator and name.casefold() == "wheel-version":
+            value = header_value.strip()
+            break
+    if value is None:
+        raise UnsupportedWheel("WHEEL is missing Wheel-Version")
+    try:
+        return tuple(map(int, value.split(".")))
+    except ValueError as exc:
+        raise UnsupportedWheel(f"invalid Wheel-Version: {value!r}") from exc
+
+
 def check_compatibility(version: tuple[int, ...], name: str) -> None:
     if version[0] > VERSION_COMPATIBLE[0]:
         raise UnsupportedWheel(
@@ -327,6 +540,24 @@ def check_compatibility(version: tuple[int, ...], name: str) -> None:
             "Installing from a newer Wheel-Version (%s)",
             ".".join(map(str, version)),
         )
+
+
+def validate_wheel(source: zipfile.ZipFile, name: str) -> str:
+    """Validate a wheel without materializing its WHEEL metadata message."""
+    try:
+        info_dir = wheel_dist_info_dir(source, name)
+        wheel_path = f"{info_dir}/WHEEL"
+        raw = read_wheel_metadata_file(source, wheel_path)
+        try:
+            text = raw.decode()
+        except UnicodeDecodeError as exc:
+            raise UnsupportedWheel(f"error decoding {wheel_path!r}: {exc!r}") from exc
+        version = wheel_version_from_text(text)
+    except UnsupportedWheel as exc:
+        raise UnsupportedWheel(f"{name} has an invalid wheel, {exc}") from exc
+
+    check_compatibility(version, name)
+    return info_dir
 
 
 def parse_wheel(wheel_zip: zipfile.ZipFile, name: str) -> tuple[str, Message]:
@@ -342,7 +573,7 @@ def parse_wheel(wheel_zip: zipfile.ZipFile, name: str) -> tuple[str, Message]:
     return info_dir, metadata
 
 
-def _legacy_build_tag(value: str | None) -> tuple[int, str] | tuple[()]:
+def legacy_build_tag(value: str | None) -> tuple[int, str] | tuple[()]:
     if value is None:
         return ()
     digits = ""
@@ -356,22 +587,22 @@ def _legacy_build_tag(value: str | None) -> tuple[int, str] | tuple[()]:
     return (int(digits or 0), suffix)
 
 
-def _tag_matches(supported: WheelTag, candidate: WheelTag) -> bool:
+def tag_matches(supported: WheelTag, candidate: WheelTag) -> bool:
     return (
-        _interpreter_matches(
+        interpreter_matches(
             supported.interpreter.lower(),
             candidate.interpreter.lower(),
             candidate.abi.lower(),
         )
         and supported.abi.lower() == candidate.abi.lower()
-        and _platform_matches(
+        and platform_matches(
             supported.platform.lower(),
             candidate.platform.lower(),
         )
     )
 
 
-def _interpreter_matches(runtime: str, wheel: str, abi: str) -> bool:
+def interpreter_matches(runtime: str, wheel: str, abi: str) -> bool:
     if runtime == wheel:
         return True
     if abi == "abi3" and runtime.startswith("cp") and wheel.startswith("cp"):
@@ -384,21 +615,21 @@ def _interpreter_matches(runtime: str, wheel: str, abi: str) -> bool:
     return False
 
 
-def _platform_matches(runtime: str, wheel: str) -> bool:
+def platform_matches(runtime: str, wheel: str) -> bool:
     if runtime == wheel:
         return True
     if runtime == "any" or wheel == "any":
         return runtime == wheel
     if runtime.startswith("macosx_") and wheel.startswith("macosx_"):
-        return _macos_platform_matches(runtime, wheel)
+        return macos_platform_matches(runtime, wheel)
     if runtime.startswith("ios_") and wheel.startswith("ios_"):
-        return _ios_platform_matches(runtime, wheel)
+        return ios_platform_matches(runtime, wheel)
     if runtime.startswith("android_") and wheel.startswith("android_"):
-        return _android_platform_matches(runtime, wheel)
+        return android_platform_matches(runtime, wheel)
     return False
 
 
-def _macos_platform_matches(runtime: str, wheel: str) -> bool:
+def macos_platform_matches(runtime: str, wheel: str) -> bool:
     runtime_parts = runtime.split("_", 3)
     wheel_parts = wheel.split("_", 3)
     if len(runtime_parts) != 4 or len(wheel_parts) != 4:
@@ -421,7 +652,7 @@ def _macos_platform_matches(runtime: str, wheel: str) -> bool:
     return wheel_arch in compatible_arches.get(runtime_arch, {runtime_arch})
 
 
-def _ios_platform_matches(runtime: str, wheel: str) -> bool:
+def ios_platform_matches(runtime: str, wheel: str) -> bool:
     runtime_parts = runtime.split("_", 4)
     wheel_parts = wheel.split("_", 4)
     if len(runtime_parts) != 5 or len(wheel_parts) != 5:
@@ -436,7 +667,7 @@ def _ios_platform_matches(runtime: str, wheel: str) -> bool:
     )
 
 
-def _android_platform_matches(runtime: str, wheel: str) -> bool:
+def android_platform_matches(runtime: str, wheel: str) -> bool:
     runtime_parts = runtime.split("_", 3)
     wheel_parts = wheel.split("_", 3)
     if len(runtime_parts) != 4 or len(wheel_parts) != 4:

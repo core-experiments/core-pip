@@ -12,8 +12,8 @@ from pip.core.errors import InstallationError, InvalidWheelFilename
 from pip.core.packaging import Requirement, SpecifierSet
 from pip.resolution.req_install import (
     InstallRequirement,
-    _get_url_from_path,
-    _looks_like_path,
+    get_url_from_path,
+    looks_like_path,
     install_req_from_editable,
     install_req_from_line,
     parse_editable,
@@ -396,7 +396,7 @@ def test_mismatched_versions(caplog: pytest.LogCaptureFixture) -> None:
     metadata = email.message.Message()
     metadata["name"] = "simplewheel"
     metadata["version"] = "1.0"
-    req._metadata = metadata
+    req.metadata_internal = metadata
 
     req.assert_source_matches_version()
     assert caplog.records[-1].message == (
@@ -410,7 +410,7 @@ def test_mismatched_metadata_name_is_normalized(
     req = install_req_from_line("old-name==1.0")
     metadata = email.message.Message()
     metadata["name"] = "New_Name"
-    req._metadata = metadata
+    req.metadata_internal = metadata
 
     req.warn_on_mismatching_name()
 
@@ -430,7 +430,7 @@ def test_mismatched_metadata_name_is_normalized(
     ],
 )
 def test_looks_like_path(value: str, expected: bool) -> None:
-    assert _looks_like_path(value) == expected
+    assert looks_like_path(value) == expected
 
 
 @pytest.mark.parametrize(
@@ -474,7 +474,7 @@ def test_get_url_from_path(
         with mock.patch(
             "pip.resolution.req_install.os.path.isfile", return_value=mock_returns[1]
         ):
-            assert _get_url_from_path(*args) is expected
+            assert get_url_from_path(*args) is expected
 
 
 def test_get_url_from_path_archive_file() -> None:
@@ -483,7 +483,7 @@ def test_get_url_from_path_archive_file() -> None:
     expected = Path(path).resolve(strict=False).as_uri()
     with mock.patch("pip.resolution.req_install.os.path.isdir", return_value=False):
         with mock.patch("pip.resolution.req_install.os.path.isfile", return_value=True):
-            assert _get_url_from_path(path, name) == expected
+            assert get_url_from_path(path, name) == expected
 
 
 def test_get_url_from_path_installable_dir() -> None:
@@ -492,7 +492,7 @@ def test_get_url_from_path_installable_dir() -> None:
     expected = Path(path).resolve(strict=False).as_uri()
     with mock.patch("pip.resolution.req_install.os.path.isdir", return_value=True):
         with mock.patch("pip.resolution.req_install.os.path.isfile", return_value=True):
-            assert _get_url_from_path(path, name) == expected
+            assert get_url_from_path(path, name) == expected
 
 
 def test_get_url_from_path_installable_error() -> None:
@@ -503,7 +503,7 @@ def test_get_url_from_path_installable_error() -> None:
             "pip.resolution.req_install.os.path.isfile", return_value=False
         ):
             with pytest.raises(InstallationError) as exc:
-                _get_url_from_path(path, name)
+                get_url_from_path(path, name)
     assert "Neither 'setup.py' nor 'pyproject.toml' found" in str(exc.value)
 
 

@@ -19,13 +19,13 @@ def build_wheel_from_source(
     build_isolation: bool = True,
 ) -> Path:
     source_path = Path(source)
-    output_dir = Path(wheel_dir) if wheel_dir is not None else _default_wheel_dir()
+    output_dir = Path(wheel_dir) if wheel_dir is not None else default_wheel_dir()
     output_dir.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="pip-build-") as temp_dir:
         project = (
             source_path
             if source_path.is_dir()
-            else _unpack_source(source_path, Path(temp_dir))
+            else unpack_source(source_path, Path(temp_dir))
         )
         if source_path.is_dir():
             (project / "build").mkdir(parents=True, exist_ok=True)
@@ -48,13 +48,13 @@ def build_editable_from_source(
     build_isolation: bool = True,
 ) -> Path:
     source_path = Path(source)
-    output_dir = Path(wheel_dir) if wheel_dir is not None else _default_wheel_dir()
+    output_dir = Path(wheel_dir) if wheel_dir is not None else default_wheel_dir()
     output_dir.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="pip-build-editable-") as temp_dir:
         project = (
             source_path
             if source_path.is_dir()
-            else _unpack_source(source_path, Path(temp_dir))
+            else unpack_source(source_path, Path(temp_dir))
         )
         builder = ProjectBuilder(
             project,
@@ -64,8 +64,8 @@ def build_editable_from_source(
         try:
             editable_metadata = not (
                 (project / "setup.py").is_file()
-                and builder._backend_spec is not None
-                and builder._backend_spec.name.startswith("setuptools.build_meta")
+                and builder.backend_spec is not None
+                and builder.backend_spec.name.startswith("setuptools.build_meta")
             )
             builder.prepare_metadata(editable=editable_metadata)
         except BuildError as exc:
@@ -93,7 +93,7 @@ def build_editable_from_source(
     return wheel_path
 
 
-def _default_wheel_dir() -> Path:
+def default_wheel_dir() -> Path:
     # Each process and build invocation gets its own directory.  A shared
     # predictable directory lets one process' atexit cleanup delete another
     # process' in-flight wheel.
@@ -102,7 +102,7 @@ def _default_wheel_dir() -> Path:
     return path
 
 
-def _unpack_source(source: Path, destination: Path) -> Path:
+def unpack_source(source: Path, destination: Path) -> Path:
     if source.suffix == ".zip":
         with zipfile.ZipFile(source) as archive:
             archive.extractall(destination)
@@ -113,10 +113,10 @@ def _unpack_source(source: Path, destination: Path) -> Path:
             archive.extractall(destination)
     else:
         raise BuildError(f"Unsupported source archive: {source}")
-    return _single_project_root(destination)
+    return single_project_root(destination)
 
 
-def _single_project_root(destination: Path) -> Path:
+def single_project_root(destination: Path) -> Path:
     children = [child for child in destination.iterdir() if child.name != "__MACOSX"]
     if len(children) == 1 and children[0].is_dir():
         return children[0]

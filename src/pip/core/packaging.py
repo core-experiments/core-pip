@@ -6,11 +6,11 @@ import re
 import sys
 import urllib.parse
 from dataclasses import dataclass
-from functools import total_ordering
+from functools import cached_property, lru_cache, total_ordering
 from typing import Iterable
 
-_NORMALIZE_RE = re.compile(r"[-_.]+")
-_VERSION_RE = re.compile(
+NORMALIZE_RE = re.compile(r"[-_.]+")
+VERSION_RE = re.compile(
     r"""
     ^\s*
     v?
@@ -32,12 +32,13 @@ _VERSION_RE = re.compile(
     """,
     re.IGNORECASE | re.VERBOSE,
 )
-_REQ_NAME_RE = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)")
-_SPEC_RE = re.compile(r"(===|==|!=|~=|<=|>=|<|>)\s*([^,]+)")
+REQ_NAME_RE = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)")
+SPEC_RE = re.compile(r"(===|==|!=|~=|<=|>=|<|>)\s*([^,]+)")
 
 
+@lru_cache(maxsize=4096)
 def canonicalize_name(name: str) -> str:
-    return _NORMALIZE_RE.sub("-", name).lower()
+    return NORMALIZE_RE.sub("-", name).lower()
 
 
 def safe_extra(extra: str) -> str:
@@ -71,7 +72,17 @@ class InvalidVersion(ValueError):
 class Version:
     def __init__(self, value: str):
         raw = value.strip()
-        match = _VERSION_RE.match(raw)
+        if raw and raw.replace(".", "").isdecimal() and ".." not in raw:
+            release = raw.split(".")
+            self.release = tuple(int(part) for part in release)
+            self.pre = None
+            self.post = None
+            self.dev = None
+            self.local = None
+            self.public = self.format_public()
+            self.comparison_key = self.build_comparison_key()
+            return
+        match = VERSION_RE.match(raw)
         if match is None:
             raise InvalidVersion(value)
         self.release = tuple(int(part) for part in match.group("release").split("."))
@@ -97,11 +108,12 @@ class Version:
             int(match.group("dev_n") or 0) if match.group("dev_n") is not None else None
         )
         self.local = (
-            _NORMALIZE_RE.sub(".", match.group("local").lower())
+            NORMALIZE_RE.sub(".", match.group("local").lower())
             if match.group("local") is not None
             else None
         )
-        self.public = self._format_public()
+        self.public = self.format_public()
+        self.comparison_key = self.build_comparison_key()
 
     @property
     def is_prerelease(self) -> bool:
@@ -112,8 +124,15 @@ class Version:
         """Return the release portion without pre/dev/post/local markers."""
         return ".".join(str(part) for part in self.release)
 
-    def _key(self) -> tuple[tuple[int, ...], int, tuple[int, int], int, int, str]:
-        release = self._normalized_release()
+    def key_internal(
+        self,
+    ) -> tuple[tuple[int, ...], int, tuple[int, int], int, int, str]:
+        return self.comparison_key
+
+    def build_comparison_key(
+        self,
+    ) -> tuple[tuple[int, ...], int, tuple[int, int], int, int, str]:
+        release = self.normalized_release()
         if self.dev is not None:
             dev_rank = 0
             dev = self.dev
@@ -136,7 +155,7 @@ class Version:
             self.local or "",
         )
 
-    def _normalized_release(self) -> tuple[int, ...]:
+    def normalized_release(self) -> tuple[int, ...]:
         release = self.release
         while len(release) > 1 and release[-1] == 0:
             release = release[:-1]
@@ -148,12 +167,15 @@ class Version:
                 other = Version(str(other))
             except InvalidVersion:
                 return NotImplemented
-        return self._key() == other._key()
+        return self.key_internal() == other.key_internal()
+
+    def __hash__(self) -> int:
+        return hash(self.key_internal())
 
     def __lt__(self, other: object) -> bool:
         if not isinstance(other, Version):
             other = Version(str(other))
-        return self._key() < other._key()
+        return self.key_internal() < other.key_internal()
 
     def __str__(self) -> str:
         return self.public
@@ -161,7 +183,7 @@ class Version:
     def __repr__(self) -> str:
         return f"<Version({self.public!r})>"
 
-    def _format_public(self) -> str:
+    def format_public(self) -> str:
         parts = [".".join(str(part) for part in self.release)]
         if self.pre is not None:
             label = {0: "a", 1: "b", 2: "rc"}[self.pre[0]]
@@ -180,13 +202,31 @@ class Specifier:
     operator: str
     version: str
 
+    def __post_init__(self) -> None:
+        if self.operator == "===":
+            return
+        validated = Version(self.version.rstrip(".*"))
+        if not self.version.endswith(".*"):
+            object.__setattr__(self, "parsed_version", validated)
+
+    @cached_property
+    def parsed_version(self) -> Version:
+        return Version(self.version)
+
+    @cached_property
+    def compatible_upper_bound(self) -> Version:
+        return compatible_upper_bound_internal(self.parsed_version)
+
     def contains(self, version: Version) -> bool:
         if self.operator == "===":
             return version.public == self.version
-        if self.operator == "==" and self.version.endswith(".*"):
+        if self.operator in {"==", "!="} and self.version.endswith(".*"):
             prefix = self.version[:-2]
-            return version.public == prefix or version.public.startswith(prefix + ".")
-        other = Version(self.version)
+            matches = version.public == prefix or version.public.startswith(
+                prefix + "."
+            )
+            return matches if self.operator == "==" else not matches
+        other = self.parsed_version
         if self.operator == "==":
             return version == other
         if self.operator == "!=":
@@ -200,11 +240,11 @@ class Specifier:
         if self.operator == "<":
             return version < other
         if self.operator == "~=":
-            return version >= other and version < _compatible_upper_bound(other)
+            return version >= other and version < self.compatible_upper_bound
         raise ValueError(f"unknown specifier operator: {self.operator}")
 
 
-def _compatible_upper_bound(version: Version) -> Version:
+def compatible_upper_bound_internal(version: Version) -> Version:
     release = list(version.release)
     if len(release) == 1:
         release[0] += 1
@@ -218,16 +258,13 @@ class SpecifierSet:
     def __init__(self, value: str = ""):
         self.raw = value.strip()
         self.specifiers = tuple(
-            Specifier(op, ver.strip()) for op, ver in _SPEC_RE.findall(self.raw)
+            Specifier(op, ver.strip()) for op, ver in SPEC_RE.findall(self.raw)
         )
         if self.raw and not self.specifiers:
             raise ValueError(f"invalid version specifier: {value!r}")
-        for specifier in self.specifiers:
-            if specifier.operator != "===":
-                try:
-                    Version(specifier.version.rstrip(".*"))
-                except InvalidVersion as exc:
-                    raise ValueError(f"invalid version specifier: {value!r}") from exc
+        self.text_internal = ",".join(
+            f"{specifier.operator}{specifier.version}" for specifier in self.specifiers
+        )
 
     def contains(
         self, version: Version | str, *, allow_prereleases: bool = False
@@ -242,11 +279,49 @@ class SpecifierSet:
                 return False
         return all(spec.contains(parsed) for spec in self.specifiers)
 
+    def bounds(
+        self,
+    ) -> tuple[tuple[Version, bool] | None, tuple[Version, bool] | None]:
+        """Return conservative lower and upper bounds with inclusive flags."""
+        lower: tuple[Version, bool] | None = None
+        upper: tuple[Version, bool] | None = None
+
+        def tighten_lower(version: Version, inclusive: bool) -> None:
+            nonlocal lower
+            if lower is None or version > lower[0]:
+                lower = (version, inclusive)
+            elif version == lower[0]:
+                lower = (version, lower[1] and inclusive)
+
+        def tighten_upper(version: Version, inclusive: bool) -> None:
+            nonlocal upper
+            if upper is None or version < upper[0]:
+                upper = (version, inclusive)
+            elif version == upper[0]:
+                upper = (version, upper[1] and inclusive)
+
+        for specifier in self.specifiers:
+            if specifier.operator == "==" and not specifier.version.endswith(".*"):
+                tighten_lower(specifier.parsed_version, True)
+                tighten_upper(specifier.parsed_version, True)
+            elif specifier.operator == ">=":
+                tighten_lower(specifier.parsed_version, True)
+            elif specifier.operator == ">":
+                tighten_lower(specifier.parsed_version, False)
+            elif specifier.operator == "<=":
+                tighten_upper(specifier.parsed_version, True)
+            elif specifier.operator == "<":
+                tighten_upper(specifier.parsed_version, False)
+            elif specifier.operator == "~=":
+                tighten_lower(specifier.parsed_version, True)
+                tighten_upper(specifier.compatible_upper_bound, False)
+        return lower, upper
+
     def __bool__(self) -> bool:
         return bool(self.specifiers)
 
     def __str__(self) -> str:
-        return ",".join(f"{spec.operator}{spec.version}" for spec in self.specifiers)
+        return self.text_internal
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, SpecifierSet):
@@ -263,7 +338,7 @@ class Requirement:
     marker: str | None = None
     raw: str = ""
 
-    @property
+    @cached_property
     def canonical_name(self) -> str:
         return canonicalize_name(self.name)
 
@@ -285,14 +360,15 @@ class Requirement:
         return "".join(parts)
 
 
+@lru_cache(maxsize=4096)
 def parse_requirement(value: str) -> Requirement:
     raw = value.strip()
     if not raw:
         raise ValueError("empty requirement")
-    if _looks_like_direct_reference(raw):
-        egg_name, egg_extras = _egg_fragment(raw)
+    if looks_like_direct_reference(raw):
+        egg_name, egg_extras = egg_fragment_internal(raw)
         if egg_name is not None:
-            inferred = _project_from_direct_reference(raw)
+            inferred = project_from_direct_reference(raw)
             if inferred is not None and raw.split("#", 1)[0].lower().endswith(".whl"):
                 name, version = inferred
                 specifier = SpecifierSet(f"=={version}") if version else SpecifierSet()
@@ -300,7 +376,7 @@ def parse_requirement(value: str) -> Requirement:
                     name=name,
                     extras=egg_extras,
                     specifier=specifier,
-                    url=raw if _looks_like_url(raw) else None,
+                    url=raw if looks_like_url(raw) else None,
                     marker=None,
                     raw=raw,
                 )
@@ -308,11 +384,11 @@ def parse_requirement(value: str) -> Requirement:
                 name=egg_name,
                 extras=egg_extras,
                 specifier=SpecifierSet(),
-                url=raw if _looks_like_url(raw) else None,
+                url=raw if looks_like_url(raw) else None,
                 marker=None,
                 raw=raw,
             )
-        inferred = _project_from_direct_reference(raw)
+        inferred = project_from_direct_reference(raw)
         if inferred is not None:
             name, version = inferred
             specifier = SpecifierSet(f"=={version}") if version else SpecifierSet()
@@ -320,7 +396,7 @@ def parse_requirement(value: str) -> Requirement:
                 name=name,
                 extras=frozenset(),
                 specifier=specifier,
-                url=raw if _looks_like_url(raw) else None,
+                url=raw if looks_like_url(raw) else None,
                 marker=None,
                 raw=raw,
             )
@@ -328,12 +404,12 @@ def parse_requirement(value: str) -> Requirement:
             name=raw,
             extras=frozenset(),
             specifier=SpecifierSet(),
-            url=raw if _looks_like_url(raw) else None,
+            url=raw if looks_like_url(raw) else None,
             marker=None,
             raw=raw,
         )
-    req_part, marker = _split_marker(raw)
-    name_match = _REQ_NAME_RE.match(req_part)
+    req_part, marker = split_marker(raw)
+    name_match = REQ_NAME_RE.match(req_part)
     if name_match is None:
         raise ValueError(f"invalid requirement: {value!r}")
     name = name_match.group(1)
@@ -355,7 +431,7 @@ def parse_requirement(value: str) -> Requirement:
         if rest.startswith("(") and rest.endswith(")"):
             rest = rest[1:-1].strip()
         spec = rest
-        if spec and ("[" in spec or "]" in spec or _SPEC_RE.sub("", spec).strip(" ,")):
+        if spec and ("[" in spec or "]" in spec or SPEC_RE.sub("", spec).strip(" ,")):
             raise ValueError(f"invalid version specifier: {value!r}")
     return Requirement(
         name=name,
@@ -383,16 +459,18 @@ def canonicalize_requirement(value: str) -> str:
     return "".join(parts)
 
 
-def _looks_like_direct_reference(value: str) -> bool:
-    return _looks_like_url(value) or value.startswith((".", "/", "~"))
+def looks_like_direct_reference(value: str) -> bool:
+    return looks_like_url(value) or value.startswith((".", "/", "~"))
 
 
-def _looks_like_url(value: str) -> bool:
+def looks_like_url(value: str) -> bool:
+    if ":" not in value:
+        return False
     parsed = urllib.parse.urlparse(value)
     return bool(parsed.scheme and (parsed.netloc or parsed.path))
 
 
-def _project_from_direct_reference(value: str) -> tuple[str, str | None] | None:
+def project_from_direct_reference(value: str) -> tuple[str, str | None] | None:
     parsed = urllib.parse.urlparse(value)
     filename = urllib.parse.unquote(parsed.path.rsplit("/", 1)[-1])
     if not filename:
@@ -415,7 +493,7 @@ def _project_from_direct_reference(value: str) -> tuple[str, str | None] | None:
     return name.replace("_", "-"), version
 
 
-def _egg_fragment(value: str) -> tuple[str | None, frozenset[str]]:
+def egg_fragment_internal(value: str) -> tuple[str | None, frozenset[str]]:
     fragment = urllib.parse.urlparse(value).fragment
     if not fragment:
         return None, frozenset()
@@ -431,12 +509,12 @@ def _egg_fragment(value: str) -> tuple[str | None, frozenset[str]]:
                 for part in extras_text.split(",")
                 if part.strip()
             )
-        if _REQ_NAME_RE.fullmatch(name):
+        if REQ_NAME_RE.fullmatch(name):
             return name, extras
     return None, frozenset()
 
 
-def _split_marker(value: str) -> tuple[str, str | None]:
+def split_marker(value: str) -> tuple[str, str | None]:
     in_quote: str | None = None
     for index, char in enumerate(value):
         if char in {"'", '"'}:
@@ -451,26 +529,26 @@ def marker_applies(marker: str | None, *, extras: Iterable[str] = ()) -> bool:
         return True
     extra_values = {safe_extra(extra) for extra in extras if extra}
     env = default_environment()
-    return _marker_applies(marker, env, extra_values)
+    return marker_applies_internal(marker, env, extra_values)
 
 
-def _marker_applies(
+def marker_applies_internal(
     marker: str,
     env: dict[str, str],
     extras: set[str],
 ) -> bool:
     or_clauses = re.split(r"\s+or\s+", marker, flags=re.IGNORECASE)
-    return any(_marker_and_clause_matches(clause, env, extras) for clause in or_clauses)
+    return any(marker_and_clause_matches(clause, env, extras) for clause in or_clauses)
 
 
-def _marker_and_clause_matches(
+def marker_and_clause_matches(
     clause_text: str,
     env: dict[str, str],
     extras: set[str],
 ) -> bool:
     clauses = re.split(r"\s+and\s+", clause_text, flags=re.IGNORECASE)
     for clause in clauses:
-        clause = _strip_grouping_parentheses(clause.strip())
+        clause = strip_grouping_parentheses(clause.strip())
         match = re.match(
             r"\s*([A-Za-z0-9_]+)\s*(==|!=|<=|>=|<|>|in|not in)\s*(['\"])(.*?)\3\s*$",
             clause,
@@ -479,7 +557,7 @@ def _marker_and_clause_matches(
             return False
         key, op, _, expected = match.groups()
         if key == "extra":
-            if not _extra_marker_clause_matches(op, expected, extras):
+            if not extra_marker_clause_matches(op, expected, extras):
                 return False
             continue
         actual = env.get(key, "")
@@ -511,7 +589,7 @@ def _marker_and_clause_matches(
     return True
 
 
-def _strip_grouping_parentheses(text: str) -> str:
+def strip_grouping_parentheses(text: str) -> str:
     while text.startswith("(") and text.endswith(")"):
         depth = 0
         balanced = True
@@ -529,7 +607,7 @@ def _strip_grouping_parentheses(text: str) -> str:
     return text
 
 
-def _extra_marker_clause_matches(op: str, expected: str, extras: set[str]) -> bool:
+def extra_marker_clause_matches(op: str, expected: str, extras: set[str]) -> bool:
     if not extras:
         extras = {""}
     expected = safe_extra(expected)
@@ -543,10 +621,10 @@ def _extra_marker_clause_matches(op: str, expected: str, extras: set[str]) -> bo
     if op == "not in":
         expected_values = {safe_extra(part.strip()) for part in expected.split(",")}
         return all(extra not in expected_values for extra in extras)
-    return any(_compare_extra(extra, op, expected) for extra in extras)
+    return any(compare_extra(extra, op, expected) for extra in extras)
 
 
-def _compare_extra(actual: str, op: str, expected: str) -> bool:
+def compare_extra(actual: str, op: str, expected: str) -> bool:
     try:
         actual_v = Version(actual)
         expected_v = Version(expected)

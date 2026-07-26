@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 
-from pip.platform.locations._sysconfig import get_scheme
+from pip.platform.locations.sysconfig import get_scheme
 
 
 def target_prefix() -> str | None:

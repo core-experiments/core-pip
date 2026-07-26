@@ -11,11 +11,11 @@ from pip.core.packaging import canonicalize_name
 def parse_dependency_groups(items: list[tuple[str, str]]) -> list[str]:
     requirements: list[str] = []
     for file_name, group_name in items:
-        requirements.extend(_resolve_group_file(Path(file_name), group_name))
+        requirements.extend(resolve_group_file(Path(file_name), group_name))
     return requirements
 
 
-def _resolve_group_file(path: Path, group_name: str) -> list[str]:
+def resolve_group_file(path: Path, group_name: str) -> list[str]:
     try:
         with path.open("rb") as handle:
             data = tomllib.load(handle)
@@ -33,14 +33,14 @@ def _resolve_group_file(path: Path, group_name: str) -> list[str]:
         )
 
     try:
-        return _resolve_group(groups, group_name, stack=[])
+        return resolve_group(groups, group_name, stack=[])
     except InstallationError as exc:
         raise InstallationError(
             f"[dependency-groups] resolution failed for {group_name!r} from {path.name!r}: {exc}"
         ) from exc
 
 
-def _resolve_group(
+def resolve_group(
     groups: dict[str, Any], group_name: str, *, stack: list[str]
 ) -> list[str]:
     if group_name in stack:
@@ -76,7 +76,7 @@ def _resolve_group(
                 raise InstallationError(
                     f"Dependency group {group_name!r} contains an invalid include."
                 )
-            resolved.extend(_resolve_group(groups, include, stack=next_stack))
+            resolved.extend(resolve_group(groups, include, stack=next_stack))
             continue
         raise InstallationError(
             f"Dependency group {group_name!r} contains an invalid item."

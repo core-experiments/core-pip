@@ -150,7 +150,7 @@ class RevOptions:
 
 
 class VcsSupport:
-    _registry: dict[str, VersionControl] = {}
+    registry_internal: dict[str, VersionControl] = {}
     schemes = ["ssh", "git", "hg", "bzr", "sftp", "svn"]
 
     def __init__(self) -> None:
@@ -160,11 +160,11 @@ class VcsSupport:
         super().__init__()
 
     def __iter__(self) -> Iterator[str]:
-        return self._registry.__iter__()
+        return self.registry_internal.__iter__()
 
     @property
     def backends(self) -> list[VersionControl]:
-        return list(self._registry.values())
+        return list(self.registry_internal.values())
 
     @property
     def dirnames(self) -> list[str]:
@@ -181,13 +181,13 @@ class VcsSupport:
         if not hasattr(cls, "name"):
             logger.warning("Cannot register VCS %s", cls.__name__)
             return
-        if cls.name not in self._registry:
-            self._registry[cls.name] = cls()
+        if cls.name not in self.registry_internal:
+            self.registry_internal[cls.name] = cls()
             logger.debug("Registered VCS backend: %s", cls.name)
 
     def unregister(self, name: str) -> None:
-        if name in self._registry:
-            del self._registry[name]
+        if name in self.registry_internal:
+            del self.registry_internal[name]
 
     def get_backend_for_dir(self, location: str) -> VersionControl | None:
         """
@@ -195,7 +195,7 @@ class VcsSupport:
         at the given directory.
         """
         vcs_backends = {}
-        for vcs_backend in self._registry.values():
+        for vcs_backend in self.registry_internal.values():
             repo_path = vcs_backend.get_repository_root(location)
             if not repo_path:
                 continue
@@ -216,7 +216,7 @@ class VcsSupport:
         """
         Return a VersionControl object or None.
         """
-        for vcs_backend in self._registry.values():
+        for vcs_backend in self.registry_internal.values():
             if scheme in vcs_backend.schemes:
                 return vcs_backend
         return None
@@ -226,7 +226,7 @@ class VcsSupport:
         Return a VersionControl object or None.
         """
         name = name.lower()
-        return self._registry.get(name)
+        return self.registry_internal.get(name)
 
 
 vcs = VcsSupport()
@@ -326,7 +326,7 @@ class VersionControl:
         return RevOptions(cls, rev, extra_args=extra_args or [])
 
     @classmethod
-    def _is_local_repository(cls, repo: str) -> bool:
+    def is_local_repository(cls, repo: str) -> bool:
         """
         posix absolute paths start with os.path.sep,
         win32 ones start with drive (like c:\\folder)

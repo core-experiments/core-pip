@@ -60,13 +60,13 @@ class HttpResponse:
         self.request = request
         self.history = history or []
         self.from_cache = from_cache
-        self._content: bytes | None = None
+        self.content_internal: bytes | None = None
 
     @property
     def content(self) -> bytes:
-        if self._content is None:
-            self._content = self.raw.read()
-        return self._content
+        if self.content_internal is None:
+            self.content_internal = self.raw.read()
+        return self.content_internal
 
     @property
     def text(self) -> str:
@@ -101,7 +101,7 @@ class HttpResponse:
             close()
 
 
-def _timeout_value(
+def timeout_value(
     timeout: float | tuple[float | None, float | None] | None,
 ) -> float | None:
     if isinstance(timeout, tuple):
@@ -124,7 +124,7 @@ class NetworkSession:
         cache: Any = None,
     ) -> None:
         self.headers: dict[str, str] = {
-            "User-Agent": self._user_agent(),
+            "User-Agent": self.user_agent(),
             "Accept-Encoding": "identity",
         }
         self.proxies: dict[str, str] | None = None
@@ -143,7 +143,7 @@ class NetworkSession:
         self.trusted_hosts = {host.lower().split(":", 1)[0] for host in trusted_hosts}
 
     @staticmethod
-    def _user_agent() -> str:
+    def user_agent() -> str:
         import platform
 
         from pip.core.pip_version import get_pip_version
@@ -181,28 +181,28 @@ class NetworkSession:
         request_url = url
         username: str | None = None
         password: str | None = None
-        if self.auth is not None and hasattr(self.auth, "_get_url_and_credentials"):
-            request_url, username, password = self.auth._get_url_and_credentials(url)
+        if self.auth is not None and hasattr(self.auth, "get_url_and_credentials"):
+            request_url, username, password = self.auth.get_url_and_credentials(url)
         if username is not None and password is not None:
             token = base64.b64encode(f"{username}:{password}".encode()).decode()
             request_headers["Authorization"] = f"Basic {token}"
 
         request = HttpRequest(method, request_url, request_headers, data)
         if method == "GET" and not stream and "Range" not in request_headers:
-            cached = self._cached_response(request)
+            cached = self.cached_response(request)
             if cached is not None:
                 return cached
         attempts = self.retries + 1
         for attempt in range(attempts):
             try:
-                response = self._open(request, timeout=timeout)
+                response = self.open_internal(request, timeout=timeout)
             except TimeoutError as exc:
                 if attempt + 1 == attempts:
                     raise ConnectionTimeoutError(
                         redact_auth_from_url(request_url),
                         urllib.parse.urlsplit(request_url).hostname or "unknown host",
                         kind="connect",
-                        timeout=_timeout_value(timeout or self.timeout) or 0,
+                        timeout=timeout_value(timeout or self.timeout) or 0,
                     ) from exc
                 time.sleep(0.25 * (2**attempt))
                 continue
@@ -229,17 +229,15 @@ class NetworkSession:
                 time.sleep(0.25 * (2**attempt))
                 continue
             if response.status_code == 401 and self.auth is not None:
-                retry = self._retry_auth(
-                    response, request, headers or {}, data, timeout
-                )
+                retry = self.retry_auth(response, request, headers or {}, data, timeout)
                 if retry is not None:
                     return retry
             if method == "GET" and not stream and response.status_code == 200:
-                self._cache_response(response)
+                self.cache_response(response)
             return response
         raise AssertionError("unreachable")
 
-    def _cached_response(self, request: HttpRequest) -> HttpResponse | None:
+    def cached_response(self, request: HttpRequest) -> HttpResponse | None:
         if self.cache is None:
             return None
         metadata = self.cache.get(request.url)
@@ -274,7 +272,7 @@ class NetworkSession:
             from_cache=True,
         )
 
-    def _cache_response(self, response: HttpResponse) -> None:
+    def cache_response(self, response: HttpResponse) -> None:
         if self.cache is None:
             return
         cache_control = response.headers.get("Cache-Control", "")
@@ -315,15 +313,15 @@ class NetworkSession:
         )
         self.cache.set_body(response.url, body)
         response.raw = io.BytesIO(body)
-        response._content = body
+        response.content_internal = body
 
-    def _open(self, request: HttpRequest, timeout: Any) -> HttpResponse:
+    def open_internal(self, request: HttpRequest, timeout: Any) -> HttpResponse:
         parsed = urllib.parse.urlsplit(request.url)
         context = None
         if parsed.hostname and parsed.hostname.lower() in self.trusted_hosts:
-            context = ssl._create_unverified_context()
+            context = ssl.create_unverified_context()
         elif self.verify is False:
-            context = ssl._create_unverified_context()
+            context = ssl.create_unverified_context()
         else:
             context = ssl.create_default_context(
                 cafile=self.verify if isinstance(self.verify, str) else None
@@ -343,7 +341,7 @@ class NetworkSession:
             method=request.method,
         )
         try:
-            raw = opener.open(req, timeout=_timeout_value(timeout or self.timeout))
+            raw = opener.open(req, timeout=timeout_value(timeout or self.timeout))
         except urllib.error.HTTPError as exc:
             raw = exc
         except urllib.error.URLError as exc:
@@ -370,7 +368,7 @@ class NetworkSession:
             request=request,
         )
 
-    def _retry_auth(
+    def retry_auth(
         self,
         response: HttpResponse,
         request: HttpRequest,

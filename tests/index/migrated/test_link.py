@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import os
 import posixpath
+from pathlib import Path
 
 import pytest
 from pip.core.errors import PipError
 from pip.core.hashes import Hashes
 from pip.index.links import InvalidEggFragment, Link
 from pip.index.paths import PathComponent
+from pip.index.source_models import ArtifactKind
 
 
 class TestLink:
@@ -23,6 +25,36 @@ class TestLink:
     def test_repr(self, url: str, expected: str) -> None:
         link = Link(url)
         assert repr(link) == expected
+
+    def test_from_known_file_skips_directory_probe(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        wheel = tmp_path / "demo-1.0-py3-none-any.whl"
+        wheel.touch()
+
+        def fail_is_dir(path: Path) -> bool:
+            raise AssertionError(f"rechecked known file: {path}")
+
+        monkeypatch.setattr(Path, "is_dir", fail_is_dir)
+
+        link = Link.from_path(wheel, source_url=None, is_dir=False)
+
+        assert link.kind is ArtifactKind.WHEEL
+
+    def test_from_path_retains_known_local_path(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        wheel = tmp_path / "demo-1.0-py3-none-any.whl"
+        wheel.touch()
+
+        def fail_url_to_path(url: str) -> str:
+            raise AssertionError(f"converted known local URL back to a path: {url}")
+
+        monkeypatch.setattr("pip.index.links.url_to_path", fail_url_to_path)
+
+        link = Link.from_path(wheel, source_url=None, is_dir=False)
+
+        assert link.file_path == str(wheel)
 
     @pytest.mark.parametrize(
         "url, expected",

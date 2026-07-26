@@ -62,7 +62,7 @@ def build_editable(wheel_directory, config_settings=None, metadata_directory=Non
 # fmt: on
 
 
-def _make_project(
+def make_project_internal(
     tmpdir: Path, backend_code: str, with_setup_py: bool, with_pyproject: bool = True
 ) -> Path:
     project_dir = tmpdir / "project"
@@ -84,12 +84,12 @@ def _make_project(
     return project_dir
 
 
-def _assert_hook_called(project_dir: Path, hook: str) -> None:
+def assert_hook_called(project_dir: Path, hook: str) -> None:
     log = project_dir.joinpath("log.txt").read_text()
     assert f":{hook} called" in log, f"{hook} has not been called"
 
 
-def _assert_hook_called_with_config_settings(
+def assert_hook_called_with_config_settings(
     project_dir: Path, hook: str, config_settings: dict[str, str]
 ) -> None:
     log = project_dir.joinpath("log.txt").read_text()
@@ -99,7 +99,7 @@ def _assert_hook_called_with_config_settings(
     )
 
 
-def _assert_hook_not_called(project_dir: Path, hook: str) -> None:
+def assert_hook_not_called(project_dir: Path, hook: str) -> None:
     log = project_dir.joinpath("log.txt").read_text()
     assert f":{hook} called" not in log, f"{hook} should not have been called"
 
@@ -108,22 +108,26 @@ def test_install_pep517_basic(tmpdir: Path, script: PipTestEnvironment) -> None:
     """
     Check that the test harness we have in this file is sane.
     """
-    project_dir = _make_project(tmpdir, BACKEND_WITHOUT_PEP660, with_setup_py=False)
+    project_dir = make_project_internal(
+        tmpdir, BACKEND_WITHOUT_PEP660, with_setup_py=False
+    )
     script.pip(
         "install",
         "--no-index",
         "--no-build-isolation",
         project_dir,
     )
-    _assert_hook_called(project_dir, "prepare_metadata_for_build_wheel")
-    _assert_hook_called(project_dir, "build_wheel")
+    assert_hook_called(project_dir, "prepare_metadata_for_build_wheel")
+    assert_hook_called(project_dir, "build_wheel")
 
 
 def test_install_pep660_basic(tmpdir: Path, script: PipTestEnvironment) -> None:
     """
     Test with backend that supports build_editable.
     """
-    project_dir = _make_project(tmpdir, BACKEND_WITH_PEP660, with_setup_py=False)
+    project_dir = make_project_internal(
+        tmpdir, BACKEND_WITH_PEP660, with_setup_py=False
+    )
     result = script.pip(
         "install",
         "--no-index",
@@ -133,8 +137,8 @@ def test_install_pep660_basic(tmpdir: Path, script: PipTestEnvironment) -> None:
         "--config-setting",
         "x=y",
     )
-    _assert_hook_called(project_dir, "prepare_metadata_for_build_editable")
-    _assert_hook_called_with_config_settings(project_dir, "build_editable", {"x": "y"})
+    assert_hook_called(project_dir, "prepare_metadata_for_build_editable")
+    assert_hook_called_with_config_settings(project_dir, "build_editable", {"x": "y"})
     assert (
         result.test_env.site_packages.joinpath("project.egg-link")
         not in result.files_created
@@ -147,7 +151,9 @@ def test_install_pep660_from_reqs_file(
     """
     Test with backend that supports build_editable.
     """
-    project_dir = _make_project(tmpdir, BACKEND_WITH_PEP660, with_setup_py=False)
+    project_dir = make_project_internal(
+        tmpdir, BACKEND_WITH_PEP660, with_setup_py=False
+    )
     reqs_file = tmpdir / "requirements.txt"
     reqs_file.write_text(f"-e {project_dir.as_uri()} --config-setting x=y\n")
     result = script.pip(
@@ -157,8 +163,8 @@ def test_install_pep660_from_reqs_file(
         "-r",
         reqs_file,
     )
-    _assert_hook_called(project_dir, "prepare_metadata_for_build_editable")
-    _assert_hook_called_with_config_settings(project_dir, "build_editable", {"x": "y"})
+    assert_hook_called(project_dir, "prepare_metadata_for_build_editable")
+    assert_hook_called_with_config_settings(project_dir, "build_editable", {"x": "y"})
     assert (
         result.test_env.site_packages.joinpath("project.egg-link")
         not in result.files_created
@@ -177,7 +183,9 @@ def test_install_no_pep660(
 
     The error is the same with and without build isolation.
     """
-    project_dir = _make_project(tmpdir, BACKEND_WITHOUT_PEP660, with_setup_py=True)
+    project_dir = make_project_internal(
+        tmpdir, BACKEND_WITHOUT_PEP660, with_setup_py=True
+    )
     result = script.pip(
         "install",
         "--no-index",
@@ -197,7 +205,9 @@ def test_wheel_editable_pep660_basic(tmpdir: Path, script: PipTestEnvironment) -
     Test 'pip wheel' of an editable pep 660 project.
     It must *not* call prepare_metadata_for_build_editable.
     """
-    project_dir = _make_project(tmpdir, BACKEND_WITH_PEP660, with_setup_py=False)
+    project_dir = make_project_internal(
+        tmpdir, BACKEND_WITH_PEP660, with_setup_py=False
+    )
     wheel_dir = tmpdir / "dist"
     script.pip(
         "wheel",
@@ -208,10 +218,10 @@ def test_wheel_editable_pep660_basic(tmpdir: Path, script: PipTestEnvironment) -
         "-w",
         wheel_dir,
     )
-    _assert_hook_not_called(project_dir, "prepare_metadata_for_build_editable")
-    _assert_hook_not_called(project_dir, "build_editable")
-    _assert_hook_called(project_dir, "prepare_metadata_for_build_wheel")
-    _assert_hook_called(project_dir, "build_wheel")
+    assert_hook_not_called(project_dir, "prepare_metadata_for_build_editable")
+    assert_hook_not_called(project_dir, "build_editable")
+    assert_hook_called(project_dir, "prepare_metadata_for_build_wheel")
+    assert_hook_called(project_dir, "build_wheel")
     assert len(os.listdir(str(wheel_dir))) == 1, "a wheel should have been created"
 
 
@@ -222,7 +232,9 @@ def test_download_editable_pep660_basic(
     Test 'pip download' of an editable pep 660 project.
     It must *not* call prepare_metadata_for_build_editable.
     """
-    project_dir = _make_project(tmpdir, BACKEND_WITH_PEP660, with_setup_py=False)
+    project_dir = make_project_internal(
+        tmpdir, BACKEND_WITH_PEP660, with_setup_py=False
+    )
     reqs_file = tmpdir / "requirements.txt"
     reqs_file.write_text(f"-e {project_dir.as_uri()}\n")
     download_dir = tmpdir / "download"
@@ -235,6 +247,6 @@ def test_download_editable_pep660_basic(
         "-d",
         download_dir,
     )
-    _assert_hook_not_called(project_dir, "prepare_metadata_for_build_editable")
-    _assert_hook_called(project_dir, "prepare_metadata_for_build_wheel")
+    assert_hook_not_called(project_dir, "prepare_metadata_for_build_editable")
+    assert_hook_called(project_dir, "prepare_metadata_for_build_wheel")
     assert len(os.listdir(str(download_dir))) == 1, "a zip should have been created"

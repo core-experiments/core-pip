@@ -122,14 +122,14 @@ def test_parsing_validation() -> None:
 
 
 def test_redact_url() -> None:
-    def _redact_git(url: str) -> str:
+    def redact_git(url: str) -> str:
         direct_url = DirectUrl(
             url=url,
             vcs_info=VcsInfo(vcs="git", commit_id="1"),
         )
         return direct_url.to_dict()["url"]
 
-    def _redact_archive(url: str) -> str:
+    def redact_archive(url: str) -> str:
         direct_url = DirectUrl(
             url=url,
             archive_info=ArchiveInfo(),
@@ -137,16 +137,16 @@ def test_redact_url() -> None:
         return direct_url.to_dict()["url"]
 
     assert (
-        _redact_git("https://user:password@g.c/u/p.git@branch#egg=pkg")
+        redact_git("https://user:password@g.c/u/p.git@branch#egg=pkg")
         == "https://g.c/u/p.git@branch#egg=pkg"
     )
-    assert _redact_git("https://${USER}:password@g.c/u/p.git") == "https://g.c/u/p.git"
+    assert redact_git("https://${USER}:password@g.c/u/p.git") == "https://g.c/u/p.git"
     assert (
-        _redact_archive("file://${U}:${PIP_PASSWORD}@g.c/u/p.tgz")
+        redact_archive("file://${U}:${PIP_PASSWORD}@g.c/u/p.tgz")
         == "file://${U}:${PIP_PASSWORD}@g.c/u/p.tgz"
     )
     assert (
-        _redact_git("https://${PIP_TOKEN}@g.c/u/p.git")
+        redact_git("https://${PIP_TOKEN}@g.c/u/p.git")
         == "https://${PIP_TOKEN}@g.c/u/p.git"
     )
-    assert _redact_git("ssh://git@g.c/u/p.git") == "ssh://git@g.c/u/p.git"
+    assert redact_git("ssh://git@g.c/u/p.git") == "ssh://git@g.c/u/p.git"

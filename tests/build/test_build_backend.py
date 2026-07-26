@@ -14,7 +14,7 @@ from pip.core.errors import BuildError
 
 
 def test_build_backend_builds_static_wheel_with_typed_marker(tmp_path: Path) -> None:
-    project = _write_project(tmp_path, "typed-pkg", "typed_pkg", "1.0")
+    project = write_project(tmp_path, "typed-pkg", "typed_pkg", "1.0")
     (project / "src" / "typed_pkg" / "py.typed").write_text("", encoding="utf-8")
     wheel_dir = tmp_path / "wheelhouse"
 
@@ -30,7 +30,7 @@ def test_build_backend_builds_static_wheel_with_typed_marker(tmp_path: Path) -> 
 
 
 def test_build_backend_includes_package_data(tmp_path: Path) -> None:
-    project = _write_project(tmp_path, "data-pkg", "data_pkg", "1.0")
+    project = write_project(tmp_path, "data-pkg", "data_pkg", "1.0")
     package_dir = project / "src" / "data_pkg"
     package_dir.joinpath("payload.dat").write_text("Data\n", encoding="utf-8")
     package_dir.joinpath(".hidden").write_text("Hidden\n", encoding="utf-8")
@@ -49,7 +49,7 @@ def test_build_backend_includes_package_data(tmp_path: Path) -> None:
 
 
 def test_build_backend_builds_editable_wheel(tmp_path: Path) -> None:
-    project = _write_project(tmp_path, "editable-pkg", "editable_pkg", "1.0")
+    project = write_project(tmp_path, "editable-pkg", "editable_pkg", "1.0")
     wheel_dir = tmp_path / "wheelhouse"
 
     wheel_name = ProjectBuilder(project).build_editable(wheel_dir)
@@ -176,15 +176,15 @@ def test_build_backend_rejects_invalid_package_version(tmp_path: Path) -> None:
 
 
 def test_default_wheel_directories_are_isolated() -> None:
-    first = build_module._default_wheel_dir()
-    second = build_module._default_wheel_dir()
+    first = build_module.default_wheel_dir()
+    second = build_module.default_wheel_dir()
 
     assert first != second
     assert first.is_dir()
     assert second.is_dir()
 
 
-def _write_project(tmp_path: Path, name: str, package: str, version: str) -> Path:
+def write_project(tmp_path: Path, name: str, package: str, version: str) -> Path:
     project = tmp_path / name
     package_dir = project / "src" / package
     package_dir.mkdir(parents=True)

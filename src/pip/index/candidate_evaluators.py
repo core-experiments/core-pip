@@ -4,13 +4,15 @@ from __future__ import annotations
 
 import logging
 import urllib.parse
+from collections.abc import Sequence
+from functools import lru_cache
 
 from pip.core.errors import InvalidWheelFilename
 from pip.core.hashes import Hashes
 from pip.core.packaging import Requirement, SpecifierSet, Version
 from pip.core.release_control import ReleaseControl
 from pip.core.target_python import TargetPython, get_supported
-from pip.core.wheel import TargetContext, Wheel, WheelTag
+from pip.core.wheel import TargetContext, Wheel, WheelTag, legacy_build_tag
 from pip.index.candidates import BestCandidateResult, InstallationCandidate
 from pip.index.links import Link
 from pip.index.source_models import ArtifactKind, RejectedCandidate, RejectionReason
@@ -18,7 +20,15 @@ from pip.index.source_models import ArtifactKind, RejectedCandidate, RejectionRe
 logger = logging.getLogger(__name__)
 
 
-def _log_hash_check(message: str, *args: object) -> None:
+@lru_cache(maxsize=64)
+def supported_tag_ranks(tags: tuple[WheelTag, ...]) -> dict[str, int]:
+    ranks: dict[str, int] = {}
+    for index, tag in enumerate(tags):
+        ranks.setdefault(str(tag).lower(), index)
+    return ranks
+
+
+def log_hash_check(message: str, *args: object) -> None:
     logger.debug(message, *args)
 
 
@@ -27,20 +37,19 @@ class CandidateEvaluator:
         self,
         project_name: str,
         *,
-        supported_tags: list[WheelTag],
+        supported_tags: Sequence[WheelTag],
         specifier: SpecifierSet,
         release_control: ReleaseControl | None = None,
         prefer_binary: bool = False,
         hashes: Hashes | None = None,
     ) -> None:
-        self._project_name = project_name
-        self._supported_tag_ranks: dict[str, int] = {}
-        for index, tag in enumerate(supported_tags):
-            self._supported_tag_ranks.setdefault(str(tag).lower(), index)
-        self._specifier = specifier
-        self._release_control = release_control
-        self._prefer_binary = prefer_binary
-        self._hashes = hashes
+        self.project_name_internal = project_name
+        self.supported_tags_internal = tuple(supported_tags)
+        self.supported_tag_ranks = supported_tag_ranks(self.supported_tags_internal)
+        self.specifier_internal = specifier
+        self.release_control_internal = release_control
+        self.prefer_binary_internal = prefer_binary
+        self.hashes_internal = hashes
 
     @classmethod
     def create(
@@ -78,37 +87,39 @@ class CandidateEvaluator:
     def get_applicable_candidates(
         self, candidates: list[InstallationCandidate]
     ) -> list[InstallationCandidate]:
-        allow_prereleases = self._allow_prereleases()
+        allow_prereleases = self.allow_prereleases_internal()
         if allow_prereleases is None:
             allow_prereleases = not any(
                 not candidate.version.is_prerelease
-                and self._specifier.contains(candidate.version)
+                and self.specifier_internal.contains(candidate.version)
                 for candidate in candidates
             )
             allow_prereleases = allow_prereleases or any(
                 spec.operator != "==="
                 and not spec.version.endswith(".*")
                 and Version(spec.version).is_prerelease
-                for spec in self._specifier.specifiers
+                for spec in self.specifier_internal.specifiers
             )
         applicable = [
             candidate
             for candidate in candidates
             if not (candidate.version.is_prerelease and allow_prereleases is False)
-            if self._specifier.contains(
+            if self.specifier_internal.contains(
                 candidate.version, allow_prereleases=allow_prereleases
             )
         ]
         return filter_unallowed_hashes(
             applicable,
-            hashes=self._hashes,
-            project_name=self._project_name,
+            hashes=self.hashes_internal,
+            project_name=self.project_name_internal,
         )
 
-    def _allow_prereleases(self) -> bool | None:
-        if self._release_control is None:
+    def allow_prereleases_internal(self) -> bool | None:
+        if self.release_control_internal is None:
             return None
-        return self._release_control.allows_prereleases(self._project_name)
+        return self.release_control_internal.allows_prereleases(
+            self.project_name_internal
+        )
 
     @staticmethod
     def evaluate_link(
@@ -120,6 +131,27 @@ class CandidateEvaluator:
         allow_source: bool,
         target: TargetContext | None,
     ) -> InstallationCandidate | RejectedCandidate:
+        parsed = InstallationCandidate.from_link(link, target=target)
+        return CandidateEvaluator.evaluate_parsed_link(
+            link,
+            parsed,
+            requirement,
+            allow_yanked=allow_yanked,
+            allow_binary=allow_binary,
+            allow_source=allow_source,
+        )
+
+    @staticmethod
+    def evaluate_parsed_link(
+        link: Link,
+        parsed: InstallationCandidate | RejectedCandidate,
+        requirement: Requirement,
+        *,
+        allow_yanked: bool,
+        allow_binary: bool,
+        allow_source: bool,
+    ) -> InstallationCandidate | RejectedCandidate:
+        """Apply requirement-specific policy to an already parsed link."""
         if link.kind is ArtifactKind.WHEEL and not allow_binary:
             return CandidateEvaluator.reject(
                 link,
@@ -135,11 +167,16 @@ class CandidateEvaluator:
                 RejectionReason.UNSUPPORTED_ARTIFACT,
                 "source distributions are disabled",
             )
-        parsed = InstallationCandidate.from_link(link, target=target)
         if isinstance(parsed, RejectedCandidate):
-            if CandidateEvaluator.is_unnamed_direct_requirement(
-                requirement
-            ) and link.kind in {ArtifactKind.SDIST, ArtifactKind.SOURCE_TREE}:
+            # Direct archive URLs often have non-distribution filenames (for
+            # example GitHub's ``master.zip``).  Keep those installable by
+            # deferring identity/version discovery to the build step, but do
+            # not mask invalid source-tree metadata this way.
+            if (
+                CandidateEvaluator.is_unnamed_direct_requirement(requirement)
+                and link.kind is ArtifactKind.SDIST
+                and parsed.reason is RejectionReason.INVALID_VERSION
+            ):
                 parsed = InstallationCandidate(
                     name=requirement.name,
                     version="0",
@@ -238,33 +275,41 @@ class CandidateEvaluator:
     ) -> InstallationCandidate | None:
         if not candidates:
             return None
-        return max(candidates, key=self._sort_key)
+        return max(candidates, key=self.sort_key_internal)
 
-    def _sort_key(
+    def sort_key_internal(
         self, candidate: InstallationCandidate
     ) -> tuple[int, int, Version, int, int, int, int, tuple[int, str] | tuple[()]]:
         digest = None
         if candidate.link.hashes is not None:
             digest = candidate.link.hashes.get("sha256")
-        allowed = _allowed_hashes(self._hashes)
+        allowed = allowed_hashes_internal(self.hashes_internal)
         hash_rank = int(bool(allowed and digest in allowed))
         yanked_rank = -1 if candidate.link.is_yanked else 0
         wheel_rank = 0
         egg_fragment_rank = 1
         tag_rank = -1_000_000
         build_tag: tuple[int, str] | tuple[()] = ()
-        if candidate.link.filename.endswith(".whl"):
+        if candidate.wheel is not None:
+            wheel_rank = 1
+            supported_matches = (
+                rank
+                for file_tag in candidate.wheel.tags
+                if (rank := self.supported_tag_ranks.get(str(file_tag).lower()))
+                is not None
+            )
+            best_rank = min(supported_matches, default=None)
+            if best_rank is not None:
+                tag_rank = -best_rank
+            build_tag = legacy_build_tag(candidate.wheel.build_tag)
+        elif candidate.link.filename.endswith(".whl"):
             try:
                 wheel = Wheel(candidate.link.filename)
                 wheel_rank = 1
                 supported_matches = (
                     rank
                     for file_tag in wheel.file_tags
-                    if (
-                        rank := self._supported_tag_ranks.get(
-                            str(file_tag).lower()
-                        )
-                    )
+                    if (rank := self.supported_tag_ranks.get(str(file_tag).lower()))
                     is not None
                 )
                 best_rank = min(supported_matches, default=None)
@@ -275,7 +320,7 @@ class CandidateEvaluator:
                 pass
         if urllib.parse.urlparse(candidate.link.url).fragment.startswith("egg="):
             egg_fragment_rank = 0
-        binary_preference = wheel_rank if self._prefer_binary else 0
+        binary_preference = wheel_rank if self.prefer_binary_internal else 0
         return (
             hash_rank,
             yanked_rank,
@@ -294,11 +339,11 @@ def filter_unallowed_hashes(
     hashes: Hashes | None,
     project_name: str,
 ) -> list[InstallationCandidate]:
-    allowed = _allowed_hashes(hashes)
+    allowed = allowed_hashes_internal(hashes)
     if hashes is None:
         return list(candidates)
     if not allowed:
-        _log_hash_check(
+        log_hash_check(
             "Given no hashes to check %d links for project %r: discarding no candidates",
             len(candidates),
             project_name,
@@ -320,7 +365,7 @@ def filter_unallowed_hashes(
         else:
             discarded.append(candidate.link.url)
     if matches == 0:
-        _log_hash_check(
+        log_hash_check(
             "Checked %d links for project %r against %d hashes (%d matches, %d no digest): discarding no candidates",
             len(candidates),
             project_name,
@@ -330,7 +375,7 @@ def filter_unallowed_hashes(
         )
         return list(candidates)
     if discarded:
-        _log_hash_check(
+        log_hash_check(
             "Checked %d links for project %r against %d hashes (%d matches, %d no digest): discarding %d non-matches:\n  %s",
             len(candidates),
             project_name,
@@ -341,7 +386,7 @@ def filter_unallowed_hashes(
             "\n  ".join(discarded),
         )
     else:
-        _log_hash_check(
+        log_hash_check(
             "Checked %d links for project %r against %d hashes (%d matches, %d no digest): discarding no candidates",
             len(candidates),
             project_name,
@@ -352,5 +397,5 @@ def filter_unallowed_hashes(
     return result
 
 
-def _allowed_hashes(hashes: Hashes | None) -> frozenset[str]:
+def allowed_hashes_internal(hashes: Hashes | None) -> frozenset[str]:
     return hashes.allowed_digests if hashes is not None else frozenset()

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import mimetypes
+import os
 from collections import defaultdict
 from pathlib import Path
 
@@ -15,23 +16,24 @@ from pip.index.links import SOURCE_ARCHIVE_SUFFIXES
 def local_source_files(path: Path) -> tuple[Path, ...]:
     if not path.is_dir():
         return ()
-    return tuple(item for item in path.iterdir() if item.is_file())
+    with os.scandir(path) as entries:
+        return tuple(Path(entry.path) for entry in entries if entry.is_file())
 
 
 class DirectoryIndex:
     """Cached page and artifact URLs discovered in a local source directory."""
 
     def __init__(self, path: str) -> None:
-        self._path = path
-        self._page_candidates: list[str] = []
-        self._project_name_to_urls: dict[str, list[str]] = defaultdict(list)
-        self._scanned = False
+        self.path_internal = path
+        self.page_candidates_internal: list[str] = []
+        self.project_name_to_urls_internal: dict[str, list[str]] = defaultdict(list)
+        self.scanned = False
 
-    def _scan(self) -> None:
-        for entry in local_source_files(Path(self._path)):
+    def scan(self) -> None:
+        for entry in local_source_files(Path(self.path_internal)):
             url = path_to_url(str(entry))
-            if _is_html_file(url):
-                self._page_candidates.append(url)
+            if is_html_file(url):
+                self.page_candidates_internal.append(url)
                 continue
             wheel = parse_wheel_filename(entry.name)
             if wheel is not None:
@@ -41,23 +43,23 @@ class DirectoryIndex:
                 if parsed is None:
                     continue
                 project_name = canonicalize_name(parsed[0])
-            self._project_name_to_urls[project_name].append(url)
-        self._scanned = True
+            self.project_name_to_urls_internal[project_name].append(url)
+        self.scanned = True
 
     @property
     def page_candidates(self) -> list[str]:
-        if not self._scanned:
-            self._scan()
-        return self._page_candidates
+        if not self.scanned:
+            self.scan()
+        return self.page_candidates_internal
 
     @property
     def project_name_to_urls(self) -> dict[str, list[str]]:
-        if not self._scanned:
-            self._scan()
-        return self._project_name_to_urls
+        if not self.scanned:
+            self.scan()
+        return self.project_name_to_urls_internal
 
 
-def _is_html_file(file_url: str) -> bool:
+def is_html_file(file_url: str) -> bool:
     return mimetypes.guess_type(file_url, strict=False)[0] == "text/html"
 
 

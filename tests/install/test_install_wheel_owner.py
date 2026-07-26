@@ -48,7 +48,7 @@ def install_wheel(
     )
 
 
-def _make_wheel(
+def make_wheel_internal(
     directory: Path,
     *,
     version: str = "1.0",
@@ -77,7 +77,7 @@ def _make_wheel(
 
 
 def test_install_and_uninstall_are_owned_by_pip_install(tmp_path: Path) -> None:
-    wheel = _make_wheel(tmp_path)
+    wheel = make_wheel_internal(tmp_path)
     target = tmp_path / "site-packages"
 
     candidate = install_wheel(wheel, target=str(target), requested=True)
@@ -94,7 +94,7 @@ def test_install_and_uninstall_are_owned_by_pip_install(tmp_path: Path) -> None:
 def test_uninstall_removes_recorded_files_and_generated_bytecode(
     tmp_path: Path,
 ) -> None:
-    wheel = _make_wheel(tmp_path)
+    wheel = make_wheel_internal(tmp_path)
     target = tmp_path / "site-packages"
     install_wheel(wheel, target=str(target), requested=True, pycompile=False)
     unrelated = target / "unrelated.txt"
@@ -112,7 +112,7 @@ def test_uninstall_removes_recorded_files_and_generated_bytecode(
 
 
 def test_uninstall_unlinks_symlinks_without_following_targets(tmp_path: Path) -> None:
-    wheel = _make_wheel(tmp_path)
+    wheel = make_wheel_internal(tmp_path)
     target = tmp_path / "site-packages"
     install_wheel(wheel, target=str(target), requested=True)
     symlink_target = tmp_path / "outside.txt"
@@ -130,7 +130,7 @@ def test_uninstall_unlinks_symlinks_without_following_targets(tmp_path: Path) ->
 
 
 def test_uninstall_ignores_unsafe_record_paths(tmp_path: Path) -> None:
-    wheel = _make_wheel(tmp_path)
+    wheel = make_wheel_internal(tmp_path)
     target = tmp_path / "site-packages"
     install_wheel(wheel, target=str(target), requested=True)
     outside = tmp_path / "outside.txt"
@@ -146,7 +146,7 @@ def test_uninstall_ignores_unsafe_record_paths(tmp_path: Path) -> None:
 
 
 def test_uninstall_requires_record(tmp_path: Path) -> None:
-    wheel = _make_wheel(tmp_path)
+    wheel = make_wheel_internal(tmp_path)
     target = tmp_path / "site-packages"
     install_wheel(wheel, target=str(target), requested=True)
     (target / "owner_demo-1.0.dist-info" / "RECORD").unlink()
@@ -161,7 +161,7 @@ def test_uninstall_missing_distribution_returns_false(tmp_path: Path) -> None:
 
 
 def test_install_target_places_package_in_target(tmp_path: Path) -> None:
-    wheel = _make_wheel(tmp_path)
+    wheel = make_wheel_internal(tmp_path)
     target = tmp_path / "target"
 
     install_wheel(wheel, target=str(target))
@@ -171,7 +171,7 @@ def test_install_target_places_package_in_target(tmp_path: Path) -> None:
 
 
 def test_install_root_relocates_default_library(tmp_path: Path) -> None:
-    wheel = _make_wheel(tmp_path)
+    wheel = make_wheel_internal(tmp_path)
     root = tmp_path / "root"
 
     install_wheel(wheel, root=str(root))
@@ -181,7 +181,7 @@ def test_install_root_relocates_default_library(tmp_path: Path) -> None:
 
 
 def test_install_prefix_places_data_and_scripts_under_prefix(tmp_path: Path) -> None:
-    wheel = _make_wheel(
+    wheel = make_wheel_internal(
         tmp_path,
         extra_files={"owner_demo.data/purelib/owner_demo/data.txt": "data"},
         entry_points="[console_scripts]\nowner-demo = owner_demo:main\n",
@@ -198,7 +198,7 @@ def test_install_prefix_places_data_and_scripts_under_prefix(tmp_path: Path) -> 
 
 
 def test_install_accepts_scheme_and_target_script_executable(tmp_path: Path) -> None:
-    wheel = _make_wheel(
+    wheel = make_wheel_internal(
         tmp_path,
         extra_files={"owner_demo.data/data/share.txt": "data"},
         entry_points="[console_scripts]\nowner-demo = owner_demo:main\n",
@@ -227,8 +227,8 @@ def test_install_accepts_scheme_and_target_script_executable(tmp_path: Path) -> 
 
 
 def test_install_upgrade_uninstalls_previous_version(tmp_path: Path) -> None:
-    first = _make_wheel(tmp_path, version="1.0")
-    second = _make_wheel(tmp_path, version="2.0")
+    first = make_wheel_internal(tmp_path, version="1.0")
+    second = make_wheel_internal(tmp_path, version="2.0")
     target = tmp_path / "target"
 
     install_wheel(first, target=str(target), requested=True)
@@ -240,7 +240,7 @@ def test_install_upgrade_uninstalls_previous_version(tmp_path: Path) -> None:
 
 
 def test_install_rejects_wheel_member_path_traversal(tmp_path: Path) -> None:
-    wheel = _make_wheel(tmp_path, extra_files={"../escape.txt": "escape"})
+    wheel = make_wheel_internal(tmp_path, extra_files={"../escape.txt": "escape"})
     target = tmp_path / "target"
 
     with pytest.raises(InstallationError, match="outside the install destination"):
@@ -248,9 +248,25 @@ def test_install_rejects_wheel_member_path_traversal(tmp_path: Path) -> None:
     assert not (tmp_path / "escape.txt").exists()
 
 
+def test_install_rejects_wheel_member_symlink_escape(tmp_path: Path) -> None:
+    wheel = make_wheel_internal(
+        tmp_path, extra_files={"owner_demo/linked/escape.txt": "escape"}
+    )
+    target = tmp_path / "target"
+    package = target / "owner_demo"
+    package.mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (package / "linked").symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(InstallationError, match="escapes installation root"):
+        install_wheel(wheel, target=str(target))
+    assert not (outside / "escape.txt").exists()
+
+
 def test_batch_validation_rejects_shared_destinations(tmp_path: Path) -> None:
-    first = _make_wheel(tmp_path, version="1.0")
-    second = _make_wheel(tmp_path, version="2.0")
+    first = make_wheel_internal(tmp_path, version="1.0")
+    second = make_wheel_internal(tmp_path, version="2.0")
     target = InstallTarget.from_options("owner-demo", target=str(tmp_path / "target"))
 
     with pytest.raises(InstallationError, match="multiple wheels target"):
@@ -258,7 +274,7 @@ def test_batch_validation_rejects_shared_destinations(tmp_path: Path) -> None:
 
 
 def test_install_rejects_entry_point_path_traversal(tmp_path: Path) -> None:
-    wheel = _make_wheel(
+    wheel = make_wheel_internal(
         tmp_path,
         entry_points="[console_scripts]\n../escape = owner_demo:main\n",
     )

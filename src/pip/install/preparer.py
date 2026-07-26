@@ -65,7 +65,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _redact_auth_from_requirement(req: Requirement) -> str:
+def redact_auth_from_requirement(req: Requirement) -> str:
     if not req.url:
         return str(req)
     return str(req).replace(req.url, str(hide_url(req.url)))
@@ -101,15 +101,15 @@ class RequirementPreparer:
         self.src_dir = src_dir
         self.build_dir = build_dir
         self.build_tracker = build_tracker
-        self._session = session
-        self._download = Downloader(session, progress_bar)
-        self._downloads = DownloadManager(
-            self._download,
+        self.session_internal = session
+        self.download_internal = Downloader(session, progress_bar)
+        self.downloads_internal = DownloadManager(
+            self.download_internal,
             download_dir=download_dir,
             check_download_dir=check_download_dir,
         )
-        self._requirements = RequirementInstaller()
-        self._distribution_preparer = DistributionPreparer(
+        self.requirements_internal = RequirementInstaller()
+        self.distribution_preparer = DistributionPreparer(
             build_tracker,
             build_isolation_installer,
             build_isolation,
@@ -137,21 +137,19 @@ class RequirementPreparer:
         self.verbosity = verbosity
 
         # Memoized downloaded files, as mapping of url: path.
-        self._downloaded: dict[str, str] = {}
+        self.downloaded_internal: dict[str, str] = {}
 
         # Previous "header" printed for a link-based InstallRequirement
-        self._previous_requirement_header = ("", "")
+        self.previous_requirement_header = ("", "")
 
-    def _log_preparing_link(self, req: InstallRequirement) -> None:
+    def log_preparing_link(self, req: InstallRequirement) -> None:
         """Provide context for the requirement being prepared."""
         if req.link.is_file and not req.is_wheel_from_cache:
             message = "Processing %s"
             information = str(display_path(req.link.file_path))
         else:
             message = "Collecting %s"
-            information = (
-                _redact_auth_from_requirement(req.req) if req.req else str(req)
-            )
+            information = redact_auth_from_requirement(req.req) if req.req else str(req)
 
         # If we used req.req, inject requirement source if available (this
         # would already be included if we used req directly)
@@ -163,14 +161,14 @@ class RequirementPreparer:
             if comes_from:
                 information += f" (from {comes_from})"
 
-        if (message, information) != self._previous_requirement_header:
-            self._previous_requirement_header = (message, information)
+        if (message, information) != self.previous_requirement_header:
+            self.previous_requirement_header = (message, information)
             logger.info(message, information)
 
         if req.is_wheel_from_cache:
             logger.info("Using cached %s", req.link.filename)
 
-    def _ensure_link_req_src_dir(
+    def ensure_link_req_src_dir(
         self, req: InstallRequirement, parallel_builds: bool
     ) -> None:
         """Ensure source_dir of a linked InstallRequirement."""
@@ -193,7 +191,7 @@ class RequirementPreparer:
         )
         req.ensure_pristine_source_checkout()
 
-    def _check_download_dir_for_requirement(
+    def check_download_dir_for_requirement(
         self,
         req: InstallRequirement,
         *,
@@ -201,13 +199,13 @@ class RequirementPreparer:
     ) -> str | None:
         if self.download_dir is None or not req.link.is_wheel:
             return None
-        return self._downloads.cached_path(
+        return self.downloads_internal.cached_path(
             req.link,
-            self._get_linked_req_hashes(req),
+            self.get_linked_req_hashes(req),
             warn_on_hash_mismatch=warn_on_hash_mismatch,
         )
 
-    def _get_linked_req_hashes(self, req: InstallRequirement) -> Hashes:
+    def get_linked_req_hashes(self, req: InstallRequirement) -> Hashes:
         # By the time this is called, the requirement's link should have
         # been checked so we can tell what kind of requirements req is
         # and raise some more informative errors than otherwise.
@@ -239,7 +237,7 @@ class RequirementPreparer:
         # showing the user what the hash should be.
         return req.hashes(trust_internet=False) or MissingHashes()
 
-    def _fetch_metadata_only(
+    def fetch_metadata_only(
         self,
         req: InstallRequirement,
     ) -> MetadataView | None:
@@ -249,11 +247,11 @@ class RequirementPreparer:
             )
             return None
         # Try PEP 658 metadata first, then fall back to lazy wheel if unavailable.
-        return self._fetch_metadata_using_link_data_attr(
+        return self.fetch_metadata_using_link_data_attr(
             req
-        ) or self._fetch_metadata_using_lazy_wheel(req.link)
+        ) or self.fetch_metadata_using_lazy_wheel(req.link)
 
-    def _fetch_metadata_using_link_data_attr(
+    def fetch_metadata_using_link_data_attr(
         self,
         req: InstallRequirement,
     ) -> MetadataView | None:
@@ -269,7 +267,7 @@ class RequirementPreparer:
             metadata_link,
         )
         # (2) Download the contents of the METADATA file, separate from the dist itself.
-        metadata_file = self._downloads.http_file(
+        metadata_file = self.downloads_internal.http_file(
             metadata_link,
             hashes=metadata_link.as_hashes(),
         )
@@ -291,7 +289,7 @@ class RequirementPreparer:
             )
         return metadata_dist
 
-    def _fetch_metadata_using_lazy_wheel(
+    def fetch_metadata_using_lazy_wheel(
         self,
         link: Link,
     ) -> MetadataView | None:
@@ -315,12 +313,12 @@ class RequirementPreparer:
         )
         url = link.url.split("#", 1)[0]
         try:
-            return dist_from_wheel_url(name, url, self._session)
+            return dist_from_wheel_url(name, url, self.session_internal)
         except HTTPRangeRequestUnsupported:
             logger.debug("%s does not support range requests", url)
             return None
 
-    def _complete_partial_requirements(
+    def complete_partial_requirements(
         self,
         partially_downloaded_reqs: Iterable[InstallRequirement],
         parallel_builds: bool = False,
@@ -338,7 +336,9 @@ class RequirementPreparer:
             assert req.link
             links_to_fully_download[req.link] = req
 
-        batch_download = self._download.batch(links_to_fully_download.keys(), temp_dir)
+        batch_download = self.download_internal.batch(
+            links_to_fully_download.keys(), temp_dir
+        )
         for link, (filepath, _) in batch_download:
             logger.debug("Downloading link %s to %s", link, filepath)
             req = links_to_fully_download[link]
@@ -347,7 +347,7 @@ class RequirementPreparer:
             req.local_file_path = filepath
             # Record that the file is downloaded so we don't do it again in
             # _prepare_linked_requirement().
-            self._downloaded[req.link.url] = filepath
+            self.downloaded_internal[req.link.url] = filepath
 
             # If this is an sdist, we need to unpack it after downloading, but the
             # .source_dir won't be set up until we are in _prepare_linked_requirement().
@@ -359,30 +359,30 @@ class RequirementPreparer:
         # This step is necessary to ensure all lazy wheels are processed
         # successfully by the 'download', 'wheel', and 'install' commands.
         for req in partially_downloaded_reqs:
-            self._prepare_linked_requirement(req, parallel_builds)
+            self.prepare_linked_requirement_internal(req, parallel_builds)
 
     def prepare_linked_requirement(
         self, req: InstallRequirement, parallel_builds: bool = False
     ) -> MetadataView:
         """Prepare a requirement to be obtained from req.link."""
         assert req.link
-        self._log_preparing_link(req)
+        self.log_preparing_link(req)
         # Check if the relevant file is already available in the download
         # directory. When a locally built wheel has been found in cache, we
         # don't warn about re-downloading when its hash does not match. The
         # original link's hash must be checked against the original link, not
         # the cached link.
-        file_path = self._check_download_dir_for_requirement(
+        file_path = self.check_download_dir_for_requirement(
             req,
             warn_on_hash_mismatch=not req.is_wheel_from_cache,
         )
 
         if file_path is not None:
             # The file is already available, so mark it as downloaded.
-            self._downloaded[req.link.url] = file_path
+            self.downloaded_internal[req.link.url] = file_path
         else:
             # The file is not available, attempt to fetch only metadata.
-            metadata_dist = self._fetch_metadata_only(req)
+            metadata_dist = self.fetch_metadata_only(req)
             if metadata_dist is not None:
                 req.needs_more_preparation = True
                 req.set_dist(metadata_dist)
@@ -392,7 +392,7 @@ class RequirementPreparer:
                 return metadata_dist
 
         # None of the optimizations worked, fully prepare the requirement.
-        return self._prepare_linked_requirement(req, parallel_builds)
+        return self.prepare_linked_requirement_internal(req, parallel_builds)
 
     def prepare_linked_requirements_more(
         self, reqs: Iterable[InstallRequirement], parallel_builds: bool = False
@@ -401,9 +401,9 @@ class RequirementPreparer:
         reqs = [req for req in reqs if req.needs_more_preparation]
         for req in reqs:
             # Determine if any of these requirements were already downloaded.
-            file_path = self._check_download_dir_for_requirement(req)
+            file_path = self.check_download_dir_for_requirement(req)
             if file_path is not None:
-                self._downloaded[req.link.url] = file_path
+                self.downloaded_internal[req.link.url] = file_path
                 req.needs_more_preparation = False
 
         # Prepare requirements we found were already downloaded for some
@@ -413,22 +413,22 @@ class RequirementPreparer:
             if req.needs_more_preparation:
                 partially_downloaded_reqs.append(req)
             else:
-                self._prepare_linked_requirement(req, parallel_builds)
+                self.prepare_linked_requirement_internal(req, parallel_builds)
 
         # TODO: separate this part out from RequirementPreparer when the v1
         # resolver can be removed!
-        self._complete_partial_requirements(
+        self.complete_partial_requirements(
             partially_downloaded_reqs,
             parallel_builds=parallel_builds,
         )
 
-    def _prepare_linked_requirement(
+    def prepare_linked_requirement_internal(
         self, req: InstallRequirement, parallel_builds: bool
     ) -> MetadataView:
         assert req.link
         link = req.link
 
-        hashes = self._get_linked_req_hashes(req)
+        hashes = self.get_linked_req_hashes(req)
 
         if hashes and req.is_wheel_from_cache:
             assert req.download_info is not None
@@ -455,13 +455,13 @@ class RequirementPreparer:
                 req.link = req.cached_wheel_source_link
                 link = req.link
 
-        self._ensure_link_req_src_dir(req, parallel_builds)
+        self.ensure_link_req_src_dir(req, parallel_builds)
 
         if link.is_existing_dir:
             local_file = None
-        elif link.url not in self._downloaded:
+        elif link.url not in self.downloaded_internal:
             try:
-                local_file = self._downloads.unpack(
+                local_file = self.downloads_internal.unpack(
                     link,
                     req.source_dir,
                     self.verbosity,
@@ -474,7 +474,7 @@ class RequirementPreparer:
                     f"error {exc} for URL {link}"
                 )
         else:
-            file_path = self._downloaded[link.url]
+            file_path = self.downloaded_internal[link.url]
             if hashes:
                 hashes.check_against_path(file_path)
             local_file = File(file_path, content_type=None)
@@ -508,7 +508,7 @@ class RequirementPreparer:
         if local_file:
             req.local_file_path = local_file.path
 
-        dist = self._distribution_preparer.prepare(req)
+        dist = self.distribution_preparer.prepare(req)
 
         # If a PEP 658 .metadata file was used, check that fields relevant for
         # dependency resolution match with the wheel's METADATA file.
@@ -524,11 +524,11 @@ class RequirementPreparer:
         # metadata-only and concrete distributions, clean this up.
         if (
             link.is_wheel
-            and req._distribution is not None
-            and req._distribution is not dist
+            and req.distribution_internal is not None
+            and req.distribution_internal is not dist
             and link.metadata_link() is not None
         ):
-            check_sidecar_matches_wheel(req, req._distribution, dist)
+            check_sidecar_matches_wheel(req, req.distribution_internal, dist)
 
         return dist
 
@@ -590,9 +590,9 @@ class RequirementPreparer:
                 dir_info=DirInfo(editable=True),
             )
 
-        dist = self._distribution_preparer.prepare(req)
+        dist = self.distribution_preparer.prepare(req)
 
-        self._requirements.check_if_exists(req)
+        self.requirements_internal.check_if_exists(req)
 
         return dist
 

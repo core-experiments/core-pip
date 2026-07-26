@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 
-_REFERENCE_RE = re.compile(r"^[a-z]+(?:-[a-z]+)*$")
+REFERENCE_RE = re.compile(r"^[a-z]+(?:-[a-z]+)*$")
 
 
 class PipError(Exception):
@@ -25,7 +25,7 @@ class DiagnosticPipError(PipError):
         resolved_reference = reference or self.reference
         if resolved_reference is None:
             raise AssertionError("error reference not provided!")
-        if _REFERENCE_RE.fullmatch(resolved_reference) is None:
+        if REFERENCE_RE.fullmatch(resolved_reference) is None:
             raise AssertionError("error reference must be kebab-case!")
         self.reference = resolved_reference
         self.message = message
@@ -35,12 +35,12 @@ class DiagnosticPipError(PipError):
 
     def render(self, *, ascii: bool = False, color: bool = False) -> str:
         return (
-            self._render_ascii(color=color)
+            self.render_ascii(color=color)
             if ascii
-            else self._render_unicode(color=color)
+            else self.render_unicode(color=color)
         )
 
-    def _render_header(self, *, color: bool) -> str:
+    def render_header(self, *, color: bool) -> str:
         reference = self.reference
         if reference is None:
             raise AssertionError("error reference not provided!")
@@ -48,7 +48,7 @@ class DiagnosticPipError(PipError):
             return "\x1b[1;31merror\x1b[0m: \x1b[1m" + reference + "\x1b[0m"
         return f"error: {reference}"
 
-    def _render_trailers(self, *, color: bool) -> list[str]:
+    def render_trailers(self, *, color: bool) -> list[str]:
         lines: list[str] = []
         if self.note_stmt is not None:
             prefix = "\x1b[1;35mnote\x1b[0m" if color else "note"
@@ -58,20 +58,20 @@ class DiagnosticPipError(PipError):
             lines.append(f"{prefix}: {self.hint_stmt}")
         return lines
 
-    def _render_ascii(self, *, color: bool) -> str:
-        lines = [self._render_header(color=color), ""]
+    def render_ascii(self, *, color: bool) -> str:
+        lines = [self.render_header(color=color), ""]
         lines.extend(self.message.splitlines())
         if self.context is not None:
             lines.append("")
             lines.extend(self.context.splitlines())
-        trailers = self._render_trailers(color=color)
+        trailers = self.render_trailers(color=color)
         if trailers:
             lines.append("")
             lines.extend(trailers)
         return "\n".join(lines) + "\n"
 
-    def _render_unicode(self, *, color: bool) -> str:
-        lines = [self._render_header(color=color), ""]
+    def render_unicode(self, *, color: bool) -> str:
+        lines = [self.render_header(color=color), ""]
         message_lines = self.message.splitlines()
         if message_lines:
             if self.context is None:
@@ -92,7 +92,7 @@ class DiagnosticPipError(PipError):
                 lines.append(f"{ctx_prefix} {context_lines[0]}")
                 for line in context_lines[1:]:
                     lines.append(f"{ctx_indent} {line}")
-        trailers = self._render_trailers(color=color)
+        trailers = self.render_trailers(color=color)
         if trailers:
             lines.append("")
             lines.extend(trailers)

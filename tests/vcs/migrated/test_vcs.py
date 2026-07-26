@@ -182,7 +182,7 @@ def test_should_add_vcs_url_prefix(
     ],
 )
 def test_git_remote_url_to_pip(url: str, target: str) -> None:
-    assert Git._git_remote_to_pip_url(url) == target
+    assert Git.git_remote_to_pip_url(url) == target
 
 
 @pytest.mark.parametrize(
@@ -204,14 +204,14 @@ def test_paths_are_not_mistaken_for_scp_shorthand(url: str, platform: str) -> No
 
     if platform == os.name:
         with pytest.raises(RemoteNotValidError):
-            Git._git_remote_to_pip_url(url)
+            Git.git_remote_to_pip_url(url)
 
 
 def test_git_remote_local_path(tmp_path: pathlib.Path) -> None:
     path = pathlib.Path(tmp_path, "project.git")
     path.mkdir()
     # Path must exist to be recognised as a local git remote.
-    assert Git._git_remote_to_pip_url(str(path)) == path.as_uri()
+    assert Git.git_remote_to_pip_url(str(path)) == path.as_uri()
 
 
 @mock.patch("pip.vcs.git.Git.get_remote_url")
@@ -241,7 +241,7 @@ def test_git_get_src_requirements(
 ) -> None:
     sha = "5547fa909e83df8bd743d3978d6667497983a4b7"
 
-    mock_get_remote_url.return_value = Git._git_remote_to_pip_url(git_url)
+    mock_get_remote_url.return_value = Git.git_remote_to_pip_url(git_url)
     mock_get_revision.return_value = sha
     mock_get_subdirectory.return_value = None
 
@@ -723,7 +723,7 @@ def test_subversion__get_vcs_version_cached(version: tuple[int, ...]) -> None:
     Test Subversion.get_vcs_version() with previously cached result.
     """
     svn = Subversion()
-    svn._vcs_version = version
+    svn.vcs_version_internal = version
     assert svn.get_vcs_version() == version
 
 
@@ -748,7 +748,7 @@ def test_subversion__get_vcs_version_call_vcs(
     assert svn.get_vcs_version() == vcs_version
 
     # Check that the version information is cached.
-    assert svn._vcs_version == vcs_version
+    assert svn.vcs_version_internal == vcs_version
 
 
 @pytest.mark.parametrize(
@@ -769,11 +769,11 @@ def test_subversion__get_remote_call_options(
     Test Subversion.get_remote_call_options().
     """
     svn = Subversion(use_interactive=use_interactive)
-    svn._vcs_version = vcs_version
+    svn.vcs_version_internal = vcs_version
     assert svn.get_remote_call_options() == expected_options
 
 
-class _TestVcsArgs:
+class TestVcsArgs:
     @pytest.fixture(autouse=True)
     def setup_base(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
@@ -789,7 +789,7 @@ class _TestVcsArgs:
         assert self.call_subprocess_mock.call_args[0][0] == args
 
 
-class TestBazaarArgs(_TestVcsArgs):
+class TestBazaarArgs(TestVcsArgs):
     def setup_method(self) -> None:
         # Test Data.
         self.url = "bzr+http://username:password@bzr.example.com/"
@@ -856,7 +856,7 @@ class TestBazaarArgs(_TestVcsArgs):
         )
 
 
-class TestGitArgs(_TestVcsArgs):
+class TestGitArgs(TestVcsArgs):
     def setup_method(self) -> None:
         # Test Data.
         self.url = "git+http://username:password@git.example.com/"
@@ -1088,7 +1088,7 @@ class TestGitArgs(_TestVcsArgs):
         update_submodules_mock.assert_called_with(self.dest, verbosity=0)
 
 
-class TestMercurialArgs(_TestVcsArgs):
+class TestMercurialArgs(TestVcsArgs):
     def setup_method(self) -> None:
         # Test Data.
         self.url = "hg+http://username:password@hg.example.com/"
@@ -1196,7 +1196,7 @@ class TestMercurialArgs(_TestVcsArgs):
         ]
 
 
-class TestSubversionArgs(_TestVcsArgs):
+class TestSubversionArgs(TestVcsArgs):
     def setup_method(self) -> None:
         # Test Data.
         self.url = "svn+http://username:password@svn.example.com/"

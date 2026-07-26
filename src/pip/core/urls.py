@@ -80,7 +80,7 @@ def redact_auth_from_url(url: str) -> str:
     if "@" not in parsed.netloc:
         return url
     auth, netloc = parsed.netloc.rsplit("@", 1)
-    user, separator, _password = auth.partition(":")
+    user, separator, password_internal = auth.partition(":")
     redacted = f"{urllib.parse.quote(user)}:****@" if separator else "****@"
     return urllib.parse.urlunsplit(
         (parsed.scheme, redacted + netloc, parsed.path, parsed.query, parsed.fragment)

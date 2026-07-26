@@ -29,7 +29,7 @@ from pip.core.direct_url import DirectUrl
 from pip.core.wheel import parse_wheel, read_wheel_metadata_file
 
 
-def _egg_link_names(raw_name: str) -> list[str]:
+def egg_link_names(raw_name: str) -> list[str]:
     """Return the filename variants used by setuptools for an egg-link."""
     return [
         re.sub("[^A-Za-z0-9.]+", "-", raw_name) + ".egg-link",
@@ -37,17 +37,17 @@ def _egg_link_names(raw_name: str) -> list[str]:
     ]
 
 
-def _egg_link_path_from_sys_path(raw_name: str) -> str | None:
+def egg_link_path_from_sys_path(raw_name: str) -> str | None:
     """Find an egg-link for ``raw_name`` by walking the interpreter path."""
     for path_item in sys.path:
-        for egg_link_name in _egg_link_names(raw_name):
+        for egg_link_name in egg_link_names(raw_name):
             egg_link = os.path.join(path_item, egg_link_name)
             if os.path.isfile(egg_link):
                 return egg_link
     return None
 
 
-def _parse_entry_points(text: str | None) -> list[SimpleNamespace]:
+def parse_entry_points(text: str | None) -> list[SimpleNamespace]:
     if not text:
         return []
     parser = configparser.ConfigParser(delimiters=("=",), strict=False)
@@ -71,9 +71,9 @@ class MetadataDistribution:
         entry_points_text: str | None = None,
     ) -> None:
         self.metadata = metadata
-        self._location = location
-        self._info_location = info_location
-        self._entry_points_text = entry_points_text
+        self.location_internal = location
+        self.info_location_internal = info_location
+        self.entry_points_text_internal = entry_points_text
 
     @classmethod
     def from_directory(
@@ -140,11 +140,11 @@ class MetadataDistribution:
 
     @property
     def location(self) -> str | None:
-        return self._location
+        return self.location_internal
 
     @property
     def info_location(self) -> str | None:
-        return self._info_location
+        return self.info_location_internal
 
     @property
     def raw_name(self) -> str:
@@ -178,7 +178,7 @@ class MetadataDistribution:
         return self.metadata.get_all("Requires-Dist", [])
 
     def iter_entry_points(self) -> list[SimpleNamespace]:
-        return _parse_entry_points(self._entry_points_text)
+        return parse_entry_points(self.entry_points_text_internal)
 
     def iter_provided_extras(self) -> list[str]:
         return [
@@ -188,8 +188,8 @@ class MetadataDistribution:
         ]
 
     def read_text(self, path: str) -> str:
-        info_location = self._info_location
-        if info_location is None or self._location == info_location:
+        info_location = self.info_location_internal
+        if info_location is None or self.location_internal == info_location:
             raise FileNotFoundError(path)
         target = Path(info_location) / path
         return target.read_text(encoding="utf-8")
@@ -204,12 +204,12 @@ class InstalledMetadataDistribution:
         *,
         user_site: str | None = None,
     ) -> None:
-        self._distribution = distribution
-        self._user_site = user_site
+        self.distribution_internal = distribution
+        self.user_site_internal = user_site
 
     @property
     def location(self) -> str:
-        return str(self._distribution.location)
+        return str(self.distribution_internal.location)
 
     @property
     def installed_location(self) -> str:
@@ -217,20 +217,20 @@ class InstalledMetadataDistribution:
 
     @property
     def info_location(self) -> str | None:
-        location = self._distribution.metadata_location
+        location = self.distribution_internal.metadata_location
         return str(location) if location is not None else None
 
     @property
     def canonical_name(self) -> str:
-        return self._distribution.canonical_name
+        return self.distribution_internal.canonical_name
 
     @property
     def raw_name(self) -> str:
-        return self._distribution.name
+        return self.distribution_internal.name
 
     @property
     def raw_version(self) -> str:
-        return self._distribution.version
+        return self.distribution_internal.version
 
     @property
     def version(self) -> Version:
@@ -238,7 +238,7 @@ class InstalledMetadataDistribution:
 
     @property
     def metadata(self) -> email.message.Message:
-        return self._distribution.raw.metadata
+        return self.distribution_internal.raw.metadata
 
     @property
     def metadata_dict(self) -> dict[str, object]:
@@ -347,7 +347,7 @@ class InstalledMetadataDistribution:
                 lines = egg_link.read_text(encoding="utf-8").splitlines()
                 if lines:
                     return lines[0]
-            egg_link = _egg_link_path_from_sys_path(self.raw_name)
+            egg_link = egg_link_path_from_sys_path(self.raw_name)
             if egg_link is not None:
                 lines = Path(egg_link).read_text(encoding="utf-8").splitlines()
                 if lines:
@@ -368,14 +368,16 @@ class InstalledMetadataDistribution:
 
     @property
     def in_usersite(self) -> bool:
-        return self._user_site is not None and self.location.startswith(self._user_site)
+        return self.user_site_internal is not None and self.location.startswith(
+            self.user_site_internal
+        )
 
     @property
     def in_site_packages(self) -> bool:
         return True
 
     def iter_dependencies(self, extras: tuple[str, ...] = ()) -> list[Requirement]:
-        return self._distribution.dependencies(extras)
+        return self.distribution_internal.dependencies(extras)
 
     def iter_raw_dependencies(self) -> list[str]:
         return self.metadata.get_all("Requires-Dist", [])
@@ -388,7 +390,7 @@ class InstalledMetadataDistribution:
         ]
 
     def read_text(self, path: str) -> str:
-        return self._distribution.read_text(path)
+        return self.distribution_internal.read_text(path)
 
     def iter_declared_entries(self) -> list[str]:
         if self.info_location and self.info_location.endswith(".egg-info"):
@@ -398,7 +400,7 @@ class InstalledMetadataDistribution:
                 ]
             except FileNotFoundError:
                 return []
-        return self._distribution.files()
+        return self.distribution_internal.files()
 
     def iter_distutils_script_names(self) -> list[str]:
         return []
@@ -408,7 +410,7 @@ class InstalledMetadataDistribution:
             entry_points = self.read_text("entry_points.txt")
         except FileNotFoundError:
             return []
-        return _parse_entry_points(entry_points)
+        return parse_entry_points(entry_points)
 
     def is_file(self, path: str) -> bool:
         try:

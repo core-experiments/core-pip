@@ -20,7 +20,7 @@ from pip_test_support.local_repos import local_checkout
 from pip_test_support.venv import VirtualEnvironment
 
 
-def _patch_dist_in_site_packages(virtualenv: VirtualEnvironment) -> None:
+def patch_dist_in_site_packages(virtualenv: VirtualEnvironment) -> None:
     # Since the tests are run from a virtualenv, and to avoid the "Will not
     # install to the usersite because it will lack sys.path precedence..."
     # error: Monkey patch the Distribution class so it's possible to install a
@@ -152,7 +152,7 @@ class Tests_UserSite:
         create_basic_wheel_for_package(script, "initools", "0.1")
         create_basic_wheel_for_package(script, "initools", "0.2")
 
-        _patch_dist_in_site_packages(virtualenv)
+        patch_dist_in_site_packages(virtualenv)
 
         script.pip(
             "install",
@@ -194,7 +194,7 @@ class Tests_UserSite:
         create_basic_wheel_for_package(script, "initools", "0.2")
         create_basic_wheel_for_package(script, "initools", "0.3.1")
 
-        _patch_dist_in_site_packages(virtualenv)
+        patch_dist_in_site_packages(virtualenv)
 
         script.pip(
             "install",
@@ -244,7 +244,7 @@ class Tests_UserSite:
             extra_files={initools_v3_file_name: "# Hi!"},
         )
 
-        _patch_dist_in_site_packages(virtualenv)
+        patch_dist_in_site_packages(virtualenv)
 
         script.pip(
             "install",

@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import shutil
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING
 
-from pip.build.build_backend import prepare_project_metadata
 from pip.core.errors import BuildError
 from pip.core.packaging import Version, canonicalize_name
 from pip.core.wheel import TargetContext, WheelFile
@@ -12,6 +12,12 @@ from pip.core.wheel import TargetContext, WheelFile
 if TYPE_CHECKING:
     from pip.index.links import Link
     from pip.index.source_models import RejectedCandidate
+
+
+def prepare_project_metadata(*args: object, **kwargs: object):
+    from pip.build.build_backend import prepare_project_metadata as prepare
+
+    return prepare(*args, **kwargs)
 
 
 @dataclass(frozen=True)
@@ -64,10 +70,7 @@ class InstallationCandidate:
             RejectedCandidate,
             RejectionReason,
         )
-        from pip.index.vcs import vcs_scheme
 
-        if vcs_scheme(link.url) is not None:
-            return cls.from_vcs(link)
         if link.kind is ArtifactKind.WHEEL:
             wheel = parse_wheel_file(link.filename)
             if wheel is None:
@@ -82,7 +85,7 @@ class InstallationCandidate:
                 tag_rank=wheel_tag_rank(wheel.tags, supported_wheel_tags(target)),
             )
         if link.kind is ArtifactKind.SOURCE_TREE:
-            return cls.from_source_tree(link)
+            return cls.from_vcs(link) if link.is_vcs else cls.from_source_tree(link)
         if link.kind is not ArtifactKind.SDIST:
             return RejectedCandidate(
                 link,
@@ -105,25 +108,38 @@ class InstallationCandidate:
     def from_source_tree(
         cls, link: Link
     ) -> "InstallationCandidate | RejectedCandidate":
-        from pip.index.artifacts import ArtifactLocator
         from pip.index.source_models import RejectedCandidate, RejectionReason
 
-        local = ArtifactLocator().local_path(link.url)
-        if local is None:
+        local = Path(link.file_path)
+        if not local.exists():
             return RejectedCandidate(
                 link, RejectionReason.MISSING_ARTIFACT, "source tree is not local"
             )
         try:
             metadata = prepare_project_metadata(local)
             version = Version(metadata.version)
-        except (BuildError, ValueError):
+        except ValueError:
+            return RejectedCandidate(
+                link, RejectionReason.INVALID_VERSION, "invalid project version"
+            )
+        except BuildError:
             if link.source_url is None and not (
                 (local / "pyproject.toml").exists() or (local / "setup.py").exists()
             ):
                 return cls(name=local.name or "source", version=Version("0"), link=link)
-            return RejectedCandidate(
-                link, RejectionReason.INVALID_VERSION, "invalid project version"
-            )
+            if (local / "pyproject.toml").exists():
+                try:
+                    if "version" in (local / "pyproject.toml").read_text(
+                        encoding="utf-8"
+                    ):
+                        return RejectedCandidate(
+                            link,
+                            RejectionReason.INVALID_VERSION,
+                            "invalid project version",
+                        )
+                except OSError:
+                    pass
+            return cls(name=local.name or "source", version=Version("0"), link=link)
         except OSError:
             return RejectedCandidate(
                 link, RejectionReason.MISSING_ARTIFACT, "source tree is unreadable"

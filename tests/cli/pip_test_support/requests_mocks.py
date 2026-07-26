@@ -8,25 +8,25 @@ from typing import Any
 
 from pip.network.http import HttpRequest, HttpResponse
 
-_Hook = Callable[["MockResponse"], None]
+Hook = Callable[["MockResponse"], None]
 
 
 class FakeStream:
     def __init__(self, contents: bytes) -> None:
-        self._io = BytesIO(contents)
+        self.io_internal = BytesIO(contents)
 
     def read(self, size: int = -1, **_: Any) -> bytes:
-        return self._io.read(size)
+        return self.io_internal.read(size)
 
     def stream(self, size: int, **_: Any) -> Iterator[bytes]:
-        while chunk := self._io.read(size):
+        while chunk := self.io_internal.read(size):
             yield chunk
 
     def release_conn(self) -> None:
         pass
 
     def close(self) -> None:
-        self._io.close()
+        self.io_internal.close()
 
 
 class MockResponse(HttpResponse):
@@ -61,19 +61,19 @@ class HeaderMap(dict[str, str]):
 
 
 class MockConnection:
-    def _send(self, req: HttpRequest, **kwargs: Any) -> MockResponse:
-        raise NotImplementedError("_send must be overridden for tests")
+    def send_internal(self, req: HttpRequest, **kwargs: Any) -> MockResponse:
+        raise NotImplementedError("send_internal must be overridden for tests")
 
     def send(self, req: HttpRequest, **kwargs: Any) -> MockResponse:
-        return self._send(req, **kwargs)
+        return self.send_internal(req, **kwargs)
 
 
 class MockRequest(HttpRequest):
     def __init__(self, url: str) -> None:
         super().__init__(method="GET", url=url)
-        self.hooks: dict[str, list[_Hook]] = {}
+        self.hooks: dict[str, list[Hook]] = {}
 
-    def register_hook(self, event_name: str, callback: _Hook) -> None:
+    def register_hook(self, event_name: str, callback: Hook) -> None:
         self.hooks.setdefault(event_name, []).append(callback)
 
 
@@ -81,5 +81,5 @@ class BrokenStream(FakeStream):
     """A truncated stream used to exercise resume handling."""
 
     def stream(self, size: int, **_: Any) -> Iterator[bytes]:
-        yield self._io.read(size)
+        yield self.io_internal.read(size)
         raise OSError("Connection broken: IncompleteRead")

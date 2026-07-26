@@ -3,11 +3,12 @@ from __future__ import annotations
 import sys
 import sysconfig
 from dataclasses import dataclass
+from functools import lru_cache
 
 from .wheel import TargetContext, WheelTag, supported_wheel_tags
 
 
-def _expand_manylinux(platform: str) -> list[str]:
+def expand_manylinux(platform: str) -> list[str]:
     if platform.startswith("manylinux2014_"):
         suffix = platform.removeprefix("manylinux2014_")
         return [platform, f"manylinux2010_{suffix}", f"manylinux1_{suffix}"]
@@ -23,11 +24,28 @@ def get_supported(
     impl: str | None = None,
     abis: list[str] | None = None,
 ) -> list[WheelTag]:
+    return list(
+        get_supported_internal(
+            version,
+            tuple(platforms) if platforms is not None else None,
+            impl,
+            tuple(abis) if abis is not None else None,
+        )
+    )
+
+
+@lru_cache(maxsize=64)
+def get_supported_internal(
+    version: str | None,
+    platforms: tuple[str, ...] | None,
+    impl: str | None,
+    abis: tuple[str, ...] | None,
+) -> tuple[WheelTag, ...]:
     expanded_platforms: list[str] | None = None
     if platforms is not None:
         expanded_platforms = []
         for platform in platforms:
-            expanded_platforms.extend(_expand_manylinux(platform))
+            expanded_platforms.extend(expand_manylinux(platform))
     target = None
     if any(value is not None for value in (version, expanded_platforms, impl, abis)):
         target = TargetContext(
@@ -36,7 +54,7 @@ def get_supported(
             python_version=version,
             abis=tuple(abis or ()),
         )
-    supported = list(supported_wheel_tags(target))
+    supported = supported_wheel_tags(target)
     soabi = sysconfig.get_config_var("SOABI")
     if soabi and "-" in soabi:
         normalized: list[WheelTag] = []
@@ -48,8 +66,8 @@ def get_supported(
                     platform=tag.platform.replace("-", "_"),
                 )
             )
-        return normalized
-    return supported
+        return tuple(normalized)
+    return tuple(supported)
 
 
 @dataclass
@@ -60,7 +78,7 @@ class TargetPython:
     implementation: str | None = None
 
     def __post_init__(self) -> None:
-        self._given_py_version_info = self.py_version_info
+        self.given_py_version_info = self.py_version_info
         if self.py_version_info is None:
             self.py_version_info = (
                 sys.version_info.major,
@@ -76,15 +94,15 @@ class TargetPython:
             if not self.py_version_info
             else ".".join(str(part) for part in self.py_version_info[:2])
         )
-        self._valid_tags: list[WheelTag] | None = None
-        self._valid_tags_set: set[WheelTag] | None = None
+        self.valid_tags: list[WheelTag] | None = None
+        self.valid_tags_set: set[WheelTag] | None = None
 
     def format_given(self) -> str:
         parts: list[str] = []
         if self.platforms:
             parts.append(f"platforms={self.platforms!r}")
-        if self._given_py_version_info is not None:
-            version_info = self._given_py_version_info
+        if self.given_py_version_info is not None:
+            version_info = self.given_py_version_info
             version = ".".join(str(part) for part in version_info[:2])
             parts.append(f"version_info={version!r}")
         if self.abis:
@@ -94,19 +112,19 @@ class TargetPython:
         return " ".join(parts)
 
     def get_sorted_tags(self) -> list[WheelTag]:
-        if self._valid_tags is None:
+        if self.valid_tags is None:
             version = None
-            if self._given_py_version_info is not None:
-                version = "".join(str(part) for part in self._given_py_version_info[:2])
-            self._valid_tags = get_supported(
+            if self.given_py_version_info is not None:
+                version = "".join(str(part) for part in self.given_py_version_info[:2])
+            self.valid_tags = get_supported(
                 version=version,
                 platforms=self.platforms,
                 impl=self.implementation,
                 abis=self.abis,
             )
-        return self._valid_tags
+        return self.valid_tags
 
     def get_unsorted_tags(self) -> set[WheelTag]:
-        if self._valid_tags_set is None:
-            self._valid_tags_set = set(self.get_sorted_tags())
-        return self._valid_tags_set
+        if self.valid_tags_set is None:
+            self.valid_tags_set = set(self.get_sorted_tags())
+        return self.valid_tags_set

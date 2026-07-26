@@ -31,13 +31,7 @@ def create_parser() -> argparse.ArgumentParser:
 
 
 def run_lock(args: list[str]) -> int:
-    from pip.build.build import _unpack_source
-    from pip.build.build_backend import prepare_project_metadata
-    from pip.index.artifacts import ArtifactLocator
     from pip.index.provider import CandidateProvider
-    from pip.index.vcs import git_revision, materialize_vcs, vcs_reference
-    from pip.network.http import NetworkSession
-    from pip.resolution.req_file import parse_requirements
     from pip.resolution.req_install import install_req_from_line
     from pip.resolution.resolver import Resolver
 
@@ -56,6 +50,8 @@ def run_lock(args: list[str]) -> int:
     for value in options.requirements:
         local_directory = Path(value).resolve()
         if local_directory.is_dir():
+            from pip.build.build_backend import prepare_project_metadata
+
             metadata = prepare_project_metadata(local_directory, build_isolation=False)
             directory_packages.append(
                 {"name": metadata.name, "directory": {"path": "."}}
@@ -69,6 +65,10 @@ def run_lock(args: list[str]) -> int:
             and item.req.name == item.req.url
             and not item.link.is_vcs
         ):
+            from pip.build.build import unpack_source
+            from pip.build.build_backend import prepare_project_metadata
+            from pip.index.artifacts import ArtifactLocator
+
             source = ArtifactLocator().ensure_local(item.link.url)
             if source.is_dir():
                 metadata = prepare_project_metadata(source, build_isolation=False)
@@ -79,7 +79,7 @@ def run_lock(args: list[str]) -> int:
             with tempfile.TemporaryDirectory(prefix="pip-lock-source-") as directory:
                 archive = Path(directory) / "source.tar.gz"
                 shutil.copyfile(source, archive)
-                project = _unpack_source(archive, Path(directory) / "project")
+                project = unpack_source(archive, Path(directory) / "project")
                 metadata = prepare_project_metadata(project, build_isolation=False)
             archive_packages.append(
                 {
@@ -96,6 +96,8 @@ def run_lock(args: list[str]) -> int:
         requirements.append(item)
     editable_packages: list[dict[str, object]] = []
     for value in options.editable:
+        from pip.build.build_backend import prepare_project_metadata
+
         item = install_req_from_line(value)
         item.editable = True
         requirements.append(item)
@@ -107,9 +109,14 @@ def run_lock(args: list[str]) -> int:
                 "directory": {"editable": True, "path": "."},
             }
         )
-    lock_session = NetworkSession()
+    lock_session = None
     for filename in options.requirement:
         if Path(filename).name.startswith("pylock") and filename.endswith(".toml"):
+            from pip.network.http import NetworkSession
+            from pip.resolution.req_file import parse_requirements
+
+            if lock_session is None:
+                lock_session = NetworkSession()
             for item in parse_requirements(filename, lock_session):
                 if item.locked_name is not None:
                     locked_order.append(item.locked_name)
@@ -159,7 +166,9 @@ def run_lock(args: list[str]) -> int:
         build_isolation=not options.no_build_isolation,
     )
     plan = (
-        Resolver(provider=provider, no_deps=False).resolve(requirements)
+        Resolver(provider=provider, no_deps=False, ignore_installed=True).resolve(
+            requirements
+        )
         if requirements
         else None
     )
@@ -179,6 +188,8 @@ def run_lock(args: list[str]) -> int:
             else None
         )
         if candidate.source_vcs:
+            from pip.index.vcs import git_revision, materialize_vcs, vcs_reference
+
             reference = vcs_reference(source)
             checkout = materialize_vcs(source, emit_resolution=False)
             commit_id = git_revision(checkout)
@@ -202,6 +213,8 @@ def run_lock(args: list[str]) -> int:
             continue
         if source_path is None:
             if source.startswith(("http://", "https://")):
+                from pip.index.artifacts import ArtifactLocator
+
                 archive_path = ArtifactLocator().ensure_local(source)
                 packages.append(
                     {

@@ -12,7 +12,7 @@ class DirectUrlValidationError(ValueError):
     pass
 
 
-def _expect_type(value: object, expected: type, field: str) -> object:
+def expect_type(value: object, expected: type, field: str) -> object:
     if not isinstance(value, expected):
         raise DirectUrlValidationError(
             f"Unexpected type {type(value).__name__} (expected {expected.__name__}) in '{field}'"
@@ -20,7 +20,7 @@ def _expect_type(value: object, expected: type, field: str) -> object:
     return value
 
 
-def _expect_string(data: dict[str, object], key: str, field: str | None = None) -> str:
+def expect_string(data: dict[str, object], key: str, field: str | None = None) -> str:
     value = data.get(key)
     label = field or key
     if not isinstance(value, str) or not value:
@@ -40,7 +40,7 @@ class ArchiveInfo:
         normalized_hashes: dict[str, str] | None = None
         if hash_value is not None:
             if not isinstance(hash_value, str):
-                _expect_type(hash_value, str, "archive_info.hash")
+                expect_type(hash_value, str, "archive_info.hash")
                 raise AssertionError("unreachable")
             hash_text = hash_value
             if "=" not in hash_text:
@@ -51,7 +51,7 @@ class ArchiveInfo:
             normalized_hashes = {algorithm: digest}
         if hashes is not None:
             if not isinstance(hashes, dict):
-                _expect_type(hashes, dict, "archive_info.hashes")
+                expect_type(hashes, dict, "archive_info.hashes")
                 raise AssertionError("unreachable")
             hash_map = cast(dict[object, object], hashes)
             normalized_hashes = {
@@ -98,12 +98,12 @@ class VcsInfo:
 
     @classmethod
     def from_dict(cls, data: dict[str, object]) -> VcsInfo:
-        vcs = _expect_string(data, "vcs", "vcs_info.vcs")
-        commit_id = _expect_string(data, "commit_id", "vcs_info.commit_id")
+        vcs = expect_string(data, "vcs", "vcs_info.vcs")
+        commit_id = expect_string(data, "commit_id", "vcs_info.commit_id")
         requested_revision = data.get("requested_revision")
         if requested_revision is not None:
             if not isinstance(requested_revision, str):
-                _expect_type(requested_revision, str, "vcs_info.requested_revision")
+                expect_type(requested_revision, str, "vcs_info.requested_revision")
                 raise AssertionError("unreachable")
         return cls(
             vcs=vcs,
@@ -153,19 +153,19 @@ class DirectUrl:
         if "archive_info" in data:
             raw = data["archive_info"]
             if not isinstance(raw, dict):
-                _expect_type(raw, dict, "archive_info")
+                expect_type(raw, dict, "archive_info")
                 raise AssertionError("unreachable")
             archive_info = ArchiveInfo.from_dict(cast(dict[str, object], raw))
         if "dir_info" in data:
             raw = data["dir_info"]
             if not isinstance(raw, dict):
-                _expect_type(raw, dict, "dir_info")
+                expect_type(raw, dict, "dir_info")
                 raise AssertionError("unreachable")
             dir_info = DirInfo.from_dict(cast(dict[str, object], raw))
         if "vcs_info" in data:
             raw = data["vcs_info"]
             if not isinstance(raw, dict):
-                _expect_type(raw, dict, "vcs_info")
+                expect_type(raw, dict, "vcs_info")
                 raise AssertionError("unreachable")
             vcs_info = VcsInfo.from_dict(cast(dict[str, object], raw))
         direct_url = cls(

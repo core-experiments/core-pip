@@ -39,14 +39,14 @@ class UserInstallationInvalid(InstallationError):
 # ad-hoc implementation does not fully implement sysconfig, we'll fall back to
 # a POSIX scheme.
 
-_AVAILABLE_SCHEMES = set(sysconfig.get_scheme_names())
+AVAILABLE_SCHEMES = set(sysconfig.get_scheme_names())
 
-_PREFERRED_SCHEME_API: Callable[[str], str] | None = getattr(
+PREFERRED_SCHEME_API: Callable[[str], str] | None = getattr(
     sysconfig, "get_preferred_scheme", None
 )
 
 
-def _should_use_osx_framework_prefix() -> bool:
+def should_use_osx_framework_prefix() -> bool:
     """Check for Apple's ``osx_framework_library`` scheme.
 
     Python distributed by Apple's Command Line Tools has this special scheme
@@ -66,13 +66,13 @@ def _should_use_osx_framework_prefix() -> bool:
     or our own, and we deal with this special case in ``get_scheme()`` instead.
     """
     return (
-        "osx_framework_library" in _AVAILABLE_SCHEMES
+        "osx_framework_library" in AVAILABLE_SCHEMES
         and not running_under_virtualenv()
         and is_osx_framework()
     )
 
 
-def _infer_prefix() -> str:
+def infer_prefix() -> str:
     """Try to find a prefix scheme for the current platform.
 
     This tries:
@@ -86,50 +86,50 @@ def _infer_prefix() -> str:
 
     If none of the above works, fall back to ``posix_prefix``.
     """
-    if _PREFERRED_SCHEME_API:
-        return _PREFERRED_SCHEME_API("prefix")
-    if _should_use_osx_framework_prefix():
+    if PREFERRED_SCHEME_API:
+        return PREFERRED_SCHEME_API("prefix")
+    if should_use_osx_framework_prefix():
         return "osx_framework_library"
     implementation_suffixed = f"{sys.implementation.name}_{os.name}"
-    if implementation_suffixed in _AVAILABLE_SCHEMES:
+    if implementation_suffixed in AVAILABLE_SCHEMES:
         return implementation_suffixed
-    if sys.implementation.name in _AVAILABLE_SCHEMES:
+    if sys.implementation.name in AVAILABLE_SCHEMES:
         return sys.implementation.name
     suffixed = f"{os.name}_prefix"
-    if suffixed in _AVAILABLE_SCHEMES:
+    if suffixed in AVAILABLE_SCHEMES:
         return suffixed
-    if os.name in _AVAILABLE_SCHEMES:  # On Windows, prefx is just called "nt".
+    if os.name in AVAILABLE_SCHEMES:  # On Windows, prefx is just called "nt".
         return os.name
     return "posix_prefix"
 
 
-def _infer_user() -> str:
+def infer_user() -> str:
     """Try to find a user scheme for the current platform."""
-    if _PREFERRED_SCHEME_API:
-        return _PREFERRED_SCHEME_API("user")
+    if PREFERRED_SCHEME_API:
+        return PREFERRED_SCHEME_API("user")
     if is_osx_framework() and not running_under_virtualenv():
         suffixed = "osx_framework_user"
     else:
         suffixed = f"{os.name}_user"
-    if suffixed in _AVAILABLE_SCHEMES:
+    if suffixed in AVAILABLE_SCHEMES:
         return suffixed
-    if "posix_user" not in _AVAILABLE_SCHEMES:  # User scheme unavailable.
+    if "posix_user" not in AVAILABLE_SCHEMES:  # User scheme unavailable.
         raise UserInstallationInvalid()
     return "posix_user"
 
 
-def _infer_home() -> str:
+def infer_home() -> str:
     """Try to find a home for the current platform."""
-    if _PREFERRED_SCHEME_API:
-        return _PREFERRED_SCHEME_API("home")
+    if PREFERRED_SCHEME_API:
+        return PREFERRED_SCHEME_API("home")
     suffixed = f"{os.name}_home"
-    if suffixed in _AVAILABLE_SCHEMES:
+    if suffixed in AVAILABLE_SCHEMES:
         return suffixed
     return "posix_home"
 
 
 # Update these keys if the user sets a custom home.
-_HOME_KEYS = [
+HOME_KEYS = [
     "installed_base",
     "base",
     "installed_platbase",
@@ -138,7 +138,7 @@ _HOME_KEYS = [
     "exec_prefix",
 ]
 if sysconfig.get_config_var("userbase") is not None:
-    _HOME_KEYS.append("userbase")
+    HOME_KEYS.append("userbase")
 
 
 def get_scheme(
@@ -168,11 +168,11 @@ def get_scheme(
         raise InvalidSchemeCombination("--home", "--prefix")
 
     if home is not None:
-        scheme_name = _infer_home()
+        scheme_name = infer_home()
     elif user:
-        scheme_name = _infer_user()
+        scheme_name = infer_user()
     else:
-        scheme_name = _infer_prefix()
+        scheme_name = infer_prefix()
 
     # Special case: When installing into a custom prefix, use posix_prefix
     # instead of osx_framework_library. See _should_use_osx_framework_prefix()
@@ -181,9 +181,9 @@ def get_scheme(
         scheme_name = "posix_prefix"
 
     if home is not None:
-        variables = {k: home for k in _HOME_KEYS}
+        variables = {k: home for k in HOME_KEYS}
     elif prefix is not None:
-        variables = {k: prefix for k in _HOME_KEYS}
+        variables = {k: prefix for k in HOME_KEYS}
     else:
         variables = {}
 

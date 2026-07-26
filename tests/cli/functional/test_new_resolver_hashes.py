@@ -9,13 +9,13 @@ from pip_test_support import (
     create_basic_wheel_for_package,
 )
 
-_FindLinks = collections.namedtuple(
-    "_FindLinks",
+FindLinks = collections.namedtuple(
+    "FindLinks",
     "index_html sdist_hash wheel_hash",
 )
 
 
-def _create_find_links(script: PipTestEnvironment) -> _FindLinks:
+def create_find_links(script: PipTestEnvironment) -> FindLinks:
     sdist_path = create_basic_sdist_for_package(script, "base", "0.1.0")
     wheel_path = create_basic_wheel_for_package(script, "base", "0.1.0")
 
@@ -31,7 +31,7 @@ def _create_find_links(script: PipTestEnvironment) -> _FindLinks:
         """.strip()
     )
 
-    return _FindLinks(index_html, sdist_hash, wheel_hash)
+    return FindLinks(index_html, sdist_hash, wheel_hash)
 
 
 @pytest.mark.parametrize(
@@ -60,7 +60,7 @@ def _create_find_links(script: PipTestEnvironment) -> _FindLinks:
 def test_new_resolver_hash_intersect(
     script: PipTestEnvironment, requirements_template: str, message: str
 ) -> None:
-    find_links = _create_find_links(script)
+    find_links = create_find_links(script)
 
     requirements_txt = script.scratch_path / "requirements.txt"
     requirements_txt.write_text(
@@ -89,7 +89,7 @@ def test_new_resolver_hash_intersect(
 def test_new_resolver_hash_intersect_from_constraint(
     script: PipTestEnvironment,
 ) -> None:
-    find_links = _create_find_links(script)
+    find_links = create_find_links(script)
     sdist_hash = find_links.sdist_hash
 
     constraints_txt = script.scratch_path / "constraints.txt"
@@ -145,7 +145,7 @@ def test_new_resolver_hash_intersect_empty(
     requirements_template: str,
     constraints_template: str,
 ) -> None:
-    find_links = _create_find_links(script)
+    find_links = create_find_links(script)
 
     constraints_txt = script.scratch_path / "constraints.txt"
     constraints_txt.write_text(
@@ -186,7 +186,7 @@ def test_new_resolver_hash_intersect_empty(
 def test_new_resolver_hash_intersect_empty_from_constraint(
     script: PipTestEnvironment,
 ) -> None:
-    find_links = _create_find_links(script)
+    find_links = create_find_links(script)
 
     constraints_txt = script.scratch_path / "constraints.txt"
     constraints_txt.write_text(
@@ -305,7 +305,7 @@ def test_new_resolver_unpinned_requirement_with_pinned_hash_constraint(
     This was because "is_pinned" could not be true for the unpinned requirement, even
     though the constraint did have a pin that was being enforced.
     """
-    find_links = _create_find_links(script)
+    find_links = create_find_links(script)
 
     requirements_txt = script.scratch_path / "requirements.txt"
     requirements_txt.write_text("base\n")

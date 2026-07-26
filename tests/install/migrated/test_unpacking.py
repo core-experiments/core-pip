@@ -48,8 +48,8 @@ class TestUnpackArchives:
         self.tempdir = tempfile.mkdtemp()
         self.old_mask = os.umask(0o022)
         self.symlink_expected_mode = None
-        self.default_file_mode = self._probe_created_file_mode()
-        self.default_dir_mode = self._probe_created_dir_mode()
+        self.default_file_mode = self.probe_created_file_mode()
+        self.default_dir_mode = self.probe_created_dir_mode()
         self.executable_mode = 0o777 & ~0o022 | 0o111
 
     def teardown_method(self) -> None:
@@ -59,7 +59,7 @@ class TestUnpackArchives:
     def mode(self, path: str) -> int:
         return stat.S_IMODE(os.stat(path).st_mode)
 
-    def _probe_created_file_mode(self) -> int:
+    def probe_created_file_mode(self) -> int:
         path = os.path.join(self.tempdir, "probe_file_mode")
         with open(path, "wb"):
             pass
@@ -67,7 +67,7 @@ class TestUnpackArchives:
         os.remove(path)
         return mode
 
-    def _probe_created_dir_mode(self) -> int:
+    def probe_created_dir_mode(self) -> int:
         path = os.path.join(self.tempdir, "probe_dir_mode")
         os.mkdir(path)
         mode = self.mode(path)
@@ -699,7 +699,7 @@ def test_flatten_only_for_non_whl(
     assert mock_unzip.call_args.kwargs["flatten"] is flatten
 
 
-def _write_polyglot(path: Path) -> None:
+def write_polyglot(path: Path) -> None:
     """Write a tar.gz with a zip appended; both views contain payload.txt."""
     tar_buf = io.BytesIO()
     with tarfile.open(fileobj=tar_buf, mode="w:gz") as tar:
@@ -726,7 +726,7 @@ def test_polyglot_routing(
     tmp_path: Path, filename: str, content_type: str | None, expected: bytes
 ) -> None:
     archive = tmp_path / filename
-    _write_polyglot(archive)
+    write_polyglot(archive)
     out = tmp_path / "out"
     ArchiveExtractor(str(archive), str(out), content_type=content_type).extract()
     assert (out / "payload.txt").read_bytes() == expected
@@ -734,6 +734,6 @@ def test_polyglot_routing(
 
 def test_polyglot_ambiguous_name_rejected(tmp_path: Path) -> None:
     archive = tmp_path / "pkg.bin"
-    _write_polyglot(archive)
+    write_polyglot(archive)
     with pytest.raises(InstallationError):
         ArchiveExtractor(str(archive), str(tmp_path / "out")).extract()

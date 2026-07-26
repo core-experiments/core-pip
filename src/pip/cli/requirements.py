@@ -57,7 +57,7 @@ class SourceConfig:
     no_index: bool
 
 
-def _load_source_config(command: str | None = None) -> SourceConfig:
+def load_source_config(command: str | None = None) -> SourceConfig:
     from pip.index.config import DEFAULT_INDEX_URL
 
     store = ConfigurationStore()
@@ -106,7 +106,7 @@ def _load_source_config(command: str | None = None) -> SourceConfig:
     return SourceConfig(find_links, index_url, extra_index_urls, no_index)
 
 
-def _requirements_from_script(path: Path) -> list[str]:
+def requirements_from_script(path: Path) -> list[str]:
     try:
         source = path.read_text(encoding="utf-8")
     except OSError as exc:
@@ -165,7 +165,7 @@ def _requirements_from_script(path: Path) -> list[str]:
     return dependencies
 
 
-def _collect_requirements(
+def collect_requirements(
     *,
     requirements: list[str],
     requirement_files: list[str] | None = None,
@@ -276,7 +276,7 @@ def _collect_requirements(
                         cast(dict[str, object], item.options["config_settings"])
                     )
             elif item.constraint:
-                _validate_constraint_requirement(
+                validate_constraint_requirement(
                     item.requirement,
                     editable=item.is_editable,
                 )
@@ -308,7 +308,7 @@ def _collect_requirements(
             options=option_state,
             constraint=True,
         ):
-            _validate_constraint_requirement(
+            validate_constraint_requirement(
                 item.requirement,
                 editable=item.is_editable,
             )
@@ -349,7 +349,7 @@ def _collect_requirements(
     )
 
 
-def _validate_constraint_requirement(
+def validate_constraint_requirement(
     requirement: str, *, editable: bool = False
 ) -> None:
     from pip.resolution.req_install import install_req_from_line
@@ -381,7 +381,7 @@ def _validate_constraint_requirement(
         raise InstallationError("Unnamed requirements are not allowed as constraints")
 
 
-def _bundle_install_requirements(
+def bundle_install_requirements(
     bundle: RequirementsBundle,
     *,
     target: TargetContext | None = None,
