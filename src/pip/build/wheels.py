@@ -4,6 +4,7 @@ import logging
 import os
 
 from pyproject_hooks import BuildBackendHookCaller, HookMissing
+from typing import Any
 
 from pip.core.subprocess import runner_with_message
 
@@ -12,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 def build_wheel_pep517(
     name: str,
-    backend: BuildBackendHookCaller,
+    backend: Any,
     metadata_directory: str,
     wheel_directory: str,
     *,

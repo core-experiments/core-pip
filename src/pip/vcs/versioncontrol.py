@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from typing import (
     Any,
     Literal,
+    cast,
 )
 
 from pip.core.errors import InstallationError
@@ -531,7 +532,7 @@ class VersionControl:
                 self.repo_name,
             )
             # https://github.com/python/mypy/issues/1174
-            prompt = ("(i)gnore, (w)ipe, (b)ackup ", ("i", "w", "b"))  # type: ignore
+            prompt = ("(i)gnore, (w)ipe, (b)ackup ", ("i", "w", "b"))
 
         logger.warning(
             "The plan is to install the %s repository %s",
@@ -620,7 +621,7 @@ class VersionControl:
         This is simply a wrapper around call_subprocess that adds the VCS
         command name, and checks that the VCS is available
         """
-        cmd = make_command(cls.name, *cmd)
+        cmd = make_command(cls.name, cast(CommandArgs, cmd))
         if command_desc is None:
             command_desc = format_command_args(cmd)
         try:

@@ -75,6 +75,10 @@ class MetadataDistribution:
         self.info_location_internal = info_location
         self.entry_points_text_internal = entry_points_text
 
+    @property
+    def metadata_version(self) -> str | None:
+        return self.metadata.get("Metadata-Version")
+
     @classmethod
     def from_directory(
         cls,

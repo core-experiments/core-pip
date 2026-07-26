@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 import sysconfig
 from collections.abc import Iterable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from pip.install.build_env.base import (
     BuildEnvironment,
@@ -68,24 +69,51 @@ class VenvBuildEnvironment(BuildEnvironment):
     """A venv-based build environment."""
 
     def __init__(self, installer: BuildEnvironmentInstaller) -> None:
-        # We defer this import because certain distributions of Python do not include
-        # a functional venv out of the box.
-        try:
-            import venv
-        except ImportError:
-            raise VenvImportError
-
+        # We defer these imports because certain distributions of Python do not
+        # include a functional venv out of the box.
         self.env_path_internal = TempDirectory(
             kind=tempdir_kinds.BUILD_ENV, globally_managed=True
         ).path
-        # Use symlinks to support relocatable Python installations on POSIX, including
-        # python-build-standalone. This matches upstream venv CLI's behaviour.
-        env = venv.EnvBuilder(symlinks=(os.name != "nt"))
+        context: Any = None
         try:
-            context = env.ensure_directories(self.env_path_internal)
-            env.create(self.env_path_internal)
-        except OSError as e:
-            raise VenvCreationError(str(e))
+            import virtualenv
+        except ImportError:
+            try:
+                import venv
+            except ImportError:
+                raise VenvImportError
+
+            env = venv.EnvBuilder(symlinks=(os.name != "nt"), with_pip=False)
+            try:
+                context = env.ensure_directories(self.env_path_internal)
+                env.create(self.env_path_internal)
+                bootstrap_environment = {
+                    key: value
+                    for key, value in os.environ.items()
+                    if not key.startswith("PIP_") and key != "PYTHONPATH"
+                }
+                subprocess.run(
+                    [context.env_exec_cmd, "-m", "ensurepip", "--upgrade", "--default-pip"],
+                    check=True,
+                    cwd=self.env_path_internal,
+                    env=bootstrap_environment,
+                    capture_output=True,
+                    text=True,
+                )
+            except (OSError, subprocess.CalledProcessError) as e:
+                detail = str(e)
+                if isinstance(e, subprocess.CalledProcessError):
+                    output = "\n".join(part for part in (e.stdout, e.stderr) if part)
+                    if output:
+                        detail = f"{detail}: {output}"
+                raise VenvCreationError(detail)
+        else:
+            try:
+                virtualenv.cli_run(
+                    [self.env_path_internal, "--no-download", "--clear"]
+                )
+            except (OSError, RuntimeError) as e:
+                raise VenvCreationError(str(e))
 
         if sys.version_info >= (3, 12):
             # The context object was only documented in Python 3.12

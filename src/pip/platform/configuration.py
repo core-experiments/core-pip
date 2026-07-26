@@ -300,7 +300,7 @@ class Configuration:
                 self.parsers_internal[variant].append((fname, parser))
 
     def load_file(self, variant: Kind, fname: str) -> RawConfigParser:
-        logger.verbose("For variant '%s', will try loading '%s'", variant, fname)
+        logger.log(15, "For variant '%s', will try loading '%s'", variant, fname)
         parser = self.construct_parser(fname)
 
         for section in parser.sections():
