@@ -8,24 +8,28 @@ import os
 import subprocess
 import sys
 import tempfile
-import tomllib
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility
+    from pip._vendor import tomli as tomllib
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Iterable, Protocol
+from typing import Any, Iterable, Protocol
 
 from pip.core.errors import (
     DiagnosticPipError,
     InstallationError,
     InvalidWheelFilename,
 )
-from pip.core.direct_url import ArchiveInfo, DirInfo
+from pip.core.direct_url import ArchiveInfo, DirectUrl, DirInfo
 from pip.core.hashes import Hashes
 from pip.index.links import Link
 from pip.core.packaging import (
     Requirement as ParsedRequirement,
     SpecifierSet,
+    Version,
     canonicalize_name,
     marker_applies,
     parse_requirement,
@@ -54,15 +58,14 @@ class InvalidPyProjectBuildRequires(DiagnosticPipError):
         )
 
 
-if TYPE_CHECKING:
-    from pip.resolution.req_file import ParsedRequirement
-
-
 class MetadataProvider(Protocol):
     """Prepared distribution view required by requirement metadata consumers."""
 
     @property
     def metadata(self) -> email.message.Message: ...
+
+    @property
+    def version(self) -> Version: ...
 
 
 @dataclass(frozen=True)
@@ -115,14 +118,14 @@ class InstallRequirement:
     extras_override: set[str] | None = None
     source_dir: str | None = None
     local_file_path: str | None = None
-    download_info: DownloadInfo | None = None
+    download_info: Any = None
     is_wheel_from_cache: bool = False
     cached_wheel_source_link: Link | None = None
     metadata_internal: email.message.Message | None = None
     distribution_internal: MetadataProvider | None = None
     archive_source_internal: Path | None = None
     needs_more_preparation: bool = False
-    build_env: object = field(default_factory=NoOpBuildEnvironment_internal)
+    build_env: Any = field(default_factory=NoOpBuildEnvironment_internal)
     pyproject_requires: list[str] | None = None
     requirements_to_check: list[str] = field(default_factory=list)
     metadata_directory: str | None = None
@@ -201,7 +204,7 @@ class InstallRequirement:
         expected = self.req.name
         if expected.startswith("file://") and self.link is not None:
             expected = self.link.filename.split("-", 1)[0]
-        return candidate.name == expected
+        return getattr(candidate, "name", None) == expected
 
     def match_markers(self, extras_requested: Iterable[str] = ()) -> bool:
         return marker_applies(self.markers, extras=extras_requested)
@@ -295,7 +298,30 @@ class InstallRequirement:
             canonicalize_name(metadata_name),
             self.name,
         )
-        self.req = parse_requirement(canonicalize_name(metadata_name))
+        # Keep the source URL and the user's requirement constraints when the
+        # project name is discovered from metadata.  Re-parsing only the name
+        # turns a directory requirement into an unconstrained requirement and
+        # loses the link used to associate it with its source candidate.
+        self.req = ParsedRequirement(
+            name=canonicalize_name(metadata_name),
+            specifier=self.req.specifier,
+            extras=self.req.extras,
+            url=(
+                self.req.url
+                or (
+                    self.link.url
+                    if self.link is not None
+                    and (
+                        self.link.is_existing_dir
+                        or self.link.is_file
+                        or self.link.is_vcs
+                    )
+                    else None
+                )
+            ),
+            marker=self.req.marker,
+            raw=self.req.raw,
+        )
 
     def load_pyproject_toml(self) -> dict[str, object]:
         if self.source_dir is None:
@@ -469,6 +495,9 @@ class ConfiguredBuildBackend:
         self.backend_path = backend_path
         self.python_executable = python_executable
 
+    def __getattr__(self, name: str) -> Any:
+        raise AttributeError(name)
+
     def build_wheel(
         self,
         wheel_directory: str,
@@ -625,6 +654,20 @@ def install_req_from_line(
                 "The argument appears to be a requirements file. If that is the case, use the '-r' flag to install"
             )
         parsed = parse_requirement(url)
+        if Path(path_text).suffix.lower() == ".whl":
+            wheel_parts = Path(path_text).name[:-4].split("-")
+            if len(wheel_parts) >= 2:
+                wheel_requirement = parse_requirement(
+                    f"{wheel_parts[0]}=={wheel_parts[1]}"
+                )
+                parsed = ParsedRequirement(
+                    name=wheel_requirement.name,
+                    specifier=wheel_requirement.specifier,
+                    extras=path_extras,
+                    url=url,
+                    marker=parsed.marker,
+                    raw=text,
+                )
         if path_extras:
             parsed = ParsedRequirement(
                 name=parsed.name,

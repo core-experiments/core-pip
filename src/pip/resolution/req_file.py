@@ -7,7 +7,10 @@ import os
 import re
 import shlex
 import sys
-import tomllib
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility
+    from pip._vendor import tomli as tomllib
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -19,6 +22,7 @@ from packaging import pylock
 from packaging.utils import parse_sdist_filename, parse_wheel_filename
 
 from pip.core.errors import InstallationError
+from pip.core.format_control import FormatControl
 from pip.core.urls import path_to_url
 from pip.index.provider import CandidateProvider
 from pip.network.http import NetworkSession
@@ -27,6 +31,14 @@ from pip.resolution.req_install import install_req_from_editable, install_req_fr
 logger = logging.getLogger(__name__)
 CODING_RE = re.compile(rb"^[ \t\f]*#.*?coding[:=][ \t]*([-\w.]+)")
 COMMENT_RE = re.compile(r"(^|\s+)#.*$")
+HTTP_SCHEMES = frozenset(("http", "https"))
+REMOTE_SCHEMES = frozenset(("http", "https", "file"))
+REQUIREMENTS_OPTIONS = frozenset(("-r", "--requirement"))
+CONSTRAINT_OPTIONS = frozenset(("-c", "--constraint"))
+FIND_LINKS_OPTIONS = frozenset(("-f", "--find-links"))
+INDEX_URL_OPTIONS = frozenset(("-i", "--index-url"))
+EDITABLE_OPTIONS = frozenset(("-e", "--editable"))
+BOOLEAN_OPTIONS = frozenset(("--no-index", "--pre", "--require-hashes"))
 
 
 class RequirementsFileParseError(InstallationError):
@@ -57,7 +69,7 @@ def pylock_location(reference: str, path: str | None) -> str:
     if path is None:
         raise InstallationError("pylock package is missing its path")
     parsed = urllib.parse.urlparse(reference)
-    if parsed.scheme in {"http", "https"}:
+    if parsed.scheme in HTTP_SCHEMES:
         return urllib.parse.urljoin(reference, path)
     return path_to_url(str((Path(reference).parent / path).resolve()))
 
@@ -102,7 +114,9 @@ def parse_pylock(
             if (
                 provider is not None
                 and "binary"
-                not in provider.format_control.get_allowed_formats(package.name)
+                not in (provider.format_control or FormatControl()).get_allowed_formats(
+                    package.name
+                )
             ):
                 if package.sdist is None:
                     raise InstallationError(
@@ -122,7 +136,9 @@ def parse_pylock(
             if (
                 provider is not None
                 and "source"
-                not in provider.format_control.get_allowed_formats(package.name)
+                not in (provider.format_control or FormatControl()).get_allowed_formats(
+                    package.name
+                )
             ):
                 raise InstallationError(
                     f"source distributions are not permitted for package {package.name!r} and "
@@ -180,7 +196,7 @@ def parse_requirements_internal(
             f"{normalized} recursively references itself in {previous}"
         )
     parsed = urllib.parse.urlparse(normalized)
-    if parsed.scheme in {"http", "https", "file"}:
+    if parsed.scheme in REMOTE_SCHEMES:
         try:
             from pip.network.utils import raise_for_status
 
@@ -233,7 +249,10 @@ def parse_requirements_internal(
                 try:
                     content = data.decode("utf-8")
                 except UnicodeDecodeError:
-                    encoding = locale.getencoding()
+                    getencoding = getattr(locale, "getencoding", None)
+                    encoding = (
+                        getencoding() if callable(getencoding) else locale.getpreferredencoding(False)
+                    )
                     logger.warning(
                         "unable to decode data from %s with default encoding %s, "
                         "falling back to encoding from locale: %s. "
@@ -336,17 +355,17 @@ def parse_line(
                 option, value = token.split("=", 1)
             else:
                 option = token
-                if option in {"--no-index", "--pre", "--require-hashes"}:
+                if option in BOOLEAN_OPTIONS:
                     value = ""
                 else:
                     index += 1
                     if index >= len(tokens):
                         raise RequirementsFileParseError(f"{option} requires a value")
                     value = tokens[index]
-            if option in {"-e", "--editable"} and index + 1 < len(tokens):
+            if option in EDITABLE_OPTIONS and index + 1 < len(tokens):
                 value = " ".join([value, *tokens[index + 1 :]])
                 index = len(tokens) - 1
-            if option in {"-r", "--requirement"}:
+            if option in REQUIREMENTS_OPTIONS:
                 nested = normalize_reference(value, filename, as_path=True)
                 results.extend(
                     parse_requirements_internal(
@@ -358,7 +377,7 @@ def parse_line(
                         stack=stack,
                     )
                 )
-            elif option in {"-c", "--constraint"}:
+            elif option in CONSTRAINT_OPTIONS:
                 nested = normalize_reference(value, filename, as_path=True)
                 results.extend(
                     parse_requirements_internal(
@@ -370,14 +389,14 @@ def parse_line(
                         stack=stack,
                     )
                 )
-            elif option in {"-f", "--find-links"}:
+            elif option in FIND_LINKS_OPTIONS:
                 if provider is not None:
                     normalized = normalize_reference(value, filename, as_path=True)
                     if os.path.exists(normalized):
                         provider.find_links.append(normalized)
                     else:
                         provider.find_links.append(value)
-            elif option in {"-i", "--index-url"}:
+            elif option in INDEX_URL_OPTIONS:
                 if provider is not None and not provider.no_index:
                     provider.index_urls[:] = [normalize_reference(value, filename)]
                 auth = session.auth
@@ -401,7 +420,7 @@ def parse_line(
                 if auth is not None:
                     auth.index_urls = []
             elif option == "--trusted-host":
-                session.adapters[f"https://{value}/"] = session.trusted_host_adapter
+                session.trusted_hosts.add(value.lower().split(":", 1)[0])
                 logger.info(
                     "adding trusted host: %r (from line %d of %s)",
                     value,
@@ -431,7 +450,7 @@ def parse_line(
                     raise RequirementsFileParseError(
                         f"invalid use-feature value {value!r}"
                     )
-            elif option in {"-e", "--editable"}:
+            elif option in EDITABLE_OPTIONS:
                 results.extend(
                     parse_requirement_line(
                         filename,
@@ -468,7 +487,7 @@ def parse_requirement_line(
     else:
         option, _, value = line.partition(" ")
     value = value.strip()
-    requirement_line = value if option in {"-e", "--editable"} else line
+    requirement_line = value if option in EDITABLE_OPTIONS else line
     config_setting_options = ("--config-settings", "--config-setting")
     if (
         not any(option in requirement_line for option in config_setting_options)
@@ -515,7 +534,7 @@ def parse_requirement_line(
         requirement_text = " ".join(requirement_tokens)
     requirement_text = expand_env_variables(requirement_text)
     try:
-        if editable or option in {"-e", "--editable"}:
+        if editable or option in EDITABLE_OPTIONS:
             install_req_from_editable(value)
         else:
             install_req_from_line(requirement_text)
@@ -528,10 +547,10 @@ def parse_requirement_line(
     return [
         ParsedRequirement(
             requirement=requirement_text
-            if option not in {"-e", "--editable"}
+            if option not in EDITABLE_OPTIONS
             else value,
             comes_from=comes_from,
-            is_editable=editable or option in {"-e", "--editable"},
+            is_editable=editable or option in EDITABLE_OPTIONS,
             constraint=constraint,
             options=metadata or None,
             line_source=f"{filename} (line {line_number})",
@@ -568,6 +587,7 @@ def normalize_reference(value: str, base: str | None, *, as_path: bool = False) 
     base_directory = base.rsplit("/", 1)[0] + "/" if base else None
     if parsed.scheme:
         if base_parsed is not None and base_parsed.scheme:
+            assert base_directory is not None
             return urllib.parse.urljoin(base_directory, value)
         return value
     if (
@@ -579,6 +599,7 @@ def normalize_reference(value: str, base: str | None, *, as_path: bool = False) 
     path = Path(value).expanduser()
     if base and not path.is_absolute():
         if base_parsed is not None and base_parsed.scheme:
+            assert base_directory is not None
             return urllib.parse.urljoin(base_directory, value)
         path = Path(base).resolve().parent / path
     return os.path.normcase(os.path.abspath(os.path.normpath(os.fspath(path))))

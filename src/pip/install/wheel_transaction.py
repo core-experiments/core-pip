@@ -514,7 +514,7 @@ def rewrite_shebang(path: Path, executable: str | None) -> None:
     contents = path.read_bytes()
     if contents.startswith(b"#!python\n"):
         path.write_bytes(
-            f"#!{executable or os.sys.executable}\n".encode()
+            f"#!{executable or sys.executable}\n".encode()
             + contents[len(b"#!python\n") :]
         )
 
@@ -538,7 +538,7 @@ def script_text(target_ref: str, executable: str | None) -> str:
     module, _, attribute = target_ref.partition(":")
     entry = attribute or "main"
     return (
-        f"#!{executable or os.sys.executable}\n"
+        f"#!{executable or sys.executable}\n"
         "import re\nimport sys\n"
         f"from {module} import {entry}\n\n"
         "if __name__ == '__main__':\n"

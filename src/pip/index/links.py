@@ -9,7 +9,7 @@ import urllib.request
 from collections.abc import Mapping
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from pip.core.errors import DiagnosticPipError
 from pip.core.hashes import Hashes
@@ -25,6 +25,7 @@ from pip.index.paths import PathComponent
 from pip.index.source_models import ArtifactKind, MetadataFile
 
 VCS_SCHEMES_internal = tuple(f"{scheme}+" for scheme in ("git", "hg", "svn", "bzr"))
+VCS_SCHEMES = frozenset(("git", "hg", "svn", "bzr"))
 SOURCE_ARCHIVE_SUFFIXES = (
     ".tar.gz",
     ".tar.bz2",
@@ -46,7 +47,7 @@ HASH_URL_FRAGMENT_RE = re.compile(
 @functools.cache
 def hash_from_url_fragment(url: str) -> tuple[str, str] | None:
     match = HASH_URL_FRAGMENT_RE.search(url)
-    return match.groups() if match is not None else None
+    return cast(tuple[str, str] | None, match.groups() if match is not None else None)
 
 
 class InvalidEggFragment(DiagnosticPipError):
@@ -254,10 +255,9 @@ class Link:
                 if sep
                 else MetadataFile(None)
             )
+        upload_time_value = attrs.get("data-upload-time")
         upload_time = (
-            parse_iso_datetime(attrs["data-upload-time"])
-            if attrs.get("data-upload-time")
-            else None
+            parse_iso_datetime(upload_time_value) if upload_time_value else None
         )
         return cls(
             url,
@@ -266,7 +266,7 @@ class Link:
             yanked_reason=attrs.get("data-yanked"),
             metadata_file_data=metadata,
             upload_time=upload_time,
-            text=attrs.get("text", ""),
+            text=attrs.get("text") or "",
         )
 
     @classmethod
@@ -397,7 +397,7 @@ class Link:
 
     @property
     def is_vcs(self) -> bool:
-        return self.scheme in {"git", "hg", "svn", "bzr"} or self.url.startswith(
+        return self.scheme in VCS_SCHEMES or self.url.startswith(
             VCS_SCHEMES_internal
         )
 

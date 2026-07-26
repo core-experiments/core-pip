@@ -4,6 +4,7 @@ import datetime
 import urllib.parse
 from bisect import bisect_left, bisect_right
 from dataclasses import dataclass, field
+from types import MappingProxyType
 from pathlib import Path
 from typing import Any
 
@@ -24,13 +25,19 @@ from pip.index.source_locations import (
     looks_like_path_requirement,
 )
 from pip.index.source_models import (
+    INSTALLABLE_ARTIFACT_KINDS,
+    SOURCE_ARTIFACT_KINDS,
     ArtifactKind,
     CandidateSelection,
+    CandidateRecord,
     CandidateSummary,
+    PackageCatalog,
     PackageSource,
     RejectedCandidate,
     RejectionReason,
 )
+
+PYPI_HOSTS = frozenset(("pypi.org", "pypi.python.org"))
 
 
 @dataclass
@@ -66,17 +73,11 @@ class CandidateProvider:
     parsed_link_cache: dict[Link, InstallationCandidate | RejectedCandidate] = field(
         default_factory=dict, init=False, repr=False
     )
-    available_versions_cache: dict[
-        tuple[str, bool, bool], tuple[CandidateSummary, ...]
-    ] = field(default_factory=dict, init=False, repr=False)
-    available_versions_by_version_cache: dict[
-        tuple[str, bool, bool, Version], tuple[CandidateSummary, ...]
-    ] = field(default_factory=dict, init=False, repr=False)
     matching_versions_cache: dict[
         tuple[str, bool, bool, str, bool], tuple[CandidateSummary, ...]
     ] = field(default_factory=dict, init=False, repr=False)
-    links_by_version_cache: dict[tuple[str, bool, bool, Version], tuple[Link, ...]] = (
-        field(default_factory=dict, init=False, repr=False)
+    package_catalog_cache: dict[tuple[str, bool, bool], PackageCatalog] = field(
+        default_factory=dict, init=False, repr=False
     )
     materializer_internal: CandidateMaterializer | None = field(
         default=None, init=False, repr=False
@@ -180,17 +181,17 @@ class CandidateProvider:
         self.link_cache[cache_key] = tuple(links)
         return links
 
-    def catalog_links(self, requirement: Requirement) -> list[Link]:
+    def catalog_links(self, requirement: Requirement) -> tuple[Link, ...]:
         """Return project links without rescanning unrelated find-links entries."""
         if (
             requirement.canonical_name in self.locked_links
             or requirement.url is not None
             or looks_like_path_requirement(requirement.raw)
         ):
-            return self.collect_links(requirement)
+            return tuple(self.collect_links(requirement))
         cached_links = self.link_cache.get(requirement.canonical_name)
         if cached_links is not None:
-            return list(cached_links)
+            return cached_links
         if self.find_links_cache is None:
             source = FindLinksSource(
                 tuple(self.find_links), self.trusted_hosts, self.session
@@ -201,7 +202,12 @@ class CandidateProvider:
             for link in self.find_links_cache:
                 parsed = self.parsed_link_cache.get(link)
                 if parsed is None:
-                    parsed = InstallationCandidate.from_link(link, target=self.target)
+                    try:
+                        parsed = InstallationCandidate.from_link(
+                            link, target=self.target
+                        )
+                    except ValueError:
+                        continue
                     self.parsed_link_cache[link] = parsed
                 if isinstance(parsed, InstallationCandidate):
                     grouped.setdefault(parsed.canonical_name, []).append(link)
@@ -217,11 +223,12 @@ class CandidateProvider:
                 if link.url not in seen:
                     seen.add(link.url)
                     links.append(link)
-        self.link_cache[requirement.canonical_name] = tuple(links)
-        return links
+        result = tuple(links)
+        self.link_cache[requirement.canonical_name] = result
+        return result
 
     def evaluate_links(self, requirement: Requirement) -> CandidateSelection:
-        accepted: list[InstallationCandidate] = []
+        accepted: list[CandidateRecord] = []
         rejected: list[RejectedCandidate] = []
         allow_binary, allow_source = self.allowed_formats_internal(requirement)
         catalog_key = (
@@ -229,15 +236,12 @@ class CandidateProvider:
             allow_binary,
             allow_source,
         )
-        links: list[Link] | None = None
+        links: tuple[Link, ...] | None = None
         exact_version = self.exact_version_internal(requirement)
-        if exact_version is not None:
-            cached_links = self.links_by_version_cache.get(
-                (*catalog_key, exact_version)
-            )
-            if cached_links is not None:
-                links = list(cached_links)
-        elif requirement.url is None and catalog_key in self.available_versions_cache:
+        catalog = self.package_catalog_cache.get(catalog_key)
+        if requirement.url is None and exact_version is not None and catalog is not None:
+            links = catalog.links_by_version.get(exact_version, ())
+        elif requirement.url is None and catalog is not None:
             matching_versions = self.matching_versions(
                 requirement,
                 allow_prereleases=True,
@@ -245,12 +249,10 @@ class CandidateProvider:
             matching_links = tuple(
                 link
                 for summary in matching_versions
-                for link in self.links_by_version_cache.get(
-                    (*catalog_key, summary.version), ()
-                )
+                for link in catalog.links_by_version.get(summary.version, ())
             )
             if matching_links:
-                links = list(dict.fromkeys(matching_links))
+                links = tuple(dict.fromkeys(matching_links))
         if links is None:
             links = self.catalog_links(requirement)
         for link in links:
@@ -276,7 +278,7 @@ class CandidateProvider:
                             cutoff = cutoff.replace(tzinfo=datetime.timezone.utc)
                         if (
                             link.upload_time is None
-                            and host in {"pypi.org", "pypi.python.org"}
+                            and host in PYPI_HOSTS
                             and cutoff > datetime.datetime.now(datetime.timezone.utc)
                         ):
                             continue
@@ -293,7 +295,19 @@ class CandidateProvider:
             )
             parsed = self.parsed_link_cache.get(link) if cache_parsed else None
             if parsed is None:
-                parsed = InstallationCandidate.from_link(link, target=self.target)
+                try:
+                    parsed = InstallationCandidate.from_link(
+                        link, target=self.target
+                    )
+                except ValueError:
+                    rejected.append(
+                        RejectedCandidate(
+                            link,
+                            RejectionReason.INVALID_VERSION,
+                            "could not parse project and version",
+                        )
+                    )
+                    continue
                 if cache_parsed:
                     self.parsed_link_cache[link] = parsed
             result = CandidateEvaluator.evaluate_parsed_link(
@@ -305,7 +319,7 @@ class CandidateProvider:
                 allow_source=allow_source,
             )
             if isinstance(result, InstallationCandidate):
-                accepted.append(result)
+                accepted.append(result.to_record())
             else:
                 rejected.append(result)
         accepted.sort(
@@ -338,7 +352,7 @@ class CandidateProvider:
                 host = urllib.parse.urlparse(
                     upload_rejection.link.source_url or ""
                 ).hostname
-                if host not in {"pypi.org", "pypi.python.org"}:
+                if host not in PYPI_HOSTS:
                     raise InstallationError(upload_rejection.detail)
         if allowed_versions is not None:
             accepted = tuple(
@@ -402,24 +416,20 @@ class CandidateProvider:
             allow_binary,
             allow_source,
         )
-        cached = self.available_versions_cache.get(cache_key)
-        if cached is not None:
-            return cached
+        catalog = self.package_catalog_cache.get(cache_key)
+        if catalog is not None:
+            return catalog.summaries
         versions: dict[tuple[str, bool], CandidateSummary] = {}
         links_by_version: dict[Version, list[Link]] = {}
         for link in self.catalog_links(requirement):
             if link.kind is ArtifactKind.WHEEL and not allow_binary:
                 continue
             if (
-                link.kind in {ArtifactKind.SDIST, ArtifactKind.SOURCE_TREE}
+                link.kind in SOURCE_ARTIFACT_KINDS
                 and not allow_source
             ):
                 continue
-            if link.kind not in {
-                ArtifactKind.WHEEL,
-                ArtifactKind.SDIST,
-                ArtifactKind.SOURCE_TREE,
-            }:
+            if link.kind not in INSTALLABLE_ARTIFACT_KINDS:
                 continue
             if link.requires_python:
                 try:
@@ -431,7 +441,12 @@ class CandidateProvider:
                     continue
             parsed = self.parsed_link_cache.get(link)
             if parsed is None:
-                parsed = InstallationCandidate.from_link(link, target=self.target)
+                try:
+                    parsed = InstallationCandidate.from_link(
+                        link, target=self.target
+                    )
+                except ValueError:
+                    continue
                 self.parsed_link_cache[link] = parsed
             if not isinstance(parsed, InstallationCandidate):
                 continue
@@ -449,16 +464,24 @@ class CandidateProvider:
         result = tuple(
             sorted(versions.values(), key=lambda item: (item.version, item.is_yanked))
         )
-        self.available_versions_cache[cache_key] = result
         summaries_by_version: dict[Version, list[CandidateSummary]] = {}
         for summary in result:
             summaries_by_version.setdefault(summary.version, []).append(summary)
-        for version, summaries in summaries_by_version.items():
-            self.available_versions_by_version_cache[(*cache_key, version)] = tuple(
-                summaries
-            )
-        for version, links in links_by_version.items():
-            self.links_by_version_cache[(*cache_key, version)] = tuple(links)
+        self.package_catalog_cache[cache_key] = PackageCatalog(
+            links=tuple(
+                link for links in links_by_version.values() for link in links
+            ),
+            summaries=result,
+            summaries_by_version=MappingProxyType(
+                {
+                    version: tuple(summaries)
+                    for version, summaries in summaries_by_version.items()
+                }
+            ),
+            links_by_version=MappingProxyType(
+                {version: tuple(links) for version, links in links_by_version.items()}
+            ),
+        )
         return result
 
     def available_versions_for(
@@ -470,12 +493,11 @@ class CandidateProvider:
             allow_binary,
             allow_source,
         )
-        if catalog_key not in self.available_versions_cache:
+        catalog = self.package_catalog_cache.get(catalog_key)
+        if catalog is None:
             self.available_versions(requirement)
-        return self.available_versions_by_version_cache.get(
-            (*catalog_key, version),
-            (),
-        )
+            catalog = self.package_catalog_cache[catalog_key]
+        return catalog.summaries_by_version.get(version, ())
 
     def matching_versions(
         self,
@@ -541,14 +563,14 @@ class CandidateProvider:
 
     @staticmethod
     def best_accepted_candidates(
-        accepted: tuple[InstallationCandidate, ...],
-    ) -> tuple[InstallationCandidate, ...]:
-        selected: list[InstallationCandidate] = []
+        accepted: tuple[CandidateRecord, ...],
+    ) -> tuple[CandidateRecord, ...]:
+        selected: list[CandidateRecord] = []
         seen_slots: set[tuple[str, bool]] = set()
         for candidate in accepted:
             slot = (
                 "source"
-                if candidate.link.kind in {ArtifactKind.SDIST, ArtifactKind.SOURCE_TREE}
+                if candidate.link.kind in SOURCE_ARTIFACT_KINDS
                 else "wheel",
                 candidate.version.is_prerelease,
             )

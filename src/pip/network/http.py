@@ -27,6 +27,7 @@ from pip.network.exceptions import (
 from pip.network.cache import SafeFileCache
 
 logger = logging.getLogger(__name__)
+RETRY_STATUS_CODES = frozenset((500, 502, 503, 520, 527))
 
 
 @dataclass
@@ -222,7 +223,7 @@ class NetworkSession:
                 time.sleep(0.25 * (2**attempt))
                 continue
             if (
-                response.status_code in {500, 502, 503, 520, 527}
+                response.status_code in RETRY_STATUS_CODES
                 and attempt + 1 < attempts
             ):
                 response.close()
@@ -319,9 +320,9 @@ class NetworkSession:
         parsed = urllib.parse.urlsplit(request.url)
         context = None
         if parsed.hostname and parsed.hostname.lower() in self.trusted_hosts:
-            context = ssl.create_unverified_context()
+            context = getattr(ssl, "create_unverified_context")()
         elif self.verify is False:
-            context = ssl.create_unverified_context()
+            context = getattr(ssl, "create_unverified_context")()
         else:
             context = ssl.create_default_context(
                 cafile=self.verify if isinstance(self.verify, str) else None

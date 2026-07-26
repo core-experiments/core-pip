@@ -202,10 +202,9 @@ def build_internal(
     if not requirements:
         return [], []
 
-    # Build the wheels.
     logger.info(
         "Building wheels for collected packages: %s",
-        ", ".join(req.name for req in requirements),  # type: ignore
+        ", ".join(req.name or "" for req in requirements),
     )
 
     build_successes, build_failures = [], []
@@ -236,12 +235,12 @@ def build_internal(
     if build_successes:
         logger.info(
             "Successfully built %s",
-            " ".join([req.name for req in build_successes]),  # type: ignore
+            " ".join([req.name for req in build_successes]),
         )
     if build_failures:
         logger.info(
             "Failed to build %s",
-            " ".join([req.name for req in build_failures]),  # type: ignore
+            " ".join([req.name for req in build_failures]),
         )
     # Return a list of requirements that failed to build
     return build_successes, build_failures

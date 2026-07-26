@@ -20,7 +20,7 @@ def get_runnable_pip() -> str:
     if pip_runner is not None:
         return pip_runner
     runner = Path(
-        importlib.metadata.distribution("pip").locate_file("pip/__pip-runner__.py")
+        str(importlib.metadata.distribution("pip").locate_file("pip/__pip-runner__.py"))
     )
     if runner.is_file():
         return os.fsdecode(runner.resolve())
