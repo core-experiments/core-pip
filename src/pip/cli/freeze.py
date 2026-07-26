@@ -33,8 +33,8 @@ def freeze(
     paths: list[str] | None = None,
     isolated: bool = False,
     exclude_editable: bool = False,
-    exclude: Container[str] = (),
-    skip: Container[str] = (),
+    exclude: Iterable[str] = (),
+    skip: Iterable[str] = (),
 ) -> Generator[str, None, None]:
     installations: dict[str, FrozenRequirement] = {}
     excluded = {canonicalize_name(name) for name in exclude}

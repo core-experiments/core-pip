@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 from pathlib import Path
 
@@ -41,9 +42,12 @@ def create_parser() -> ArgumentParser:
     parser.add_argument(
         "--trusted-host", dest="trusted_hosts", action="append", default=[]
     )
+    parser.add_argument("--proxy")
+    parser.add_argument("--use-feature", dest="use_features", action="append", default=[])
     parser.add_argument("--no-index", action="store_true")
     parser.add_argument("--no-build-isolation", action="store_true")
     parser.add_argument("--no-deps", action="store_true")
+    parser.add_argument("-v", "--verbose", action="count", default=0)
     parser.add_argument(
         "--config-settings",
         "--config-setting",
@@ -56,7 +60,7 @@ def create_parser() -> ArgumentParser:
 
 
 def run_wheel(args: list[str]) -> int:
-    options = create_parser().parse_args(args)
+    options = create_parser().parse_args([arg for arg in args if arg])
 
     config = load_source_config("wheel")
     config_settings: dict[str, object] = {}
@@ -81,7 +85,14 @@ def run_wheel(args: list[str]) -> int:
         extra_index_urls=options.extra_index_url or config.extra_index_urls,
         no_index=options.no_index or config.no_index,
         format_control=FormatControl(),
+        proxy=options.proxy,
     )
+    if options.proxy:
+        os.environ["PIP_PROXY"] = options.proxy
+        os.environ["HTTP_PROXY"] = options.proxy
+        os.environ["HTTPS_PROXY"] = options.proxy
+        os.environ["http_proxy"] = options.proxy
+        os.environ["https_proxy"] = options.proxy
     raw_requirements = [*bundle.requirements, *bundle.editables]
     if not raw_requirements and not options.requirement_files and not options.groups:
         raise CommandError(
@@ -114,6 +125,7 @@ def run_wheel(args: list[str]) -> int:
         build_options=build_options,
         build_constraints=options.build_constraint_files,
         trusted_hosts=options.trusted_hosts,
+        session=bundle.session,
         build_isolation=not options.no_build_isolation,
     )
     plan = Resolver(

@@ -13,5 +13,5 @@ class ArgumentParser(argparse.ArgumentParser):
             message = message.removeprefix("unrecognized arguments: ")
             message = f"no such option: {message.split()[0]}"
         usage = self.format_usage().replace("usage:", "Usage:", 1)
-        self.print_message(usage, sys.stderr)
+        self._print_message(usage, sys.stderr)
         self.exit(2, f"{self.prog}: error: {message}\n")

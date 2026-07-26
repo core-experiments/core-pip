@@ -90,6 +90,7 @@ def run_list(args: list[str]) -> int:
             no_index=options.no_index or config.no_index,
             format_control=FormatControl(),
         )
+        assert provider.release_control is not None
         for value in options.all_releases:
             provider.release_control.apply("all_releases", value)
         for value in options.only_final:

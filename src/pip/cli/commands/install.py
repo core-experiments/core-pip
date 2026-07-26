@@ -45,6 +45,10 @@ from pip.core.wheel import TargetContext
 from pip.index.links import Link
 from pip.install.report import ReportItem, write_install_report
 
+INDEX_URL_OPTIONS = frozenset(("-i", "--index-url"))
+FORMAT_OPTIONS = frozenset(("--no-binary", "--only-binary"))
+RELEASE_OPTIONS = frozenset(("--all-releases", "--only-final"))
+
 if TYPE_CHECKING:
     from pip.resolution.req_install import InstallRequirement
 
@@ -65,7 +69,7 @@ def run_install(args: list[str]) -> int:
     index = 0
     while index < len(args):
         token = args[index]
-        if token in {"-i", "--index-url"} and index + 1 < len(args):
+        if token in INDEX_URL_OPTIONS and index + 1 < len(args):
             normalized_args.append(f"{token}={args[index + 1]}")
             index += 2
             continue
@@ -103,7 +107,7 @@ def run_install(args: list[str]) -> int:
     else:
         os.environ.pop("PIP_QUIET", None)
     config = load_source_config("install")
-    explicit_index_url = any(arg in {"-i", "--index-url"} for arg in args)
+    explicit_index_url = any(arg in INDEX_URL_OPTIONS for arg in args)
     config_settings: dict[str, object] = {}
     for value in options.config_settings:
         key, sep, payload = value.partition("=")
@@ -128,7 +132,7 @@ def run_install(args: list[str]) -> int:
     index = 0
     while index < len(normalized_args):
         token = normalized_args[index]
-        if token in {"--no-binary", "--only-binary"}:
+        if token in FORMAT_OPTIONS:
             if index + 1 < len(normalized_args):
                 format_control.apply(token[2:], normalized_args[index + 1])
             index += 2
@@ -197,7 +201,7 @@ def run_install(args: list[str]) -> int:
     index = 0
     while index < len(normalized_args):
         token = normalized_args[index]
-        if token in {"--all-releases", "--only-final"}:
+        if token in RELEASE_OPTIONS:
             if index + 1 >= len(normalized_args):
                 parser.error(f"{token} requires a value")
             release_control_args.append((token[2:], normalized_args[index + 1]))

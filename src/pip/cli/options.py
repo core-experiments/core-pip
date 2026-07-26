@@ -5,6 +5,8 @@ from __future__ import annotations
 from pip.cli.commands.registry import COMMANDS
 from pip.core.errors import CommandError
 
+VIRTUALENV_OPTIONS = frozenset(("--require-virtualenv", "--require-venv"))
+
 
 def extract_python_option(args: list[str]) -> tuple[list[str], str | None]:
     filtered: list[str] = []
@@ -56,7 +58,7 @@ def extract_global_options(
     index = 0
     while index < len(filtered):
         token = filtered[index]
-        if token in {"--require-virtualenv", "--require-venv"}:
+        if token in VIRTUALENV_OPTIONS:
             require_virtualenv = True
             index += 1
             continue

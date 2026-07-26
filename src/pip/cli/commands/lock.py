@@ -8,6 +8,7 @@ import os
 import shutil
 import tempfile
 from pathlib import Path
+from typing import Any
 
 from pip.core.errors import CommandError
 from pip.core.format_control import FormatControl
@@ -45,8 +46,8 @@ def run_lock(args: list[str]) -> int:
         format_control.apply("no-binary", value)
     requirements = []
     locked_order: list[str] = []
-    archive_packages: list[dict[str, object]] = []
-    directory_packages: list[dict[str, object]] = []
+    archive_packages: list[dict[str, Any]] = []
+    directory_packages: list[dict[str, Any]] = []
     for value in options.requirements:
         local_directory = Path(value).resolve()
         if local_directory.is_dir():
@@ -94,7 +95,7 @@ def run_lock(args: list[str]) -> int:
             )
             continue
         requirements.append(item)
-    editable_packages: list[dict[str, object]] = []
+    editable_packages: list[dict[str, Any]] = []
     for value in options.editable:
         from pip.build.build_backend import prepare_project_metadata
 
@@ -172,7 +173,7 @@ def run_lock(args: list[str]) -> int:
         if requirements
         else None
     )
-    packages: list[dict[str, object]] = [
+    packages: list[dict[str, Any]] = [
         *editable_packages,
         *directory_packages,
         *archive_packages,

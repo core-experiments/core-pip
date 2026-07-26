@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import builtins
 import fnmatch
 import os
 import sys
@@ -18,12 +19,12 @@ class CacheManager:
         self.http_dir = self.cache_dir / "http-v2"
         self.wheel_dir = self.cache_dir / "wheels"
 
-    def wheel_files(self) -> list[Path]:
+    def wheel_files(self) -> builtins.list[Path]:
         if not self.wheel_dir.is_dir():
             return []
         return sorted(path for path in self.wheel_dir.rglob("*.whl") if path.is_file())
 
-    def list(self, pattern: str | None, *, absolute: bool) -> list[str]:
+    def list(self, pattern: str | None, *, absolute: bool) -> builtins.list[str]:
         wheels = self.wheel_files()
         if pattern:
             expression = (
