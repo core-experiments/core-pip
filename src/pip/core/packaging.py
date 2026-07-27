@@ -460,14 +460,26 @@ def canonicalize_requirement(value: str) -> str:
 
 
 def looks_like_direct_reference(value: str) -> bool:
-    return looks_like_url(value) or value.startswith((".", "/", "~"))
+    return (
+        looks_like_url(value)
+        or value.startswith((".", "/", "~"))
+        or is_windows_path(value)
+    )
 
 
 def looks_like_url(value: str) -> bool:
+    if is_windows_path(value):
+        return False
     if ":" not in value:
         return False
     parsed = urllib.parse.urlparse(value)
     return bool(parsed.scheme and (parsed.netloc or parsed.path))
+
+
+def is_windows_path(value: str) -> bool:
+    return (
+        len(value) >= 3 and value[0].isalpha() and value[1] == ":" and value[2] in "/\\"
+    )
 
 
 def project_from_direct_reference(value: str) -> tuple[str, str | None] | None:

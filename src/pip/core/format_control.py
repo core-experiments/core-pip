@@ -3,6 +3,12 @@ from __future__ import annotations
 from .packaging import canonicalize_name
 from .errors import CommandError
 
+FORMAT_CONTROL_KINDS = frozenset(
+    ("no_binary", "only_binary", "no-binary", "only-binary")
+)
+ONLY_BINARY_KINDS = frozenset(("only_binary", "only-binary"))
+FORMAT_CONTROL_SENTINELS = frozenset((":all:", ":none:"))
+
 
 class FormatControl:
     def __init__(
@@ -21,9 +27,9 @@ class FormatControl:
         )
 
     def apply(self, kind: str, value: str) -> None:
-        if kind not in {"no_binary", "only_binary", "no-binary", "only-binary"}:
+        if kind not in FORMAT_CONTROL_KINDS:
             raise ValueError(f"unknown format control kind: {kind}")
-        only_binary = kind in {"only_binary", "only-binary"}
+        only_binary = kind in ONLY_BINARY_KINDS
         entries = [item.strip() for item in value.split(",") if item.strip()]
         if not entries:
             return
@@ -31,7 +37,9 @@ class FormatControl:
         opposite = self.no_binary if only_binary else self.only_binary
         for entry in entries:
             normalized = (
-                canonicalize_name(entry) if entry not in {":all:", ":none:"} else entry
+                canonicalize_name(entry)
+                if entry not in FORMAT_CONTROL_SENTINELS
+                else entry
             )
             if normalized == ":none:":
                 target.clear()
@@ -53,7 +61,9 @@ class FormatControl:
         entries = [item.strip() for item in value.split(",") if item.strip()]
         for entry in entries:
             normalized = (
-                canonicalize_name(entry) if entry not in {":all:", ":none:"} else entry
+                canonicalize_name(entry)
+                if entry not in FORMAT_CONTROL_SENTINELS
+                else entry
             )
             if normalized == ":none:":
                 target.clear()

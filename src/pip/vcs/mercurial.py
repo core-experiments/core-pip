@@ -128,7 +128,7 @@ class Mercurial(VersionControl):
         return current_revision
 
     @classmethod
-    def get_requirement_revision(cls, location: str) -> str:
+    def get_requirement_revision(cls, repo_dir: str) -> str:
         """
         Return the changeset identification hash, as a 40-character
         hexadecimal string
@@ -137,7 +137,7 @@ class Mercurial(VersionControl):
             ["parents", "--template={node}"],
             show_stdout=False,
             stdout_only=True,
-            cwd=location,
+            cwd=repo_dir,
         ).strip()
         return current_rev_hash
 

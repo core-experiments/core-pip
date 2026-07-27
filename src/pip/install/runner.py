@@ -1,9 +1,10 @@
 """Helpers for invoking the currently running pip from a subprocess."""
 
-import importlib.metadata
 import importlib.util
 import os
 from pathlib import Path
+
+from pip.core.pip_version import get_pip_distribution
 
 
 pip_runner: str | None = None
@@ -19,9 +20,7 @@ def get_runnable_pip() -> str:
     """Return the pip runner script used for isolated build dependencies."""
     if pip_runner is not None:
         return pip_runner
-    runner = Path(
-        importlib.metadata.distribution("pip").locate_file("pip/__pip-runner__.py")
-    )
+    runner = Path(str(get_pip_distribution().locate_file("pip/__pip-runner__.py")))
     if runner.is_file():
         return os.fsdecode(runner.resolve())
 

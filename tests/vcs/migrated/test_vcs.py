@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import os
 import pathlib
+import sys
 from typing import Any
 from unittest import mock
 
@@ -20,7 +21,8 @@ from pip.vcs.versioncontrol import RevOptions, VersionControl, make_vcs_requirem
 
 
 @pytest.mark.skipif(
-    "CI" not in os.environ, reason="Subversion is only required under CI"
+    "CI" not in os.environ or sys.platform == "win32",
+    reason="Subversion is only required under CI on POSIX runners",
 )
 def test_ensure_svn_available() -> None:
     """Make sure that svn is available when running in CI."""

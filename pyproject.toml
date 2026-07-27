@@ -1,5 +1,5 @@
 [project]
-name = "pip"
+name = "core-pip"
 version = "0.0.0"
 description = "The PyPA recommended tool for installing Python packages."
 license = "MIT"
@@ -23,7 +23,7 @@ authors = [{ name = "The pip developers", email = "distutils-sig@python.org" }]
 
 # NOTE: requires-python is duplicated in __pip-runner__.py.
 # When changing this value, please change the other copy as well.
-requires-python = ">=3.10"
+requires-python = ">=3.9"
 dependencies = [
     "msgpack",
     "packaging",
@@ -49,9 +49,10 @@ build-backend = "uv_build"
 
 [dependency-groups]
 benchmark = ["asv>=0.6.5"]
-typing = ["ty"]
+typing = ["ruff", "ty"]
 test = [
     "cryptography",
+    "filelock",
     "installer",
     "keyring",
     "msgpack",
@@ -60,8 +61,10 @@ test = [
     "pytest-cov",
     "pytest-rerunfailures",
     "pytest-subket",
+    "pytest-xdist>=3.8.0",
     "scripttest",
     "tomli-w",
+    "tomli",
     "uv",
     "uv-build",
     "virtualenv",
@@ -70,6 +73,31 @@ test = [
 
 [tool.uv]
 default-groups = ["typing"]
+
+[tool.uv.build-backend]
+module-name = "pip"
+
+[tool.ruff]
+extend-exclude = [
+    "tests/cli/data",
+]
+
+[tool.pytest.ini_options]
+markers = [
+    "bzr: tests requiring Bazaar",
+    "enable_socket: allow network access for this test",
+    "git: tests requiring Git",
+    "incompatible_with_venv: tests incompatible with the venv test mode",
+    "integration: integration test",
+    "mercurial: tests requiring Mercurial",
+    "network: test requiring network access",
+    "search: pip search test",
+    "svn: tests requiring Subversion",
+    "unit: unit test",
+]
+
+[tool.ty.environment]
+python-version = "3.14"
 
 [tool.pip.architecture]
 domains = [

@@ -99,8 +99,8 @@ def run_with_build_env(
         + indent(dedent(setup_script_contents), "    ")
         + indent(
             dedent("""
-                if len(sys.argv) > 1:
-                    with build_env:
+                with build_env:
+                    if len(sys.argv) > 1:
                         subprocess.check_call((
                             build_env.python_executable, sys.argv[1]
                         ))
@@ -325,7 +325,8 @@ def test_build_env_can_still_access_python_tools_on_system_path(
     This is a regression test for https://github.com/pypa/pip/issues/13222 where
     our legacy sitecustomize.py trick for achieving isolation broke this use-case.
     """
-    script.pip_install_local("cmake", find_links=[data.common_wheels])
+    if shutil.which("cmake") is None:
+        pytest.skip("requires a system cmake executable")
     script.pip_install_local(
         data.src / "python-cmake-issue-13222",
         "--use-feature=venv-isolation",

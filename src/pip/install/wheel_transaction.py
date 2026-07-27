@@ -11,6 +11,7 @@ import compileall
 import csv
 import hashlib
 import importlib.util
+import io
 import os
 import stat
 import sys
@@ -158,7 +159,7 @@ def install_wheel_internal(
 
         dist_info_stage = stage_root / dist_info
         installer_source = dist_info_stage / "INSTALLER"
-        installer_source.write_text("pip\n", encoding="utf-8")
+        installer_source.write_bytes(b"pip\n")
         installer_destination = target.purelib / dist_info / "INSTALLER"
         staged.append((installer_source, installer_destination, None))
 
@@ -186,20 +187,57 @@ def install_wheel_internal(
             for generated in (name, f"{name}-script.py", f"{name}.exe")
         }
         staged = [item for item in staged if item[1] not in script_destinations]
-        for name, target_ref in scripts.items():
+        script_stage = stage_root / ".pip-scripts"
+        script_stage.mkdir(parents=True, exist_ok=True)
+        for name, (target_ref, gui) in scripts.items():
             if Path(name).name != name or name in {".", ".."}:
                 raise InstallationError(
                     f"console script {name!r} is outside the scripts directory"
                 )
-            source = stage_root / ".pip-scripts" / name
-            source.parent.mkdir(parents=True, exist_ok=True)
-            source.write_text(
-                script_text(target_ref, script_executable), encoding="utf-8"
-            )
-            source.chmod(
-                source.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
-            )
-            staged.append((source, target.scripts / name, source.stat().st_mode))
+            try:
+                from distlib.scripts import ScriptMaker
+            except ImportError:
+                if os.name == "nt":
+                    source = script_stage / f"{name}.exe"
+                    write_windows_script(
+                        source,
+                        script_text(target_ref, script_executable),
+                        gui=gui,
+                    )
+                else:
+                    source = script_stage / name
+                    source.write_text(
+                        script_text(target_ref, script_executable), encoding="utf-8"
+                    )
+                    source.chmod(
+                        source.stat().st_mode
+                        | stat.S_IXUSR
+                        | stat.S_IXGRP
+                        | stat.S_IXOTH
+                    )
+            else:
+                maker = ScriptMaker(None, os.fspath(script_stage))
+                maker.clobber = True
+                maker.variants = {""}
+                if script_executable is not None:
+                    maker.executable = script_executable
+                maker.make(f"{name} = {target_ref}", options={"gui": gui})
+                if os.name == "nt":
+                    # Keep the script-text form for callers that inspect the
+                    # generated script path. Windows execution uses the EXE.
+                    source = script_stage / name
+                    source.write_text(
+                        script_text(target_ref, script_executable), encoding="utf-8"
+                    )
+                    source.chmod(
+                        source.stat().st_mode
+                        | stat.S_IXUSR
+                        | stat.S_IXGRP
+                        | stat.S_IXOTH
+                    )
+
+        for source in script_stage.iterdir():
+            staged.append((source, target.scripts / source.name, source.stat().st_mode))
 
         if pycompile:
             staged.extend(compiled_files(stage_root, staged))
@@ -358,6 +396,11 @@ def uninstall_distribution(
                 continue
             path = root / Path(*relative.parts)
             resolved = path.resolve(strict=False)
+            # RECORD uses POSIX separators, but an absolute Windows path can
+            # be smuggled in as a backslash-containing "relative" entry.
+            # Never let a manifest remove files outside the install root.
+            if os.name == "nt" and Path(row[0]).is_absolute():
+                continue
             if ".." in relative.parts and resolved.parent.name not in {
                 "bin",
                 "Scripts",
@@ -514,23 +557,26 @@ def rewrite_shebang(path: Path, executable: str | None) -> None:
     contents = path.read_bytes()
     if contents.startswith(b"#!python\n"):
         path.write_bytes(
-            f"#!{executable or os.sys.executable}\n".encode()
+            f"#!{executable or sys.executable}\n".encode()
             + contents[len(b"#!python\n") :]
         )
 
 
-def entry_point_scripts(path: Path) -> dict[str, str]:
+def entry_point_scripts(path: Path) -> dict[str, tuple[str, bool]]:
     if not path.is_file():
         return {}
     active = False
-    result: dict[str, str] = {}
+    result: dict[str, tuple[str, bool]] = {}
+    gui = False
     for raw_line in path.read_text(encoding="utf-8").splitlines():
         line = raw_line.strip()
         if line.startswith("[") and line.endswith("]"):
-            active = line[1:-1].strip() in {"console_scripts", "gui_scripts"}
+            section = line[1:-1].strip()
+            active = section in {"console_scripts", "gui_scripts"}
+            gui = section == "gui_scripts"
         elif active and "=" in line and not line.startswith("#"):
             name, target = line.split("=", 1)
-            result[name.strip()] = target.strip()
+            result[name.strip()] = (target.strip(), gui)
     return result
 
 
@@ -538,7 +584,7 @@ def script_text(target_ref: str, executable: str | None) -> str:
     module, _, attribute = target_ref.partition(":")
     entry = attribute or "main"
     return (
-        f"#!{executable or os.sys.executable}\n"
+        f"#!{executable or sys.executable}\n"
         "import re\nimport sys\n"
         f"from {module} import {entry}\n\n"
         "if __name__ == '__main__':\n"
@@ -547,15 +593,37 @@ def script_text(target_ref: str, executable: str | None) -> str:
     )
 
 
-def script_matches(path: Path, scripts: dict[str, str]) -> bool:
-    target_ref = scripts.get(path.name)
-    if target_ref is None:
+def write_windows_script(path: Path, script: str, *, gui: bool) -> None:
+    """Create a distlib-compatible Windows launcher without importing distlib."""
+    from importlib.resources import files
+    from io import BytesIO
+
+    machine = os.environ.get("PROCESSOR_ARCHITECTURE", "").lower()
+    suffix = "-arm" if "arm" in machine else ""
+    bits = "64" if sys.maxsize > 2**32 else "32"
+    launcher_name = f"{'w' if gui else 't'}{bits}{suffix}.exe"
+    launcher = (files("pip._vendor.launchers") / launcher_name).read_bytes()
+    archive = BytesIO()
+    with zipfile.ZipFile(archive, "w") as package:
+        package.writestr("__main__.py", script.encode("utf-8"))
+    path.write_bytes(launcher + archive.getvalue())
+
+
+def script_matches(path: Path, scripts: dict[str, tuple[str, bool]]) -> bool:
+    name = path.stem if path.suffix.lower() == ".exe" else path.name
+    script = scripts.get(name)
+    if script is None:
         return False
+    target_ref, _ = script
     module, _, attribute = target_ref.partition(":")
     entry = attribute or "main"
     try:
-        text = path.read_text(encoding="utf-8")
-    except OSError:
+        if path.suffix.lower() == ".exe":
+            with zipfile.ZipFile(io.BytesIO(path.read_bytes())) as archive:
+                text = archive.read("__main__.py").decode("utf-8")
+        else:
+            text = path.read_text(encoding="utf-8")
+    except (OSError, KeyError, UnicodeDecodeError, zipfile.BadZipFile):
         return False
     return f"from {module} import {entry}" in text
 

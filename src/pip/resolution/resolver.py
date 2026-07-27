@@ -6,7 +6,7 @@ import sys
 import urllib.parse
 import urllib.request
 from bisect import bisect_left, insort
-from collections.abc import Generator, Iterable, Iterator
+from collections.abc import Generator, Iterable, Iterator, Mapping
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Callable, cast
@@ -21,6 +21,7 @@ from pip.core.errors import (
     ResolutionError,
     VcsHashUnsupported,
 )
+from pip.core.urls import url_to_path
 from pip.core.metadata import InstalledDistribution, iter_installed_distributions
 from pip.core.packaging import (
     Requirement,
@@ -30,8 +31,8 @@ from pip.core.packaging import (
     marker_applies,
     parse_requirement,
 )
-from pip.core.wheel import WheelCandidate, parse_wheel_filename, wheel_candidate
-from pip.index.candidate_materialization import CandidateStream
+from pip.core.wheel import WheelCandidate, wheel_candidate
+from pip.index.candidate_materialization import CandidateStream, LazyWheelCandidate
 from pip.index.links import Link
 from pip.index.provider import CandidateProvider
 from pip.index.source_locations import looks_like_path_requirement
@@ -43,9 +44,24 @@ from pip.resolution.req_install import (
     VcsInfo,
     file_hashes,
 )
+from pip.resolution.constraints import ConstraintStore
 from pip.resolution.requirement_set import RequirementSet
 
 logger = logging.getLogger(__name__)
+
+HTTP_URL_SCHEMES = frozenset(("http", "https"))
+LOCAL_FILE_NETLOCS = frozenset(("", "localhost"))
+FALSE_VALUES = frozenset((None, "", "0", "false", "False"))
+PYPI_HOSTS = frozenset(
+    (
+        "files.pythonhosted.org",
+        "test-files.pythonhosted.org",
+        "pypi.org",
+        "test.pypi.org",
+    )
+)
+SOURCE_KINDS = frozenset(("source-tree", "sdist", "vcs"))
+SOURCE_TREE_OR_VCS_KINDS = frozenset(("source-tree", "vcs"))
 
 
 def as_requirement_strings(
@@ -201,7 +217,7 @@ class PendingAgenda:
         self.undo: list[AgendaMutation] = []
         self.by_name: dict[str, set[int]] = {}
         self.key_cache: dict[int, RequirementStateKey] = {}
-        self.state_keys: list[RequirementStateKey] | None = None
+        self.state_keys: list[RequirementStateKey] = []
         self.append_initial(requirements)
 
     def key_internal(self, requirement: Requirement) -> RequirementStateKey:
@@ -212,23 +228,16 @@ class PendingAgenda:
         return key
 
     def state_key(self) -> tuple[RequirementStateKey, ...]:
-        if self.state_keys is None:
-            if self.length_internal < INCREMENTAL_STATE_KEY_THRESHOLD:
-                return tuple(sorted(self.key_internal(item) for item in self))
-            self.state_keys = sorted(self.key_internal(item) for item in self)
         return tuple(self.state_keys)
 
     def remove_state_key(self, requirement: Requirement) -> None:
-        if self.state_keys is None:
-            return
         key = self.key_internal(requirement)
         index = bisect_left(self.state_keys, key)
         assert self.state_keys[index] == key
         self.state_keys.pop(index)
 
     def add_state_key(self, requirement: Requirement) -> None:
-        if self.state_keys is not None:
-            insort(self.state_keys, self.key_internal(requirement))
+        insort(self.state_keys, self.key_internal(requirement))
 
     def append_initial(self, requirements: Iterable[Requirement]) -> None:
         for order, requirement in enumerate(requirements):
@@ -236,6 +245,7 @@ class PendingAgenda:
             self.entries_internal.append(
                 AgendaEntry(requirement, self.tail_internal, None, order)
             )
+            self.add_state_key(requirement)
             self.by_name.setdefault(requirement.canonical_name, set()).add(entry_id)
             if self.tail_internal is None:
                 self.head_internal = entry_id
@@ -424,12 +434,12 @@ class Resolver:
         self.no_deps = no_deps
         self.upgrade = upgrade
         self.ignore_installed = ignore_installed
-        self.constraints = [parse_requirement(item) for item in constraints or ()]
-        self.constraints_by_name: dict[str, list[Requirement]] = {}
-        for constraint in self.constraints:
-            self.constraints_by_name.setdefault(constraint.canonical_name, []).append(
-                constraint
-            )
+        self.constraint_store = ConstraintStore(
+            (parse_requirement(item) for item in constraints or ()),
+            direct_urls_equivalent=direct_urls_equivalent,
+        )
+        self.constraints = list(self.constraint_store.constraints)
+        self.constraints_by_name = self.constraint_store.constraints_by_name
         self.allow_prereleases = allow_prereleases
         if (
             allow_prereleases
@@ -458,6 +468,7 @@ class Resolver:
         self.active_version_masks: dict[
             tuple[str, tuple[tuple[str, bool], ...]], int
         ] = {}
+        self.allowed_versions_cache: dict[tuple[str, int], frozenset[Version]] = {}
         self.allow_prereleases_cache: dict[tuple[str, str, str | None, str], bool] = {}
         self.last_graph: dict[str, set[str]] | None = None
         self.incoming_requirements: dict[str, dict[str, tuple[Requirement, ...]]] = {}
@@ -491,13 +502,7 @@ class Resolver:
         self.learned_incompatibility_terms: set[frozenset[Assignment]] = set()
         self.incompatibility_watches: dict[int, set[int]] = {}
         self.installed_by_name_internal: dict[str, InstalledDistribution] | None = None
-        self.debug_internal = os.environ.get("PIP_RESOLVER_DEBUG") not in {
-            None,
-            "",
-            "0",
-            "false",
-            "False",
-        }
+        self.debug_internal = os.environ.get("PIP_RESOLVER_DEBUG") not in FALSE_VALUES
 
     def resolve(
         self,
@@ -543,6 +548,7 @@ class Resolver:
         self.version_tables.clear()
         self.version_masks.clear()
         self.active_version_masks.clear()
+        self.allowed_versions_cache.clear()
         self.incoming_requirements.clear()
         self.domains_internal.clear()
         self.root_incompatibilities.clear()
@@ -594,6 +600,26 @@ class Resolver:
                     )
                     raise ResolutionError(f"ResolutionImpossible: {message}")
                 raise DistributionNotFound(message)
+            for root in requirements:
+                if root.url is None:
+                    continue
+                for candidate in self.provider.find_candidates(root):
+                    constraints = self.constraints_by_name.get(
+                        candidate.canonical_name, ()
+                    )
+                    if (
+                        any(
+                            not constraint.is_satisfied_by(
+                                candidate.version, allow_prereleases=True
+                            )
+                            for constraint in constraints
+                        )
+                        and candidate.source_kind in SOURCE_KINDS
+                    ):
+                        raise ResolutionError(
+                            f"Cannot install {candidate.name} {candidate.version} "
+                            "because it conflicts with a constraint."
+                        )
             detail = "; ".join(self.conflicts[-10:]) or "requirements are unsatisfiable"
             if self.debug_internal:
                 print(f"conflict is caused by: {detail}", file=sys.stdout)
@@ -616,12 +642,12 @@ class Resolver:
 
     @staticmethod
     def finalize_source_hashes(candidate: WheelCandidate) -> WheelCandidate:
+        if isinstance(candidate, LazyWheelCandidate):
+            candidate = candidate.materialize()
         if (
             candidate.source_hashes
-            or candidate.source_kind in {"source-tree", "vcs"}
-            or (
-                candidate.from_cache
-            )
+            or candidate.source_kind in SOURCE_TREE_OR_VCS_KINDS
+            or (candidate.from_cache)
         ):
             return candidate
         hashes = actual_hashes_for_candidate(candidate)
@@ -705,9 +731,7 @@ class Resolver:
                     and candidate.source_url.startswith("file://")
                 ):
                     try:
-                        hashes = file_hashes(
-                            Path(candidate.source_url.removeprefix("file://"))
-                        )
+                        hashes = file_hashes(url_to_path(candidate.source_url))
                     except OSError:
                         hashes = {}
                 requirement.download_info = DownloadInfo(
@@ -1117,7 +1141,13 @@ class Resolver:
             source_requirements=source_requirements,
             source_requirements_by_url=source_requirements_by_url,
         )
-        if candidates and name.startswith("file://"):
+        if candidates and (
+            name.startswith("file://")
+            or (
+                requirement.url is not None
+                and candidates[0].canonical_name != requirement.canonical_name
+            )
+        ):
             resolved_name = candidates[0].canonical_name
             graph["<root>"].discard(name)
             self.root_requirement_names.discard(name)
@@ -1189,7 +1219,10 @@ class Resolver:
                 ):
                     return True
         if not candidates:
-            if requirement.canonical_name in self.root_requirement_names:
+            if (
+                requirement.canonical_name in self.root_requirement_names
+                or requirement.url is not None
+            ):
                 matching_constraints = self.constraints_by_name.get(
                     requirement.canonical_name, ()
                 )
@@ -1348,7 +1381,7 @@ class Resolver:
         extras: frozenset[str],
         selected: dict[str, WheelCandidate],
         selected_extras: dict[str, frozenset[str]],
-    ) -> SearchFrame:
+    ) -> bool:
         self.last_conflict_was_root = False
         grouped = self.grouped_candidate_dependencies(candidate, extras)
         for target, dependencies in grouped:
@@ -1767,9 +1800,14 @@ class Resolver:
         versions = self.version_table(requirement)
         if mask is None or versions is None:
             return None, None
-        return mask, frozenset(
-            version for index, version in enumerate(versions) if mask & (1 << index)
-        )
+        key = requirement.canonical_name, mask
+        allowed_versions = self.allowed_versions_cache.get(key)
+        if allowed_versions is None:
+            allowed_versions = frozenset(
+                version for index, version in enumerate(versions) if mask & (1 << index)
+            )
+            self.allowed_versions_cache[key] = allowed_versions
+        return mask, allowed_versions
 
     @staticmethod
     def candidate_incompatibility_key(
@@ -1834,6 +1872,11 @@ class Resolver:
             if not constraint.is_satisfied_by(
                 candidate.version, allow_prereleases=True
             ):
+                if candidate.source_kind in SOURCE_KINDS:
+                    raise ResolutionError(
+                        f"Cannot install {candidate.name} {candidate.version} "
+                        "because it conflicts with a constraint."
+                    )
                 raise ResolutionError(
                     f"Cannot install {candidate.name} {candidate.version} because these "
                     "package versions have conflicting dependencies."
@@ -1949,7 +1992,7 @@ class Resolver:
         *,
         source_requirements: dict[str, InstallRequirement],
         source_requirements_by_url: dict[str, InstallRequirement],
-    ) -> bool:
+    ) -> SearchFrame:
         previous = satisfied.get(requirement.canonical_name)
         satisfied[requirement.canonical_name] = SatisfiedRequirement(
             requirement=requirement,
@@ -2031,6 +2074,8 @@ class Resolver:
         requirement: Requirement,
         extras: frozenset[str],
     ) -> WheelCandidate:
+        if isinstance(candidate, LazyWheelCandidate):
+            candidate = candidate.materialize()
         try:
             enriched = wheel_candidate(candidate.path, set(extras))
         except (OSError, ValueError):
@@ -2143,72 +2188,7 @@ class Resolver:
             print("If you want to abort this run, press Ctrl + C.", file=sys.stdout)
 
     def apply_constraints(self, requirement: Requirement) -> Requirement:
-        matching = [
-            constraint
-            for constraint in self.constraints_by_name.get(
-                requirement.canonical_name, ()
-            )
-            if marker_applies(constraint.marker, extras=requirement.extras)
-        ]
-        if not matching:
-            return requirement
-        direct_constraints = [constraint for constraint in matching if constraint.url]
-        if direct_constraints:
-            if (
-                len(
-                    {
-                        constraint.url
-                        for constraint in direct_constraints
-                        if constraint.url
-                    }
-                )
-                > 1
-            ):
-                raise ResolutionError(
-                    f"Cannot install {requirement.name} because these package versions "
-                    "have conflicting dependencies."
-                )
-            selected = direct_constraints[-1]
-            if requirement.url is not None and not direct_urls_equivalent(
-                selected.url, requirement.url
-            ):
-                filename = Path(urllib.parse.urlparse(requirement.url).path).name
-                parsed = parse_wheel_filename(filename)
-                requested_label = (
-                    f"{canonicalize_name(parsed[0])} {parsed[1]}"
-                    if parsed is not None
-                    else canonicalize_name(requirement.name)
-                )
-                raise ResolutionError(
-                    f"Cannot install {requested_label}"
-                    + " because these package versions have conflicting dependencies."
-                )
-            merged_specifier = ",".join(
-                part
-                for part in (str(requirement.specifier), str(selected.specifier))
-                if part
-            )
-            return Requirement(
-                name=requirement.name,
-                specifier=SpecifierSet(merged_specifier),
-                extras=requirement.extras,
-                url=selected.url,
-                marker=requirement.marker,
-                raw=requirement.raw,
-            )
-        spec_parts = [
-            str(requirement.specifier),
-            *(str(item.specifier) for item in matching),
-        ]
-        merged = ",".join(part for part in spec_parts if part)
-        return Requirement(
-            name=requirement.name,
-            specifier=SpecifierSet(merged),
-            extras=requirement.extras,
-            url=requirement.url,
-            marker=requirement.marker,
-            raw=requirement.raw if not merged else f"{requirement.name}{merged}",
-        )
+        return self.constraint_store.apply(requirement)
 
     def choose_requirement(
         self,
@@ -2365,20 +2345,43 @@ class Resolver:
         source_requirements_by_url: dict[str, InstallRequirement] | None = None,
     ) -> CandidateStream:
         active_mask, allowed_versions = self.active_allowed_versions(requirement)
-        key = (*self.candidate_cache_key(requirement), active_mask)
+        source_req = (
+            source_requirements.get(requirement.canonical_name)
+            if source_requirements is not None
+            else None
+        )
+        if source_req is None and source_requirements_by_url is not None:
+            source_req = source_requirements_by_url.get(requirement.url or "")
+        source_hash_key = (
+            tuple(
+                sorted(
+                    (algorithm, tuple(sorted(digests)))
+                    for algorithm, digests in source_req.hash_options.items()
+                )
+            )
+            if source_req is not None
+            else ()
+        )
+        provider_hashes = self.provider.hashes_by_name.get(requirement.canonical_name)
+        provider_hash_key = (
+            tuple(
+                sorted(
+                    (algorithm, tuple(sorted(digests)))
+                    for algorithm, digests in provider_hashes.allowed_internal.items()
+                )
+            )
+            if provider_hashes is not None
+            else ()
+        )
+        key = (
+            *self.candidate_cache_key(requirement),
+            active_mask,
+            source_hash_key,
+            provider_hash_key,
+        )
         if key not in self.candidate_cache:
             logger.debug(
                 f"candidate cache miss requirement={requirement.raw or requirement.name}"
-            )
-            source_req = (
-                source_requirements.get(requirement.canonical_name)
-                if source_requirements is not None
-                else None
-            )
-            if source_req is None and source_requirements_by_url is not None:
-                source_req = source_requirements_by_url.get(requirement.url or "")
-            provider_hashes = self.provider.hashes_by_name.get(
-                requirement.canonical_name
             )
             if provider_hashes is not None and not provider_hashes.allowed_internal:
                 if source_req is not None and "--hash" in str(source_req):
@@ -2397,7 +2400,7 @@ class Resolver:
                 self.provider.find_candidates(
                     requirement, allowed_versions=allowed_versions
                 )
-                if allowed_versions
+                if allowed_versions and requirement.url is None
                 else self.provider.find_candidates(requirement)
             )
             if (
@@ -2446,7 +2449,7 @@ class Resolver:
 
                 def keep(candidate: WheelCandidate) -> bool:
                     value = digest(candidate)
-                    return value is None or value in allowed_sha256
+                    return value is not None and value in allowed_sha256
 
                 def decisive(candidate: WheelCandidate) -> bool:
                     value = digest(candidate)
@@ -2488,7 +2491,9 @@ class Resolver:
                             discarded_detail,
                         )
                     )
-                    candidates = CandidateStream(iter(materialized))
+                    candidates = CandidateStream(iter(materialized)).prefer(
+                        keep, decisive=decisive
+                    )
                 candidates = candidates.prefer(keep, decisive=decisive)
             self.candidate_cache[key] = candidates
         else:
@@ -2496,6 +2501,21 @@ class Resolver:
                 f"candidate cache hit requirement={requirement.raw or requirement.name}"
             )
         candidates = self.candidate_cache[key]
+        if source_req is not None and source_req.hash_options:
+            allowed_sha256 = {
+                digest.lower() for digest in source_req.hash_options.get("sha256", ())
+            }
+
+            def keep_hashed(candidate: WheelCandidate) -> bool:
+                digest = (candidate.source_hashes or {}).get("sha256")
+                return digest is not None and digest.lower() in allowed_sha256
+
+            def decisive_hashed(candidate: WheelCandidate) -> bool:
+                digest = (candidate.source_hashes or {}).get("sha256")
+                return digest is not None and digest.lower() in allowed_sha256
+
+            if allowed_sha256:
+                candidates = candidates.prefer(keep_hashed, decisive=decisive_hashed)
         logger.debug(
             "candidate cache ready requirement=%s",
             requirement.raw or requirement.name,
@@ -2575,7 +2595,7 @@ class Resolver:
                 "have a way to hash version control repositories"
             )
         if link_url.startswith("file://"):
-            local_path = Path(link_url.removeprefix("file://"))
+            local_path = Path(url_to_path(link_url))
             if local_path.is_dir():
                 raise DirectoryUrlHashUnsupported(
                     "Can't verify hashes for these file:// requirements because "
@@ -2633,7 +2653,7 @@ class Resolver:
                     "have a way to hash version control repositories"
                 )
             if link_url.startswith("file://"):
-                local_path = Path(link_url.removeprefix("file://"))
+                local_path = Path(url_to_path(link_url))
                 if local_path.is_dir():
                     raise DirectoryUrlHashUnsupported(
                         "Can't verify hashes for these file:// requirements because "
@@ -2767,7 +2787,7 @@ def exact_pinned_version(requirement: Requirement) -> Version | None:
     )
 
 
-def specifier_intersection_is_empty(requirements: list[Requirement]) -> bool:
+def specifier_intersection_is_empty(requirements: Iterable[Requirement]) -> bool:
     lower: tuple[Version, bool] | None = None
     upper: tuple[Version, bool] | None = None
     excluded: set[Version] = set()
@@ -2855,14 +2875,18 @@ def allowed_hashes_internal(requirement: InstallRequirement) -> dict[str, set[st
     }
 
 
-def hash_sets(hashes: dict[str, str]) -> dict[str, set[str]]:
+def hash_sets(hashes: Mapping[str, str | list[str]]) -> dict[str, set[str]]:
     return {
-        algorithm: {digest.lower()} for algorithm, digest in hashes.items() if digest
+        algorithm: {
+            digest.lower() for digest in (value if isinstance(value, list) else [value])
+        }
+        for algorithm, value in hashes.items()
+        if value
     }
 
 
 def actual_hashes_for_candidate(candidate: WheelCandidate) -> dict[str, str]:
-    if candidate.from_cache and candidate.source_hashes:
+    if candidate.source_kind in SOURCE_KINDS and candidate.source_hashes:
         return dict(candidate.source_hashes)
     if candidate.source_url:
         parsed_url = urllib.parse.urlparse(candidate.source_url)
@@ -2870,7 +2894,7 @@ def actual_hashes_for_candidate(candidate: WheelCandidate) -> dict[str, str]:
         parsed_url = None
     if parsed_url is not None and parsed_url.scheme == "file":
         try:
-            path = Path(urllib.request.url2pathname(parsed_url.path))
+            path = Path(url_to_path(candidate.source_url or ""))
             if path.is_file():
                 return file_hashes(path)
         except OSError:
@@ -2914,9 +2938,7 @@ def direct_urls_equivalent(first: str | None, second: str | None) -> bool:
 
     def local_path(parts: urllib.parse.SplitResult, original: str) -> Path | None:
         if parts.scheme.lower() == "file":
-            return Path(
-                urllib.request.url2pathname(urllib.parse.unquote(parts.path))
-            ).resolve()
+            return Path(url_to_path(original)).resolve()
         if parts.scheme == "":
             return Path(original).resolve()
         return None
@@ -2930,10 +2952,10 @@ def direct_urls_equivalent(first: str | None, second: str | None) -> bool:
     def normalize_parts(
         parts: urllib.parse.SplitResult,
     ) -> urllib.parse.SplitResult:
-        if parts.scheme.lower() == "file" and parts.netloc.lower() in {
-            "",
-            "localhost",
-        }:
+        if (
+            parts.scheme.lower() == "file"
+            and parts.netloc.lower() in LOCAL_FILE_NETLOCS
+        ):
             return parts._replace(netloc="")
         return parts
 
@@ -2960,13 +2982,8 @@ def direct_urls_equivalent(first: str | None, second: str | None) -> bool:
 def is_pypi_hosted_url(url: str | None) -> bool:
     if not url:
         return False
-    if url.partition(":")[0].casefold() not in {"http", "https"}:
+    if url.partition(":")[0].casefold() not in HTTP_URL_SCHEMES:
         return False
     parsed = urllib.parse.urlparse(url)
     host = parsed.netloc.lower()
-    return host in {
-        "files.pythonhosted.org",
-        "test-files.pythonhosted.org",
-        "pypi.org",
-        "test.pypi.org",
-    }
+    return host in PYPI_HOSTS

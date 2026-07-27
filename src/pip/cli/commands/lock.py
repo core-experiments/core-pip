@@ -8,10 +8,12 @@ import os
 import shutil
 import tempfile
 from pathlib import Path
+from typing import Any
 
 from pip.core.errors import CommandError
 from pip.core.format_control import FormatControl
-from pip.core.urls import path_to_url
+from pip.core.temp_dir import remove_temp_directory
+from pip.core.urls import path_to_url, url_to_path
 
 
 def create_parser() -> argparse.ArgumentParser:
@@ -45,8 +47,8 @@ def run_lock(args: list[str]) -> int:
         format_control.apply("no-binary", value)
     requirements = []
     locked_order: list[str] = []
-    archive_packages: list[dict[str, object]] = []
-    directory_packages: list[dict[str, object]] = []
+    archive_packages: list[dict[str, Any]] = []
+    directory_packages: list[dict[str, Any]] = []
     for value in options.requirements:
         local_directory = Path(value).resolve()
         if local_directory.is_dir():
@@ -94,7 +96,7 @@ def run_lock(args: list[str]) -> int:
             )
             continue
         requirements.append(item)
-    editable_packages: list[dict[str, object]] = []
+    editable_packages: list[dict[str, Any]] = []
     for value in options.editable:
         from pip.build.build_backend import prepare_project_metadata
 
@@ -125,7 +127,10 @@ def run_lock(args: list[str]) -> int:
                     and item.locked_name is not None
                     and item.locked_link is not None
                     and not item.locked_link.startswith(("git+", "hg+", "svn+", "bzr+"))
-                    and not Path(item.locked_link.removeprefix("file://")).is_dir()
+                    and not (
+                        item.locked_link.startswith("file:")
+                        and Path(url_to_path(item.locked_link)).is_dir()
+                    )
                 ):
                     archive_packages.append(
                         {
@@ -172,7 +177,7 @@ def run_lock(args: list[str]) -> int:
         if requirements
         else None
     )
-    packages: list[dict[str, object]] = [
+    packages: list[dict[str, Any]] = [
         *editable_packages,
         *directory_packages,
         *archive_packages,
@@ -182,18 +187,14 @@ def run_lock(args: list[str]) -> int:
         source = candidate.source_url
         if source is None:
             continue
-        source_path = (
-            Path(source.removeprefix("file://"))
-            if source.startswith("file://")
-            else None
-        )
+        source_path = Path(url_to_path(source)) if source.startswith("file:") else None
         if candidate.source_vcs:
             from pip.index.vcs import git_revision, materialize_vcs, vcs_reference
 
             reference = vcs_reference(source)
             checkout = materialize_vcs(source, emit_resolution=False)
             commit_id = git_revision(checkout)
-            shutil.rmtree(checkout, ignore_errors=True)
+            remove_temp_directory(checkout)
             packages.append(
                 {
                     "name": candidate.name,

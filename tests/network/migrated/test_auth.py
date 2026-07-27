@@ -10,6 +10,7 @@ import sys
 from collections.abc import Generator, Iterable
 from dataclasses import dataclass
 from typing import Any
+from unittest.mock import Mock
 
 import pytest
 
@@ -21,6 +22,8 @@ from pip_test_support.requests_mocks import MockConnection, MockRequest, MockRes
 
 @pytest.fixture(autouse=True)
 def reset_keyring() -> Iterable[None]:
+    pip.network.auth.KEYRING_DISABLED = False
+    pip.network.auth.get_keyring_provider.cache_clear()
     yield None
     # Reset the state of the module between tests
     pip.network.auth.KEYRING_DISABLED = False
@@ -712,15 +715,16 @@ def test_keyring_cli_set_password(
 )
 def test_keyring_cli_outdated_version(
     monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
     url: str,
     expect: tuple[str | None, str | None],
 ) -> None:
     keyring_subprocess = KeyringSubprocessResult()
     keyring_subprocess.old_version = True
+    warning = Mock()
 
     monkeypatch.setattr(pip.network.auth.shutil, "which", lambda x: "keyring")
     monkeypatch.setattr(pip.network.auth.subprocess, "run", keyring_subprocess)
+    monkeypatch.setattr(pip.network.auth.logger, "warning", warning)
     auth = MultiDomainBasicAuth(
         index_urls=["http://example.com/path2", "http://example.com/path3"],
         keyring_provider="subprocess",
@@ -740,12 +744,8 @@ def test_keyring_cli_outdated_version(
         # Verify no password is returned
         assert actual[1] is None
 
-    # Verify the correct warning is given to the user
-    log_records = [(r.levelname, r.message) for r in caplog.records]
-
-    assert len(log_records) == 1
-    actual_level, actual_message = log_records[0]
-    assert actual_level == "WARNING"
+    warning.assert_called_once()
+    actual_message = warning.call_args.args[1]
     assert "Keyring util is outdated" in actual_message
     assert "version 25.2.1" in actual_message
 

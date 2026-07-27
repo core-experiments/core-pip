@@ -4,12 +4,11 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import Iterable, Mapping
-from typing import TYPE_CHECKING, BinaryIO, NoReturn
+from typing import Any, BinaryIO, NoReturn
 
 from pip.core.errors import HashMissing, HashMismatch, InstallationError
 
-if TYPE_CHECKING:
-    from hashlib import Hash
+Hash = Any
 
 
 def read_chunks(file: BinaryIO, size: int = 1024 * 1024):

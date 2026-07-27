@@ -5,7 +5,20 @@ from __future__ import annotations
 import importlib.metadata
 
 
+PIP_DISTRIBUTION_NAME = "core-pip"
+PIP_DISTRIBUTION_NAMES = frozenset((PIP_DISTRIBUTION_NAME, "pip"))
+
 pip_version_internal: str | None = None
+
+
+def get_pip_distribution() -> importlib.metadata.Distribution:
+    """Return the installed core-pip distribution, including legacy installs."""
+    for name in PIP_DISTRIBUTION_NAMES:
+        try:
+            return importlib.metadata.distribution(name)
+        except importlib.metadata.PackageNotFoundError:
+            continue
+    raise importlib.metadata.PackageNotFoundError(PIP_DISTRIBUTION_NAME)
 
 
 def set_pip_version(version: str) -> None:
@@ -19,7 +32,7 @@ def get_pip_version() -> str:
     if pip_version_internal is not None:
         return pip_version_internal
     try:
-        return importlib.metadata.version("pip")
+        return get_pip_distribution().version
     except importlib.metadata.PackageNotFoundError:
         # Source checkouts are importable without an installed distribution.
         from pip import __version__

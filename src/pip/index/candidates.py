@@ -1,27 +1,39 @@
 from __future__ import annotations
 
-import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pip.core.errors import BuildError
 from pip.core.packaging import Version, canonicalize_name
+from pip.core.temp_dir import remove_temp_directory
 from pip.core.wheel import TargetContext, WheelFile
+from pip.index.source_models import CandidateRecord
 
 if TYPE_CHECKING:
     from pip.index.links import Link
-    from pip.index.source_models import RejectedCandidate
+    from pip.index.source_models import CandidateRecord, RejectedCandidate
 
 
-def prepare_project_metadata(*args: object, **kwargs: object):
+def prepare_project_metadata(
+    source_dir: Path,
+    *,
+    editable: bool = False,
+    build_constraints: list[str] | None = None,
+    build_isolation: bool = True,
+):
     from pip.build.build_backend import prepare_project_metadata as prepare
 
-    return prepare(*args, **kwargs)
+    return prepare(
+        source_dir,
+        editable=editable,
+        build_constraints=build_constraints,
+        build_isolation=build_isolation,
+    )
 
 
 @dataclass(frozen=True)
-class InstallationCandidate:
+class InstallationCandidate(CandidateRecord):
     name: str
     version: Version
     link: Link
@@ -49,6 +61,17 @@ class InstallationCandidate:
     @property
     def canonical_name(self) -> str:
         return canonicalize_name(self.name)
+
+    def to_record(self) -> CandidateRecord:
+        from pip.index.source_models import CandidateRecord
+
+        return CandidateRecord(
+            name=self.name,
+            version=self.version,
+            link=self.link,
+            wheel=self.wheel,
+            tag_rank=self.tag_rank,
+        )
 
     def __hash__(self) -> int:
         return hash((self.name, str(self.version), self.link))
@@ -164,7 +187,7 @@ class InstallationCandidate:
             return RejectedCandidate(link, RejectionReason.MISSING_ARTIFACT, str(exc))
         finally:
             if local is not None:
-                shutil.rmtree(local, ignore_errors=True)
+                remove_temp_directory(local)
         return cls(name=metadata.name, version=version, link=link)
 
     def sort_key(self, *, prefer_binary: bool) -> tuple[object, object, object, int]:

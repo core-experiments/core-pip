@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import compileall
 import contextlib
+import errno
 import fnmatch
 import http.server
 import importlib.metadata
@@ -10,7 +11,9 @@ import py_compile
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
+import time
 import zlib
 from collections.abc import Callable, Iterable, Iterator
 from contextlib import AbstractContextManager
@@ -23,7 +26,13 @@ from typing import TYPE_CHECKING, Any, AnyStr, ClassVar
 from unittest.mock import patch
 from zipfile import ZipFile
 
+if sys.version_info < (3, 11):
+    from pip._vendor import tomli
+
+    sys.modules.setdefault("tomllib", tomli)
+
 import pytest
+from filelock import FileLock
 
 sys.path.insert(0, str(Path(__file__).parent / "tests/cli"))
 
@@ -67,6 +76,7 @@ def pytest_addoption(parser: Parser) -> None:
         default=False,
         help="keep temporary test directories",
     )
+
     parser.addoption(
         "--resolver",
         action="store",
@@ -114,6 +124,38 @@ def pytest_addoption(parser: Parser) -> None:
     )
 
 
+def pytest_configure(config: Config) -> None:
+    """Make pytest's numbered-directory cleanup tolerate transient races."""
+    from _pytest import pathlib as pytest_pathlib
+
+    original = pytest_pathlib.on_rm_rf_error
+    if getattr(original, "_pip_retry_enotempty", False):
+        return
+
+    def on_rm_rf_error(
+        func: Callable[..., Any] | None,
+        path: str,
+        excinfo: BaseException | tuple[type[BaseException], BaseException, Any],
+        *,
+        start_path: Path,
+    ) -> bool:
+        exc = excinfo if isinstance(excinfo, BaseException) else excinfo[1]
+        if getattr(exc, "errno", None) == errno.ENOTEMPTY and func is not None:
+            for attempt in range(5):
+                if attempt:
+                    time.sleep(0.01 * 2 ** (attempt - 1))
+                try:
+                    func(path)
+                    return True
+                except OSError:
+                    pass
+            return True
+        return original(func, path, excinfo, start_path=start_path)
+
+    on_rm_rf_error._pip_retry_enotempty = True  # type: ignore[attr-defined]
+    pytest_pathlib.on_rm_rf_error = on_rm_rf_error
+
+
 def pytest_collection_modifyitems(config: Config, items: list[pytest.Function]) -> None:
     for item in items:
         if not hasattr(item, "module"):  # e.g.: DoctestTextfile
@@ -138,9 +180,9 @@ def pytest_collection_modifyitems(config: Config, items: list[pytest.Function]) 
             item.add_marker(pytest.mark.skip("Incompatible with venv"))
 
         module_file = item.module.__file__
-        module_path = os.path.relpath(
-            module_file, os.path.commonpath([__file__, module_file])
-        )
+        module_path = Path(
+            os.path.relpath(module_file, os.path.commonpath([__file__, module_file]))
+        ).as_posix()
 
         module_root_dir = Path(module_path).parts[0]
         if module_path.startswith(("tests/cli/functional", "tests/cli/integration")):
@@ -202,7 +244,7 @@ def pytest_collection_modifyitems(config: Config, items: list[pytest.Function]) 
                     "Cannot use the ``script`` funcarg in a package unit test: "
                     f"(filename = {module_path}, item = {item})"
                 )
-        elif module_path == os.path.join("tests", "test_workspace_boundaries.py"):
+        elif module_path == "tests/test_workspace_boundaries.py":
             item.add_marker(pytest.mark.unit)
         else:
             raise RuntimeError(f"Unknown test type (filename = {module_path})")
@@ -267,46 +309,12 @@ def resolver_variant(request: pytest.FixtureRequest) -> Iterator[str]:
 
 
 @pytest.fixture(scope="session")
-def tmp_path_factory(
-    request: pytest.FixtureRequest, tmp_path_factory: pytest.TempPathFactory
-) -> Iterator[pytest.TempPathFactory]:
-    """Modified `tmpdir_factory` session fixture
-    that will automatically cleanup after itself.
-    """
-    yield tmp_path_factory
-    if not request.config.getoption("--keep-tmpdir"):
-        shutil.rmtree(
-            tmp_path_factory.getbasetemp(),
-            ignore_errors=True,
-        )
-
-
-@pytest.fixture(scope="session")
 def tmpdir_factory(tmp_path_factory: pytest.TempPathFactory) -> pytest.TempPathFactory:
     """Override Pytest's ``tmpdir_factory`` with our pathlib implementation.
 
     This prevents misuse of this fixture.
     """
     return tmp_path_factory
-
-
-@pytest.fixture
-def tmp_path(request: pytest.FixtureRequest, tmp_path: Path) -> Iterator[Path]:
-    """
-    Return a temporary directory path object which is unique to each test
-    function invocation, created as a sub directory of the base temporary
-    directory. The returned object is a ``Path`` object.
-
-    This uses the built-in tmp_path fixture from pytest itself, but deletes the
-    temporary directories at the end of each test case.
-    """
-    assert tmp_path.is_dir()
-    yield tmp_path
-    # Clear out the temporary directory after the test has finished using it.
-    # This should prevent us from needing a multiple gigabyte temporary
-    # directory while running the tests.
-    if not request.config.getoption("--keep-tmpdir"):
-        shutil.rmtree(tmp_path, ignore_errors=True)
 
 
 @pytest.fixture
@@ -481,19 +489,26 @@ def pip_editable_parts(
     )
     pip_self_install_path = tmpdir_factory.mktemp("pip_self_install")
     shutil.copytree(SRC_DIR / "src" / "pip", pip_self_install_path / "pip")
-    subprocess.check_call(
-        [
-            sys.executable,
-            "-m",
-            "pip",
-            "install",
-            "--target",
-            pip_self_install_path,
-            "--no-deps",
-            "-e",
-            pip_editable,
-        ]
-    )
+    # Target installs still generate console scripts in the active Python
+    # environment.  Every xdist worker builds this session fixture, so the
+    # installs must not concurrently replace the shared ``.venv/bin/pip``.
+    # Otherwise one worker can move that file into its transaction backup just
+    # as another worker tries to move it, leaving the subprocess without pip.
+    lock_path = Path(tempfile.gettempdir()) / "pip-tests-editable-install.lock"
+    with FileLock(lock_path):
+        subprocess.check_call(
+            [
+                sys.executable,
+                "-m",
+                "pip",
+                "install",
+                "--target",
+                pip_self_install_path,
+                "--no-deps",
+                "-e",
+                pip_editable,
+            ]
+        )
     pth = next(pip_self_install_path.glob("*pip*.pth"))
     pth.write_text(
         pth.read_text(encoding="utf-8")

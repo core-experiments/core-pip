@@ -1,10 +1,12 @@
 import json
+from hashlib import sha256
 import textwrap
 from pathlib import Path
 from typing import Any
 
 import pytest
 from packaging.utils import canonicalize_name
+from pip.core.urls import url_to_path
 
 from pip_test_support import PipTestEnvironment, TestData
 
@@ -36,10 +38,15 @@ def test_install_report_basic(
     assert simplewheel_report["is_direct"] is False
     url = simplewheel_report["download_info"]["url"]
     assert url.startswith("file://")
-    assert url.endswith("/packages/simplewheel-2.0-1-py2.py3-none-any.whl")
+    selected = Path(url_to_path(url))
+    assert selected.parent.name == "packages"
+    assert selected.name in {
+        "simplewheel-2.0-py2.py3-none-any.whl",
+        "simplewheel-2.0-1-py2.py3-none-any.whl",
+    }
     assert (
         simplewheel_report["download_info"]["archive_info"]["hash"]
-        == "sha256=71e1ca6b16ae3382a698c284013f66504f2581099b2ce4801f60e9536236ceee"
+        == f"sha256={sha256(selected.read_bytes()).hexdigest()}"
     )
 
 
@@ -136,8 +143,12 @@ def test_install_report_index(
 ) -> None:
     """Test report for sdist obtained from index."""
     report_path = tmp_path / "report.json"
+    build_constraints = tmp_path / "build-constraints.txt"
+    build_constraints.write_text("setuptools<72\n", encoding="utf-8")
     script.pip(
         "install",
+        "--build-constraint",
+        str(build_constraints),
         "--dry-run",
         *specifiers,
         "--report",
@@ -167,8 +178,12 @@ def test_install_report_index_multiple_extras(
 ) -> None:
     """Test report for sdist obtained from index, with multiple extras requested."""
     report_path = tmp_path / "report.json"
+    build_constraints = tmp_path / "build-constraints.txt"
+    build_constraints.write_text("setuptools<72\n", encoding="utf-8")
     script.pip(
         "install",
+        "--build-constraint",
+        str(build_constraints),
         "--dry-run",
         "Paste[openid]",
         "Paste[subprocess]",

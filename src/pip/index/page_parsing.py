@@ -78,7 +78,7 @@ class IndexPageParser:
         request = urllib.request.Request(url, headers=headers)
         parsed = urllib.parse.urlsplit(url)
         context = (
-            ssl.create_unverified_context()
+            getattr(ssl, "create_unverified_context")()
             if parsed.hostname and parsed.hostname.lower() in self.trusted_hosts
             else None
         )

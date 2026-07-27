@@ -17,5 +17,5 @@ class PathComponent(str):
             raise ValueError(f"Unexpected file name derived from URL: {name!r}")
         return cls(component)
 
-    def join(self, directory: str) -> str:
+    def join(self, directory: str) -> str:  # ty: ignore[invalid-method-override]
         return os.path.join(directory, self)

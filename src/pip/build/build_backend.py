@@ -15,8 +15,10 @@ import subprocess
 import sys
 import tarfile
 import tempfile
-import tomllib
-import venv
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility
+    from pip._vendor import tomli as tomllib
 import zipfile
 from collections.abc import Iterable, Iterator
 from pathlib import Path
@@ -109,7 +111,42 @@ class BackendRunner:
 
         with tempfile.TemporaryDirectory(prefix="pip-build-env-") as env_dir:
             env_path = Path(env_dir)
-            venv.create(env_path, with_pip=True, clear=True)
+            # ``virtualenv`` handles relocated Python distributions (such as
+            # uv-managed interpreters) whose stdlib ``venv`` launcher cannot
+            # locate its installation prefix.  Keep the stdlib fallback for
+            # installations that do not provide virtualenv.
+            try:
+                import virtualenv
+            except ImportError:
+                import venv
+
+                builder = venv.EnvBuilder(
+                    symlinks=(os.name != "nt"), with_pip=False
+                )
+                builder.create(env_path)
+                bootstrap_environment = {
+                    key: value
+                    for key, value in os.environ.items()
+                    if not key.startswith("PIP_") and key != "PYTHONPATH"
+                }
+                subprocess.run(
+                    [
+                        os.fspath(env_path / ("bin/python" if os.name != "nt" else "Scripts/python.exe")),
+                        "-m",
+                        "ensurepip",
+                        "--upgrade",
+                        "--default-pip",
+                    ],
+                    check=True,
+                    cwd=env_path,
+                    env=bootstrap_environment,
+                    capture_output=True,
+                    text=True,
+                )
+            else:
+                virtualenv.cli_run(
+                    [os.fspath(env_path), "--no-download", "--clear"]
+                )
             python = env_path / (
                 "Scripts/python.exe" if os.name == "nt" else "bin/python"
             )
@@ -131,6 +168,10 @@ class BackendRunner:
                     if link
                     for option in ("--find-links", link)
                 ]
+                # The bootstrap environment may contain setuptools from
+                # ensurepip. Build requirements must still be resolved and
+                # installed through the configured index/proxy.
+                install_options.insert(0, "--ignore-installed")
                 no_index = environment.get("PIP_NO_INDEX", "").lower()
                 if no_index in {"1", "true", "yes", "on"}:
                     install_options.insert(0, "--no-index")
@@ -503,6 +544,7 @@ class ProjectBuilder:
             dependencies=tuple(metadata.get_all("Requires-Dist", [])),
             optional_dependencies={},
             scripts={},
+            provided_extras=frozenset(metadata.get_all("Provides-Extra", [])),
         )
 
 
@@ -590,6 +632,7 @@ class ProjectMetadata:
     dependencies: tuple[str, ...]
     optional_dependencies: dict[str, tuple[str, ...]]
     scripts: dict[str, str]
+    provided_extras: frozenset[str] = frozenset()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "version", str(Version(self.version)))

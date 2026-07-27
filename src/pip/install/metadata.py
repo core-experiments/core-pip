@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 from pip.build.metadata import InstalledMetadataDistribution, MetadataDistribution
 from pip.core.errors import InstallationError
@@ -56,7 +56,7 @@ class DistributionPreparer:
 
     def __init__(
         self,
-        build_tracker: object,
+        build_tracker: Any,
         build_env_installer: BuildEnvironmentInstaller,
         build_isolation: BuildIsolationMode,
         check_build_deps: bool,
@@ -86,7 +86,7 @@ class DistributionPreparer:
                     raise AssertionError("source requirement has no prepared metadata")
                 distribution = MetadataDistribution.from_directory(directory)
                 req.set_dist(distribution)
-            return distribution
+            return cast(MetadataView, distribution)
 
         path = req.local_file_path
         name = req.name

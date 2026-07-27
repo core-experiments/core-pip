@@ -9,6 +9,7 @@ from pip.cli.freeze import freeze
 from pip.cli.parser import ArgumentParser
 from pip.core.metadata import stdlib_pkgs
 from pip.core.packaging import canonicalize_name
+from pip.core.pip_version import PIP_DISTRIBUTION_NAMES
 
 
 def create_parser() -> ArgumentParser:
@@ -25,9 +26,11 @@ def create_parser() -> ArgumentParser:
 def run_freeze(args: list[str]) -> int:
     options = create_parser().parse_args(args)
     excluded = {canonicalize_name(name) for name in options.exclude}
+    if "pip" in excluded:
+        excluded.update(canonicalize_name(name) for name in PIP_DISTRIBUTION_NAMES)
     skip = set(stdlib_pkgs)
     if not options.all:
-        skip.add("pip")
+        skip.update(PIP_DISTRIBUTION_NAMES)
         if sys.version_info < (3, 12):
             skip.add("setuptools")
     paths = [str(Path(path)) for path in options.path] if options.path else None

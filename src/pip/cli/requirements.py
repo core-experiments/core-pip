@@ -5,7 +5,11 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-import tomllib
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility
+    from pip._vendor import tomli as tomllib
 import urllib.parse
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -23,6 +27,9 @@ from pip.core.packaging import (
 from pip.core.release_control import ReleaseControl
 from pip.core.wheel import TargetContext
 from pip.index.links import Link
+
+NO_INDEX_VALUES = frozenset(("1", "true", "yes", "on"))
+RELEASE_OPTIONS = frozenset(("pre", "all-releases"))
 
 if TYPE_CHECKING:
     from pip.resolution.req_install import InstallRequirement
@@ -89,12 +96,9 @@ def load_source_config(command: str | None = None) -> SourceConfig:
         ]
     )
     no_index_value = configured("no-index")
-    no_index = no_index_value is not None and no_index_value.strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
+    no_index = (
+        no_index_value is not None and no_index_value.strip().lower() in NO_INDEX_VALUES
+    )
     if (value := os.environ.get("PIP_FIND_LINKS")) is not None:
         find_links = value.split()
     if (value := os.environ.get("PIP_INDEX_URL")) is not None:
@@ -102,7 +106,7 @@ def load_source_config(command: str | None = None) -> SourceConfig:
     if (value := os.environ.get("PIP_EXTRA_INDEX_URL")) is not None:
         extra_index_urls = value.split()
     if (value := os.environ.get("PIP_NO_INDEX")) is not None:
-        no_index = value.strip().lower() in {"1", "true", "yes", "on"}
+        no_index = value.strip().lower() in NO_INDEX_VALUES
     return SourceConfig(find_links, index_url, extra_index_urls, no_index)
 
 
@@ -252,7 +256,7 @@ def collect_requirements(
     if provider.release_control is not None:
         for kind, value in release_control_args or []:
             provider.release_control.apply(
-                "all_releases" if kind in {"pre", "all-releases"} else "only_final",
+                "all_releases" if kind in RELEASE_OPTIONS else "only_final",
                 value,
             )
 
@@ -336,7 +340,7 @@ def collect_requirements(
         if len(provider.index_urls) > 1
         else [],
         no_index=provider.no_index,
-        format_control=provider.format_control,
+        format_control=provider.format_control or FormatControl(),
         locked_links=locked_links,
         locked_direct_names=frozenset(locked_direct_names),
         release_control=provider.release_control or ReleaseControl(),
@@ -467,6 +471,7 @@ def bundle_install_requirements(
                 and wheel_tag_rank(wheel.tags, supported_wheel_tags(target)) is None
             ):
                 if direct_constraints:
+                    assert item.req is not None
                     raise InstallationError(
                         f"Cannot install {item.req.name} because these package "
                         "versions have conflicting dependencies."
@@ -504,12 +509,12 @@ def bundle_install_requirements(
             previous = direct_sources.get(item.req.canonical_name)
             if (
                 previous is not None
-                and Path(previous).resolve() != source_path.resolve()
+                and Path(previous[0]).resolve() != source_path.resolve()
             ):
                 raise InstallationError(
                     f"Cannot install {item.req.name} because these package versions "
                     "have conflicting dependencies."
                 )
-            direct_sources[item.req.canonical_name] = str(source_path)
+            direct_sources[item.req.canonical_name] = (str(source_path), "")
         requirements.append(item)
     return requirements

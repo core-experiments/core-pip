@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 import sysconfig
 from collections.abc import Iterable
-from typing import TYPE_CHECKING
+from types import TracebackType
+from typing import TYPE_CHECKING, Any
 
 from pip.install.build_env.base import (
     BuildEnvironment,
@@ -68,29 +70,72 @@ class VenvBuildEnvironment(BuildEnvironment):
     """A venv-based build environment."""
 
     def __init__(self, installer: BuildEnvironmentInstaller) -> None:
-        # We defer this import because certain distributions of Python do not include
-        # a functional venv out of the box.
-        try:
-            import venv
-        except ImportError:
-            raise VenvImportError
-
-        self.env_path_internal = TempDirectory(
+        # We defer these imports because certain distributions of Python do not
+        # include a functional venv out of the box.
+        self.temp_dir_internal = TempDirectory(
             kind=tempdir_kinds.BUILD_ENV, globally_managed=True
-        ).path
-        # Use symlinks to support relocatable Python installations on POSIX, including
-        # python-build-standalone. This matches upstream venv CLI's behaviour.
-        env = venv.EnvBuilder(symlinks=(os.name != "nt"))
+        )
+        self.env_path_internal = self.temp_dir_internal.path
+        context: Any = None
         try:
-            context = env.ensure_directories(self.env_path_internal)
-            env.create(self.env_path_internal)
-        except OSError as e:
-            raise VenvCreationError(str(e))
+            import virtualenv
+        except ImportError:
+            try:
+                import venv
+            except ImportError:
+                raise VenvImportError
 
-        if sys.version_info >= (3, 12):
-            # The context object was only documented in Python 3.12
+            env = venv.EnvBuilder(symlinks=(os.name != "nt"), with_pip=False)
+            try:
+                context = env.ensure_directories(self.env_path_internal)
+                env.create(self.env_path_internal)
+                bootstrap_environment = {
+                    key: value
+                    for key, value in os.environ.items()
+                    if not key.startswith("PIP_") and key != "PYTHONPATH"
+                }
+                subprocess.run(
+                    [
+                        context.env_exec_cmd,
+                        "-m",
+                        "ensurepip",
+                        "--upgrade",
+                        "--default-pip",
+                    ],
+                    check=True,
+                    cwd=self.env_path_internal,
+                    env=bootstrap_environment,
+                    capture_output=True,
+                    text=True,
+                )
+            except (OSError, subprocess.CalledProcessError) as e:
+                detail = str(e)
+                if isinstance(e, subprocess.CalledProcessError):
+                    output = "\n".join(part for part in (e.stdout, e.stderr) if part)
+                    if output:
+                        detail = f"{detail}: {output}"
+                raise VenvCreationError(detail)
+        else:
+            try:
+                virtualenv.cli_run([self.env_path_internal, "--no-download", "--clear"])
+            except (OSError, RuntimeError) as e:
+                raise VenvCreationError(str(e))
+
+        if sys.version_info >= (3, 12) and context is not None:
+            # The context object was only documented in Python 3.12.  The
+            # virtualenv backend does not return one from ``cli_run``.
             self.lib_dirs = [context.lib_path]
             self.bin_path_internal = context.bin_path
+        elif sys.version_info >= (3, 12):
+            # Derive the same paths when virtualenv created the environment.
+            # This also keeps pip compatible with virtualenv versions that
+            # intentionally return no context from their CLI entry point.
+            self.lib_dirs = [
+                get_venv_path_from_sysconfig("purelib", self.env_path_internal)
+            ]
+            self.bin_path_internal = get_venv_path_from_sysconfig(
+                "scripts", self.env_path_internal
+            )
         elif sys.version_info[:2] == (3, 11):
             # On Python 3.11, we can use sysconfig.
             self.lib_dirs = [
@@ -160,6 +205,15 @@ class VenvBuildEnvironment(BuildEnvironment):
         # However, we don't want a pre-existing PYTHONPATH to influence the
         # backend calls.
         os.environ.update({"PATH": os.pathsep.join(new_path), "PYTHONPATH": ""})
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
+        super().__exit__(exc_type, exc_val, exc_tb)
+        self.temp_dir_internal.cleanup()
 
     def install_requirements(
         self,

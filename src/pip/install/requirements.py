@@ -48,7 +48,7 @@ class RequirementInstaller:
         existing = InstalledDistributionStore().find(req.name)
         if existing is None:
             return
-        compatible = req.specifier.contains(existing.version, prereleases=True)
+        compatible = req.specifier.contains(existing.version, allow_prereleases=True)
         if not compatible or requirement.editable:
             requirement.satisfied_by = None
             requirement.should_reinstall = True

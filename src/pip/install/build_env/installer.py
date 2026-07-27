@@ -73,7 +73,7 @@ class BuildConfiguration:
 class InstallWheelBuildError(DiagnosticPipError):
     reference = "failed-wheel-build-for-install"
 
-    def __init__(self, failed: list[NamedRequirement]) -> None:
+    def __init__(self, failed: list[InstallRequirement]) -> None:
         super().__init__(
             message=(
                 "Failed to build installable wheels for some "

@@ -12,7 +12,7 @@ import sys
 PYTHON_REQUIRES = (3, 10)
 
 
-def version_str(version):  # type: ignore
+def version_str(version):
     return ".".join(str(v) for v in version)
 
 

@@ -10,6 +10,7 @@ import sys
 import tarfile
 import zipfile
 from collections.abc import Iterable
+from typing import Any, cast
 from zipfile import ZipInfo
 
 from pip.core.errors import InstallationError
@@ -183,7 +184,7 @@ def untar_file(filename: str, location: str) -> None:
         )
         mode = "r:*"
 
-    tar = tarfile.open(filename, mode, encoding="utf-8")  # type: ignore
+    tar = tarfile.open(filename, mode, encoding="utf-8")
     try:
         leading = has_leading_dir([member.name for member in tar.getmembers()])
 
@@ -247,7 +248,7 @@ def untar_file(filename: str, location: str) -> None:
                     # The PEP changed this from `int` to `Optional[int]`,
                     # where None means "use the default". Mypy doesn't
                     # know this yet.
-                    member.mode = None  # type: ignore [assignment]
+                    cast(Any, member).mode = None
                 return member
 
             tar.extractall(location, filter=pip_filter)

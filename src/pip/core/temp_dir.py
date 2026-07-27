@@ -50,6 +50,16 @@ def rmtree(path: str, ignore_errors: bool = False, onexc=None) -> None:
             onexc(os.rmdir, path, exc)
 
 
+def remove_temp_directory(path: str | os.PathLike[str]) -> None:
+    """Remove a temporary directory, including read-only VCS files."""
+    if not os.path.exists(path):
+        return
+    try:
+        rmtree(os.fspath(path))
+    except OSError:
+        rmtree(os.fspath(path), ignore_errors=True)
+
+
 tempdir_kinds = enum(
     BUILD_ENV="build-env", EPHEM_WHEEL_CACHE="ephem-wheel-cache", REQ_BUILD="req-build"
 )

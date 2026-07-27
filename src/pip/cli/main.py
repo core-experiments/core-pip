@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import os
 import sys
 
@@ -10,6 +11,11 @@ from pip.core.errors import (
     PipError,
 )
 from pip.core.pip_version import set_pip_version
+from pip.core.temp_dir import global_tempdir_manager
+
+VERBOSITY_FLAGS = frozenset(("-vv", "-vvv"))
+VERSION_FLAGS = frozenset(("-V", "--version"))
+HELP_FLAGS = frozenset(("-h", "--help"))
 
 
 def main(
@@ -32,17 +38,26 @@ def main(
     try:
         argv = list(sys.argv[1:] if args is None else args)
         argv, verbosity, require_virtualenv, log_file = extract_global_options(argv)
-        if verbosity >= 2 or any(token in {"-vv", "-vvv"} for token in argv):
+        if verbosity >= 2 or any(token in VERBOSITY_FLAGS for token in argv):
             os.environ["PIP_RESOLVER_DEBUG"] = "1"
         argv, target_prefix = extract_python_option(argv)
         if target_prefix is not None:
             os.environ["PIP_TARGET_PREFIX"] = target_prefix
         configure_logging(log_file)
-        status = run(argv, require_virtualenv=require_virtualenv, location=location)
+        with global_tempdir_manager():
+            status = run(argv, require_virtualenv=require_virtualenv, location=location)
         sys.stdout.flush()
         sys.stderr.flush()
         return status
-    except BrokenPipeError as exc:
+    except OSError as exc:
+        # Windows reports a closed stdout pipe as ``EINVAL``/``EBADF`` rather
+        # than raising BrokenPipeError.  Treat those errors consistently so a
+        # pipeline never gets a traceback merely because its consumer exited.
+        if not isinstance(exc, BrokenPipeError) and exc.errno not in {
+            errno.EINVAL,
+            errno.EBADF,
+        }:
+            raise
         try:
             devnull = os.open(os.devnull, os.O_WRONLY)
             os.dup2(devnull, sys.stdout.fileno())
@@ -80,12 +95,12 @@ def run(
 
         print_help()
         return 0
-    if args[0] in {"-V", "--version"}:
+    if args[0] in VERSION_FLAGS:
         from pip.cli.help import print_version
 
         print_version(location)
         return 0
-    if args[0] in {"-h", "--help"}:
+    if args[0] in HELP_FLAGS:
         from pip.cli.help import print_help
 
         print_help()

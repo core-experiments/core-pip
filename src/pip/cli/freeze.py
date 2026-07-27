@@ -6,7 +6,7 @@ import logging
 import os
 import re
 import site
-from collections.abc import Container, Generator, Iterable
+from collections.abc import Generator, Iterable
 from dataclasses import dataclass, field
 from typing import NamedTuple
 
@@ -33,8 +33,8 @@ def freeze(
     paths: list[str] | None = None,
     isolated: bool = False,
     exclude_editable: bool = False,
-    exclude: Container[str] = (),
-    skip: Container[str] = (),
+    exclude: Iterable[str] = (),
+    skip: Iterable[str] = (),
 ) -> Generator[str, None, None]:
     installations: dict[str, FrozenRequirement] = {}
     excluded = {canonicalize_name(name) for name in exclude}

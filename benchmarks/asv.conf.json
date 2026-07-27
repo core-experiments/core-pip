@@ -3,7 +3,7 @@
   "project": "pip",
   "project_url": "https://pip.pypa.io/",
   "repo": "..",
-  "branches": ["core-pip"],
+  "branches": ["main"],
   "benchmark_dir": ".",
   "environment_type": "virtualenv",
   "build_command": "python -m pip wheel --no-deps -w {build_cache_dir} {build_dir}",

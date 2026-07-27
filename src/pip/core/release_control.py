@@ -5,6 +5,9 @@ from dataclasses import dataclass, field
 from .errors import CommandError
 from .packaging import canonicalize_name
 
+RELEASE_CONTROL_KINDS = frozenset(("all_releases", "only_final"))
+RELEASE_CONTROL_SENTINELS = frozenset((":all:", ":none:"))
+
 
 @dataclass
 class ReleaseControl:
@@ -13,7 +16,7 @@ class ReleaseControl:
     ordered_args: list[tuple[str, str]] = field(default_factory=list, compare=False)
 
     def apply(self, kind: str, value: str) -> None:
-        if kind not in {"all_releases", "only_final"}:
+        if kind not in RELEASE_CONTROL_KINDS:
             raise ValueError(f"unknown release control kind: {kind}")
         if value.startswith("-"):
             raise CommandError(
@@ -22,13 +25,15 @@ class ReleaseControl:
         entries = [item.strip() for item in value.split(",") if item.strip()]
         if not entries:
             return
-        if kind not in {"all_releases", "only_final"}:
+        if kind not in RELEASE_CONTROL_KINDS:
             raise ValueError(f"unknown release control kind: {kind}")
         target = self.all_releases if kind == "all_releases" else self.only_final
         opposite = self.only_final if kind == "all_releases" else self.all_releases
         for entry in entries:
             normalized = (
-                canonicalize_name(entry) if entry not in {":all:", ":none:"} else entry
+                canonicalize_name(entry)
+                if entry not in RELEASE_CONTROL_SENTINELS
+                else entry
             )
             self.ordered_args.append((kind, normalized))
             if normalized == ":none:":

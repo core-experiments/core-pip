@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import ntpath
 import string
 import sys
 import urllib.parse
@@ -9,6 +10,7 @@ WINDOWS = sys.platform == "win32"
 
 
 def path_to_url(path: str) -> str:
+    path = _normalize_windows_path(path)
     path = os.path.normpath(os.path.abspath(path))
     import urllib.request
 
@@ -33,15 +35,33 @@ def url_to_path(url: str) -> str:
         )
 
     path = urllib.request.url2pathname(netloc + path)
+    # ``url2pathname`` has returned both ``/C:/...`` and ``\\C:\\...``
+    # for drive-qualified file URLs across Python versions.  Leaving the
+    # separator in place makes ``abspath`` turn it into ``C:\\C:\\...``.
+    return _normalize_windows_path(path, strip_drive_separator=not bool(netloc))
+
+
+def _normalize_windows_path(path: str, *, strip_drive_separator: bool = False) -> str:
+    if not WINDOWS:
+        return path
     if (
-        WINDOWS
-        and not netloc
+        strip_drive_separator
         and len(path) >= 3
-        and path[0] == "/"
+        and path[0] in "/\\"
         and path[1] in string.ascii_letters
-        and path[2:4] in (":", ":/")
+        and path[2] == ":"
     ):
         path = path[1:]
+    drive, tail = ntpath.splitdrive(path)
+    while (
+        drive
+        and len(tail) >= 3
+        and tail[0] in "/\\"
+        and tail[1] in string.ascii_letters
+        and tail[2] == ":"
+    ):
+        path = drive + tail[1:]
+        drive, tail = ntpath.splitdrive(path)
     return path
 
 

@@ -9,6 +9,9 @@ from pathlib import Path
 
 from pip.core.errors import ConfigurationError
 
+INTERNAL_CONFIG_KEYS = frozenset(("PIP_VERSION", "PIP_HELP", "PIP_CONFIG_FILE"))
+NON_CONFIG_KEYS = frozenset(("PIP_VERSION", "PIP_HELP"))
+
 CONFIG_BASENAME = "pip.conf" if os.name != "nt" else "pip.ini"
 
 
@@ -41,7 +44,7 @@ class ConfigurationStore:
         for key, value in os.environ.items():
             if not key.startswith("PIP_"):
                 continue
-            if key in {"PIP_VERSION", "PIP_HELP", "PIP_CONFIG_FILE"}:
+            if key in INTERNAL_CONFIG_KEYS:
                 continue
             self.env_internal[key[4:].lower().replace("_", "-")] = value
         for location in config_locations():
@@ -115,7 +118,7 @@ class ConfigurationStore:
             (key, value)
             for key, value in os.environ.items()
             if key.startswith("PIP_")
-            and key not in {"PIP_VERSION", "PIP_HELP"}
+            and key not in NON_CONFIG_KEYS
             and key != "PIP_CONFIG_FILE"
         )
         return ConfigDebugView(

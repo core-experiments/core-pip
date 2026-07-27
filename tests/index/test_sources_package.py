@@ -150,6 +150,8 @@ def test_candidate_provider_prunes_versions_before_materialization(
     )
 
     assert [candidate.version for candidate in candidates] == [Version("1.0")]
+    assert materialized == []
+    assert candidates[0].path.is_file()
     assert materialized == [Version("1.0")]
 
 
@@ -233,6 +235,43 @@ def test_candidate_provider_reuses_candidate_materializer(
     assert len(provider.find_candidates(parse_requirement("first"))) == 1
     assert len(provider.find_candidates(parse_requirement("second"))) == 1
     assert calls == 1
+
+
+def test_candidate_materializer_reuses_stable_wheel_metadata(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    wheelhouse = tmp_path / "packages"
+    wheelhouse.mkdir()
+    wheel_path = make_wheel(wheelhouse, "first", "first", "1.0")
+    provider = CandidateProvider.from_options(
+        find_links=[str(wheelhouse)], no_index=True
+    )
+    materializer = provider.materializer_internal
+    assert materializer is None
+
+    original = CandidateMaterializer.iter_materialize
+    materialized: list[Path] = []
+
+    def counting_materialize(
+        current: CandidateMaterializer,
+        requirement: Requirement,
+        accepted: tuple[InstallationCandidate, ...],
+    ) -> object:
+        materialized.extend(Path(candidate.link.file_path) for candidate in accepted)
+        yield from original(current, requirement, accepted)
+
+    monkeypatch.setattr(CandidateMaterializer, "iter_materialize", counting_materialize)
+    first = provider.find_candidates(parse_requirement("first"))
+    second = provider.find_candidates(parse_requirement("first>=1"))
+    assert len(first) == 1
+    assert len(second) == 1
+    assert materialized == []
+
+    assert first[0].path == wheel_path
+    assert second[0].path == wheel_path
+    assert materialized == [wheel_path, wheel_path]
+    assert provider.materializer_internal is not None
+    assert len(provider.materializer_internal.wheel_candidates) == 1
 
 
 def test_candidate_provider_parses_index_artifacts_once(
@@ -757,6 +796,7 @@ def test_candidate_provider_only_builds_highest_ranked_source_candidate(
     assert built == []
     preferred = candidates[:2]
 
+    assert preferred[0].path.is_file()
     assert built == [newest.name]
     assert [str(candidate.version) for candidate in preferred] == ["3.0", "1.0"]
 

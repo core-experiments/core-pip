@@ -14,7 +14,7 @@ from zipfile import BadZipFile, ZipFile
 from pip.build.metadata import MetadataDistribution
 
 from packaging.utils import NormalizedName
-from pip.network.exceptions import InvalidWheel
+from pip.network.exceptions import InvalidWheel, NetworkConnectionError
 from pip.network.http import HttpResponse, NetworkSession
 from pip.network.utils import HEADERS, raise_for_status, response_chunks
 
@@ -164,7 +164,12 @@ class LazyZipOverHTTP:
         """Check and download until the file is a valid ZIP."""
         end = self.length_internal - 1
         for start in reversed(range(0, end, self.chunk_size_internal)):
-            self.download_internal(start, end)
+            try:
+                self.download_internal(start, end)
+            except NetworkConnectionError as exc:
+                if exc.response is not None and exc.response.status_code == 416:
+                    raise InvalidWheel(self.name, "unknown") from exc
+                raise
             with self.stay():
                 try:
                     # For read-only ZIP files, ZipFile only needs

@@ -10,6 +10,7 @@ from pip.build.build_backend import ProjectMetadata, prepare_project_metadata
 from pip.core.direct_url import DirectUrl, DirInfo
 from pip.core.errors import BuildError, CommandError
 from pip.core.packaging import SpecifierSet, canonicalize_name
+from pip.core.temp_dir import remove_temp_directory
 from pip.index.artifacts import ArtifactLocator
 from pip.resolution.direct_url_helpers import direct_url_from_link
 from pip.resolution.req_install import install_req_from_editable
@@ -42,7 +43,7 @@ def prepare_editable_source(
         checkout_dir.parent.mkdir(parents=True, exist_ok=True)
         materialized_source = source_path
         shutil.copytree(materialized_source, checkout_dir, symlinks=True)
-        shutil.rmtree(materialized_source, ignore_errors=True)
+        remove_temp_directory(materialized_source)
         source_path = checkout_dir
         direct_url = DirectUrl(
             url=checkout_dir.as_uri(), dir_info=DirInfo(editable=True)

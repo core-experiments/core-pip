@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from pip.core.direct_url import ArchiveInfo, DirectUrl, DirInfo, VcsInfo
+from pip.core.urls import url_to_path
 from pip.index.links import Link
 from pip.vcs.versioncontrol import vcs
 
@@ -38,9 +39,6 @@ def direct_url_from_link(
                 requested_revision=requested_revision,
             ),
         )
-    if (
-        link.url.startswith("file://")
-        and Path(link.url.removeprefix("file://")).is_dir()
-    ):
+    if link.is_file and Path(url_to_path(link.url)).is_dir():
         return DirectUrl(url=link.url, dir_info=DirInfo())
     return DirectUrl(url=link.url, archive_info=ArchiveInfo(hashes=link.hashes or None))

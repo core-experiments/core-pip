@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ntpath
 import os
 import urllib.parse
 from dataclasses import dataclass
@@ -17,16 +18,15 @@ from pip.index.links import Link
 from pip.index.page_parsing import IndexPageParser
 from pip.index.source_models import ArtifactKind
 
+SUPPORTED_SCHEMES = frozenset(("http", "https", "file", "ftp"))
+VCS_SCHEMES = frozenset(("git", "hg", "svn", "bzr"))
+HTML_SUFFIXES = frozenset((".html", ".htm"))
+
 
 def is_supported_location(value: str) -> bool:
     scheme = urllib.parse.urlsplit(value).scheme
     vcs_scheme = scheme.partition("+")[0]
-    return scheme in {"http", "https", "file", "ftp"} or vcs_scheme in {
-        "git",
-        "hg",
-        "svn",
-        "bzr",
-    }
+    return scheme in SUPPORTED_SCHEMES or vcs_scheme in VCS_SCHEMES
 
 
 def resolve_source_location(location: str) -> tuple[str | None, str | None]:
@@ -70,7 +70,7 @@ class FindLinksSource:
 
     def links_from_local_path(self, path: Path) -> list[Link]:
         if path.is_file():
-            if path.suffix.lower() in {".html", ".htm"}:
+            if path.suffix.lower() in HTML_SUFFIXES:
                 return IndexPageParser(
                     trusted_hosts=self.trusted_hosts, session=self.session
                 ).links_from_url(path.as_uri())
@@ -108,4 +108,5 @@ def looks_like_path_requirement(value: str) -> bool:
         value.startswith((".", "/", "~"))
         or os.sep in value
         or (os.altsep is not None and os.altsep in value)
+        or bool(ntpath.splitdrive(value)[0])
     )

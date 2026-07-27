@@ -6,18 +6,28 @@ import logging
 import urllib.parse
 from collections.abc import Sequence
 from functools import lru_cache
+from typing import TypeVar
 
 from pip.core.errors import InvalidWheelFilename
 from pip.core.hashes import Hashes
-from pip.core.packaging import Requirement, SpecifierSet, Version
+from pip.core.packaging import Requirement, SpecifierSet, Version, is_windows_path
 from pip.core.release_control import ReleaseControl
 from pip.core.target_python import TargetPython, get_supported
 from pip.core.wheel import TargetContext, Wheel, WheelTag, legacy_build_tag
 from pip.index.candidates import BestCandidateResult, InstallationCandidate
 from pip.index.links import Link
-from pip.index.source_models import ArtifactKind, RejectedCandidate, RejectionReason
+from pip.index.source_models import (
+    INSTALLABLE_ARTIFACT_KINDS,
+    SOURCE_ARTIFACT_KINDS,
+    ArtifactKind,
+    CandidateRecord,
+    RejectedCandidate,
+    RejectionReason,
+)
 
 logger = logging.getLogger(__name__)
+
+CandidateT = TypeVar("CandidateT", bound=CandidateRecord)
 
 
 @lru_cache(maxsize=64)
@@ -85,8 +95,8 @@ class CandidateEvaluator:
         )
 
     def get_applicable_candidates(
-        self, candidates: list[InstallationCandidate]
-    ) -> list[InstallationCandidate]:
+        self, candidates: list[CandidateT]
+    ) -> list[CandidateT]:
         allow_prereleases = self.allow_prereleases_internal()
         if allow_prereleases is None:
             allow_prereleases = not any(
@@ -158,10 +168,7 @@ class CandidateEvaluator:
                 RejectionReason.UNSUPPORTED_ARTIFACT,
                 "binary distributions are disabled",
             )
-        if (
-            link.kind in {ArtifactKind.SDIST, ArtifactKind.SOURCE_TREE}
-            and not allow_source
-        ):
+        if link.kind in SOURCE_ARTIFACT_KINDS and not allow_source:
             return CandidateEvaluator.reject(
                 link,
                 RejectionReason.UNSUPPORTED_ARTIFACT,
@@ -192,7 +199,18 @@ class CandidateEvaluator:
                 RejectionReason.DIFFERENT_PROJECT,
                 f"wrong project name: {parsed.name}",
             )
-        if not requirement.is_satisfied_by(parsed.version):
+        # A direct source URL with a non-distribution filename is represented
+        # by the placeholder version 0 until its build metadata is available.
+        # Applying an exact constraint to that placeholder rejects the source
+        # before it can be built and inspected.
+        unknown_direct_source_version = (
+            CandidateEvaluator.is_unnamed_direct_requirement(requirement)
+            and link.kind in SOURCE_ARTIFACT_KINDS
+            and parsed.version == Version("0")
+        )
+        if not unknown_direct_source_version and not requirement.is_satisfied_by(
+            parsed.version
+        ):
             return CandidateEvaluator.reject(
                 link,
                 RejectionReason.VERSION_MISMATCH,
@@ -224,11 +242,7 @@ class CandidateEvaluator:
                 RejectionReason.UNSUPPORTED_WHEEL,
                 "wheel tags are not supported by this interpreter",
             )
-        if link.kind not in {
-            ArtifactKind.WHEEL,
-            ArtifactKind.SDIST,
-            ArtifactKind.SOURCE_TREE,
-        }:
+        if link.kind not in INSTALLABLE_ARTIFACT_KINDS:
             return CandidateEvaluator.reject(
                 link,
                 RejectionReason.UNSUPPORTED_ARTIFACT,
@@ -257,7 +271,9 @@ class CandidateEvaluator:
             return True
         if requirement.raw.startswith("file:"):
             return True
-        return requirement.raw.startswith((".", "/", "~"))
+        return requirement.raw.startswith((".", "/", "~")) or is_windows_path(
+            requirement.raw
+        )
 
     @staticmethod
     def reject(link: Link, reason: RejectionReason, detail: str) -> RejectedCandidate:
@@ -334,11 +350,11 @@ class CandidateEvaluator:
 
 
 def filter_unallowed_hashes(
-    candidates: list[InstallationCandidate],
+    candidates: list[CandidateT],
     *,
     hashes: Hashes | None,
     project_name: str,
-) -> list[InstallationCandidate]:
+) -> list[CandidateT]:
     allowed = allowed_hashes_internal(hashes)
     if hashes is None:
         return list(candidates)
@@ -352,7 +368,7 @@ def filter_unallowed_hashes(
     matches = 0
     no_digest = 0
     discarded: list[str] = []
-    result: list[InstallationCandidate] = []
+    result: list[CandidateT] = []
     for candidate in candidates:
         candidate_hashes = candidate.link.hashes or {}
         digest = candidate_hashes.get("sha256")

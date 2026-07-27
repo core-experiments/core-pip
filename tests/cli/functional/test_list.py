@@ -1,5 +1,6 @@
 import json
 import os
+import re
 from pathlib import Path
 
 import pytest
@@ -109,7 +110,7 @@ def test_local_columns_flag(simple_script: PipTestEnvironment) -> None:
     assert "Package" in result.stdout
     assert "Version" in result.stdout
     assert "simple (1.0)" not in result.stdout
-    assert "simple  1.0" in result.stdout, str(result)
+    assert re.search(r"^simple\s+1\.0$", result.stdout, re.MULTILINE), str(result)
 
 
 def test_multiple_exclude_and_normalization(
@@ -122,10 +123,10 @@ def test_multiple_exclude_and_normalization(
     result = script.pip("list")
     print(result.stdout)
     assert "Normalizable_Name" in result.stdout
-    assert "pip" in result.stdout
+    assert "core-pip" in result.stdout
     result = script.pip("list", "--exclude", "normalizablE-namE", "--exclude", "pIp")
     assert "Normalizable_Name" not in result.stdout
-    assert "pip" not in result.stdout
+    assert "core-pip" not in result.stdout
 
 
 @pytest.mark.usefixtures("enable_user_site")

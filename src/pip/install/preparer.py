@@ -9,7 +9,7 @@ import logging
 import shutil
 from collections.abc import Iterable
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from pip.build.metadata import (
     MetadataDistribution,
@@ -34,7 +34,7 @@ from pip.install.metadata import (
     check_sidecar_matches_wheel,
 )
 
-from packaging.utils import canonicalize_name
+from packaging.utils import NormalizedName, canonicalize_name
 
 from pip.install.build_env.base import BuildEnvironmentInstaller, BuildIsolationMode
 from pip.core.errors import (
@@ -144,6 +144,7 @@ class RequirementPreparer:
 
     def log_preparing_link(self, req: InstallRequirement) -> None:
         """Provide context for the requirement being prepared."""
+        assert req.link is not None
         if req.link.is_file and not req.is_wheel_from_cache:
             message = "Processing %s"
             information = str(display_path(req.link.file_path))
@@ -172,6 +173,7 @@ class RequirementPreparer:
         self, req: InstallRequirement, parallel_builds: bool
     ) -> None:
         """Ensure source_dir of a linked InstallRequirement."""
+        assert req.link is not None
         # Since source_dir is only set for editable requirements.
         if req.link.is_wheel:
             # We don't need to unpack wheels, so no need for a source
@@ -197,6 +199,7 @@ class RequirementPreparer:
         *,
         warn_on_hash_mismatch: bool = True,
     ) -> str | None:
+        assert req.link is not None
         if self.download_dir is None or not req.link.is_wheel:
             return None
         return self.downloads_internal.cached_path(
@@ -211,6 +214,7 @@ class RequirementPreparer:
         # and raise some more informative errors than otherwise.
         # (For example, we can raise VcsHashUnsupported for a VCS URL
         # rather than HashMissing.)
+        assert req.link is not None
         if not self.require_hashes:
             return req.hashes(trust_internet=True)
 
@@ -241,6 +245,7 @@ class RequirementPreparer:
         self,
         req: InstallRequirement,
     ) -> MetadataView | None:
+        assert req.link is not None
         if self.require_hashes:
             logger.debug(
                 "Metadata-only fetching is not used as hash checking is required",
@@ -257,6 +262,7 @@ class RequirementPreparer:
     ) -> MetadataView | None:
         """Fetch metadata from the data-dist-info-metadata attribute, if possible."""
         # (1) Get the link to the metadata file, if provided by the backend.
+        assert req.link is not None
         metadata_link = req.link.metadata_link()
         if metadata_link is None:
             return None
@@ -305,7 +311,7 @@ class RequirementPreparer:
             return None
 
         wheel = Wheel(link.filename)
-        name = wheel.name
+        name = NormalizedName(wheel.name)
         logger.info(
             "Obtaining dependency information from %s %s",
             name,
@@ -347,6 +353,7 @@ class RequirementPreparer:
             req.local_file_path = filepath
             # Record that the file is downloaded so we don't do it again in
             # _prepare_linked_requirement().
+            assert req.link is not None
             self.downloaded_internal[req.link.url] = filepath
 
             # If this is an sdist, we need to unpack it after downloading, but the
@@ -388,7 +395,9 @@ class RequirementPreparer:
                 req.set_dist(metadata_dist)
                 # Ensure download_info is available even in dry-run mode.
                 if req.download_info is None:
-                    req.download_info = direct_url_from_link(req.link, req.source_dir)
+                    req.download_info = direct_url_from_link(
+                        req.link, source_dir=req.source_dir
+                    )
                 return metadata_dist
 
         # None of the optimizations worked, fully prepare the requirement.
@@ -398,8 +407,10 @@ class RequirementPreparer:
         self, reqs: Iterable[InstallRequirement], parallel_builds: bool = False
     ) -> None:
         """Prepare linked requirements more, if needed."""
+        reqs = [req for req in reqs if req.link is not None]
         reqs = [req for req in reqs if req.needs_more_preparation]
         for req in reqs:
+            assert req.link is not None
             # Determine if any of these requirements were already downloaded.
             file_path = self.check_download_dir_for_requirement(req)
             if file_path is not None:
@@ -425,7 +436,7 @@ class RequirementPreparer:
     def prepare_linked_requirement_internal(
         self, req: InstallRequirement, parallel_builds: bool
     ) -> MetadataView:
-        assert req.link
+        assert req.link is not None
         link = req.link
 
         hashes = self.get_linked_req_hashes(req)
@@ -453,6 +464,7 @@ class RequirementPreparer:
                     "and re-downloading source."
                 )
                 req.link = req.cached_wheel_source_link
+                assert req.link is not None
                 link = req.link
 
         self.ensure_link_req_src_dir(req, parallel_builds)
@@ -463,7 +475,7 @@ class RequirementPreparer:
             try:
                 local_file = self.downloads_internal.unpack(
                     link,
-                    req.source_dir,
+                    req.source_dir or self.src_dir,
                     self.verbosity,
                     hashes,
                     unpack_vcs=unpack_vcs_link,
@@ -484,7 +496,7 @@ class RequirementPreparer:
             # Editables don't go through this function (see
             # prepare_editable_requirement).
             assert not req.editable
-            req.download_info = direct_url_from_link(link, req.source_dir)
+            req.download_info = direct_url_from_link(link, source_dir=req.source_dir)
             # Make sure we have a hash in download_info. If we got it as part of the
             # URL, it will have been verified and we can rely on it. Otherwise we
             # compute it from the downloaded file.
@@ -528,7 +540,9 @@ class RequirementPreparer:
             and req.distribution_internal is not dist
             and link.metadata_link() is not None
         ):
-            check_sidecar_matches_wheel(req, req.distribution_internal, dist)
+            check_sidecar_matches_wheel(
+                req, cast(MetadataView, req.distribution_internal), dist
+            )
 
         return dist
 
@@ -578,7 +592,7 @@ class RequirementPreparer:
         vcs_backend = vcs.get_backend_for_dir(str(source_path))
         if vcs_backend is not None:
             req.download_info = DirectUrl(
-                url=vcs_backend.get_url(str(source_path)),
+                url=vcs_backend.get_remote_url(str(source_path)),
                 vcs_info=VcsInfo(
                     vcs=vcs_backend.name,
                     commit_id=vcs_backend.get_revision(str(source_path)),
@@ -617,4 +631,4 @@ class RequirementPreparer:
                 "completely repeatable environment, install into an "
                 "empty virtualenv."
             )
-        return req.satisfied_by
+        return cast(MetadataView, req.satisfied_by)

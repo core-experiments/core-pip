@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 from pip.cli.cache import CacheManager
 from pip.cli.parser import ArgumentParser
 from pip.core.appdirs import user_cache_dir
@@ -25,7 +27,7 @@ def run_cache(args: list[str]) -> int:
     if options.command == "dir":
         if options.pattern or options.cache_dir or options.no_cache_dir:
             raise CommandError("Too many arguments")
-        print(user_cache_dir("pip"))
+        print(os.path.normcase(user_cache_dir("pip")))
         return 0
     if options.no_cache_dir:
         raise CommandError(

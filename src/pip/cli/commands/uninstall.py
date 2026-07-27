@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import site
 from pathlib import Path
 
 from pip.build.metadata import InstalledDistributionStore
@@ -37,11 +39,14 @@ def run_uninstall(args: list[str]) -> int:
     removed: list[str] = []
     for package in packages:
         paths = target_paths()
-        distribution = InstalledDistributionStore(paths=paths).find(package)
+        distribution = InstalledDistributionStore(
+            paths=paths, user_site=site.getusersitepackages()
+        ).find(package)
         if options.verbose and distribution is not None:
             location = Path(distribution.location)
             if len(location.parents) >= 3:
-                print(f"Uninstalling files from {location.parents[2] / 'bin'}")
+                scripts = "Scripts" if os.name == "nt" else "bin"
+                print(f"Uninstalling files from {location.parents[2] / scripts}")
         if paths is None:
             removed_now = RequirementInstaller().uninstall(package)
         else:

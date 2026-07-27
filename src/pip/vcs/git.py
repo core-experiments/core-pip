@@ -574,8 +574,8 @@ class Git(VersionControl):
             return None
         return os.path.normpath(r.rstrip("\r\n"))
 
-    @staticmethod
-    def should_add_vcs_url_prefix(repo_url: str) -> bool:
+    @classmethod
+    def should_add_vcs_url_prefix(cls, remote_url: str) -> bool:
         """In either https or ssh form, requirements must be prefixed with git+."""
         return True
 

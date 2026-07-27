@@ -32,13 +32,13 @@ def configure_logging(log_file: str | None = None) -> None:
             break
     else:
         handler = logging.StreamHandler(sys.stderr)
-        handler.pip_core_handler = True
+        setattr(handler, "pip_core_handler", True)
         handler.setFormatter(PipFormatter())
         root.addHandler(handler)
         root.setLevel(logging.INFO)
     if log_file is not None:
         file_handler = logging.FileHandler(log_file)
-        file_handler.pip_core_log_file = True
+        setattr(file_handler, "pip_core_log_file", True)
         file_handler.setFormatter(PipFormatter())
         root.addHandler(file_handler)
     root.setLevel(logging.INFO)

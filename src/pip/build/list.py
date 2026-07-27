@@ -8,6 +8,7 @@ from email.parser import Parser
 from typing import Any, Mapping
 
 from pip.core.packaging import canonicalize_name
+from pip.core.pip_version import PIP_DISTRIBUTION_NAMES
 
 from .metadata import InstalledDistributionStore, InstalledMetadataDistribution
 
@@ -29,6 +30,8 @@ def select_installed_distributions(
 ) -> list[InstalledMetadataDistribution]:
     """Return installed distributions after applying listing filters."""
     excluded = {canonicalize_name(name) for name in excludes}
+    if "pip" in excluded:
+        excluded.update(canonicalize_name(name) for name in PIP_DISTRIBUTION_NAMES)
     distributions = list(
         InstalledDistributionStore(paths=paths, user_site=user_site).iter(
             local_only=local_only,

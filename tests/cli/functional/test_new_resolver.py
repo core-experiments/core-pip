@@ -1695,7 +1695,10 @@ def test_new_resolver_fails_with_url_constraint_and_incompatible_version(
         expect_error=True,
     )
 
-    assert "Cannot install test_pkg" in result.stderr, str(result)
+    assert any(
+        message in result.stderr
+        for message in ("Cannot install test_pkg", "Cannot install test-pkg")
+    ), str(result)
     assert (
         "because these package versions have conflicting dependencies."
     ) in result.stderr, str(result)

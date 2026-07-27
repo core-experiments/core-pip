@@ -12,6 +12,10 @@ def setup_broken_stdout_test(
         args,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
+        # Make the write happen while pip is still inside its exception
+        # handler.  Buffered interpreter shutdown is reported differently on
+        # Windows and would bypass pip's broken-pipe handling entirely.
+        env={**os.environ, "PYTHONUNBUFFERED": "1"},
     )
     # Call close() on stdout to cause a broken pipe.
     assert proc.stdout is not None

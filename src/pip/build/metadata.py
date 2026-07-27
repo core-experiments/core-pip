@@ -8,8 +8,8 @@ import configparser
 import os
 import re
 import sys
-import urllib.parse
 import zipfile
+from collections.abc import Collection
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -26,6 +26,7 @@ from pip.core.metadata import (
     iter_installed_distributions,
 )
 from pip.core.direct_url import DirectUrl
+from pip.core.urls import url_to_path
 from pip.core.wheel import parse_wheel, read_wheel_metadata_file
 
 
@@ -74,6 +75,10 @@ class MetadataDistribution:
         self.location_internal = location
         self.info_location_internal = info_location
         self.entry_points_text_internal = entry_points_text
+
+    @property
+    def metadata_version(self) -> str | None:
+        return self.metadata.get("Metadata-Version")
 
     @classmethod
     def from_directory(
@@ -338,8 +343,7 @@ class InstalledMetadataDistribution:
     def editable_project_location(self) -> str | None:
         direct_url = self.direct_url
         if direct_url and direct_url.is_local_editable():
-            parsed = urllib.parse.urlparse(direct_url.url)
-            return urllib.parse.unquote(parsed.path)
+            return url_to_path(direct_url.url)
         if self.info_location and self.info_location.endswith(".egg-info"):
             egg_links = Path(self.info_location).parent.glob("*.egg-link")
             egg_link = next(egg_links, None)
@@ -439,7 +443,7 @@ class InstalledDistributionStore:
         user_only: bool = False,
         editables_only: bool = False,
         include_editables: bool = True,
-        skip: set[str] | None = None,
+        skip: Collection[str] | None = None,
     ) -> list[InstalledMetadataDistribution]:
         result: list[InstalledMetadataDistribution] = []
         for distribution in iter_installed_distributions(self.paths):
@@ -462,11 +466,16 @@ class InstalledDistributionStore:
 
     def find(self, name: str) -> InstalledMetadataDistribution | None:
         canonical = canonicalize_name(name)
+        distributions = [
+            distribution
+            for distribution in self.iter()
+            if distribution.canonical_name == canonical
+        ]
         return next(
             (
                 distribution
-                for distribution in self.iter()
-                if distribution.canonical_name == canonical
+                for distribution in distributions
+                if distribution.in_usersite
             ),
-            None,
+            next(iter(distributions), None),
         )
