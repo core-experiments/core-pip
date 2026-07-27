@@ -358,6 +358,11 @@ def uninstall_distribution(
                 continue
             path = root / Path(*relative.parts)
             resolved = path.resolve(strict=False)
+            # RECORD uses POSIX separators, but an absolute Windows path can
+            # be smuggled in as a backslash-containing "relative" entry.
+            # Never let a manifest remove files outside the install root.
+            if os.name == "nt" and Path(row[0]).is_absolute():
+                continue
             if ".." in relative.parts and resolved.parent.name not in {
                 "bin",
                 "Scripts",

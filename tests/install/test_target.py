@@ -20,7 +20,10 @@ def test_target_mode_applies_root(tmp_path: Path) -> None:
     target = InstallTarget.from_options("demo", target="/target", root=os.fspath(root))
 
     assert target.purelib == root / "target"
-    assert target.scripts == root / Path(sysconfig.get_path("scripts")).relative_to("/")
+    scripts = Path(sysconfig.get_path("scripts"))
+    if scripts.is_absolute():
+        scripts = Path(*scripts.parts[1:])
+    assert target.scripts == root / scripts
 
 
 def test_destination_rejects_path_escape(tmp_path: Path) -> None:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import os
 import sys
 
@@ -46,7 +47,15 @@ def main(
         sys.stdout.flush()
         sys.stderr.flush()
         return status
-    except BrokenPipeError as exc:
+    except OSError as exc:
+        # Windows reports a closed stdout pipe as ``EINVAL``/``EBADF`` rather
+        # than raising BrokenPipeError.  Treat those errors consistently so a
+        # pipeline never gets a traceback merely because its consumer exited.
+        if not isinstance(exc, BrokenPipeError) and exc.errno not in {
+            errno.EINVAL,
+            errno.EBADF,
+        }:
+            raise
         try:
             devnull = os.open(os.devnull, os.O_WRONLY)
             os.dup2(devnull, sys.stdout.fileno())

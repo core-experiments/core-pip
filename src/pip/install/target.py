@@ -96,7 +96,11 @@ class InstallTarget:
 def apply_root(scheme: Scheme, root: Path) -> Scheme:
     def relocate(path: str) -> str:
         value = Path(path)
-        if value.is_absolute():
+        # ``/target`` is rooted on the current drive on Windows, but it still
+        # represents a path relative to the synthetic installation root.
+        # Checking the anchor handles both POSIX roots and drive-relative
+        # Windows paths consistently.
+        if value.anchor:
             value = Path(*value.parts[1:])
         return os.fspath(root / value)
 
