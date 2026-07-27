@@ -2595,7 +2595,7 @@ class Resolver:
                 "have a way to hash version control repositories"
             )
         if link_url.startswith("file://"):
-            local_path = Path(link_url.removeprefix("file://"))
+            local_path = Path(url_to_path(link_url))
             if local_path.is_dir():
                 raise DirectoryUrlHashUnsupported(
                     "Can't verify hashes for these file:// requirements because "
@@ -2653,7 +2653,7 @@ class Resolver:
                     "have a way to hash version control repositories"
                 )
             if link_url.startswith("file://"):
-                local_path = Path(link_url.removeprefix("file://"))
+                local_path = Path(url_to_path(link_url))
                 if local_path.is_dir():
                     raise DirectoryUrlHashUnsupported(
                         "Can't verify hashes for these file:// requirements because "
