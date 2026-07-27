@@ -75,11 +75,7 @@ jobs:
         run: brew install breezy mercurial subversion
       - run: uv sync --locked --all-groups
       - name: Run full test suite
-        if: runner.os != 'Windows'
         run: uv run pytest tests/ -n auto
-      - name: Run Windows-safe test suite
-        if: runner.os == 'Windows'
-        run: uv run pytest tests/unit tests/cli/functional/minimal -n auto
 
   packaging:
     name: packaging / ${{ matrix.os }}
