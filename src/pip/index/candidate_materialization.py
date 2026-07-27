@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Callable, Generator, Iterator, Sequence, overload
 
 from pip.core.errors import BuildError, InstallationError, UnsupportedWheel
+from pip.core.temp_dir import remove_temp_directory
 from pip.core.packaging import (
     Requirement,
     Version,
@@ -256,7 +257,7 @@ class LazyWheelCandidate(WheelCandidate):
                 ),
             )
             if self.record_internal.link.is_vcs:
-                shutil.rmtree(local, ignore_errors=True)
+                remove_temp_directory(local)
                 return None
             if local.is_file():
                 return {"sha256": hashlib.sha256(local.read_bytes()).hexdigest()}
@@ -461,7 +462,7 @@ class CandidateMaterializer:
                         requires_python=project.requires_python,
                     )
                 if vcs_path is not None:
-                    shutil.rmtree(vcs_path, ignore_errors=True)
+                    remove_temp_directory(vcs_path)
             else:
                 with (
                     path.open("rb", buffering=32768) as stream,
@@ -670,12 +671,12 @@ class CandidateMaterializer:
                     wheel.path.name,
                 )
                 if materialized_vcs_path is not None:
-                    shutil.rmtree(materialized_vcs_path, ignore_errors=True)
+                    remove_temp_directory(materialized_vcs_path)
                 continue
             seen.add(key)
             candidates.append(wheel)
             if materialized_vcs_path is not None:
-                shutil.rmtree(materialized_vcs_path, ignore_errors=True)
+                remove_temp_directory(materialized_vcs_path)
             logger.debug(
                 "candidate ready %s==%s kind=%s",
                 candidate.name,

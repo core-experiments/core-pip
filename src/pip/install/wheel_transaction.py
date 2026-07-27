@@ -159,7 +159,7 @@ def install_wheel_internal(
 
         dist_info_stage = stage_root / dist_info
         installer_source = dist_info_stage / "INSTALLER"
-        installer_source.write_text("pip\n", encoding="utf-8")
+        installer_source.write_bytes(b"pip\n")
         installer_destination = target.purelib / dist_info / "INSTALLER"
         staged.append((installer_source, installer_destination, None))
 
@@ -222,6 +222,19 @@ def install_wheel_internal(
                 if script_executable is not None:
                     maker.executable = script_executable
                 maker.make(f"{name} = {target_ref}", options={"gui": gui})
+                if os.name == "nt":
+                    # Keep the script-text form for callers that inspect the
+                    # generated script path. Windows execution uses the EXE.
+                    source = script_stage / name
+                    source.write_text(
+                        script_text(target_ref, script_executable), encoding="utf-8"
+                    )
+                    source.chmod(
+                        source.stat().st_mode
+                        | stat.S_IXUSR
+                        | stat.S_IXGRP
+                        | stat.S_IXOTH
+                    )
 
         for source in script_stage.iterdir():
             staged.append((source, target.scripts / source.name, source.stat().st_mode))

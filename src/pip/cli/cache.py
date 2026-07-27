@@ -15,7 +15,7 @@ class CacheManager:
     """Inspect and remove files from pip's cache directories."""
 
     def __init__(self, cache_dir: str | None = None) -> None:
-        self.cache_dir = Path(cache_dir or user_cache_dir("pip"))
+        self.cache_dir = Path(os.path.normcase(cache_dir or user_cache_dir("pip")))
         self.http_dir = self.cache_dir / "http-v2"
         self.wheel_dir = self.cache_dir / "wheels"
 

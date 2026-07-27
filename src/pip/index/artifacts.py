@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from pip.core.errors import InstallationError
+from pip.core.urls import url_to_path
 
 logger = logging.getLogger(__name__)
 
@@ -106,7 +107,7 @@ class ArtifactLocator:
     def local_path(self, link: str) -> Path | None:
         parsed = urllib.parse.urlparse(link)
         if parsed.scheme == "file":
-            return Path(urllib.request.url2pathname(parsed.path))
+            return Path(url_to_path(link))
         if parsed.scheme:
             return None
         return Path(link)

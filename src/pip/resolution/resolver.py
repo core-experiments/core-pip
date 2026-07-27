@@ -21,6 +21,7 @@ from pip.core.errors import (
     ResolutionError,
     VcsHashUnsupported,
 )
+from pip.core.urls import url_to_path
 from pip.core.metadata import InstalledDistribution, iter_installed_distributions
 from pip.core.packaging import (
     Requirement,
@@ -2895,7 +2896,7 @@ def actual_hashes_for_candidate(candidate: WheelCandidate) -> dict[str, str]:
         parsed_url = None
     if parsed_url is not None and parsed_url.scheme == "file":
         try:
-            path = Path(urllib.request.url2pathname(parsed_url.path))
+            path = Path(url_to_path(candidate.source_url or ""))
             if path.is_file():
                 return file_hashes(path)
         except OSError:
@@ -2939,9 +2940,7 @@ def direct_urls_equivalent(first: str | None, second: str | None) -> bool:
 
     def local_path(parts: urllib.parse.SplitResult, original: str) -> Path | None:
         if parts.scheme.lower() == "file":
-            return Path(
-                urllib.request.url2pathname(urllib.parse.unquote(parts.path))
-            ).resolve()
+            return Path(url_to_path(original)).resolve()
         if parts.scheme == "":
             return Path(original).resolve()
         return None

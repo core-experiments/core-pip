@@ -12,7 +12,8 @@ from typing import Any
 
 from pip.core.errors import CommandError
 from pip.core.format_control import FormatControl
-from pip.core.urls import path_to_url
+from pip.core.temp_dir import remove_temp_directory
+from pip.core.urls import path_to_url, url_to_path
 
 
 def create_parser() -> argparse.ArgumentParser:
@@ -183,18 +184,14 @@ def run_lock(args: list[str]) -> int:
         source = candidate.source_url
         if source is None:
             continue
-        source_path = (
-            Path(source.removeprefix("file://"))
-            if source.startswith("file://")
-            else None
-        )
+        source_path = Path(url_to_path(source)) if source.startswith("file:") else None
         if candidate.source_vcs:
             from pip.index.vcs import git_revision, materialize_vcs, vcs_reference
 
             reference = vcs_reference(source)
             checkout = materialize_vcs(source, emit_resolution=False)
             commit_id = git_revision(checkout)
-            shutil.rmtree(checkout, ignore_errors=True)
+            remove_temp_directory(checkout)
             packages.append(
                 {
                     "name": candidate.name,

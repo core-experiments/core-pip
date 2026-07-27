@@ -26,6 +26,7 @@ from pip.core.errors import (
 )
 from pip.core.direct_url import ArchiveInfo, DirInfo
 from pip.core.hashes import Hashes
+from pip.core.urls import url_to_path
 from pip.index.links import Link
 from pip.core.packaging import (
     Requirement as ParsedRequirement,
@@ -884,7 +885,7 @@ def normalize_file_url_reference(value: str) -> str | None:
 
 
 def path_from_file_url(parsed: urllib.parse.ParseResult) -> Path:
-    path = Path(urllib.request.url2pathname(parsed.path))
+    path = Path(url_to_path(urllib.parse.urlunparse(parsed)))
     if not path.is_absolute():
         path = Path.cwd() / path
     return path.resolve(strict=False)

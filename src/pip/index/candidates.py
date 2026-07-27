@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pip.core.errors import BuildError
 from pip.core.packaging import Version, canonicalize_name
+from pip.core.temp_dir import remove_temp_directory
 from pip.core.wheel import TargetContext, WheelFile
 from pip.index.source_models import CandidateRecord
 
@@ -187,7 +187,7 @@ class InstallationCandidate(CandidateRecord):
             return RejectedCandidate(link, RejectionReason.MISSING_ARTIFACT, str(exc))
         finally:
             if local is not None:
-                shutil.rmtree(local, ignore_errors=True)
+                remove_temp_directory(local)
         return cls(name=metadata.name, version=version, link=link)
 
     def sort_key(self, *, prefer_binary: bool) -> tuple[object, object, object, int]:
