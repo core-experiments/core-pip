@@ -13,6 +13,12 @@ from pip_test_support import (
 )
 
 
+def setuptools_compatibility_constraint(script: PipTestEnvironment) -> Path:
+    constraints = script.scratch_path / "build-constraints.txt"
+    constraints.write_text("setuptools<79\n", encoding="utf-8")
+    return constraints
+
+
 @pytest.mark.network
 def test_simple_extras_install_from_pypi(script: PipTestEnvironment) -> None:
     """
@@ -20,6 +26,8 @@ def test_simple_extras_install_from_pypi(script: PipTestEnvironment) -> None:
     """
     result = script.pip(
         "install",
+        "--build-constraint",
+        setuptools_compatibility_constraint(script),
         "Paste[openid]==1.7.5.1",
         expect_stderr=True,
     )
@@ -63,6 +71,8 @@ def test_no_extras_uninstall(script: PipTestEnvironment) -> None:
     """
     result = script.pip(
         "install",
+        "--build-constraint",
+        setuptools_compatibility_constraint(script),
         "Paste[openid]==1.7.5.1",
         expect_stderr=True,
     )

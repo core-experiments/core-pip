@@ -11,6 +11,7 @@ from pip.core.errors import (
     PipError,
 )
 from pip.core.pip_version import set_pip_version
+from pip.core.temp_dir import global_tempdir_manager
 
 VERBOSITY_FLAGS = frozenset(("-vv", "-vvv"))
 VERSION_FLAGS = frozenset(("-V", "--version"))
@@ -43,7 +44,8 @@ def main(
         if target_prefix is not None:
             os.environ["PIP_TARGET_PREFIX"] = target_prefix
         configure_logging(log_file)
-        status = run(argv, require_virtualenv=require_virtualenv, location=location)
+        with global_tempdir_manager():
+            status = run(argv, require_virtualenv=require_virtualenv, location=location)
         sys.stdout.flush()
         sys.stderr.flush()
         return status

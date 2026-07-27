@@ -143,8 +143,12 @@ def test_install_report_index(
 ) -> None:
     """Test report for sdist obtained from index."""
     report_path = tmp_path / "report.json"
+    build_constraints = tmp_path / "build-constraints.txt"
+    build_constraints.write_text("setuptools<79\n", encoding="utf-8")
     script.pip(
         "install",
+        "--build-constraint",
+        str(build_constraints),
         "--dry-run",
         *specifiers,
         "--report",
@@ -174,8 +178,12 @@ def test_install_report_index_multiple_extras(
 ) -> None:
     """Test report for sdist obtained from index, with multiple extras requested."""
     report_path = tmp_path / "report.json"
+    build_constraints = tmp_path / "build-constraints.txt"
+    build_constraints.write_text("setuptools<79\n", encoding="utf-8")
     script.pip(
         "install",
+        "--build-constraint",
+        str(build_constraints),
         "--dry-run",
         "Paste[openid]",
         "Paste[subprocess]",
