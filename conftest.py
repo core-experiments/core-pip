@@ -184,9 +184,9 @@ def pytest_collection_modifyitems(config: Config, items: list[pytest.Function]) 
             item.add_marker(pytest.mark.skip("Incompatible with venv"))
 
         module_file = item.module.__file__
-        module_path = os.path.relpath(
-            module_file, os.path.commonpath([__file__, module_file])
-        )
+        module_path = Path(
+            os.path.relpath(module_file, os.path.commonpath([__file__, module_file]))
+        ).as_posix()
 
         module_root_dir = Path(module_path).parts[0]
         if module_path.startswith(("tests/cli/functional", "tests/cli/integration")):
