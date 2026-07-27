@@ -8,7 +8,6 @@ import configparser
 import os
 import re
 import sys
-import urllib.parse
 import zipfile
 from collections.abc import Collection
 from pathlib import Path
@@ -27,6 +26,7 @@ from pip.core.metadata import (
     iter_installed_distributions,
 )
 from pip.core.direct_url import DirectUrl
+from pip.core.urls import url_to_path
 from pip.core.wheel import parse_wheel, read_wheel_metadata_file
 
 
@@ -343,8 +343,7 @@ class InstalledMetadataDistribution:
     def editable_project_location(self) -> str | None:
         direct_url = self.direct_url
         if direct_url and direct_url.is_local_editable():
-            parsed = urllib.parse.urlparse(direct_url.url)
-            return urllib.parse.unquote(parsed.path)
+            return url_to_path(direct_url.url)
         if self.info_location and self.info_location.endswith(".egg-info"):
             egg_links = Path(self.info_location).parent.glob("*.egg-link")
             egg_link = next(egg_links, None)

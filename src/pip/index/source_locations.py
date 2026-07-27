@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ntpath
 import os
 import urllib.parse
 from dataclasses import dataclass
@@ -107,4 +108,5 @@ def looks_like_path_requirement(value: str) -> bool:
         value.startswith((".", "/", "~"))
         or os.sep in value
         or (os.altsep is not None and os.altsep in value)
+        or bool(ntpath.splitdrive(value)[0])
     )

@@ -501,6 +501,8 @@ def parse_requirement_line(
         index = 0
         while index < len(tokens):
             token = tokens[index]
+            if len(token) >= 2 and token[0] == token[-1] and token[0] in "\"'":
+                token = token[1:-1]
             if token in config_setting_options:
                 if index + 1 >= len(tokens):
                     raise RequirementsFileParseError(f"{token} requires a value")
