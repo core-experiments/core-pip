@@ -15,7 +15,7 @@ from pip_test_support import (
 
 def setuptools_compatibility_constraint(script: PipTestEnvironment) -> Path:
     constraints = script.scratch_path / "build-constraints.txt"
-    constraints.write_text("setuptools<79\n", encoding="utf-8")
+    constraints.write_text("setuptools<72\n", encoding="utf-8")
     return constraints
 
 
