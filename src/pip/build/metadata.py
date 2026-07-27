@@ -466,11 +466,16 @@ class InstalledDistributionStore:
 
     def find(self, name: str) -> InstalledMetadataDistribution | None:
         canonical = canonicalize_name(name)
+        distributions = [
+            distribution
+            for distribution in self.iter()
+            if distribution.canonical_name == canonical
+        ]
         return next(
             (
                 distribution
-                for distribution in self.iter()
-                if distribution.canonical_name == canonical
+                for distribution in distributions
+                if distribution.in_usersite
             ),
-            None,
+            next(iter(distributions), None),
         )

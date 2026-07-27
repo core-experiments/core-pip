@@ -10,7 +10,7 @@ from typing import TypeVar
 
 from pip.core.errors import InvalidWheelFilename
 from pip.core.hashes import Hashes
-from pip.core.packaging import Requirement, SpecifierSet, Version
+from pip.core.packaging import Requirement, SpecifierSet, Version, is_windows_path
 from pip.core.release_control import ReleaseControl
 from pip.core.target_python import TargetPython, get_supported
 from pip.core.wheel import TargetContext, Wheel, WheelTag, legacy_build_tag
@@ -271,7 +271,9 @@ class CandidateEvaluator:
             return True
         if requirement.raw.startswith("file:"):
             return True
-        return requirement.raw.startswith((".", "/", "~"))
+        return requirement.raw.startswith((".", "/", "~")) or is_windows_path(
+            requirement.raw
+        )
 
     @staticmethod
     def reject(link: Link, reason: RejectionReason, detail: str) -> RejectedCandidate:

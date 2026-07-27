@@ -500,14 +500,14 @@ def parse_requirement_line(
         hash_options: dict[str, list[str]] = {}
         index = 0
         while index < len(tokens):
-            token = tokens[index]
-            if len(token) >= 2 and token[0] == token[-1] and token[0] in "\"'":
-                token = token[1:-1]
+            token = _strip_matching_quotes(tokens[index])
             if token in config_setting_options:
                 if index + 1 >= len(tokens):
                     raise RequirementsFileParseError(f"{token} requires a value")
                 index += 1
-                merge_config_setting(config_settings, tokens[index])
+                merge_config_setting(
+                    config_settings, _strip_matching_quotes(tokens[index])
+                )
             elif token.startswith(config_setting_options):
                 merge_config_setting(config_settings, token.split("=", 1)[1])
             elif token == "--hash":
@@ -558,6 +558,12 @@ def parse_requirement_line(
             line_source=f"{filename} (line {line_number})",
         )
     ]
+
+
+def _strip_matching_quotes(value: str) -> str:
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+        return value[1:-1]
+    return value
 
 
 def add_hash_option(
