@@ -5,6 +5,7 @@ import subprocess
 import sys
 import sysconfig
 from collections.abc import Iterable
+from types import TracebackType
 from typing import TYPE_CHECKING, Any
 
 from pip.install.build_env.base import (
@@ -71,9 +72,10 @@ class VenvBuildEnvironment(BuildEnvironment):
     def __init__(self, installer: BuildEnvironmentInstaller) -> None:
         # We defer these imports because certain distributions of Python do not
         # include a functional venv out of the box.
-        self.env_path_internal = TempDirectory(
+        self.temp_dir_internal = TempDirectory(
             kind=tempdir_kinds.BUILD_ENV, globally_managed=True
-        ).path
+        )
+        self.env_path_internal = self.temp_dir_internal.path
         context: Any = None
         try:
             import virtualenv
@@ -203,6 +205,15 @@ class VenvBuildEnvironment(BuildEnvironment):
         # However, we don't want a pre-existing PYTHONPATH to influence the
         # backend calls.
         os.environ.update({"PATH": os.pathsep.join(new_path), "PYTHONPATH": ""})
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
+        super().__exit__(exc_type, exc_val, exc_tb)
+        self.temp_dir_internal.cleanup()
 
     def install_requirements(
         self,
