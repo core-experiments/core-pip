@@ -33,13 +33,16 @@ def url_to_path(url: str) -> str:
         )
 
     path = urllib.request.url2pathname(netloc + path)
+    # ``url2pathname`` has returned both ``/C:/...`` and ``\\C:\\...``
+    # for drive-qualified file URLs across Python versions.  Leaving the
+    # separator in place makes ``abspath`` turn it into ``C:\\C:\\...``.
     if (
         WINDOWS
         and not netloc
         and len(path) >= 3
-        and path[0] == "/"
+        and path[0] in "/\\"
         and path[1] in string.ascii_letters
-        and path[2:4] in (":", ":/")
+        and path[2] == ":"
     ):
         path = path[1:]
     return path
