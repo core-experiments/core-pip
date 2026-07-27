@@ -529,11 +529,17 @@ def parse_requirement_line(
             parsed_options["hashes"] = hash_options
         requirement_text = " ".join(requirement_tokens)
     requirement_text = expand_env_variables(requirement_text)
+    requirement_for_install = requirement_text
+    file_reference = urllib.parse.urlparse(requirement_for_install)
+    if file_reference.scheme == "file" and not file_reference.path.startswith("/"):
+        requirement_for_install = normalize_reference(
+            requirement_for_install, filename, as_path=True
+        )
     try:
         if editable or option in EDITABLE_OPTIONS:
-            install_req_from_editable(value)
+            install_req_from_editable(requirement_for_install)
         else:
-            install_req_from_line(requirement_text)
+            install_req_from_line(requirement_for_install)
     except ValueError as exc:
         raise InstallationError(f"Invalid requirement: {requirement_text!r}") from exc
     comes_from = f"{'-c' if constraint else '-r'} {filename} (line {line_number})"
@@ -542,7 +548,7 @@ def parse_requirement_line(
         metadata.update(parsed_options)
     return [
         ParsedRequirement(
-            requirement=requirement_text if option not in EDITABLE_OPTIONS else value,
+            requirement=requirement_for_install,
             comes_from=comes_from,
             is_editable=editable or option in EDITABLE_OPTIONS,
             constraint=constraint,
