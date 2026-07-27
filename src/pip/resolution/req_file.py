@@ -492,7 +492,7 @@ def parse_requirement_line(
         requirement_text, parsed_options = requirement_line.strip(), {}
     else:
         try:
-            tokens = shlex.split(requirement_line)
+            tokens = shlex.split(requirement_line, posix=os.name != "nt")
         except ValueError as exc:
             raise RequirementsFileParseError(str(exc)) from exc
         requirement_tokens: list[str] = []
