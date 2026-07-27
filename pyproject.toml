@@ -1,5 +1,5 @@
 [project]
-name = "pip"
+name = "core-pip"
 version = "0.0.0"
 description = "The PyPA recommended tool for installing Python packages."
 license = "MIT"
@@ -72,6 +72,9 @@ test = [
 
 [tool.uv]
 default-groups = ["typing"]
+
+[tool.uv.build-backend]
+module-name = "pip"
 
 [tool.ruff]
 extend-exclude = [

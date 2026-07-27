@@ -11,8 +11,8 @@ def test_runner_work_in_environments_with_no_pip(
 ) -> None:
     runner = pip_src / "src" / "pip" / "__pip-runner__.py"
 
-    # Ensure there's no pip installed in the environment
-    script.pip("uninstall", "pip", "--yes", use_module=True)
+    # Ensure there's no core-pip distribution installed in the environment.
+    script.pip("uninstall", "core-pip", "--yes", use_module=True)
     # We don't use script.pip to check here, as when testing a
     # zipapp, script.pip will run pip from the zipapp.
     script.run("python", "-c", "import pip", expect_error=True)
