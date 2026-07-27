@@ -248,7 +248,7 @@ def pytest_collection_modifyitems(config: Config, items: list[pytest.Function]) 
                     "Cannot use the ``script`` funcarg in a package unit test: "
                     f"(filename = {module_path}, item = {item})"
                 )
-        elif module_path == os.path.join("tests", "test_workspace_boundaries.py"):
+        elif module_path == "tests/test_workspace_boundaries.py":
             item.add_marker(pytest.mark.unit)
         else:
             raise RuntimeError(f"Unknown test type (filename = {module_path})")
