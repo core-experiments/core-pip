@@ -5,16 +5,14 @@ from __future__ import annotations
 import sys
 
 from pip.cli.commands.registry import COMMAND_SPECS, get_command, parser_for_command
-from pip.core.pip_version import get_pip_version
+from pip.core.pip_version import get_pip_distribution, get_pip_version
 
 
 def print_version(location: str | None = None) -> None:
     from pathlib import Path
 
     if location is None:
-        import importlib.metadata
-
-        location = str(importlib.metadata.distribution("pip").locate_file("pip"))
+        location = str(get_pip_distribution().locate_file("pip"))
     print(
         f"pip {get_pip_version()} from {Path(location).resolve()} "
         f"(python {sys.version_info.major}.{sys.version_info.minor})"

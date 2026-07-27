@@ -41,6 +41,7 @@ from pip.core.packaging import (
     marker_applies,
     parse_requirement,
 )
+from pip.core.pip_version import PIP_DISTRIBUTION_NAMES
 from pip.core.wheel import TargetContext
 from pip.index.links import Link
 from pip.install.report import ReportItem, write_install_report
@@ -876,7 +877,7 @@ def run_install(args: list[str]) -> int:
 
 def warn_about_install_conflicts(changed_names: set[str]) -> None:
     """Warn about broken requirements affected by the current install."""
-    distributions = InstalledDistributionStore().iter(skip={"pip"})
+    distributions = InstalledDistributionStore().iter(skip=PIP_DISTRIBUTION_NAMES)
     package_set = {
         dist.canonical_name: PackageDetails.from_dependencies(
             Version(dist.raw_version),

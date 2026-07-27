@@ -86,9 +86,9 @@ def test_basic_freeze(script: PipTestEnvironment) -> None:
 def test_freeze_with_pip(script: PipTestEnvironment) -> None:
     """Test that pip shows itself only when --all is used"""
     result = script.pip("freeze")
-    assert "pip==" not in result.stdout
+    assert "core-pip==" not in result.stdout
     result = script.pip("freeze", "--all")
-    assert "pip==" in result.stdout
+    assert "core-pip==" in result.stdout
 
 
 def test_freeze_with_setuptools(script: PipTestEnvironment) -> None:
@@ -135,12 +135,12 @@ def test_exclude_and_normalization(script: PipTestEnvironment, tmpdir: Path) -> 
 
 def test_freeze_multiple_exclude_with_all(script: PipTestEnvironment) -> None:
     result = script.pip("freeze", "--all")
-    assert "pip==" in result.stdout
+    assert "core-pip==" in result.stdout
     assert "setuptools==" in result.stdout
     result = script.pip(
-        "freeze", "--all", "--exclude", "pip", "--exclude", "setuptools"
+        "freeze", "--all", "--exclude", "core-pip", "--exclude", "setuptools"
     )
-    assert "pip==" not in result.stdout
+    assert "core-pip==" not in result.stdout
     assert "setuptools==" not in result.stdout
 
 

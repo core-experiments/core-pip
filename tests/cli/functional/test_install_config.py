@@ -461,7 +461,19 @@ def test_prompt_for_keyring_if_needed(
         keyring_script = script_factory(
             workspace.joinpath("keyring"), keyring_virtualenv
         )
-        keyring_script.pip_install_local("keyring", "-f", data.common_wheels)
+        keyring_script.pip_install_local(
+            "keyring",
+            "jaraco.classes",
+            "jaraco.context",
+            "jaraco.functools",
+            "more-itertools",
+            "importlib-metadata",
+            "zipp",
+            "backports.tarfile",
+            "--no-deps",
+            "-f",
+            data.common_wheels,
+        )
 
         # Set up this venv with a PATH that can see the keyring installed in a
         # separate venv.
@@ -476,7 +488,19 @@ def test_prompt_for_keyring_if_needed(
     elif keyring_provider_implementation == "import":
         # Set up a venv with keyring installed.
         virtualenv_script = script_factory(workspace.joinpath("venv"), virtualenv)
-        virtualenv_script.pip_install_local("keyring", "-f", data.common_wheels)
+        virtualenv_script.pip_install_local(
+            "keyring",
+            "jaraco.classes",
+            "jaraco.context",
+            "jaraco.functools",
+            "more-itertools",
+            "importlib-metadata",
+            "zipp",
+            "backports.tarfile",
+            "--no-deps",
+            "-f",
+            data.common_wheels,
+        )
         keyring_script = virtualenv_script
     elif keyring_provider_implementation == "disabled":
         # Set up an venv that does not have keyring installed, nor is able to

@@ -10,6 +10,7 @@ import re
 import sys
 import urllib.parse
 import zipfile
+from collections.abc import Collection
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -443,7 +444,7 @@ class InstalledDistributionStore:
         user_only: bool = False,
         editables_only: bool = False,
         include_editables: bool = True,
-        skip: set[str] | None = None,
+        skip: Collection[str] | None = None,
     ) -> list[InstalledMetadataDistribution]:
         result: list[InstalledMetadataDistribution] = []
         for distribution in iter_installed_distributions(self.paths):

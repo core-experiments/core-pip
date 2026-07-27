@@ -34,7 +34,7 @@ def test_inspect_basic(simple_script: PipTestEnvironment) -> None:
     installed_by_name.pop("coverage", None)
     assert len(installed_by_name) == 3
     assert installed_by_name.keys() == {
-        "pip",
+        "core-pip",
         "setuptools",
         "simplewheel",
     }

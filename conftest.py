@@ -26,17 +26,13 @@ from typing import TYPE_CHECKING, Any, AnyStr, ClassVar
 from unittest.mock import patch
 from zipfile import ZipFile
 
-if os.name == "nt":
-    import msvcrt
-else:
-    import fcntl
-
 if sys.version_info < (3, 11):
     from pip._vendor import tomli
 
     sys.modules.setdefault("tomllib", tomli)
 
 import pytest
+from filelock import FileLock
 
 sys.path.insert(0, str(Path(__file__).parent / "tests/cli"))
 
@@ -499,34 +495,20 @@ def pip_editable_parts(
     # Otherwise one worker can move that file into its transaction backup just
     # as another worker tries to move it, leaving the subprocess without pip.
     lock_path = Path(tempfile.gettempdir()) / "pip-tests-editable-install.lock"
-    with lock_path.open("w") as lock:
-        if os.name == "nt":
-            lock.write("\0")
-            lock.flush()
-            lock.seek(0)
-            msvcrt.locking(lock.fileno(), msvcrt.LK_LOCK, 1)
-        else:
-            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
-        try:
-            subprocess.check_call(
-                [
-                    sys.executable,
-                    "-m",
-                    "pip",
-                    "install",
-                    "--target",
-                    pip_self_install_path,
-                    "--no-deps",
-                    "-e",
-                    pip_editable,
-                ]
-            )
-        finally:
-            if os.name == "nt":
-                lock.seek(0)
-                msvcrt.locking(lock.fileno(), msvcrt.LK_UNLCK, 1)
-            else:
-                fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+    with FileLock(lock_path):
+        subprocess.check_call(
+            [
+                sys.executable,
+                "-m",
+                "pip",
+                "install",
+                "--target",
+                pip_self_install_path,
+                "--no-deps",
+                "-e",
+                pip_editable,
+            ]
+        )
     pth = next(pip_self_install_path.glob("*pip*.pth"))
     pth.write_text(
         pth.read_text(encoding="utf-8")

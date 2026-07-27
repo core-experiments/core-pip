@@ -52,6 +52,7 @@ benchmark = ["asv>=0.6.5"]
 typing = ["ruff", "ty"]
 test = [
     "cryptography",
+    "filelock",
     "installer",
     "keyring",
     "msgpack",

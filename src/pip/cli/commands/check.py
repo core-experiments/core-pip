@@ -14,6 +14,7 @@ from pip.build.check import (
 from pip.build.metadata import InstalledDistributionStore
 from pip.cli.parser import ArgumentParser
 from pip.core.packaging import Version, canonicalize_name
+from pip.core.pip_version import PIP_DISTRIBUTION_NAMES
 from pip.core.target_python import get_supported as get_supported_tags
 
 
@@ -23,7 +24,7 @@ def create_parser() -> ArgumentParser:
 
 def run_check(args: list[str]) -> int:
     create_parser().parse_args(args)
-    distributions = InstalledDistributionStore().iter(skip={"pip"})
+    distributions = InstalledDistributionStore().iter(skip=PIP_DISTRIBUTION_NAMES)
     package_set = {
         dist.canonical_name: PackageDetails.from_dependencies(
             Version(dist.raw_version),
