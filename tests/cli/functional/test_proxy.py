@@ -18,17 +18,15 @@ from pip_test_support.server import (
 
 
 class AccessLogPlugin(HttpProxyBasePlugin):
-    logs: list[dict[str, Any]] = []
-
     def on_access_log(self, context: dict[str, Any]) -> None:
-        self.logs.append(context)
+        print(context)
 
 
 @pytest.mark.network
 def test_proxy_overrides_env(
-    script: PipTestEnvironment,
+    script: PipTestEnvironment, capfd: pytest.CaptureFixture[str]
 ) -> None:
-    AccessLogPlugin.logs.clear()
+    capfd.readouterr()
     with (
         proxy.Proxy(port=0, num_acceptors=1) as proxy1,
         proxy.Proxy(plugins=[AccessLogPlugin], port=0, num_acceptors=1) as proxy2,
@@ -46,9 +44,8 @@ def test_proxy_overrides_env(
             "INITools==0.1",
         )
         result.did_create(Path("scratch") / "pip_downloads" / "INITools-0.1.tar.gz")
-        assert not any(
-            log["request_method"] == "CONNECT" for log in AccessLogPlugin.logs
-        )
+        out, _ = capfd.readouterr()
+        assert "CONNECT" not in out
 
 
 def test_proxy_does_not_override_netrc(
