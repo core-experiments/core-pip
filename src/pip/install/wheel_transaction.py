@@ -11,6 +11,7 @@ import compileall
 import csv
 import hashlib
 import importlib.util
+import io
 import os
 import stat
 import sys
@@ -596,15 +597,20 @@ def write_windows_script(path: Path, script: str, *, gui: bool) -> None:
 
 
 def script_matches(path: Path, scripts: dict[str, tuple[str, bool]]) -> bool:
-    script = scripts.get(path.name)
+    name = path.stem if path.suffix.lower() == ".exe" else path.name
+    script = scripts.get(name)
     if script is None:
         return False
     target_ref, _ = script
     module, _, attribute = target_ref.partition(":")
     entry = attribute or "main"
     try:
-        text = path.read_text(encoding="utf-8")
-    except OSError:
+        if path.suffix.lower() == ".exe":
+            with zipfile.ZipFile(io.BytesIO(path.read_bytes())) as archive:
+                text = archive.read("__main__.py").decode("utf-8")
+        else:
+            text = path.read_text(encoding="utf-8")
+    except (OSError, KeyError, UnicodeDecodeError, zipfile.BadZipFile):
         return False
     return f"from {module} import {entry}" in text
 
