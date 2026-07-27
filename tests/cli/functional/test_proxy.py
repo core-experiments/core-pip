@@ -31,8 +31,9 @@ def test_proxy_overrides_env(
         proxy.Proxy(port=0, num_acceptors=1) as proxy1,
         proxy.Proxy(plugins=[AccessLogPlugin], port=0, num_acceptors=1) as proxy2,
     ):
-        script.environ["http_proxy"] = f"127.0.0.1:{proxy2.flags.port}"
-        script.environ["https_proxy"] = f"127.0.0.1:{proxy2.flags.port}"
+        environment_proxy = f"http://127.0.0.1:{proxy2.flags.port}"
+        script.environ["http_proxy"] = environment_proxy
+        script.environ["https_proxy"] = environment_proxy
         result = script.pip(
             "download",
             "--proxy",

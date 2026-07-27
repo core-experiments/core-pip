@@ -99,8 +99,8 @@ def run_with_build_env(
         + indent(dedent(setup_script_contents), "    ")
         + indent(
             dedent("""
-                if len(sys.argv) > 1:
-                    with build_env:
+                with build_env:
+                    if len(sys.argv) > 1:
                         subprocess.check_call((
                             build_env.python_executable, sys.argv[1]
                         ))

@@ -50,6 +50,18 @@ def create_parser() -> ArgumentParser:
 
 def run_download(args: list[str]) -> int:
     options = create_parser().parse_args(args)
+    if options.proxy is not None:
+        # Keep urllib-based helpers and subprocesses on the same proxy as the
+        # resolver session. This also ensures --proxy overrides inherited
+        # HTTP(S)_PROXY values on every platform.
+        for name in (
+            "PIP_PROXY",
+            "HTTP_PROXY",
+            "HTTPS_PROXY",
+            "http_proxy",
+            "https_proxy",
+        ):
+            os.environ[name] = options.proxy
     config = load_source_config("download")
     bundle = collect_requirements(
         requirements=options.requirements,
