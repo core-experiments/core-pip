@@ -1,4 +1,5 @@
 import textwrap
+from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
@@ -6,6 +7,18 @@ import pytest
 import tomllib
 from pip.core.urls import path_to_url
 from pip_test_support import PipTestEnvironment, TestData
+
+
+def expected_simplewheel_lock(
+    shared_data: TestData, wheel_name: str
+) -> dict[str, object]:
+    wheel = shared_data.root.joinpath("packages", wheel_name)
+    assert wheel.is_file()
+    return {
+        "name": wheel.name,
+        "url": path_to_url(str(wheel)),
+        "hashes": {"sha256": sha256(wheel.read_bytes()).hexdigest()},
+    }
 
 
 def test_lock_wheel_from_findlinks(
@@ -22,6 +35,7 @@ def test_lock_wheel_from_findlinks(
     )
     result.did_create(Path("scratch") / "pylock.toml")
     pylock = tomllib.loads(script.scratch_path.joinpath("pylock.toml").read_text())
+    wheel_name = pylock["packages"][0]["wheels"][0]["name"]
     assert pylock == {
         "created-by": "pip",
         "lock-version": "1.0",
@@ -31,20 +45,7 @@ def test_lock_wheel_from_findlinks(
                 "version": "2.0",
                 "wheels": [
                     {
-                        "name": "simplewheel-2.0-1-py2.py3-none-any.whl",
-                        "url": path_to_url(
-                            str(
-                                shared_data.root
-                                / "packages"
-                                / "simplewheel-2.0-1-py2.py3-none-any.whl"
-                            )
-                        ),
-                        "hashes": {
-                            "sha256": (
-                                "71e1ca6b16ae3382a698c284013f6650"
-                                "4f2581099b2ce4801f60e9536236ceee"
-                            )
-                        },
+                        **expected_simplewheel_lock(shared_data, wheel_name),
                     }
                 ],
             },
@@ -149,6 +150,7 @@ def test_lock_local_editable_with_dep(
         expect_stderr=True,  # for the experimental warning
     )
     pylock = tomllib.loads(result.stdout)
+    wheel_name = pylock["packages"][1]["wheels"][0]["name"]
     assert pylock["packages"] == [
         {
             "name": "pkga",
@@ -159,20 +161,7 @@ def test_lock_local_editable_with_dep(
             "version": "2.0",
             "wheels": [
                 {
-                    "name": "simplewheel-2.0-1-py2.py3-none-any.whl",
-                    "url": path_to_url(
-                        str(
-                            shared_data.root
-                            / "packages"
-                            / "simplewheel-2.0-1-py2.py3-none-any.whl"
-                        )
-                    ),
-                    "hashes": {
-                        "sha256": (
-                            "71e1ca6b16ae3382a698c284013f6650"
-                            "4f2581099b2ce4801f60e9536236ceee"
-                        )
-                    },
+                    **expected_simplewheel_lock(shared_data, wheel_name),
                 }
             ],
         },

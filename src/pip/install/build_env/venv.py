@@ -119,10 +119,21 @@ class VenvBuildEnvironment(BuildEnvironment):
             except (OSError, RuntimeError) as e:
                 raise VenvCreationError(str(e))
 
-        if sys.version_info >= (3, 12):
-            # The context object was only documented in Python 3.12
+        if sys.version_info >= (3, 12) and context is not None:
+            # The context object was only documented in Python 3.12.  The
+            # virtualenv backend does not return one from ``cli_run``.
             self.lib_dirs = [context.lib_path]
             self.bin_path_internal = context.bin_path
+        elif sys.version_info >= (3, 12):
+            # Derive the same paths when virtualenv created the environment.
+            # This also keeps pip compatible with virtualenv versions that
+            # intentionally return no context from their CLI entry point.
+            self.lib_dirs = [
+                get_venv_path_from_sysconfig("purelib", self.env_path_internal)
+            ]
+            self.bin_path_internal = get_venv_path_from_sysconfig(
+                "scripts", self.env_path_internal
+            )
         elif sys.version_info[:2] == (3, 11):
             # On Python 3.11, we can use sysconfig.
             self.lib_dirs = [
