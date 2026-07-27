@@ -3,6 +3,7 @@ from __future__ import annotations
 import codecs
 import locale
 import logging
+import ntpath
 import os
 import re
 import shlex
@@ -576,9 +577,22 @@ def merge_config_setting(target: dict[str, object], raw: str) -> None:
 def normalize_reference(value: str, base: str | None, *, as_path: bool = False) -> str:
     value = expand_env_variables(value.strip())
     parsed = urllib.parse.urlparse(value)
+    windows_path = bool(
+        ntpath.splitdrive(value)[0] and len(value) > 2 and value[2] in "/\\"
+    )
     base_parsed = urllib.parse.urlparse(base) if base else None
     base_directory = base.rsplit("/", 1)[0] + "/" if base else None
-    if parsed.scheme:
+    if parsed.scheme and not windows_path:
+        if (
+            parsed.scheme == "file"
+            and base
+            and not parsed.netloc
+            and not parsed.path.startswith("/")
+        ):
+            base_path = Path(base).resolve().parent
+            return path_to_url(str(base_path / parsed.path)) + (
+                f"#{parsed.fragment}" if parsed.fragment else ""
+            )
         if base_parsed is not None and base_parsed.scheme:
             assert base_directory is not None
             return urllib.parse.urljoin(base_directory, value)

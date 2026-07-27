@@ -4,6 +4,7 @@ import email.message
 import hashlib
 import json
 import logging
+import ntpath
 import os
 import subprocess
 import sys
@@ -846,6 +847,7 @@ def looks_like_path(value: str) -> bool:
         or (os.altsep is not None and os.altsep in value)
         or "://" in value
         or " @ " in value
+        or bool(ntpath.splitdrive(value)[0])
     )
 
 

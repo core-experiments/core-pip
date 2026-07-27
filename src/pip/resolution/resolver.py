@@ -731,9 +731,7 @@ class Resolver:
                     and candidate.source_url.startswith("file://")
                 ):
                     try:
-                        hashes = file_hashes(
-                            Path(candidate.source_url.removeprefix("file://"))
-                        )
+                        hashes = file_hashes(url_to_path(candidate.source_url))
                     except OSError:
                         hashes = {}
                 requirement.download_info = DownloadInfo(

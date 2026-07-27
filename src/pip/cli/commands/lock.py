@@ -127,7 +127,10 @@ def run_lock(args: list[str]) -> int:
                     and item.locked_name is not None
                     and item.locked_link is not None
                     and not item.locked_link.startswith(("git+", "hg+", "svn+", "bzr+"))
-                    and not Path(item.locked_link.removeprefix("file://")).is_dir()
+                    and not (
+                        item.locked_link.startswith("file:")
+                        and Path(url_to_path(item.locked_link)).is_dir()
+                    )
                 ):
                     archive_packages.append(
                         {
