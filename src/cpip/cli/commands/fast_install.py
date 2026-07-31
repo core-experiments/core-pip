@@ -374,3 +374,104 @@ def run(args: list[str]) -> int | None:
             )
         )
     return 0
+
+
+def run_local_fallback(args: list[str]) -> int | None:
+    """Handle the narrow local-wheel shape when fast install needs fallback."""
+    options = parse_arguments(args)
+    if (
+        options is None
+        or not options.no_index
+        or not options.ignore_installed
+        or not options.no_compile
+        or options.target is None
+        or not options.find_links
+        or not options.requirements
+        or "--upgrade" in args
+        or "--no-compile" not in args
+        or _target_is_empty(options.target)
+    ):
+        return None
+
+    from cpip.core.packaging import Version
+    from cpip.core.wheel import WheelCandidate, parse_wheel, wheel_candidate
+    from cpip.install.target import InstallTarget
+    from cpip.install.wheel_transaction import install_wheels_transactionally
+    from pathlib import Path
+    from cpip.resolution.fast_local_wheelhouse import resolve
+
+    plan = resolve(
+        options.find_links,
+        options.requirements,
+        cache_dir=options.cache_dir,
+    )
+    if plan is None:
+        return None
+
+    candidates: list[WheelCandidate] = []
+    try:
+        for local_candidate in plan.candidates:
+            candidates.append(
+                WheelCandidate(
+                    name=local_candidate.name,
+                    version=Version(str(local_candidate.version)),
+                    path=Path(local_candidate.path),
+                    dependencies=(),
+                    provided_extras=local_candidate.provided_extras,
+                    requires_python=local_candidate.requires_python,
+                    source_kind="wheel",
+                )
+            )
+    except (OSError, TypeError, ValueError):
+        return None
+
+    if sum(candidate.path.stat().st_size for candidate in candidates) > 4 * 1024 * 1024:
+        import zipfile
+
+        for index, candidate in enumerate(candidates):
+            with zipfile.ZipFile(candidate.path) as archive:
+                dist_info, _ = parse_wheel(
+                    archive,
+                    candidate.path.name[:-4].split("-", 1)[0],
+                )
+                layout = wheel_candidate(
+                    candidate.path,
+                    archive=archive,
+                    dist_info_dir=dist_info,
+                ).wheel_layout
+            candidates[index] = candidate.copy_with(wheel_layout=layout)
+
+    requested_roots = {
+        value.partition("[")[0]
+        .split("==", 1)[0]
+        .split(">", 1)[0]
+        .split("<", 1)[0]
+        .strip()
+        .replace("_", "-")
+        .replace(".", "-")
+        .lower()
+        for value in options.requirements
+    }
+    if not options.quiet:
+        print(f"Looking in links: {', '.join(options.find_links)}")
+        if candidates:
+            print(
+                "Installing collected packages: "
+                + ", ".join(candidate.name for candidate in candidates)
+            )
+    install_wheels_transactionally(
+        [
+            (candidate.path, candidate.canonical_name in requested_roots, None)
+            for candidate in candidates
+        ],
+        target=InstallTarget.from_options("cpip", target=options.target),
+        pycompile=False,
+        preserve_existing=True,
+        candidates=candidates,
+    )
+    if candidates and not options.quiet:
+        print(
+            "Successfully installed "
+            + " ".join(f"{candidate.name}-{candidate.version}" for candidate in candidates)
+        )
+    return 0

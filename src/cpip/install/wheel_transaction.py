@@ -185,6 +185,7 @@ class WheelInstaller:
         destination_cache: dict[tuple[Path, PurePosixPath], Path] | None = None,
         stage_root: Path | None = None,
         transaction: InstallTransaction | None = None,
+        direct: bool = False,
     ) -> WheelCandidate:
         return install_wheel_internal(
             path,
@@ -203,6 +204,7 @@ class WheelInstaller:
             destination_cache=destination_cache,
             stage_root=stage_root,
             transaction=transaction,
+            direct=direct,
         )
 
     def validate_batch(
@@ -238,6 +240,7 @@ def install_wheel_internal(
     destination_cache: dict[tuple[Path, PurePosixPath], Path] | None = None,
     stage_root: Path | None = None,
     transaction: InstallTransaction | None = None,
+    direct: bool = False,
 ) -> WheelCandidate:
     if candidate is None:
         candidate = wheel_candidate(path)
@@ -260,11 +263,17 @@ def install_wheel_internal(
 
     if existing is not None and (existing.version != str(candidate.version) or force):
         print(f"Uninstalling {existing.raw_name}-{existing.raw_version}")
+    if direct and transaction is None:
+        raise ValueError("direct wheel installation needs a transaction")
 
     stage_context = (
-        tempfile.TemporaryDirectory(prefix="cpip-wheel-stage-")
-        if stage_root is None
-        else nullcontext(stage_root)
+        nullcontext(target.purelib)
+        if direct
+        else (
+            tempfile.TemporaryDirectory(prefix="cpip-wheel-stage-")
+            if stage_root is None
+            else nullcontext(stage_root)
+        )
     )
     with stage_context as temporary:
         stage_root = Path(temporary)
@@ -280,6 +289,17 @@ def install_wheel_internal(
         direct_contents: dict[Path, bytes] = {}
         direct_metadata: dict[Path, tuple[str, str]] = {}
         direct_content_size = 0
+
+        def write_direct(
+            destination: Path, contents: bytes, mode: int | None = None
+        ) -> None:
+            assert transaction is not None
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            transaction.record_created(destination)
+            with open(destination, "wb") as file:
+                file.write(contents)
+            if mode is not None:
+                os.chmod(destination, mode)
 
         with _open_wheel_archive(path, candidate) as archive:
             if validated_dist_info is None:
@@ -328,7 +348,13 @@ def install_wheel_internal(
                     and (not pycompile or relative.suffix != ".py")
                     and relative.name != "entry_points.txt"
                 )
-                if not direct_content:
+                destination = destination_internal(
+                    target,
+                    relative,
+                    resolved_directories=resolved_directories,
+                    resolved_roots=resolved_roots,
+                )
+                if not direct and not direct_content:
                     source_parent = source.parent
                     if source_parent not in stage_directories:
                         source_parent.mkdir(parents=True, exist_ok=True)
@@ -344,9 +370,20 @@ def install_wheel_internal(
                     metadata = wheel_record_metadata.get(relative.as_posix())
                     if metadata is not None and metadata[1] != str(member.file_size):
                         metadata = None
-                    record_metadata[source] = copy_member_with_metadata(
-                        archive, member, source, metadata=metadata
+                    if direct:
+                        assert transaction is not None
+                        destination.parent.mkdir(parents=True, exist_ok=True)
+                        transaction.record_created(destination)
+                    metadata = copy_member_with_metadata(
+                        archive,
+                        member,
+                        destination if direct else source,
+                        metadata=metadata,
                     )
+                    if direct:
+                        direct_metadata[destination] = metadata
+                    else:
+                        record_metadata[source] = metadata
                     contents = None
                 if rewrite_metadata:
                     assert contents is not None
@@ -357,15 +394,11 @@ def install_wheel_internal(
                             lines[index] = f"Name: {candidate.name.lower()}{ending}"
                             contents = "".join(lines).encode("utf-8")
                             break
-                if contents is not None and not direct_content:
+                if direct and contents is not None and not direct_content:
+                    write_direct(destination, contents, zip_mode(member))
+                if contents is not None and not direct_content and not direct:
                     with open(source, "wb") as file:
                         file.write(contents)
-                destination = destination_internal(
-                    target,
-                    relative,
-                    resolved_directories=resolved_directories,
-                    resolved_roots=resolved_roots,
-                )
                 if script_member:
                     rewrite_shebang(source, script_executable)
                 elif contents is not None:
@@ -373,10 +406,16 @@ def install_wheel_internal(
                     if metadata is None or metadata[1] != str(len(contents)):
                         metadata = record_metadata_internal(contents)
                     if direct_content:
-                        direct_contents[destination] = contents
+                        if direct:
+                            write_direct(destination, contents, zip_mode(member))
+                        else:
+                            direct_contents[destination] = contents
                         direct_metadata[destination] = metadata
                     else:
-                        record_metadata[source] = metadata
+                        if direct:
+                            direct_metadata[destination] = metadata
+                        else:
+                            record_metadata[source] = metadata
                 mode = zip_mode(member)
                 staged.append((source, destination, mode))
                 if relative.name == "RECORD" and relative.parts:
@@ -404,14 +443,21 @@ def install_wheel_internal(
         dist_info_stage = stage_root / dist_info
         installer_source = dist_info_stage / "INSTALLER"
         installer_destination = target.purelib / dist_info / "INSTALLER"
-        direct_contents[installer_destination] = b"cpip\n"
+        installer_contents = b"cpip\n"
+        if direct:
+            write_direct(installer_destination, installer_contents)
+        else:
+            direct_contents[installer_destination] = installer_contents
         direct_metadata[installer_destination] = record_metadata_internal(b"cpip\n")
         staged.append((installer_source, installer_destination, None))
 
         requested_destination = target.purelib / dist_info / "REQUESTED"
         if requested:
             requested_source = dist_info_stage / "REQUESTED"
-            direct_contents[requested_destination] = b""
+            if direct:
+                write_direct(requested_destination, b"")
+            else:
+                direct_contents[requested_destination] = b""
             direct_metadata[requested_destination] = record_metadata_internal(b"")
             staged.append((requested_source, requested_destination, None))
 
@@ -427,7 +473,9 @@ def install_wheel_internal(
                 )
             )
 
-        scripts = entry_point_scripts(stage_root / dist_info / "entry_points.txt")
+        scripts = {} if direct else entry_point_scripts(
+            stage_root / dist_info / "entry_points.txt"
+        )
         script_destinations = {
             target.scripts / generated
             for name in scripts
@@ -522,7 +570,10 @@ def install_wheel_internal(
         record_file = io.StringIO(newline="")
         csv.writer(record_file).writerows(record_rows)
         record_contents = record_file.getvalue().encode("utf-8")
-        direct_contents[record_destination] = record_contents
+        if direct:
+            write_direct(record_destination, record_contents)
+        else:
+            direct_contents[record_destination] = record_contents
         direct_metadata[record_destination] = record_metadata_internal(record_contents)
 
         owned_paths, old_paths = existing_paths(existing)
@@ -534,18 +585,21 @@ def install_wheel_internal(
                     owned_paths.add(destination)
         new_destinations = {destination for _, destination, _ in staged}
         active_transaction = transaction or InstallTransaction(owned_paths=owned_paths)
+        if direct and active_transaction is not transaction:
+            raise ValueError("direct wheel installation needs the shared transaction")
         if transaction is not None:
             transaction.owned.update(normalized_internal(path) for path in owned_paths)
-        for source, destination, mode in staged:
-            contents = direct_contents.get(destination)
-            if contents is not None:
-                active_transaction.add_contents(destination, contents, mode=mode)
-            else:
-                active_transaction.add(source, destination, mode=mode)
-        for old_path in old_paths - new_destinations:
-            active_transaction.delete(old_path)
-        if transaction is None:
-            active_transaction.commit(finalize=transaction_sink is None)
+        if not direct:
+            for source, destination, mode in staged:
+                contents = direct_contents.get(destination)
+                if contents is not None:
+                    active_transaction.add_contents(destination, contents, mode=mode)
+                else:
+                    active_transaction.add(source, destination, mode=mode)
+            for old_path in old_paths - new_destinations:
+                active_transaction.delete(old_path)
+            if transaction is None:
+                active_transaction.commit(finalize=transaction_sink is None)
         if transaction_sink is not None and transaction is None:
             transaction_sink.append(active_transaction)
         if existing is not None and (
@@ -596,6 +650,144 @@ def validate_wheel_batch(
     return candidates
 
 
+def _direct_batch_preflight(
+    requests: tuple[tuple[str | Path, bool, DirectUrl | None], ...],
+    candidates: tuple[WheelCandidate, ...],
+    *,
+    target: InstallTarget,
+) -> dict[tuple[Path, PurePosixPath], Path] | None:
+    """Check whether a batch can write final paths without staging files."""
+    destinations: set[Path] = set()
+    resolved_directories: dict[tuple[Path, PurePosixPath], Path] = {}
+    resolved_roots: dict[Path, Path] = {}
+    member_sets: list[tuple[object, ...]] = []
+    total_size = 0
+    for request, candidate in zip(requests, candidates):
+        if request[2] is not None or candidate.wheel_layout is None:
+            return None
+        _, raw_members, _ = candidate.wheel_layout
+        member_sets.append(raw_members)
+        total_size += sum(
+            raw_member[4] for raw_member in raw_members if not raw_member[0].endswith("/")
+        )
+    if total_size <= DIRECT_CONTENT_BATCH_LIMIT:
+        return None
+    for raw_members in member_sets:
+        for raw_member in raw_members:
+            name = raw_member[0]
+            if name.endswith("/"):
+                continue
+            try:
+                relative = validate_member(name)
+            except InstallationError:
+                return None
+            if (
+                relative.name in {"INSTALLER", "REQUESTED", "direct_url.json"}
+                or relative.name == "entry_points.txt"
+                or is_script_member(relative)
+            ):
+                return None
+            destination = destination_internal(
+                target,
+                relative,
+                resolved_directories=resolved_directories,
+                resolved_roots=resolved_roots,
+            )
+            if destination in destinations or os.path.lexists(destination):
+                return None
+            destinations.add(destination)
+    return resolved_directories
+
+
+def _install_wheels_directly(
+    requests: tuple[tuple[str | Path, bool, DirectUrl | None], ...],
+    candidates: tuple[WheelCandidate, ...],
+    *,
+    target: InstallTarget,
+    pycompile: bool,
+    installer: WheelInstaller,
+    destination_cache: dict[tuple[Path, PurePosixPath], Path],
+) -> tuple[WheelCandidate, ...]:
+    """Install a preflighted fresh batch directly with transactional rollback."""
+    with InstallTransaction() as transaction:
+        parallel = 4 <= len(requests) <= 64 and not pycompile
+
+        def install_one(
+            index: int,
+            request: tuple[str | Path, bool, DirectUrl | None],
+            candidate: WheelCandidate,
+        ) -> tuple[int, InstallTransaction, WheelCandidate]:
+            local_transaction = InstallTransaction()
+            try:
+                result = installer.install(
+                    request[0],
+                    candidate=candidate,
+                    requested=request[1],
+                    direct_url=request[2],
+                    existing=None,
+                    lookup_existing=False,
+                    destination_cache=destination_cache,
+                    transaction=local_transaction,
+                    direct=True,
+                )
+            except Exception:
+                local_transaction.rollback()
+                raise
+            return index, local_transaction, result
+
+        futures = []
+        staged_results: list[tuple[int, InstallTransaction, WheelCandidate]] = []
+        try:
+            if parallel:
+                from concurrent.futures import ThreadPoolExecutor
+
+                with ThreadPoolExecutor(max_workers=min(4, len(requests))) as pool:
+                    futures = [
+                        pool.submit(install_one, index, request, candidate)
+                        for index, (request, candidate) in enumerate(
+                            zip(requests, candidates)
+                        )
+                    ]
+                    staged_results = [future.result() for future in futures]
+                ordered_results = sorted(staged_results, key=lambda item: item[0])
+                for _, local_transaction, _ in ordered_results:
+                    transaction.adopt(local_transaction)
+                transaction.finish_successfully()
+                for _, local_transaction, _ in ordered_results:
+                    local_transaction.finalize()
+                return tuple(result for _, _, result in ordered_results)
+
+            results = tuple(
+                installer.install(
+                    path,
+                    candidate=candidate,
+                    requested=requested,
+                    direct_url=direct_url,
+                    existing=None,
+                    lookup_existing=False,
+                    destination_cache=destination_cache,
+                    transaction=transaction,
+                    direct=True,
+                )
+                for (path, requested, direct_url), candidate in zip(
+                    requests, candidates
+                )
+            )
+            transaction.finish_successfully()
+            return results
+        except Exception:
+            for future in futures:
+                if not future.done() or future.cancelled():
+                    continue
+                try:
+                    _, local_transaction, _ = future.result()
+                except Exception:
+                    continue
+                local_transaction.rollback()
+            transaction.rollback()
+            raise
+
+
 def install_wheels_transactionally(
     items: Iterable[tuple[str | Path, bool, DirectUrl | None]],
     *,
@@ -635,6 +827,20 @@ def install_wheels_transactionally(
     )
     if len(planned_candidates) != len(requests):
         raise ValueError("candidate count does not match wheel request count")
+    direct_destination_cache = None
+    if not pycompile and not force and not existing_distributions:
+        direct_destination_cache = _direct_batch_preflight(
+            requests, planned_candidates, target=target
+        )
+    if direct_destination_cache is not None:
+        return _install_wheels_directly(
+            requests,
+            planned_candidates,
+            target=target,
+            pycompile=pycompile,
+            installer=installer,
+            destination_cache=direct_destination_cache,
+        )
     with InstallTransaction() as transaction:
         with tempfile.TemporaryDirectory(prefix="cpip-wheel-batch-") as temporary:
             batch_stage = Path(temporary)

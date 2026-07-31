@@ -73,10 +73,11 @@ def _try_local_wheelhouse_plan(
             return None
         values.append(requirement.req.raw)
     from cpip.core.packaging import Requirement, SpecifierSet, Version
-    from cpip.core.wheel import WheelCandidate
+    from cpip.core.wheel import WheelCandidate, parse_wheel, wheel_candidate
     from cpip.resolution.fast_local_wheelhouse import resolve
     from cpip.resolution.resolver_internals.state.plans import InstallPlan
     from pathlib import Path
+    import zipfile
 
     local_plan = resolve(bundle.find_links, values, cache_dir=cache_dir)
     if local_plan is None:
@@ -124,6 +125,19 @@ def _try_local_wheelhouse_plan(
             }
     except (OSError, TypeError, ValueError):
         return None
+    if sum(candidate.path.stat().st_size for candidate in candidates) > 4 * 1024 * 1024:
+        for index, candidate in enumerate(candidates):
+            with zipfile.ZipFile(candidate.path) as archive:
+                dist_info, _ = parse_wheel(
+                    archive,
+                    candidate.path.name[:-4].split("-", 1)[0],
+                )
+                layout = wheel_candidate(
+                    candidate.path,
+                    archive=archive,
+                    dist_info_dir=dist_info,
+                ).wheel_layout
+            candidates[index] = candidate.copy_with(wheel_layout=layout)
     return InstallPlan(candidates, graph=graph)
 
 

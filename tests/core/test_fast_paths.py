@@ -441,6 +441,36 @@ for module in (
     subprocess.run([sys.executable, "-c", script], check=True)
 
 
+def test_entrypoint_uses_light_local_fallback_for_nonempty_target(
+    tmp_path: Path,
+) -> None:
+    wheelhouse = tmp_path / "wheelhouse"
+    wheelhouse.mkdir()
+    write_wheel(wheelhouse / "demo-1.0-py3-none-any.whl", purelib=True)
+    target = tmp_path / "target"
+    target.mkdir()
+    (target / ".existing").touch()
+    script = f"""
+import sys
+from cpip.cli.entrypoint import main
+
+assert main([
+    "install", "--quiet", "--no-index", "--ignore-installed", "--no-compile",
+    "--target", {str(target)!r}, "--find-links", {str(wheelhouse)!r}, "demo",
+]) == 0
+for module in (
+    "cpip.cli._main_fallback",
+    "cpip.cli.commands.registry",
+    "cpip.cli.requirements",
+    "cpip.resolution.resolver",
+):
+    assert module not in sys.modules, module
+"""
+
+    subprocess.run([sys.executable, "-c", script], check=True)
+    assert (target / "demo" / "__init__.py").exists()
+
+
 def test_entrypoint_keeps_upgrade_on_empty_target_on_fast_path(
     tmp_path: Path,
 ) -> None:

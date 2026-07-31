@@ -119,6 +119,13 @@ def main(
                 sys.stdout.flush()
                 sys.stderr.flush()
                 return status
+            from cpip.cli.commands.fast_install import run_local_fallback
+
+            status = run_local_fallback(argv[1:])
+            if status is not None:
+                sys.stdout.flush()
+                sys.stderr.flush()
+                return status
 
         if not require_virtualenv and log_file is None and verbosity == 0:
             if not argv or argv[0] in HELP_FLAGS or argv[:1] == ["help"]:

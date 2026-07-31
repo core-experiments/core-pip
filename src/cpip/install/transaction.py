@@ -88,12 +88,17 @@ class InstallTransaction:
     def adopt(self, other: InstallTransaction) -> None:
         """Merge staged actions from a transaction that has not committed."""
         self.owned.update(other.owned)
+        self.created_internal.extend(other.created_internal)
         for item in other.staged_internal:
             if item.contents is None:
                 self.add(item.source, item.destination, mode=item.mode)
             else:
                 self.add_contents(item.destination, item.contents, mode=item.mode)
         self.deletions.update(other.deletions)
+
+    def record_created(self, destination: str | Path) -> None:
+        """Record a path written directly for rollback by the caller."""
+        self.created_internal.append(Path(destination))
 
     def validate(self) -> None:
         for item in self.staged_internal:
