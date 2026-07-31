@@ -120,7 +120,9 @@ class VersionFiltering:
 
     def setup(self, specifier: str) -> None:
         self.parsed = SpecifierSet(specifier)
-        self.versions = tuple(Version(f"{major}.{minor}") for major in range(1, 6) for minor in range(10))
+        self.versions = tuple(
+            Version(f"{major}.{minor}") for major in range(1, 6) for minor in range(10)
+        )
 
     def time_filter_versions(self, specifier: str) -> None:
         tuple(version for version in self.versions if self.parsed.contains(version))

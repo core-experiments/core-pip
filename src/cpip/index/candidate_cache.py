@@ -75,7 +75,9 @@ def cache_built_wheel(
     os.makedirs(entry_dir_text, exist_ok=True)
     shutil.copy2(wheel, os.path.join(entry_dir_text, wheel.name))
     origin = {"archive_info": {"hashes": source_hashes_for_link(candidate.link)}}
-    with open(os.path.join(entry_dir_text, "origin.json"), "w", encoding="utf-8") as file:
+    with open(
+        os.path.join(entry_dir_text, "origin.json"), "w", encoding="utf-8"
+    ) as file:
         json.dump(origin, file)
 
 

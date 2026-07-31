@@ -673,7 +673,9 @@ def test_install_from_wheel_uninstalls_old_version(
     result.did_not_create(dist_info_folder)
 
 
-def test_wheel_compile_syntax_error(script: CpipTestEnvironment, data: TestData) -> None:
+def test_wheel_compile_syntax_error(
+    script: CpipTestEnvironment, data: TestData
+) -> None:
     package = data.packages.joinpath("compilewheel-1.0-py2.py3-none-any.whl")
     result = script.cpip("install", "--compile", package, "--no-index")
     assert "yield from" not in result.stdout

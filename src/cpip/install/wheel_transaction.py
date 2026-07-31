@@ -291,6 +291,7 @@ def install_wheel_internal(
             if destination_text.startswith(purelib_prefix):
                 return destination_text[len(purelib_prefix) :]
             return os.path.relpath(destination_text, purelib_text)
+
         staged: list[StagedEntry] = []
         record_destination: Path | None = None
         dist_info: str | None = None
@@ -352,7 +353,9 @@ def install_wheel_internal(
                 rewrite_metadata = (
                     relative_name == "METADATA" and candidate.name.isalpha()
                 )
-                script_member = len(relative_parts) >= 2 and relative_parts[-2] == "scripts"
+                script_member = (
+                    len(relative_parts) >= 2 and relative_parts[-2] == "scripts"
+                )
                 is_record = relative_name == "RECORD" and bool(relative_parts)
                 direct_content = (
                     not rewrite_metadata
@@ -490,8 +493,8 @@ def install_wheel_internal(
                 write_direct(requested_destination, b"")
             else:
                 direct_contents[os.fspath(requested_destination)] = b""
-            direct_metadata[os.fspath(requested_destination)] = record_metadata_internal(
-                b""
+            direct_metadata[os.fspath(requested_destination)] = (
+                record_metadata_internal(b"")
             )
             staged.append(
                 (
@@ -589,7 +592,12 @@ def install_wheel_internal(
                 source = script_stage / entry.name
                 destination = target.scripts / source.name
                 staged.append(
-                    (source, destination, os.fspath(destination), os.stat(source).st_mode)
+                    (
+                        source,
+                        destination,
+                        os.fspath(destination),
+                        os.stat(source).st_mode,
+                    )
                 )
 
         if pycompile:
@@ -598,9 +606,7 @@ def install_wheel_internal(
         record_rows = []
         for source, destination, destination_text, _ in staged:
             if destination_text == record_destination_text:
-                record_rows.append(
-                    (record_relative_path(destination_text), "", "")
-                )
+                record_rows.append((record_relative_path(destination_text), "", ""))
                 continue
             metadata = direct_metadata.get(destination_text)
             if metadata is None:
@@ -1109,7 +1115,9 @@ def uninstall_distribution(
             if relative.is_absolute():
                 continue
             path = Path(
-                os.path.realpath(os.path.join(os.fspath(egg_link_root), *relative.parts))
+                os.path.realpath(
+                    os.path.join(os.fspath(egg_link_root), *relative.parts)
+                )
             )
             try:
                 path.relative_to(root_path)
@@ -1125,9 +1133,7 @@ def uninstall_distribution(
             for name in top_level.splitlines():
                 name = name.strip()
                 if name and name.isidentifier():
-                    recorded_paths.update(
-                        {root_path / name, root_path / f"{name}.py"}
-                    )
+                    recorded_paths.update({root_path / name, root_path / f"{name}.py"})
         egg_links = list(egg_link_root.glob("*.egg-link"))
         egg_links.extend(
             egg_link

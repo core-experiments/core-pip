@@ -52,7 +52,9 @@ def install_invalid_version(script: CpipTestEnvironment, data: TestData) -> None
         zf.extractall(script.site_packages_path)
 
 
-def install_require_invalid_version(script: CpipTestEnvironment, data: TestData) -> None:
+def install_require_invalid_version(
+    script: CpipTestEnvironment, data: TestData
+) -> None:
     """
     Install a package with an invalid version.
     """

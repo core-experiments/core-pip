@@ -146,12 +146,7 @@ def topological_weights(
                 )
                 continue
             memo[node] = 1 + max(
-                (
-                    memo.get(dep, 0)
-                    if not path & node_bits[dep]
-                    else 0
-                    for dep in deps
-                ),
+                (memo.get(dep, 0) if not path & node_bits[dep] else 0 for dep in deps),
                 default=0,
             )
 

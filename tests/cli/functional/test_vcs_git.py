@@ -32,7 +32,9 @@ def checkout_ref(script: CpipTestEnvironment, repo_dir: str, ref: str) -> None:
     script.run("git", "checkout", ref, cwd=repo_dir)
 
 
-def checkout_new_branch(script: CpipTestEnvironment, repo_dir: str, branch: str) -> None:
+def checkout_new_branch(
+    script: CpipTestEnvironment, repo_dir: str, branch: str
+) -> None:
     script.run(
         "git",
         "checkout",

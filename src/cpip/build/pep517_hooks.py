@@ -22,7 +22,7 @@ class HookMissing(Exception):
         self.hook_name = hook_name
 
 
-_CALLER = r'''
+_CALLER = r"""
 import importlib
 import json
 import os
@@ -53,7 +53,7 @@ else:
     else:
         with open(os.path.join(control_dir, "output.json"), "w", encoding="utf-8") as stream:
             json.dump({"return_val": result}, stream)
-'''
+"""
 
 
 class BuildBackendHookCaller:
@@ -81,9 +81,7 @@ class BuildBackendHookCaller:
     def _call(self, hook: str, **kwargs: Any) -> Any:
         with tempfile.TemporaryDirectory(prefix="cpip-pep517-") as directory:
             control = Path(directory)
-            (control / "input.json").write_text(
-                json.dumps(kwargs), encoding="utf-8"
-            )
+            (control / "input.json").write_text(json.dumps(kwargs), encoding="utf-8")
             environment = os.environ.copy()
             environment["CPIP_BUILD_BACKEND"] = self.backend
             if self.backend_path:

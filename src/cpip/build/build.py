@@ -119,11 +119,7 @@ def unpack_source(source: Path, destination: Path) -> Path:
 
 def single_project_root(destination: Path) -> Path:
     with os.scandir(os.fspath(destination)) as entries:
-        children = [
-            Path(entry.path)
-            for entry in entries
-            if entry.name != "__MACOSX"
-        ]
+        children = [Path(entry.path) for entry in entries if entry.name != "__MACOSX"]
     if len(children) == 1 and os.path.isdir(os.fspath(children[0])):
         return children[0]
     project = destination / "project"

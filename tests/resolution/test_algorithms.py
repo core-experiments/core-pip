@@ -6,12 +6,7 @@ from cpip.resolution.algorithms import topological_weights
 def test_topological_weights_handles_deep_chain() -> None:
     size = 4_000
     graph = {"<root>": {"node-0"}}
-    graph.update(
-        {
-            f"node-{index}": {f"node-{index + 1}"}
-            for index in range(size - 1)
-        }
-    )
+    graph.update({f"node-{index}": {f"node-{index + 1}"} for index in range(size - 1)})
     graph[f"node-{size - 1}"] = set()
 
     weights = topological_weights(graph, set(graph) - {"<root>"})

@@ -309,7 +309,9 @@ def test_constraints_apply_to_dependency_groups(
     assert "installed TopoRequires-0.0.1" in result.stdout
 
 
-def test_multiple_constraints_files(script: CpipTestEnvironment, data: TestData) -> None:
+def test_multiple_constraints_files(
+    script: CpipTestEnvironment, data: TestData
+) -> None:
     script.scratch_path.joinpath("outer.txt").write_text("-c inner.txt")
     script.scratch_path.joinpath("inner.txt").write_text("Upper==1.0")
     result = script.cpip(
@@ -829,7 +831,9 @@ def test_install_distribution_union_conflicting_extras(
     assert "Conflict" in result.stderr
 
 
-def test_install_unsupported_wheel_link_with_marker(script: CpipTestEnvironment) -> None:
+def test_install_unsupported_wheel_link_with_marker(
+    script: CpipTestEnvironment,
+) -> None:
     script.scratch_path.joinpath("with-marker.txt").write_text(
         textwrap.dedent("""\
             {url}; {req}

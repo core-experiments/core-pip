@@ -424,7 +424,10 @@ def run_local_fallback(args: list[str]) -> int | None:
     except (OSError, TypeError, ValueError):
         return None
 
-    if sum(os.stat(candidate.path).st_size for candidate in candidates) > 4 * 1024 * 1024:
+    if (
+        sum(os.stat(candidate.path).st_size for candidate in candidates)
+        > 4 * 1024 * 1024
+    ):
         import zipfile
 
         for index, candidate in enumerate(candidates):
@@ -471,6 +474,8 @@ def run_local_fallback(args: list[str]) -> int | None:
     if candidates and not options.quiet:
         print(
             "Successfully installed "
-            + " ".join(f"{candidate.name}-{candidate.version}" for candidate in candidates)
+            + " ".join(
+                f"{candidate.name}-{candidate.version}" for candidate in candidates
+            )
         )
     return 0

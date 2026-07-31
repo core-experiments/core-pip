@@ -370,7 +370,9 @@ def test_exclude_editable_flag(cpip_test_package_script: CpipTestEnvironment) ->
     """
     Test the behavior of --editables flag in the list command
     """
-    result = cpip_test_package_script.cpip("list", "--exclude-editable", "--format=json")
+    result = cpip_test_package_script.cpip(
+        "list", "--exclude-editable", "--format=json"
+    )
     assert {"name": "simple", "version": "1.0"} in json.loads(result.stdout)
     assert "pip-test-package" not in {p["name"] for p in json.loads(result.stdout)}
 
@@ -496,7 +498,9 @@ def test_outdated_editables_columns_flag(
     assert os.path.join("src", "pip-test-package") in result.stdout, str(result)
 
 
-def test_outdated_not_required_flag(script: CpipTestEnvironment, data: TestData) -> None:
+def test_outdated_not_required_flag(
+    script: CpipTestEnvironment, data: TestData
+) -> None:
     """
     test the behavior of --outdated --not-required flag in the list command
     """

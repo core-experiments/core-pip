@@ -70,12 +70,14 @@ def parse_pylock(
     results: list[ParsedRequirement] = []
     for package in packages:
         if not isinstance(package, dict) or not isinstance(package.get("name"), str):
-            raise InstallationError(f"Cannot select requirements from pylock file {reference!r}")
+            raise InstallationError(
+                f"Cannot select requirements from pylock file {reference!r}"
+            )
         package_name = package["name"]
         requires_python = package.get("requires-python")
-        if requires_python is not None and not SpecifierSet(str(requires_python)).contains(
-            Version(".".join(str(part) for part in sys.version_info[:3]))
-        ):
+        if requires_python is not None and not SpecifierSet(
+            str(requires_python)
+        ).contains(Version(".".join(str(part) for part in sys.version_info[:3]))):
             raise InstallationError(
                 f"Cannot select requirements from pylock file {reference!r}: "
                 "no distribution supports this Python version"
@@ -104,9 +106,7 @@ def parse_pylock(
             direct = True
         elif kind == "vcs":
             link = distribution.get("url") or distribution.get("path") or ""
-            requirement = (
-                f"{package_name} @ {distribution['type']}+{link}@{distribution['commit-id']}"
-            )
+            requirement = f"{package_name} @ {distribution['type']}+{link}@{distribution['commit-id']}"
             direct = True
         elif kind == "wheel":
             if provider is not None and "binary" not in (
@@ -127,7 +127,9 @@ def parse_pylock(
                 link = pylock_location(
                     reference, distribution.get("path") or distribution.get("url")
                 )
-            parsed = parse_wheel_filename(distribution.get("name") or posixpath.basename(link))
+            parsed = parse_wheel_filename(
+                distribution.get("name") or posixpath.basename(link)
+            )
             if parsed is None:
                 raise InstallationError(f"Invalid wheel filename for {package_name!r}")
             _, version = parsed
@@ -166,7 +168,11 @@ def _select_distribution(
     package: dict[str, object], provider: CandidateProvider | None
 ) -> tuple[dict[str, object], str]:
     """Select the first usable PEP 751 distribution without packaging.pylock."""
-    for key, kind in (("directory", "directory"), ("archive", "archive"), ("vcs", "vcs")):
+    for key, kind in (
+        ("directory", "directory"),
+        ("archive", "archive"),
+        ("vcs", "vcs"),
+    ):
         distribution = package.get(key)
         if isinstance(distribution, dict):
             return distribution, kind
@@ -192,5 +198,7 @@ def _sdist_version(filename: str, package_name: str) -> str:
         return stem[len(prefix) :]
     match = re.search(r"-(\d[^-]*)$", stem)
     if match is None:
-        raise InstallationError(f"Cannot determine version from source archive {filename!r}")
+        raise InstallationError(
+            f"Cannot determine version from source archive {filename!r}"
+        )
     return match.group(1)

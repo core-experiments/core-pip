@@ -20,7 +20,9 @@ def test_install_vcs_non_editable_direct_url(script: CpipTestEnvironment) -> Non
     assert direct_url.vcs_info.vcs == "git"
 
 
-def test_install_archive_direct_url(script: CpipTestEnvironment, data: TestData) -> None:
+def test_install_archive_direct_url(
+    script: CpipTestEnvironment, data: TestData
+) -> None:
     req = "simple @ " + data.packages.joinpath("simple-2.0.tar.gz").as_uri()
     assert req.startswith("simple @ file://")
     result = script.cpip("install", "--no-build-isolation", req)

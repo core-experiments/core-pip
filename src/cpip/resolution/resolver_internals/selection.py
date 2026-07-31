@@ -137,10 +137,11 @@ class ResolverSelectionOperations:
         extras: frozenset[str],
     ) -> WheelCandidate:
         if isinstance(candidate, LazyWheelCandidate):
-            if (
-                candidate.materializer_internal.dry_run
-                and candidate.source_kind in {"sdist", "source-tree", "vcs"}
-            ):
+            if candidate.materializer_internal.dry_run and candidate.source_kind in {
+                "sdist",
+                "source-tree",
+                "vcs",
+            }:
                 merged_requirement = requirement.copy_with(extras=extras)
                 record = candidate.record_internal.copy_with(
                     metadata_loader=candidate.materializer_internal.metadata_loader(
@@ -309,8 +310,7 @@ class ResolverSelectionOperations:
                     first_unresolved = entry_id, requirement
                 if is_direct:
                     if direct is None or (
-                        order
-                        < pending.entries_internal[direct[0]].order
+                        order < pending.entries_internal[direct[0]].order
                     ):
                         direct = entry_id, requirement
                     continue

@@ -64,7 +64,9 @@ class TestUploadedPriorTo:
         assert "does not provide upload-time metadata" in result.stderr
 
     @pytest.mark.network
-    def test_uploaded_prior_to_with_real_pypi(self, script: CpipTestEnvironment) -> None:
+    def test_uploaded_prior_to_with_real_pypi(
+        self, script: CpipTestEnvironment
+    ) -> None:
         """Test filtering against real PyPI with upload-time metadata."""
         # Test with old cutoff date - should find no matching versions
         result = script.cpip(

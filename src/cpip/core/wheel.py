@@ -547,9 +547,7 @@ def wheel_candidate(
     wheel_layout = None
     if include_layout and archive is not None and dist_info_dir is not None:
         if wheel_metadata_text is None:
-            wheel_metadata_text = archive.read(f"{dist_info_dir}/WHEEL").decode(
-                "utf-8"
-            )
+            wheel_metadata_text = archive.read(f"{dist_info_dir}/WHEEL").decode("utf-8")
         wheel_layout = (
             dist_info_dir,
             tuple(
@@ -729,9 +727,7 @@ def check_compatibility(version: tuple[int, ...], name: str) -> None:
         )
 
 
-def validate_wheel_with_metadata(
-    source: zipfile.ZipFile, name: str
-) -> tuple[str, str]:
+def validate_wheel_with_metadata(source: zipfile.ZipFile, name: str) -> tuple[str, str]:
     """Validate a wheel and return its metadata directory and WHEEL text."""
     try:
         info_dir = wheel_dist_info_dir(source, name)

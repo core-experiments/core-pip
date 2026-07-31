@@ -15,14 +15,24 @@ SNAPSHOT_DISK_LIMIT = 25 * 1024 * 1024
 
 class Scenario:
     __slots__ = (
-        "name", "projects", "versions", "requirements", "expected_projects",
-        "extras", "shared_conflict",
+        "name",
+        "projects",
+        "versions",
+        "requirements",
+        "expected_projects",
+        "extras",
+        "shared_conflict",
     )
 
     def __init__(
-        self, name: str, projects: int, versions: int,
-        requirements: tuple[str, ...], expected_projects: int,
-        extras: bool = False, shared_conflict: bool = False,
+        self,
+        name: str,
+        projects: int,
+        versions: int,
+        requirements: tuple[str, ...],
+        expected_projects: int,
+        extras: bool = False,
+        shared_conflict: bool = False,
     ) -> None:
         self.name = name
         self.projects = projects

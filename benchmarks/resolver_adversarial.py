@@ -39,9 +39,7 @@ def create_late_conflict_graph(root: Path, size: int) -> Path:
         make_wheel_internal(wheelhouse, "B", version)
         make_wheel_internal(wheelhouse, "C", version)
     make_wheel_internal(wheelhouse, "root-b", "1.0.0", requires=("B == 1.0.0",))
-    make_wheel_internal(
-        wheelhouse, "root", "1.0.0", requires=("A", "root-b == 1.0.0")
-    )
+    make_wheel_internal(wheelhouse, "root", "1.0.0", requires=("A", "root-b == 1.0.0"))
     return wheelhouse
 
 
@@ -116,21 +114,14 @@ class GeneralResolverAdversarial:
     timeout = 180
 
     @staticmethod
-    def _setup(
-        root_name: str, creator: Callable[[Path, int], Path]
-    ) -> dict[int, str]:
+    def _setup(root_name: str, creator: Callable[[Path, int], Path]) -> dict[int, str]:
         root = Path.cwd() / root_name
         if root.exists():
             shutil.rmtree(root)
         root.mkdir()
-        return {
-            size: os.fspath(creator(root, size))
-            for size in SIZES
-        }
+        return {size: os.fspath(creator(root, size)) for size in SIZES}
 
-    def resolve(
-        self, wheelhouses: dict[int, str], packages: int, root: str
-    ) -> int:
+    def resolve(self, wheelhouses: dict[int, str], packages: int, root: str) -> int:
         provider = CandidateProvider.from_options(
             find_links=[wheelhouses[packages]], no_index=True
         )
@@ -192,9 +183,7 @@ class SeededResolution(GeneralResolverAdversarial):
         plan = self.resolver.resolve(["root"])
         assert len(plan.candidates) == packages + 2
 
-    def time_resolve_changed(
-        self, wheelhouses: dict[int, str], packages: int
-    ) -> None:
+    def time_resolve_changed(self, wheelhouses: dict[int, str], packages: int) -> None:
         del wheelhouses
         plan = self.resolver.resolve(["root", "leaf-0==1.0.0"])
         assert len(plan.candidates) == packages + 2

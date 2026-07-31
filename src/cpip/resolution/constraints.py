@@ -84,7 +84,9 @@ class ConstraintStore:
             if requirement.url is not None and not self.direct_urls_equivalent(
                 selected.url, requirement.url
             ):
-                filename = posixpath.basename(urllib.parse.urlparse(requirement.url).path)
+                filename = posixpath.basename(
+                    urllib.parse.urlparse(requirement.url).path
+                )
                 parsed = parse_wheel_filename(filename)
                 requested_label = (
                     f"{canonicalize_name(parsed[0])} {parsed[1]}"

@@ -47,9 +47,7 @@ def _make_sat_graph(wheelhouse: Path, order: tuple[str, ...]) -> None:
     )
 
 
-@pytest.mark.parametrize(
-    "order_kind", ["forward", "reverse", "rotated", "striped"]
-)
+@pytest.mark.parametrize("order_kind", ["forward", "reverse", "rotated", "striped"])
 def test_resolution_is_order_invariant_under_candidate_activity_perturbation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, order_kind: str
 ) -> None:

@@ -311,7 +311,9 @@ def _untar_regular_members(
             created_directories.add(parent)
         source = tar.extractfile(member)
         if source is None:
-            raise InstallationError(f"Unable to extract {member.name!r} from {filename}")
+            raise InstallationError(
+                f"Unable to extract {member.name!r} from {filename}"
+            )
         with source, open(path, "wb") as destination:
             shutil.copyfileobj(source, destination)
         tar.utime(member, path)

@@ -362,9 +362,7 @@ def build_sdist(
         for current, directories, files in os.walk(
             source_dir_text, topdown=True, followlinks=False
         ):
-            directories[:] = sorted(
-                name for name in directories if name != ".git"
-            )
+            directories[:] = sorted(name for name in directories if name != ".git")
             for name in sorted(files):
                 child = os.path.join(current, name)
                 relative = os.path.relpath(child, source_dir_text)
@@ -994,10 +992,14 @@ def read_legacy_metadata(source_dir: Path) -> ProjectMetadata | None:
                 egg_info_candidates.append(os.path.join(entry.path, "PKG-INFO"))
             elif entry.name.endswith(".dist-info"):
                 dist_info_candidates.append(os.path.join(entry.path, "METADATA"))
-    candidates = sorted(egg_info_candidates) + [
-        os.path.join(source_text, "METADATA"),
-        os.path.join(source_text, "PKG-INFO"),
-    ] + sorted(dist_info_candidates)
+    candidates = (
+        sorted(egg_info_candidates)
+        + [
+            os.path.join(source_text, "METADATA"),
+            os.path.join(source_text, "PKG-INFO"),
+        ]
+        + sorted(dist_info_candidates)
+    )
     for candidate in candidates:
         if not os.path.isfile(candidate):
             continue
@@ -1029,9 +1031,9 @@ def read_legacy_metadata(source_dir: Path) -> ProjectMetadata | None:
         summary = fields.get("Summary", [None])[0]
         requires_python = fields.get("Requires-Python", [None])[0]
         dependencies = fields.get("Requires-Dist", [])
-        if not dependencies and os.path.basename(
-            os.path.dirname(candidate)
-        ).endswith(".egg-info"):
+        if not dependencies and os.path.basename(os.path.dirname(candidate)).endswith(
+            ".egg-info"
+        ):
             requires_path = os.path.join(os.path.dirname(candidate), "requires.txt")
             if os.path.isfile(requires_path):
                 dependencies = _read_legacy_requirements(Path(requires_path))
@@ -1098,7 +1100,9 @@ def iter_project_files(source_dir: Path) -> Iterable[tuple[str, bytes]]:
         child_path = Path(entry.path)
         if entry.is_dir() and os.path.isfile(os.path.join(entry.path, "__init__.py")):
             yield from iter_package_files(source_dir, root=child_path)
-        elif entry.is_file() and entry.name.endswith(".py") and entry.name != "setup.py":
+        elif (
+            entry.is_file() and entry.name.endswith(".py") and entry.name != "setup.py"
+        ):
             with open(entry.path, "rb") as file:
                 yield entry.name, file.read()
 

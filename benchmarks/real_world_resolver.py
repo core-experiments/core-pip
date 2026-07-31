@@ -24,8 +24,12 @@ CASE_NAMES = (
 CACHE_STATES = ("cold", "warm")
 
 
-def make_versioned_case(root: Path, size: int, *, unsatisfiable: bool) -> dict[str, object]:
-    wheelhouse = root / ("unsatisfiable" if unsatisfiable else "backtracking") / str(size)
+def make_versioned_case(
+    root: Path, size: int, *, unsatisfiable: bool
+) -> dict[str, object]:
+    wheelhouse = (
+        root / ("unsatisfiable" if unsatisfiable else "backtracking") / str(size)
+    )
     wheelhouse.mkdir(parents=True)
     for index in range(1, size + 1):
         version = f"{index}.0"
@@ -201,32 +205,22 @@ def make_no_match_case(root: Path, size: int) -> dict[str, object]:
 
 def create_cases(root: Path) -> dict[str, dict[int, dict[str, object]]]:
     return {
-        "many-versions": {
-            size: make_many_versions_case(root, size) for size in SIZES
-        },
+        "many-versions": {size: make_many_versions_case(root, size) for size in SIZES},
         "backtracking": {
-            size: make_versioned_case(root, size, unsatisfiable=False)
-            for size in SIZES
+            size: make_versioned_case(root, size, unsatisfiable=False) for size in SIZES
         },
         "unsatisfiable": {
-            size: make_versioned_case(root, size, unsatisfiable=True)
-            for size in SIZES
+            size: make_versioned_case(root, size, unsatisfiable=True) for size in SIZES
         },
         "extras-conflict": {
             size: make_extras_conflict_case(root, size) for size in SIZES
         },
-        "nested-extras": {
-            size: make_nested_extras_case(root, size) for size in SIZES
-        },
+        "nested-extras": {size: make_nested_extras_case(root, size) for size in SIZES},
         "requires-python": {
             size: make_requires_python_case(root, size) for size in SIZES
         },
-        "large-catalog": {
-            size: make_large_catalog_case(root, size) for size in SIZES
-        },
-        "no-match": {
-            size: make_no_match_case(root, size) for size in SIZES
-        },
+        "large-catalog": {size: make_large_catalog_case(root, size) for size in SIZES},
+        "no-match": {size: make_no_match_case(root, size) for size in SIZES},
     }
 
 

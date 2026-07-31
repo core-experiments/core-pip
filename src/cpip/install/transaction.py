@@ -112,7 +112,9 @@ class InstallTransaction:
     def validate(self) -> None:
         for item in self.staged_internal:
             if item.source_text is not None and not os.path.isfile(item.source_text):
-                raise InstallationError(f"staged file does not exist: {item.source_text}")
+                raise InstallationError(
+                    f"staged file does not exist: {item.source_text}"
+                )
             destination_text = item.destination_text
             destination_exists = os.path.lexists(destination_text)
             self.destination_presence[destination_text] = destination_exists
@@ -154,7 +156,9 @@ class InstallTransaction:
             append_created = self.created_internal.append
             for item in self.staged_internal:
                 backup_if_needed(item.destination_text)
-                destination_parent_text = os.path.dirname(item.destination_text) or os.curdir
+                destination_parent_text = (
+                    os.path.dirname(item.destination_text) or os.curdir
+                )
                 if destination_parent_text not in created_directories:
                     makedirs(destination_parent_text, exist_ok=True)
                     created_directories.add(destination_parent_text)

@@ -164,11 +164,12 @@ def _safe_destination_parts_with_text(
             resolved_root = os.path.realpath(root_text)
             if resolved_roots is not None:
                 resolved_roots[root_text] = resolved_root
-        resolved_parent_text = os.path.realpath(
-            os.path.join(root_text, *parent_parts)
-        )
+        resolved_parent_text = os.path.realpath(os.path.join(root_text, *parent_parts))
         try:
-            if os.path.commonpath((resolved_parent_text, resolved_root)) != resolved_root:
+            if (
+                os.path.commonpath((resolved_parent_text, resolved_root))
+                != resolved_root
+            ):
                 raise ValueError
         except (OSError, ValueError) as exc:
             raise InstallationError(

@@ -610,14 +610,19 @@ def test_resolver_learns_direct_selected_candidate_conflicts() -> None:
         dependencies=(),
     )
 
-    assert resolver.candidate_dependencies_conflict(
-        child,
-        extras=frozenset(),
-        selected={"shared": selected},
-        selected_extras={},
-    ) is False
+    assert (
+        resolver.candidate_dependencies_conflict(
+            child,
+            extras=frozenset(),
+            selected={"shared": selected},
+            selected_extras={},
+        )
+        is False
+    )
     assert len(resolver.learned_incompatibilities) == 1
-    assert {level for _, level in resolver.learned_incompatibilities[0].decision_levels} == {
+    assert {
+        level for _, level in resolver.learned_incompatibilities[0].decision_levels
+    } == {
         0,
         1,
     }

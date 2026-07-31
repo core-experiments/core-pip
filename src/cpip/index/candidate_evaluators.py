@@ -341,8 +341,9 @@ class CandidateEvaluator:
             if best_rank is not None:
                 tag_rank = -best_rank
             build_tag = legacy_build_tag(candidate.wheel.build_tag)
-        elif candidate.link.kind is ArtifactKind.WHEEL or candidate.link.filename.endswith(
-            ".whl"
+        elif (
+            candidate.link.kind is ArtifactKind.WHEEL
+            or candidate.link.filename.endswith(".whl")
         ):
             try:
                 wheel = Wheel(candidate.link.filename)

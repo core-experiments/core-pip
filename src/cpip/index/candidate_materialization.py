@@ -192,7 +192,9 @@ class LazyWheelCandidate(WheelCandidate):
             if self.record_internal.link.is_vcs:
                 url = self.record_internal.link.url
                 if self.materializer_internal.vcs_revision(url) is None:
-                    local = self.materializer_internal.ensure_local(self.record_internal)
+                    local = self.materializer_internal.ensure_local(
+                        self.record_internal
+                    )
                     remove_temp_directory_internal(local)
                 return None
             if (
@@ -433,7 +435,10 @@ class CandidateMaterializer:
                     return cached
             if candidate.link.kind in SOURCE_ARTIFACT_KINDS and self.dry_run:
                 metadata = self.pypi_metadata(candidate, requested_extras)
-                if metadata is not None and requested_extras <= metadata.provided_extras:
+                if (
+                    metadata is not None
+                    and requested_extras <= metadata.provided_extras
+                ):
                     self.metadata_cache[key] = metadata
                     if self.persistent_candidate_metadata_cache is not None:
                         self.persistent_candidate_metadata_cache.put(
@@ -507,9 +512,11 @@ class CandidateMaterializer:
                     zipfile.ZipFile(stream) as archive,
                 ):
                     try:
-                        dist_info_dir, wheel_metadata_text = validate_wheel_with_metadata(
-                            archive,
-                            os.path.basename(os.fspath(path))[:-4].split("-", 1)[0],
+                        dist_info_dir, wheel_metadata_text = (
+                            validate_wheel_with_metadata(
+                                archive,
+                                os.path.basename(os.fspath(path))[:-4].split("-", 1)[0],
+                            )
                         )
                     except UnsupportedWheel as exc:
                         raise InstallationError(str(exc)) from exc
@@ -757,8 +764,10 @@ class CandidateMaterializer:
                         ):
                             dist_info_dir, wheel_metadata_text = (
                                 validate_wheel_with_metadata(
-                                archive,
-                                os.path.basename(os.fspath(path))[:-4].split("-", 1)[0],
+                                    archive,
+                                    os.path.basename(os.fspath(path))[:-4].split(
+                                        "-", 1
+                                    )[0],
                                 )
                             )
                             built = wheel_candidate(

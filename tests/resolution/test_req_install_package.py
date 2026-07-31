@@ -369,7 +369,9 @@ def test_parse_editable_local_extras(tmp_path: Path) -> None:
     with mock.patch(
         "cpip.resolution.req_install.os.path.abspath", return_value=os.fspath(root)
     ):
-        with mock.patch("cpip.resolution.req_install.os.path.exists", return_value=True):
+        with mock.patch(
+            "cpip.resolution.req_install.os.path.exists", return_value=True
+        ):
             assert parse_editable(".[extras]") == (
                 None,
                 root.resolve().as_uri(),
@@ -378,7 +380,9 @@ def test_parse_editable_local_extras(tmp_path: Path) -> None:
     with mock.patch(
         "cpip.resolution.req_install.os.path.abspath", return_value=os.fspath(child)
     ):
-        with mock.patch("cpip.resolution.req_install.os.path.exists", return_value=True):
+        with mock.patch(
+            "cpip.resolution.req_install.os.path.exists", return_value=True
+        ):
             assert parse_editable("foo[bar,baz]") == (
                 None,
                 child.resolve().as_uri(),
@@ -481,7 +485,9 @@ def test_get_url_from_path_archive_file() -> None:
     path = f"/path/to/{name}"
     expected = Path(path).resolve(strict=False).as_uri()
     with mock.patch("cpip.resolution.req_install.os.path.isdir", return_value=False):
-        with mock.patch("cpip.resolution.req_install.os.path.isfile", return_value=True):
+        with mock.patch(
+            "cpip.resolution.req_install.os.path.isfile", return_value=True
+        ):
             assert get_url_from_path(path, name) == expected
 
 
@@ -490,7 +496,9 @@ def test_get_url_from_path_installable_dir() -> None:
     path = f"/path/to/{name}"
     expected = Path(path).resolve(strict=False).as_uri()
     with mock.patch("cpip.resolution.req_install.os.path.isdir", return_value=True):
-        with mock.patch("cpip.resolution.req_install.os.path.isfile", return_value=True):
+        with mock.patch(
+            "cpip.resolution.req_install.os.path.isfile", return_value=True
+        ):
             assert get_url_from_path(path, name) == expected
 
 

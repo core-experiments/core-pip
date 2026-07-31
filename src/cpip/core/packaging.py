@@ -162,11 +162,20 @@ class Version:
         elif self.pre is None and self.post is None and self.dev is not None:
             suffix = (-1, 0, 0, 0, 0, self.dev)
         else:
-            pre_rank, pre_number = (3, 0) if self.pre is None else (self.pre[0], self.pre[1])
+            pre_rank, pre_number = (
+                (3, 0) if self.pre is None else (self.pre[0], self.pre[1])
+            )
             post_rank = 0 if self.post is None else 1
             post_number = 0 if self.post is None else self.post
             dev_rank = 1 if self.dev is None else 0
-            suffix = (pre_rank, pre_number, post_rank, post_number, dev_rank, self.dev or 0)
+            suffix = (
+                pre_rank,
+                pre_number,
+                post_rank,
+                post_number,
+                dev_rank,
+                self.dev or 0,
+            )
         key: tuple[object, ...] = (self.epoch, release, suffix)
         if self.local is not None:
             local = tuple(

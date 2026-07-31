@@ -25,6 +25,7 @@ from cpip.network.exceptions import (
     NetworkConnectionError,
     SSLVerificationError,
 )
+
 logger = logging.getLogger(__name__)
 RETRY_STATUS_CODES = frozenset((500, 502, 503, 520, 527))
 MAX_IDLE_CONNECTIONS_PER_ORIGIN = 8
@@ -160,7 +161,10 @@ class InFlightRequest:
 
     def __init__(self) -> None:
         self.event = threading.Event()
-        self.response: tuple[int, str, str, Mapping[str, str] | email.message.Message, bytes] | None = None
+        self.response: (
+            tuple[int, str, str, Mapping[str, str] | email.message.Message, bytes]
+            | None
+        ) = None
         self.error: BaseException | None = None
 
 
@@ -402,7 +406,9 @@ class NetworkSession:
         key = (
             request.method,
             request.url,
-            tuple(sorted((name.lower(), value) for name, value in request.headers.items())),
+            tuple(
+                sorted((name.lower(), value) for name, value in request.headers.items())
+            ),
         )
         with self.inflight_requests_lock:
             flight = self.inflight_requests.get(key)
@@ -594,11 +600,7 @@ class NetworkSession:
         self, request: HttpRequest, timeout: Any, *, stream: bool = False
     ) -> HttpResponse:
         parsed = urllib.parse.urlsplit(request.url)
-        if (
-            not stream
-            and parsed.scheme in {"http", "https"}
-            and self.proxies is None
-        ):
+        if not stream and parsed.scheme in {"http", "https"} and self.proxies is None:
             return self.open_persistent(request, parsed, timeout)
         return self.open_with_urllib(request, timeout, stream=stream)
 
@@ -627,7 +629,10 @@ class NetworkSession:
                     if self.cert:
                         context.load_cert_chain(self.cert)
                 return http.client.HTTPSConnection(
-                    hostname, port, context=context, timeout=timeout_value(timeout or self.timeout)
+                    hostname,
+                    port,
+                    context=context,
+                    timeout=timeout_value(timeout or self.timeout),
                 )
             return http.client.HTTPConnection(
                 hostname, port, timeout=timeout_value(timeout or self.timeout)

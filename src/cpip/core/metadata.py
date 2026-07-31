@@ -104,7 +104,10 @@ def _iter_installed_distributions(
         version = dist.version
         if not name or not version:
             continue
-        if canonical_names is not None and canonicalize_name(name) not in canonical_names:
+        if (
+            canonical_names is not None
+            and canonicalize_name(name) not in canonical_names
+        ):
             continue
         metadata_location = getattr(dist, "_path", None)
         location = Path(str(dist.locate_file("")))
@@ -118,9 +121,7 @@ def _iter_installed_distributions(
             # remove them.
             version=str(version),
             location=location,
-            metadata_location=Path(metadata_location)
-            if metadata_location
-            else None,
+            metadata_location=Path(metadata_location) if metadata_location else None,
             raw=dist,
         )
 

@@ -1045,7 +1045,9 @@ class TestExtraMerge:
         script.assert_installed(pkg="1.0.0", dep="1.0.0", depdev="1.0.0")
 
 
-def test_new_resolver_build_directory_error_zazo_19(script: CpipTestEnvironment) -> None:
+def test_new_resolver_build_directory_error_zazo_19(
+    script: CpipTestEnvironment,
+) -> None:
     """https://github.com/pradyunsg/zazo/issues/19#issuecomment-631615674
 
     This will first resolve like this:
@@ -1900,7 +1902,9 @@ def test_new_resolver_succeeds_on_matching_constraint_and_requirement(
         script.assert_installed_editable("test_pkg")
 
 
-def test_new_resolver_applies_url_constraint_to_dep(script: CpipTestEnvironment) -> None:
+def test_new_resolver_applies_url_constraint_to_dep(
+    script: CpipTestEnvironment,
+) -> None:
     version_1 = create_basic_wheel_for_package(
         script,
         "dep",

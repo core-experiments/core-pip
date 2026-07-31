@@ -58,9 +58,8 @@ def prepare_editable_source(
 
     if not os.path.isdir(os.fspath(source_path)):
         raise CommandError(f"{source_path} is not a valid editable requirement")
-    if (
-        not os.path.isfile(os.fspath(source_path / "setup.py"))
-        and not os.path.isfile(os.fspath(source_path / "pyproject.toml"))
+    if not os.path.isfile(os.fspath(source_path / "setup.py")) and not os.path.isfile(
+        os.fspath(source_path / "pyproject.toml")
     ):
         raise CommandError(
             f"{source_path} does not appear to be a Python project: "

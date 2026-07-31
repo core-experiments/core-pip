@@ -24,7 +24,6 @@ RELEASE_OPTIONS = frozenset(("pre", "all-releases"))
 
 if TYPE_CHECKING:
     from cpip.core.wheel import TargetContext
-    from cpip.index.links import Link
     from cpip.resolution.req_install import InstallRequirement
 
 
@@ -277,8 +276,7 @@ def collect_requirements(
         and not constraint_files
         and bool(bundle_find_links)
         and all(
-            resolve_source_location(value)[1] is not None
-            for value in bundle_find_links
+            resolve_source_location(value)[1] is not None for value in bundle_find_links
         )
     )
     if local_only:
@@ -569,10 +567,7 @@ def bundle_install_requirements(
         if item.req is not None and item.local_file_path is not None:
             source_path = os.path.realpath(item.local_file_path)
             previous = direct_sources.get(item.req.canonical_name)
-            if (
-                previous is not None
-                and os.path.realpath(previous[0]) != source_path
-            ):
+            if previous is not None and os.path.realpath(previous[0]) != source_path:
                 raise InstallationError(
                     f"Cannot install {item.req.name} because these package versions "
                     "have conflicting dependencies."

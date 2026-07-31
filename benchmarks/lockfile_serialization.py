@@ -23,9 +23,7 @@ def create_lock_workload(count: int) -> dict[str, object]:
             "hashes": {"sha256": digest},
         }
         packages.append({"name": name, "version": version, "wheels": [artifact]})
-        fast_packages.append(
-            (name, version, artifact["name"], artifact["url"], digest)
-        )
+        fast_packages.append((name, version, artifact["name"], artifact["url"], digest))
     return {"packages": packages, "fast_packages": fast_packages}
 
 
@@ -42,9 +40,7 @@ class LockfileSerialization:
 
     @staticmethod
     def setup_cache() -> dict[str, object]:
-        return {
-            str(count): create_lock_workload(count) for count in PACKAGE_COUNTS
-        }
+        return {str(count): create_lock_workload(count) for count in PACKAGE_COUNTS}
 
     def setup(self, state: dict[str, object], package_count: str) -> None:
         workload = cast(dict[str, object], state[package_count])

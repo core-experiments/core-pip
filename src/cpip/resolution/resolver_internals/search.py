@@ -578,9 +578,9 @@ class ResolverSearchEngine:
                 if self.metrics.enabled:
                     self.metrics.resolution_seed_hits += 1
             selected[name] = candidate
-            self.assignment_levels[self.candidate_assignment(
-                candidate, constrained.extras
-            )] = len(selected) - 1
+            self.assignment_levels[
+                self.candidate_assignment(candidate, constrained.extras)
+            ] = len(selected) - 1
             self.add_candidate_dependencies(name, candidate)
             selected_extras[name] = frozenset(constrained.extras)
             graph.setdefault(name, set())
@@ -643,9 +643,7 @@ class ResolverSearchEngine:
                 f"does not satisfy the active dependency set"
             )
             self.emit_backtracking_message()
-            failure = self.should_backjump_after_failure(
-                learned_start, decision_level
-            )
+            failure = self.should_backjump_after_failure(learned_start, decision_level)
             if failure is not None:
                 return failure
         if all_candidates_conflicted and candidate_conflicts:

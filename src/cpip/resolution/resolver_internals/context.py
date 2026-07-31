@@ -63,9 +63,7 @@ class ResolverMetrics:
 
     def snapshot(self) -> dict[str, int]:
         return {
-            name: getattr(self, name)
-            for name in self.__slots__
-            if name != "enabled"
+            name: getattr(self, name) for name in self.__slots__ if name != "enabled"
         }
 
 

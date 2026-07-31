@@ -287,7 +287,9 @@ def test_batch_install_rolls_back_when_destinations_overlap(tmp_path: Path) -> N
 def test_large_fresh_batch_writes_without_staging(tmp_path: Path, monkeypatch) -> None:
     wheel = make_wheel_internal(
         tmp_path,
-        extra_files={f"owner_demo/{index}.bin": "x" * (128 * 1024) for index in range(40)},
+        extra_files={
+            f"owner_demo/{index}.bin": "x" * (128 * 1024) for index in range(40)
+        },
     )
     target = tmp_path / "target"
     target.mkdir()
@@ -320,7 +322,9 @@ def test_direct_batch_rolls_back_final_writes_on_later_failure(
 ) -> None:
     wheel = make_wheel_internal(
         tmp_path,
-        extra_files={f"owner_demo/{index}.bin": "x" * (128 * 1024) for index in range(40)},
+        extra_files={
+            f"owner_demo/{index}.bin": "x" * (128 * 1024) for index in range(40)
+        },
     )
     other = tmp_path / "other_demo-1.0-py3-none-any.whl"
     with zipfile.ZipFile(other, "w") as archive:

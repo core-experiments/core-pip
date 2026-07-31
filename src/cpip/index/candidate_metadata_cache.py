@@ -72,7 +72,9 @@ class CandidateMetadataCache:
             and (value[4] is None or isinstance(value[4], str))
         )
 
-    def get(self, key: tuple[str, str, tuple[str, ...], str]) -> CandidateMetadata | None:
+    def get(
+        self, key: tuple[str, str, tuple[str, ...], str]
+    ) -> CandidateMetadata | None:
         decoded = self.decoded.get(key)
         if decoded is not None:
             return decoded

@@ -487,9 +487,7 @@ class InstallRequirement:
             and setup_uses_pkg_resources
             and not any(
                 canonicalize_name(parsed.name) == "setuptools"
-                and not parsed.specifier.contains(
-                    Version("81"), allow_prereleases=True
-                )
+                and not parsed.specifier.contains(Version("81"), allow_prereleases=True)
                 for parsed in parsed_requires
             )
         ):

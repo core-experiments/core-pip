@@ -98,6 +98,7 @@ class WheelArchive:
                 raise WheelhouseUnavailable from exc
             self.members[name] = member
             self.modes[name] = external_attr
+
     def namelist(self) -> list[str]:
         return list(self.members)
 
@@ -150,9 +151,7 @@ class WheelArchive:
             ordered_members = [member for member, _ in ordered]
             ordered_names = [name for _, name in ordered]
         ordered_results: list[bytes] = []
-        unordered_results: dict[str, bytes] | None = (
-            None if in_archive_order else {}
-        )
+        unordered_results: dict[str, bytes] | None = None if in_archive_order else {}
         position = -1
         for name, member in zip(ordered_names, ordered_members):
             compression, crc, compressed_size, uncompressed_size, local_offset = member

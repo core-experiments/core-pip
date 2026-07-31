@@ -16,7 +16,9 @@ def create_workspace(root: Path) -> None:
     for index in range(MEMBER_COUNT):
         member = root / "packages" / f"provider-{index:03}"
         member.mkdir(parents=True)
-        dependencies = [f"provider-{max(0, index - offset):03}>=1" for offset in range(1, 5)]
+        dependencies = [
+            f"provider-{max(0, index - offset):03}>=1" for offset in range(1, 5)
+        ]
         dependencies.append("sniffio>=1,<2")
         (member / "pyproject.toml").write_text(
             "[project]\n"
@@ -29,8 +31,8 @@ def create_workspace(root: Path) -> None:
             encoding="utf-8",
         )
     (root / "pyproject.toml").write_text(
-        "[project]\nname = \"workspace\"\nversion = \"1.0\"\n"
-        "[tool.workspace]\nmembers = [\"packages/*\"]\n",
+        '[project]\nname = "workspace"\nversion = "1.0"\n'
+        '[tool.workspace]\nmembers = ["packages/*"]\n',
         encoding="utf-8",
     )
 

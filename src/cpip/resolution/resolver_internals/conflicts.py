@@ -463,12 +463,16 @@ class ResolverConflicts:
             selected_candidate = selected.get(
                 self.package_names_internal[other_term[0]]
             )
-            if selected_candidate is None or self.candidate_assignment(
-                selected_candidate,
-                selected_extras.get(
-                    self.package_names_internal[other_term[0]], frozenset()
-                ),
-            ) != other_term:
+            if (
+                selected_candidate is None
+                or self.candidate_assignment(
+                    selected_candidate,
+                    selected_extras.get(
+                        self.package_names_internal[other_term[0]], frozenset()
+                    ),
+                )
+                != other_term
+            ):
                 continue
             self.bump_conflict_activity(
                 self.package_names_internal[candidate_term[0]],

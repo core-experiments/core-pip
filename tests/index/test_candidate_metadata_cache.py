@@ -18,7 +18,7 @@ def test_candidate_metadata_cache_roundtrip(tmp_path: Path) -> None:
     metadata = CandidateMetadata(
         name="demo",
         version=Version("1.2.3"),
-        dependencies=(parse_requirement("requests>=2") ,),
+        dependencies=(parse_requirement("requests>=2"),),
         provided_extras=frozenset(("docs",)),
         requires_python=">=3.9",
     )

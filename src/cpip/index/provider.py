@@ -502,7 +502,9 @@ class CandidateProvider:
             catalog = self.package_catalog_cache.get(cache_key)
         if catalog is not None:
             return catalog.summaries
-        future = self.prefetcher.take(cache_key) if self.prefetcher is not None else None
+        future = (
+            self.prefetcher.take(cache_key) if self.prefetcher is not None else None
+        )
         if future is not None:
             return future.result()
         return self.load_available_versions(requirement, cache_key)

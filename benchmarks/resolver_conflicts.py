@@ -122,9 +122,7 @@ class ColdRangeConflictResolution(ColdConflictResolution):
 class WarmConflictResolution(ColdConflictResolution):
     """Measure repeated resolution after populating the wheel metadata cache."""
 
-    def setup(
-        self, wheelhouses: dict[int, str], versions: int
-    ) -> None:
+    def setup(self, wheelhouses: dict[int, str], versions: int) -> None:
         cache = Path(wheelhouses[versions]).parent / "cache"
         cache.mkdir(exist_ok=True)
         self.provider = CandidateProvider.from_options(

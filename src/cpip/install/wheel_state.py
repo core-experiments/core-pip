@@ -70,9 +70,7 @@ def existing_paths(
     else:
         entries = distribution.iter_declared_entries()
     root = os.fspath(distribution.location)
-    paths = {
-        Path(os.path.realpath(os.path.join(root, entry))) for entry in entries
-    }
+    paths = {Path(os.path.realpath(os.path.join(root, entry))) for entry in entries}
     existing = {path for path in paths if os.path.lexists(path)}
     return existing, existing
 

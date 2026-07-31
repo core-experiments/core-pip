@@ -132,7 +132,9 @@ def remove_matches_http(http_cache_dir: str) -> RemoveMatches:
     `Removed <http files cache dir>/arbitrary/pathname/aaaaaaaaa`.
     """
 
-    def remove_matches_http_internal(http_filename: str, result: TestCpipResult) -> bool:
+    def remove_matches_http_internal(
+        http_filename: str, result: TestCpipResult
+    ) -> bool:
         lines = result.stdout.splitlines()
 
         # The "/arbitrary/pathname/" bit is an implementation detail of how

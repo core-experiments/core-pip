@@ -99,7 +99,10 @@ class Tests_UserSite:
         result.did_create(dist_info_folder)
 
     def test_install_user_venv_nositepkgs_fails(
-        self, virtualenv: VirtualEnvironment, script: CpipTestEnvironment, data: TestData
+        self,
+        virtualenv: VirtualEnvironment,
+        script: CpipTestEnvironment,
+        data: TestData,
     ) -> None:
         """
         user install in virtualenv (with no system packages) fails with message

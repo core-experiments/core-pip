@@ -365,7 +365,9 @@ class Link:
         if cached is not None:
             return cached
         name = PathComponent.from_name(posixpath.basename(self.path.rstrip("/")))
-        filename = name or PathComponent.from_name(split_auth_from_netloc(self.netloc)[0])
+        filename = name or PathComponent.from_name(
+            split_auth_from_netloc(self.netloc)[0]
+        )
         self.filename_internal = filename
         return filename
 

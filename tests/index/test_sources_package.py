@@ -320,13 +320,9 @@ def test_dry_run_uses_pypi_metadata_before_building_sdist(
     def fail_build(*args: object, **kwargs: object) -> None:
         pytest.fail("dry-run should not invoke the source build backend")
 
-    monkeypatch.setattr(
-        "cpip.index.candidates.prepare_project_metadata", fail_build
-    )
+    monkeypatch.setattr("cpip.index.candidates.prepare_project_metadata", fail_build)
 
-    metadata = materializer.metadata_loader(
-        candidate, parse_requirement("demo")
-    ).load()
+    metadata = materializer.metadata_loader(candidate, parse_requirement("demo")).load()
 
     assert metadata is expected
 
@@ -409,9 +405,7 @@ def test_dry_run_reads_detached_wheel_metadata_without_download(
         lambda *args, **kwargs: pytest.fail("wheel should not be downloaded"),
     )
 
-    metadata = materializer.metadata_loader(
-        candidate, parse_requirement("demo")
-    ).load()
+    metadata = materializer.metadata_loader(candidate, parse_requirement("demo")).load()
 
     assert metadata.version == Version("1.0")
     assert metadata.dependencies[0].raw == "requests>=2"
