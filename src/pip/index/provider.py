@@ -3,19 +3,14 @@ from __future__ import annotations
 import datetime
 import urllib.parse
 from bisect import bisect_left, bisect_right
-from dataclasses import dataclass, field
 from types import MappingProxyType
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from pip.core.format_control import FormatControl
 from pip.core.errors import InstallationError
 from pip.core.hashes import Hashes
 from pip.core.packaging import Requirement, Version
 from pip.core.release_control import ReleaseControl
-from pip.core.wheel import TargetContext
-from pip.index.candidate_evaluators import CandidateEvaluator
-from pip.index.candidate_materialization import CandidateMaterializer, CandidateStream
 from pip.index.candidates import InstallationCandidate
 from pip.index.config import DEFAULT_INDEX_URL
 from pip.index.links import Link
@@ -37,52 +32,60 @@ from pip.index.source_models import (
     RejectionReason,
 )
 
+if TYPE_CHECKING:
+    from pip.core.format_control import FormatControl
+    from pip.core.wheel import TargetContext
+    from pip.index.candidate_materialization import CandidateStream
+
 PYPI_HOSTS = frozenset(("pypi.org", "pypi.python.org"))
 
 
-@dataclass
-class CandidateProvider:
-    sources: tuple[PackageSource, ...]
-    find_links: list[str]
-    index_urls: list[str]
-    no_index: bool = False
-    allow_yanked: bool = False
-    release_control: ReleaseControl | None = None
-    format_control: FormatControl | None = None
-    prefer_binary: bool = False
-    target: TargetContext | None = None
-    build_options: dict[str, dict[str, object]] | None = None
-    build_constraints: list[str] | None = None
-    wheel_cache_dir: Path | None = None
-    trusted_hosts: tuple[str, ...] = ()
-    build_isolation: bool = True
-    locked_links: dict[str, Link] = field(default_factory=dict)
-    session: Any = None
-    uploaded_prior_to: datetime.datetime | None = None
-    compute_source_hashes: bool = False
-    hashes_by_name: dict[str, Hashes] = field(default_factory=dict)
-    link_cache: dict[str, tuple[Link, ...]] = field(
-        default_factory=dict, init=False, repr=False
-    )
-    find_links_cache: tuple[Link, ...] | None = field(
-        default=None, init=False, repr=False
-    )
-    find_links_by_name_cache: dict[str, tuple[Link, ...]] | None = field(
-        default=None, init=False, repr=False
-    )
-    parsed_link_cache: dict[Link, InstallationCandidate | RejectedCandidate] = field(
-        default_factory=dict, init=False, repr=False
-    )
-    matching_versions_cache: dict[
-        tuple[str, bool, bool, str, bool], tuple[CandidateSummary, ...]
-    ] = field(default_factory=dict, init=False, repr=False)
-    package_catalog_cache: dict[tuple[str, bool, bool], PackageCatalog] = field(
-        default_factory=dict, init=False, repr=False
-    )
-    materializer_internal: CandidateMaterializer | None = field(
-        default=None, init=False, repr=False
-    )
+def is_unnamed_direct_requirement_internal(requirement: Requirement) -> bool:
+    return requirement.url is not None or looks_like_path_requirement(requirement.raw)
 
+
+class CandidateProvider:
+    def __init__(
+        self,
+        sources: tuple[PackageSource, ...], find_links: list[str], index_urls: list[str],
+        no_index: bool = False, allow_yanked: bool = False,
+        release_control: ReleaseControl | None = None,
+        format_control: FormatControl | None = None, prefer_binary: bool = False,
+        target: TargetContext | None = None,
+        build_options: dict[str, dict[str, object]] | None = None,
+        build_constraints: list[str] | None = None, wheel_cache_dir: Path | None = None,
+        trusted_hosts: tuple[str, ...] = (), build_isolation: bool = True,
+        locked_links: dict[str, Link] | None = None, session: Any = None,
+        uploaded_prior_to: datetime.datetime | None = None,
+        compute_source_hashes: bool = False,
+        hashes_by_name: dict[str, Hashes] | None = None,
+    ) -> None:
+        self.sources = sources
+        self.find_links = find_links
+        self.index_urls = index_urls
+        self.no_index = no_index
+        self.allow_yanked = allow_yanked
+        self.release_control = release_control
+        self.format_control = format_control
+        self.prefer_binary = prefer_binary
+        self.target = target
+        self.build_options = build_options
+        self.build_constraints = build_constraints
+        self.wheel_cache_dir = wheel_cache_dir
+        self.trusted_hosts = trusted_hosts
+        self.build_isolation = build_isolation
+        self.locked_links = locked_links if locked_links is not None else {}
+        self.session = session
+        self.uploaded_prior_to = uploaded_prior_to
+        self.compute_source_hashes = compute_source_hashes
+        self.hashes_by_name = hashes_by_name if hashes_by_name is not None else {}
+        self.link_cache = {}
+        self.find_links_cache = None
+        self.find_links_by_name_cache = None
+        self.parsed_link_cache = {}
+        self.matching_versions_cache = {}
+        self.package_catalog_cache = {}
+        self.materializer_internal = None
     @classmethod
     def from_options(
         cls,
@@ -259,6 +262,51 @@ class CandidateProvider:
                 links = tuple(dict.fromkeys(matching_links))
         if links is None:
             links = self.catalog_links(requirement)
+        if (
+            requirement.url is None
+            and links
+            and all(
+                link.is_file
+                and link.kind is ArtifactKind.WHEEL
+                and not link.requires_python
+                and not link.is_yanked
+                for link in links
+            )
+        ):
+            from pip.index.candidate_evaluators import CandidateEvaluator
+
+            accepted: list[CandidateRecord] = []
+            for link in links:
+                parsed = self.parsed_link_cache.get(link)
+                if parsed is None:
+                    try:
+                        parsed = InstallationCandidate.from_link(
+                            link, target=self.target
+                        )
+                    except ValueError:
+                        continue
+                    self.parsed_link_cache[link] = parsed
+                result = CandidateEvaluator.evaluate_parsed_link(
+                    link,
+                    parsed,
+                    requirement,
+                    allow_yanked=self.allow_yanked,
+                    allow_binary=allow_binary,
+                    allow_source=allow_source,
+                )
+                if isinstance(result, InstallationCandidate):
+                    accepted.append(result.to_record())
+                else:
+                    rejected.append(result)
+            accepted.sort(
+                key=lambda candidate: candidate.sort_key(
+                    prefer_binary=self.prefer_binary
+                ),
+                reverse=True,
+            )
+            return CandidateSelection(tuple(accepted), tuple(rejected))
+        from pip.index.candidate_evaluators import CandidateEvaluator
+
         for link in links:
             if self.uploaded_prior_to is not None:
                 # Upload timestamps describe index-hosted artifacts. Local
@@ -336,6 +384,8 @@ class CandidateProvider:
         *,
         allowed_versions: frozenset[Version] | None = None,
     ) -> CandidateStream:
+        from pip.index.candidate_materialization import CandidateMaterializer
+
         selection = self.evaluate_links(requirement)
         accepted = selection.accepted
         if not accepted and requirement.url is not None:
@@ -365,6 +415,8 @@ class CandidateProvider:
         if requirement.url is None and any(
             candidate.version.is_prerelease for candidate in accepted
         ):
+            from pip.index.candidate_evaluators import CandidateEvaluator
+
             accepted = tuple(
                 CandidateEvaluator.create(
                     requirement.name,
@@ -432,6 +484,8 @@ class CandidateProvider:
                 continue
             if link.requires_python:
                 try:
+                    from pip.index.candidate_evaluators import CandidateEvaluator
+
                     if not CandidateEvaluator.requires_python_matches(
                         link.requires_python
                     ):
@@ -447,7 +501,7 @@ class CandidateProvider:
                 self.parsed_link_cache[link] = parsed
             if not isinstance(parsed, InstallationCandidate):
                 continue
-            if not CandidateEvaluator.is_unnamed_direct_requirement(requirement) and (
+            if not is_unnamed_direct_requirement_internal(requirement) and (
                 parsed.canonical_name != requirement.canonical_name
             ):
                 continue
@@ -467,6 +521,7 @@ class CandidateProvider:
         self.package_catalog_cache[cache_key] = PackageCatalog(
             links=tuple(link for links in links_by_version.values() for link in links),
             summaries=result,
+            summary_versions=tuple(summary.version for summary in result),
             summaries_by_version=MappingProxyType(
                 {
                     version: tuple(summaries)
@@ -512,24 +567,27 @@ class CandidateProvider:
         if cached is not None:
             return cached
         available = self.available_versions(requirement)
+        catalog = self.package_catalog_cache.get(
+            (requirement.canonical_name, allow_binary, allow_source)
+        )
+        summary_versions = catalog.summary_versions if catalog is not None else tuple(
+            summary.version for summary in available
+        )
         lower, upper = requirement.specifier.bounds()
         start = 0
         stop = len(available)
 
-        def version_key(summary: CandidateSummary) -> Version:
-            return summary.version
-
         if lower is not None:
             start = (
-                bisect_left(available, lower[0], key=version_key)
+                bisect_left(summary_versions, lower[0])
                 if lower[1]
-                else bisect_right(available, lower[0], key=version_key)
+                else bisect_right(summary_versions, lower[0])
             )
         if upper is not None:
             stop = (
-                bisect_right(available, upper[0], key=version_key)
+                bisect_right(summary_versions, upper[0])
                 if upper[1]
-                else bisect_left(available, upper[0], key=version_key)
+                else bisect_left(summary_versions, upper[0])
             )
         result = tuple(
             summary

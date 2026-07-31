@@ -45,12 +45,55 @@ uv run --group benchmark asv --config benchmarks/asv.conf.json run \
   --bench 'cache_materialization.*Install.*'
 ```
 
+## Direct pip versus uv comparisons
+
+For paired measurements over the same workload, use the Hyperfine runner. It
+validates that both tools choose the same deterministic resolution before
+timing them and writes a JSON manifest containing tool, Python, platform, and
+Hyperfine metadata:
+
+```console
+brew install hyperfine
+uv run --group benchmark python -m benchmarks.cross_tool \
+  --scenario trio \
+  --benchmark resolve-cold \
+  --benchmark resolve-warm \
+  --benchmark install-cold \
+  --benchmark install-warm \
+  --output-dir benchmarks/results
+```
+
+The runner uses three warmups and ten measured runs by default, with isolated
+cache and output directories for each tool. `resolve-cold` and
+`resolve-warm` measure the same resolver operation with different metadata
+cache state; installation modes recreate the target while either clearing or
+preserving the package cache. The generated `benchmarks/results/` directory is
+local output and is not committed.
+
+The deterministic comparison suite is the primary cross-tool signal. ASV
+remains the source of pip revision history and in-process microbenchmarks.
+Live-PyPI benchmarks remain opt-in because network and index conditions are
+useful for realism but unsuitable for a stable comparison gate.
+
 Run the cold conflict-resolution scaling benchmark:
 
 ```console
 uv run --group benchmark asv --config benchmarks/asv.conf.json run \
   --bench 'resolver_conflicts.*'
 ```
+
+Run the real-world fast-resolver cases:
+
+```console
+uv run --group benchmark asv --config benchmarks/asv.conf.json run \
+  --bench 'real_world_resolver.*'
+```
+
+These cases isolate eight failure modes: catalogs with many versions,
+backtracking to an older compatible branch, unsatisfiable graphs, simple and
+nested conflicting extras, `Requires-Python` rejection, large catalogs with
+irrelevant projects, and no-match searches. Each case has 32, 128, and 512
+versions and measures both cold and warm metadata/catalog caches.
 
 ## uv-derived workloads
 
@@ -79,6 +122,51 @@ uv run --group benchmark asv --config benchmarks/asv.conf.json run \
   --bench 'uv_offline.OfflineResolution.*'
 ```
 
+Run the deterministic resolver primitive benchmarks:
+
+```console
+uv run --group benchmark asv --config benchmarks/asv.conf.json run \
+  --bench 'pip_primitives.*'
+```
+
+These isolate PEP 508 requirement parsing, version parsing, project-name
+normalization, wheel filename parsing, local specifier checks, and version
+filtering. The requirement benchmarks report both uncached parsing and pip's
+cached parsing so cache effects are not mistaken for parser improvements.
+
+Run metadata-cache scaling benchmarks:
+
+```console
+uv run --group benchmark asv --config benchmarks/asv.conf.json run \
+  --bench 'metadata_cache.*'
+```
+
+These use deterministic wheelhouses containing 10, 100, 1,000, and 10,000
+metadata-only wheels, measured with cold, warm, and single-file-invalidation
+cache states.
+
+Run local index and requirements-file parsing benchmarks:
+
+```console
+uv run --group benchmark asv --config benchmarks/asv.conf.json run \
+  --bench 'io_primitives.*'
+```
+
+These scan local wheelhouses containing 10, 100, 1,000, and 10,000 files and
+parse flat, nested, and constraint-bearing requirements files at the same
+scales. The index cases include both wheel-only and mixed artifact directories.
+
+Run lockfile serialization benchmarks:
+
+```console
+uv run --group benchmark asv --config benchmarks/asv.conf.json run \
+  --bench 'lockfile_serialization.*'
+```
+
+These measure production TOML rendering for the regular and optimized lock
+paths with 10, 100, 1,000, and 10,000 packages, excluding resolution and file
+I/O.
+
 The authentic PyPI cases use uv's `2024-08-08` upload cutoff and are opt-in so
 normal revision benchmarks remain deterministic. Enable them with:
 
@@ -92,6 +180,33 @@ NumPy/Sparse, Sentry, and Starlette/FastAPI. It also installs uv's compiled Trio
 environment with cold and warm caches. Use Python 3.12 for parity with uv's
 benchmark fixture and to avoid source builds caused by unavailable wheels on
 newer Python versions.
+
+Run the startup comparison matrix on one deterministic scenario:
+
+```console
+uv run --group benchmark python -m benchmarks.cross_tool \
+  --scenario trio \
+  --benchmark startup-version \
+  --benchmark startup-version-cold \
+  --benchmark startup-help \
+  --benchmark startup-help-cold \
+  --benchmark startup-fast-install \
+  --benchmark startup-fallback-install \
+  --benchmark startup-full-fallback-install \
+  --output-dir benchmarks/results
+```
+
+The startup install cases warm their local cache before measurement and recreate
+only the target directory between samples. The fallback case omits `--quiet`
+so it exercises the normal CLI path rather than the specialized fast installer.
+Core-pip benchmark commands use a dedicated `PYTHONPYCACHEPREFIX`; the regular
+startup cases measure warm cached imports, while the `*-cold` cases remove that
+cache before every sample. This avoids inheriting an ambient
+`PYTHONDONTWRITEBYTECODE` setting from the shell.
+
+`startup-fallback-install` measures the safe local-wheel capability route with
+normal output. `startup-full-fallback-install` adds an unsupported `--upgrade`
+shape to force the complete resolver/install path for regression comparisons.
 
 uv's universal resolver, workspace discovery, and tool-management benchmarks
 are intentionally omitted because core-pip has no equivalent operation.

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from enum import Enum
 from collections.abc import Iterable, Mapping
 from typing import TYPE_CHECKING, Callable, Protocol
@@ -40,55 +39,80 @@ class RejectionReason(Enum):
     MISSING_ARTIFACT = "missing-artifact"
 
 
-@dataclass(frozen=True)
 class MetadataFile:
-    hashes: dict[str, str] | None
+    __slots__ = ("hashes",)
+
+    def __init__(self, hashes: dict[str, str] | None) -> None:
+        self.hashes = hashes
 
 
-@dataclass(frozen=True)
 class VcsReference:
-    vcs: str
-    repo_url: str
-    requested_revision: str | None
+    __slots__ = ("vcs", "repo_url", "requested_revision")
+
+    def __init__(self, vcs: str, repo_url: str, requested_revision: str | None) -> None:
+        self.vcs = vcs
+        self.repo_url = repo_url
+        self.requested_revision = requested_revision
 
 
-@dataclass(frozen=True)
 class RejectedCandidate:
-    link: Link
-    reason: RejectionReason
-    detail: str
+    __slots__ = ("link", "reason", "detail")
+
+    def __init__(self, link: Link, reason: RejectionReason, detail: str) -> None:
+        self.link = link
+        self.reason = reason
+        self.detail = detail
 
 
-@dataclass(frozen=True)
 class CandidateSelection:
-    accepted: tuple[CandidateRecord, ...]
-    rejected: tuple[RejectedCandidate, ...]
+    __slots__ = ("accepted", "rejected")
+
+    def __init__(
+        self,
+        accepted: tuple[CandidateRecord, ...],
+        rejected: tuple[RejectedCandidate, ...],
+    ) -> None:
+        self.accepted = accepted
+        self.rejected = rejected
 
 
-@dataclass(frozen=True)
 class CandidateSummary:
-    version: Version
-    is_yanked: bool
-    yanked_reason: str | None
+    __slots__ = ("version", "is_yanked", "yanked_reason")
+
+    def __init__(self, version: Version, is_yanked: bool, yanked_reason: str | None) -> None:
+        self.version = version
+        self.is_yanked = is_yanked
+        self.yanked_reason = yanked_reason
 
 
-@dataclass(frozen=True)
 class CandidateMetadata:
     """Metadata needed by dependency resolution, separate from artifact state."""
 
-    name: str
-    version: Version
-    dependencies: tuple[Requirement, ...]
-    provided_extras: frozenset[str]
-    requires_python: str | None
+    __slots__ = ("name", "version", "dependencies", "provided_extras", "requires_python")
+
+    def __init__(
+        self,
+        name: str,
+        version: Version,
+        dependencies: tuple[Requirement, ...],
+        provided_extras: frozenset[str],
+        requires_python: str | None,
+    ) -> None:
+        self.name = name
+        self.version = version
+        self.dependencies = dependencies
+        self.provided_extras = provided_extras
+        self.requires_python = requires_python
 
 
-@dataclass
 class LazyCandidateMetadata:
     """A one-shot, memoized metadata computation for a candidate."""
 
-    loader: Callable[[], CandidateMetadata]
-    value: CandidateMetadata | None = None
+    __slots__ = ("loader", "value")
+
+    def __init__(self, loader: Callable[[], CandidateMetadata]) -> None:
+        self.loader = loader
+        self.value: CandidateMetadata | None = None
 
     def load(self) -> CandidateMetadata:
         metadata = self.value
@@ -98,18 +122,50 @@ class LazyCandidateMetadata:
         return metadata
 
 
-@dataclass(frozen=True)
 class CandidateRecord:
     """Immutable discovery result that does not imply artifact materialization."""
 
-    name: str
-    version: Version
-    link: Link
-    wheel: WheelFile | None = None
-    tag_rank: int | None = None
-    metadata_loader: LazyCandidateMetadata | None = field(
-        default=None, compare=False, hash=False, repr=False
-    )
+    __slots__ = ("name", "version", "link", "wheel", "tag_rank", "metadata_loader")
+
+    def __init__(
+        self,
+        name: str,
+        version: Version,
+        link: Link,
+        wheel: WheelFile | None = None,
+        tag_rank: int | None = None,
+        metadata_loader: LazyCandidateMetadata | None = None,
+    ) -> None:
+        self.name = name
+        self.version = version
+        self.link = link
+        self.wheel = wheel
+        self.tag_rank = tag_rank
+        self.metadata_loader = metadata_loader
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, CandidateRecord) and (
+            self.name,
+            self.version,
+            self.link,
+            self.wheel,
+            self.tag_rank,
+        ) == (other.name, other.version, other.link, other.wheel, other.tag_rank)
+
+    def __hash__(self) -> int:
+        return hash((self.name, self.version, self.link, self.wheel, self.tag_rank))
+
+    def copy_with(self, **changes: object) -> CandidateRecord:
+        values = {
+            "name": self.name,
+            "version": self.version,
+            "link": self.link,
+            "wheel": self.wheel,
+            "tag_rank": self.tag_rank,
+            "metadata_loader": self.metadata_loader,
+        }
+        values.update(changes)
+        return type(self)(**values)
 
     @property
     def canonical_name(self) -> str:
@@ -131,14 +187,27 @@ class CandidateRecord:
         return self.metadata_loader.load()
 
 
-@dataclass(frozen=True)
 class PackageCatalog:
     """Immutable package metadata shared by candidate and resolver queries."""
 
-    links: tuple[Link, ...]
-    summaries: tuple[CandidateSummary, ...]
-    summaries_by_version: Mapping[Version, tuple[CandidateSummary, ...]]
-    links_by_version: Mapping[Version, tuple[Link, ...]]
+    __slots__ = (
+        "links", "summaries", "summary_versions", "summaries_by_version",
+        "links_by_version",
+    )
+
+    def __init__(
+        self,
+        links: tuple[Link, ...],
+        summaries: tuple[CandidateSummary, ...],
+        summary_versions: tuple[Version, ...],
+        summaries_by_version: Mapping[Version, tuple[CandidateSummary, ...]],
+        links_by_version: Mapping[Version, tuple[Link, ...]],
+    ) -> None:
+        self.links = links
+        self.summaries = summaries
+        self.summary_versions = summary_versions
+        self.summaries_by_version = summaries_by_version
+        self.links_by_version = links_by_version
 
 
 class PackageSource(Protocol):

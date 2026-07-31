@@ -8,7 +8,6 @@ import os
 import subprocess
 import sys
 from collections.abc import Generator, Iterable
-from dataclasses import dataclass
 from typing import Any
 from unittest.mock import Mock
 
@@ -345,10 +344,12 @@ class KeyringModuleV2:
             str, dict[str, KeyringModuleV2.Credential]
         ] = {}
 
-    @dataclass
     class Credential:
-        username: str
-        password: str
+        __slots__ = ("username", "password")
+
+        def __init__(self, username: str, password: str) -> None:
+            self.username = username
+            self.password = password
 
     def get_password(self, system: str, username: str) -> None:
         pytest.fail("get_password should not ever be called")

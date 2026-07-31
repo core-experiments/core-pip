@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 
 from .errors import CommandError
 from .packaging import canonicalize_name
@@ -9,11 +8,18 @@ RELEASE_CONTROL_KINDS = frozenset(("all_releases", "only_final"))
 RELEASE_CONTROL_SENTINELS = frozenset((":all:", ":none:"))
 
 
-@dataclass
 class ReleaseControl:
-    all_releases: set[str] = field(default_factory=set)
-    only_final: set[str] = field(default_factory=set)
-    ordered_args: list[tuple[str, str]] = field(default_factory=list, compare=False)
+    __slots__ = ("all_releases", "only_final", "ordered_args")
+
+    def __init__(
+        self,
+        all_releases: set[str] | None = None,
+        only_final: set[str] | None = None,
+        ordered_args: list[tuple[str, str]] | None = None,
+    ) -> None:
+        self.all_releases = all_releases if all_releases is not None else set()
+        self.only_final = only_final if only_final is not None else set()
+        self.ordered_args = ordered_args if ordered_args is not None else []
 
     def apply(self, kind: str, value: str) -> None:
         if kind not in RELEASE_CONTROL_KINDS:

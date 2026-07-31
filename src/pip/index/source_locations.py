@@ -5,7 +5,6 @@ from __future__ import annotations
 import ntpath
 import os
 import urllib.parse
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -15,7 +14,6 @@ from pip.index.directory_index import (
     local_source_files,
 )
 from pip.index.links import Link
-from pip.index.page_parsing import IndexPageParser
 from pip.index.source_models import ArtifactKind
 
 SUPPORTED_SCHEMES = frozenset(("http", "https", "file", "ftp"))
@@ -41,11 +39,18 @@ def resolve_source_location(location: str) -> tuple[str | None, str | None]:
     return None, None
 
 
-@dataclass(frozen=True)
 class FindLinksSource:
-    links: tuple[str, ...]
-    trusted_hosts: tuple[str, ...] = ()
-    session: Any = None
+    __slots__ = ("links", "trusted_hosts", "session")
+
+    def __init__(
+        self,
+        links: tuple[str, ...],
+        trusted_hosts: tuple[str, ...] = (),
+        session: Any = None,
+    ) -> None:
+        self.links = links
+        self.trusted_hosts = trusted_hosts
+        self.session = session
 
     def collect_links(self, requirement: Requirement) -> list[Link]:
         links: list[Link] = []
@@ -64,6 +69,8 @@ class FindLinksSource:
             return [candidate]
         if candidate.kind is not ArtifactKind.UNKNOWN:
             return [candidate]
+        from pip.index.page_parsing import IndexPageParser
+
         return IndexPageParser(
             trusted_hosts=self.trusted_hosts, session=self.session
         ).links_from_url(normalized)
@@ -71,6 +78,8 @@ class FindLinksSource:
     def links_from_local_path(self, path: Path) -> list[Link]:
         if path.is_file():
             if path.suffix.lower() in HTML_SUFFIXES:
+                from pip.index.page_parsing import IndexPageParser
+
                 return IndexPageParser(
                     trusted_hosts=self.trusted_hosts, session=self.session
                 ).links_from_url(path.as_uri())
@@ -83,13 +92,22 @@ class FindLinksSource:
         ]
 
 
-@dataclass(frozen=True)
 class SimpleIndexSource:
-    index_url: str
-    trusted_hosts: tuple[str, ...] = ()
-    session: Any = None
+    __slots__ = ("index_url", "trusted_hosts", "session")
+
+    def __init__(
+        self,
+        index_url: str,
+        trusted_hosts: tuple[str, ...] = (),
+        session: Any = None,
+    ) -> None:
+        self.index_url = index_url
+        self.trusted_hosts = trusted_hosts
+        self.session = session
 
     def collect_links(self, requirement: Requirement) -> list[Link]:
+        from pip.index.page_parsing import IndexPageParser
+
         project_url = self.project_page_url(self.index_url, requirement.canonical_name)
         return IndexPageParser(
             trusted_hosts=self.trusted_hosts, session=self.session

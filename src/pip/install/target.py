@@ -7,7 +7,6 @@ than calculating individual scheme paths.
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
 from pathlib import Path
 
 from pip.platform.locations.sysconfig import get_scheme
@@ -15,15 +14,24 @@ from pip.core.metadata import default_scripts_path
 from pip.platform.scheme import Scheme
 
 
-@dataclass(frozen=True, slots=True)
 class InstallTarget:
     """The complete destination scheme for one installation transaction."""
 
-    purelib: Path
-    platlib: Path
-    headers: Path
-    scripts: Path
-    data: Path
+    __slots__ = ("purelib", "platlib", "headers", "scripts", "data")
+
+    def __init__(
+        self,
+        purelib: Path,
+        platlib: Path,
+        headers: Path,
+        scripts: Path,
+        data: Path,
+    ) -> None:
+        self.purelib = purelib
+        self.platlib = platlib
+        self.headers = headers
+        self.scripts = scripts
+        self.data = data
 
     @classmethod
     def from_scheme(cls, scheme: Scheme) -> InstallTarget:

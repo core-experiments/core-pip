@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from dataclasses import dataclass
 
 from pip.core.packaging import (
     Requirement,
@@ -20,11 +19,18 @@ from .metadata import InstalledMetadataDistribution
 PackageSet = dict[str, "PackageDetails"]
 
 
-@dataclass(frozen=True)
 class PackageDetails:
-    version: Version
-    dependencies: tuple[Requirement, ...]
-    requested_extras: frozenset[str] = frozenset()
+    __slots__ = ("version", "dependencies", "requested_extras")
+
+    def __init__(
+        self,
+        version: Version,
+        dependencies: tuple[Requirement, ...],
+        requested_extras: frozenset[str] = frozenset(),
+    ) -> None:
+        self.version = version
+        self.dependencies = dependencies
+        self.requested_extras = requested_extras
 
     @classmethod
     def from_dependencies(

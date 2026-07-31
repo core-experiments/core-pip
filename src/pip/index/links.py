@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import datetime
 import functools
+import os
 import posixpath
 import re
 import urllib.parse
-import urllib.request
 from collections.abc import Mapping
 from enum import Enum
 from pathlib import Path
@@ -64,7 +64,12 @@ def clean_url_path_part(part: str) -> str:
 
 
 def clean_file_url_path(part: str) -> str:
-    ret = urllib.request.pathname2url(urllib.request.url2pathname(part))
+    if os.name == "nt":
+        from urllib import request
+
+        ret = request.pathname2url(request.url2pathname(part))
+    else:
+        ret = urllib.parse.quote(urllib.parse.unquote(part), safe="/:")
     if ret.startswith("///"):
         ret = ret.removeprefix("//")
     return ret

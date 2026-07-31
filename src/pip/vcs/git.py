@@ -5,7 +5,6 @@ import os.path
 import pathlib
 import re
 import urllib.parse
-from dataclasses import replace
 from typing import Any
 
 from pip.core.errors import InstallationError
@@ -230,7 +229,9 @@ class Git(VersionControl):
 
         if sha is not None:
             rev_options = rev_options.make_new(sha)
-            rev_options = replace(rev_options, branch_name=(rev if is_branch else None))
+            rev_options = rev_options.copy_with(
+                branch_name=(rev if is_branch else None)
+            )
 
             return rev_options
 

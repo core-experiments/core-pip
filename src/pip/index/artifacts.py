@@ -6,7 +6,6 @@ import urllib.parse
 import urllib.request
 import hashlib
 import logging
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -43,11 +42,13 @@ def download_dir_internal() -> Path:
     return DOWNLOAD_DIR
 
 
-@dataclass(frozen=True)
 class ArtifactLocator:
     """Locate local artifacts and materialize remote distribution URLs."""
 
-    session: Any = None
+    __slots__ = ("session",)
+
+    def __init__(self, session: Any = None) -> None:
+        self.session = session
 
     def ensure_local(
         self,

@@ -8,7 +8,6 @@ import logging
 import mimetypes
 import os
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
 from http import HTTPStatus
 from typing import BinaryIO
 
@@ -158,15 +157,20 @@ def get_http_response_filename(resp: HttpResponse, link: Link) -> PathComponent:
     return PathComponent.from_name(filename, required=True)
 
 
-@dataclass
 class FileDownload:
     """Stores the state of a single link download."""
 
-    link: Link
-    output_file: BinaryIO
-    size: int | None
-    bytes_received: int = 0
-    reattempts: int = 0
+    __slots__ = ("link", "output_file", "size", "bytes_received", "reattempts")
+
+    def __init__(
+        self, link: Link, output_file: BinaryIO, size: int | None,
+        bytes_received: int = 0, reattempts: int = 0,
+    ) -> None:
+        self.link = link
+        self.output_file = output_file
+        self.size = size
+        self.bytes_received = bytes_received
+        self.reattempts = reattempts
 
     def is_incomplete(self) -> bool:
         return bool(self.size is not None and self.bytes_received < self.size)

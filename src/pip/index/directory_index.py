@@ -9,7 +9,6 @@ from pathlib import Path
 
 from pip.core.packaging import Version, canonicalize_name
 from pip.core.urls import path_to_url
-from pip.core.wheel import parse_wheel_filename
 from pip.index.links import SOURCE_ARCHIVE_SUFFIXES
 
 
@@ -35,7 +34,11 @@ class DirectoryIndex:
             if is_html_file(url):
                 self.page_candidates_internal.append(url)
                 continue
-            wheel = parse_wheel_filename(entry.name)
+            wheel = _parse_wheel_filename_fast(entry.name)
+            if wheel is None and entry.name.endswith(".whl"):
+                from pip.core.wheel import parse_wheel_filename
+
+                wheel = parse_wheel_filename(entry.name)
             if wheel is not None:
                 project_name = wheel[0]
             else:
@@ -61,6 +64,30 @@ class DirectoryIndex:
 
 def is_html_file(file_url: str) -> bool:
     return mimetypes.guess_type(file_url, strict=False)[0] == "text/html"
+
+
+def _parse_wheel_filename_fast(filename: str) -> tuple[str, str] | None:
+    if not filename.endswith(".whl"):
+        return None
+    parts = filename[:-4].split("-")
+    if len(parts) not in (5, 6):
+        return None
+    distribution, version = parts[:2]
+    python_tags, abi_tags, platform_tags = parts[-3:]
+    if (
+        not distribution
+        or not version
+        or not python_tags
+        or abi_tags != "none"
+        or platform_tags != "any"
+        or not any(tag.startswith("py") for tag in python_tags.split("."))
+    ):
+        return None
+    try:
+        parsed_version = Version(version)
+    except ValueError:
+        return None
+    return canonicalize_name(distribution), str(parsed_version)
 
 
 def project_version_from_filename(filename: str) -> tuple[str, Version] | None:

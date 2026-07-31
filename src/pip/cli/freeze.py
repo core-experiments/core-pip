@@ -1,13 +1,11 @@
 from __future__ import annotations
 
 import collections
-import dataclasses
 import logging
 import os
 import re
 import site
 from collections.abc import Generator, Iterable
-from dataclasses import dataclass, field
 from typing import NamedTuple
 
 from pip.build.metadata import (
@@ -145,7 +143,7 @@ def freeze(
                                     if frozen.canonical_name == "initools"
                                     else frozen.canonical_name
                                 )
-                                frozen = dataclasses.replace(
+                                frozen = frozen.copy_with(
                                     frozen,
                                     req=re.sub(
                                         r"^[A-Za-z0-9][A-Za-z0-9._-]*",
@@ -251,12 +249,23 @@ def get_editable_info(dist: InstalledMetadataDistribution) -> EditableInfo:
     )
 
 
-@dataclass(frozen=True)
 class FrozenRequirement:
-    name: str
-    req: str
-    editable: bool
-    comments: Iterable[str] = field(default_factory=tuple)
+    __slots__ = ("name", "req", "editable", "comments")
+
+    def __init__(
+        self, name: str, req: str, editable: bool,
+        comments: Iterable[str] = (),
+    ) -> None:
+        self.name = name
+        self.req = req
+        self.editable = editable
+        self.comments = comments
+
+    def copy_with(self, **changes: object) -> FrozenRequirement:
+        values = {"name": self.name, "req": self.req, "editable": self.editable,
+                  "comments": self.comments}
+        values.update(changes)
+        return type(self)(**values)
 
     @property
     def canonical_name(self) -> str:

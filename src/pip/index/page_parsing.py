@@ -7,7 +7,6 @@ import ssl
 import urllib.error
 import urllib.parse
 import urllib.request
-from dataclasses import dataclass
 from html.parser import HTMLParser
 from typing import Any, Callable
 
@@ -20,10 +19,12 @@ from pip.index.source_models import MetadataFile
 LinkFactory = Callable[..., Link]
 
 
-@dataclass(frozen=True)
 class IndexContent:
-    body: str
-    content_type: str
+    __slots__ = ("body", "content_type")
+
+    def __init__(self, body: str, content_type: str) -> None:
+        self.body = body
+        self.content_type = content_type
 
 
 class IndexPageParser:

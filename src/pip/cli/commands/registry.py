@@ -2,23 +2,40 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from importlib import import_module
-from typing import Callable
+from typing import TYPE_CHECKING
 
-from pip.cli.parser import ArgumentParser
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
-CommandRunner = Callable[[list[str]], int]
-ParserFactory = Callable[[], ArgumentParser]
+    from pip.cli.parser import ArgumentParser
+
+    CommandRunner = Callable[[list[str]], int]
+    ParserFactory = Callable[[], ArgumentParser]
 
 
-@dataclass(frozen=True)
 class CommandSpec:
+    __slots__ = ("name", "module", "runner", "parser_factory", "visible")
+
+    def __init__(
+        self,
+        name: str,
+        module: str | None = None,
+        runner: str | None = None,
+        parser_factory: str | None = None,
+        visible: bool = True,
+    ) -> None:
+        self.name = name
+        self.module = module
+        self.runner = runner
+        self.parser_factory = parser_factory
+        self.visible = visible
+
     name: str
-    module: str | None = None
-    runner: str | None = None
-    parser_factory: str | None = None
-    visible: bool = True
+    module: str | None
+    runner: str | None
+    parser_factory: str | None
+    visible: bool
 
     def load_runner(self) -> CommandRunner | None:
         if self.module is None or self.runner is None:
@@ -27,6 +44,8 @@ class CommandSpec:
         return getattr(module, self.runner)
 
     def create_parser(self) -> ArgumentParser:
+        from pip.cli.parser import ArgumentParser
+
         if self.module is not None and self.parser_factory is not None:
             module = import_module(self.module)
             factory: ParserFactory = getattr(module, self.parser_factory)

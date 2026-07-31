@@ -6,7 +6,6 @@ import mimetypes
 import os
 import tempfile
 import logging
-from dataclasses import dataclass
 from typing import Protocol
 
 from pip.core.errors import HashMismatch, InstallationError
@@ -36,10 +35,13 @@ class VCSUnpacker(Protocol):
     def __call__(self, link: Link, location: str, verbosity: int) -> None: ...
 
 
-@dataclass
 class File:
-    path: str
-    content_type: str | None = None
+    __slots__ = ("path", "content_type")
+
+    def __init__(self, path: str, content_type: str | None = None) -> None:
+        self.path = path
+        self.content_type = content_type
+        self.__post_init__()
 
     def __post_init__(self) -> None:
         if self.content_type is None:

@@ -3,7 +3,6 @@ from __future__ import annotations
 import importlib.metadata
 import os
 import sysconfig
-from dataclasses import dataclass
 from email.message import Message
 from pathlib import Path
 from typing import Any, Iterable, cast
@@ -18,8 +17,23 @@ from .packaging import (
 stdlib_pkgs = {"python", "wsgiref", "argparse"}
 
 
-@dataclass(frozen=True)
 class InstalledDistribution:
+    __slots__ = ("name", "version", "location", "metadata_location", "raw")
+
+    def __init__(
+        self,
+        name: str,
+        version: str,
+        location: Path,
+        metadata_location: Path | None,
+        raw: importlib.metadata.Distribution,
+    ) -> None:
+        self.name = name
+        self.version = version
+        self.location = location
+        self.metadata_location = metadata_location
+        self.raw = raw
+
     name: str
     version: str
     location: Path

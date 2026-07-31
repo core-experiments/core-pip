@@ -6,7 +6,6 @@ import io
 import os
 import tarfile
 import zipfile
-from dataclasses import dataclass
 from pathlib import Path
 
 
@@ -14,15 +13,24 @@ MANY_FILES = 10_000
 SNAPSHOT_DISK_LIMIT = 25 * 1024 * 1024
 
 
-@dataclass(frozen=True)
 class Scenario:
-    name: str
-    projects: int
-    versions: int
-    requirements: tuple[str, ...]
-    expected_projects: int
-    extras: bool = False
-    shared_conflict: bool = False
+    __slots__ = (
+        "name", "projects", "versions", "requirements", "expected_projects",
+        "extras", "shared_conflict",
+    )
+
+    def __init__(
+        self, name: str, projects: int, versions: int,
+        requirements: tuple[str, ...], expected_projects: int,
+        extras: bool = False, shared_conflict: bool = False,
+    ) -> None:
+        self.name = name
+        self.projects = projects
+        self.versions = versions
+        self.requirements = requirements
+        self.expected_projects = expected_projects
+        self.extras = extras
+        self.shared_conflict = shared_conflict
 
 
 SCENARIOS = (
@@ -60,6 +68,7 @@ def make_metadata_wheel(
     *,
     requires: tuple[str, ...] = (),
     provides_extras: tuple[str, ...] = (),
+    requires_python: str | None = None,
     files: int = 0,
 ) -> Path:
     """Create a tiny valid wheel whose dependency metadata drives resolution."""
@@ -72,6 +81,8 @@ def make_metadata_wheel(
         f"Version: {version}",
     ]
     metadata.extend(f"Provides-Extra: {extra}" for extra in provides_extras)
+    if requires_python is not None:
+        metadata.append(f"Requires-Python: {requires_python}")
     metadata.extend(f"Requires-Dist: {requirement}" for requirement in requires)
     with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_STORED) as archive:
         for index in range(files):

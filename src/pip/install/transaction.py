@@ -5,18 +5,21 @@ from __future__ import annotations
 import os
 import shutil
 import tempfile
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
 from pip.core.errors import InstallationError
 
 
-@dataclass(frozen=True, slots=True)
 class StagedFile:
-    source: Path
-    destination: Path
-    mode: int | None = None
+    __slots__ = ("source", "destination", "mode")
+
+    def __init__(
+        self, source: Path, destination: Path, mode: int | None = None
+    ) -> None:
+        self.source = source
+        self.destination = destination
+        self.mode = mode
 
 
 class InstallTransaction:
@@ -48,17 +51,19 @@ class InstallTransaction:
 
     def validate(self) -> None:
         for item in self.staged_internal:
-            if not item.source.is_file():
+            if not os.path.isfile(item.source):
                 raise InstallationError(f"staged file does not exist: {item.source}")
             if (
-                item.destination.exists()
+                os.path.exists(item.destination)
                 and normalized_internal(item.destination) not in self.owned
             ):
-                if (
-                    item.destination.is_file()
-                    and item.destination.read_bytes() == item.source.read_bytes()
-                ):
-                    continue
+                if os.path.isfile(item.destination):
+                    with open(item.destination, "rb") as destination_file:
+                        destination_contents = destination_file.read()
+                    with open(item.source, "rb") as source_file:
+                        source_contents = source_file.read()
+                    if destination_contents == source_contents:
+                        continue
                 raise InstallationError(
                     f"Cannot install {item.destination} from {item.source}: "
                     "an unrelated file already exists"
@@ -76,13 +81,13 @@ class InstallTransaction:
             self.validate()
             for item in self.staged_internal:
                 self.backup_if_needed(item.destination)
-                item.destination.parent.mkdir(parents=True, exist_ok=True)
+                os.makedirs(os.fspath(item.destination.parent), exist_ok=True)
                 shutil.move(os.fspath(item.source), os.fspath(item.destination))
                 if item.mode is not None:
-                    item.destination.chmod(item.mode)
+                    os.chmod(item.destination, item.mode)
                 self.created_internal.append(item.destination)
             for path in sorted(self.deletions, key=os.fspath):
-                if path.exists() or path.is_symlink():
+                if os.path.exists(path) or os.path.islink(path):
                     self.backup_if_needed(path)
                 self.remove_empty_parents(path.parent)
             if finalize:
@@ -93,16 +98,16 @@ class InstallTransaction:
 
     def rollback(self) -> None:
         for path in reversed(self.created_internal):
-            if path.exists() or path.is_symlink():
-                if path.is_dir() and not path.is_symlink():
+            if os.path.exists(path) or os.path.islink(path):
+                if os.path.isdir(path) and not os.path.islink(path):
                     shutil.rmtree(path)
                 else:
-                    path.unlink()
+                    os.unlink(path)
         for original, backup in reversed(self.backups):
-            if backup.exists():
-                original.parent.mkdir(parents=True, exist_ok=True)
-                if original.exists() or original.is_symlink():
-                    original.unlink()
+            if os.path.exists(backup):
+                os.makedirs(os.fspath(original.parent), exist_ok=True)
+                if os.path.exists(original) or os.path.islink(original):
+                    os.unlink(original)
                 shutil.move(os.fspath(backup), os.fspath(original))
         self.finish_successfully()
 
@@ -112,10 +117,10 @@ class InstallTransaction:
             self.finish_successfully()
 
     def backup_if_needed(self, path: Path) -> None:
-        if not path.exists() and not path.is_symlink():
+        if not os.path.exists(path) and not os.path.islink(path):
             return
         backup = self.temporary_internal / str(len(self.backups))
-        backup.parent.mkdir(parents=True, exist_ok=True)
+        os.makedirs(os.fspath(backup.parent), exist_ok=True)
         shutil.move(os.fspath(path), os.fspath(backup))
         self.backups.append((path, backup))
 
@@ -123,13 +128,13 @@ class InstallTransaction:
         current = directory
         while current != current.parent:
             try:
-                current.rmdir()
+                os.rmdir(current)
             except OSError:
                 return
             current = current.parent
 
     def finish_successfully(self) -> None:
-        shutil.rmtree(self.temporary_internal, ignore_errors=True)
+        shutil.rmtree(os.fspath(self.temporary_internal), ignore_errors=True)
         self.finished = True
 
     def __enter__(self) -> InstallTransaction:

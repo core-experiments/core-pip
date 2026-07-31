@@ -1,13 +1,17 @@
 """Configuration defaults for package discovery."""
 
 import urllib.parse
-from dataclasses import dataclass
 
 DEFAULT_INDEX_URL = "https://pypi.org/simple"
 
 
-@dataclass(frozen=True)
 class PackageIndex:
+    __slots__ = ("url", "file_storage_domain")
+
+    def __init__(self, url: str, file_storage_domain: str) -> None:
+        self.url = url
+        self.file_storage_domain = file_storage_domain
+
     url: str
     file_storage_domain: str
 

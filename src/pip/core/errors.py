@@ -1,8 +1,11 @@
 from __future__ import annotations
 
-import re
 
-REFERENCE_RE = re.compile(r"^[a-z]+(?:-[a-z]+)*$")
+def _valid_reference(value: str) -> bool:
+    return bool(value) and all(
+        part and all("a" <= character <= "z" for character in part)
+        for part in value.split("-")
+    )
 
 
 class PipError(Exception):
@@ -25,7 +28,7 @@ class DiagnosticPipError(PipError):
         resolved_reference = reference or self.reference
         if resolved_reference is None:
             raise AssertionError("error reference not provided!")
-        if REFERENCE_RE.fullmatch(resolved_reference) is None:
+        if not _valid_reference(resolved_reference):
             raise AssertionError("error reference must be kebab-case!")
         self.reference = resolved_reference
         self.message = message

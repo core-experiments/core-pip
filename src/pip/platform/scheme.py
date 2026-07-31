@@ -2,17 +2,20 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 
 SCHEME_KEYS = ["platlib", "purelib", "headers", "scripts", "data"]
 
 
-@dataclass(frozen=True, slots=True)
 class Scheme:
     """Paths used for the files produced by a wheel installation."""
 
-    platlib: str
-    purelib: str
-    headers: str
-    scripts: str
-    data: str
+    __slots__ = ("platlib", "purelib", "headers", "scripts", "data")
+
+    def __init__(
+        self, platlib: str, purelib: str, headers: str, scripts: str, data: str
+    ) -> None:
+        self.platlib = platlib
+        self.purelib = purelib
+        self.headers = headers
+        self.scripts = scripts
+        self.data = data

@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-import os
-import platform
 import re
-import sys
 import urllib.parse
-from dataclasses import dataclass
-from functools import cached_property, lru_cache, total_ordering
-from typing import Iterable
+from functools import lru_cache, total_ordering
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 NORMALIZE_RE = re.compile(r"[-_.]+")
 VERSION_RE = re.compile(
@@ -46,6 +45,10 @@ def safe_extra(extra: str) -> str:
 
 
 def default_environment(extra: str | None = None) -> dict[str, str]:
+    import os
+    import platform
+    import sys
+
     impl = platform.python_implementation()
     version = platform.python_version()
     return {
@@ -197,25 +200,42 @@ class Version:
         return "".join(parts)
 
 
-@dataclass(frozen=True)
 class Specifier:
-    operator: str
-    version: str
+    __slots__ = ("operator", "version", "_parsed_version", "_compatible_upper_bound")
 
-    def __post_init__(self) -> None:
+    def __init__(self, operator: str, version: str) -> None:
+        self.operator = operator
+        self.version = version
+        self._parsed_version: Version | None = None
+        self._compatible_upper_bound: Version | None = None
         if self.operator == "===":
             return
         validated = Version(self.version.rstrip(".*"))
         if not self.version.endswith(".*"):
-            object.__setattr__(self, "parsed_version", validated)
+            self._parsed_version = validated
 
-    @cached_property
+    @property
     def parsed_version(self) -> Version:
-        return Version(self.version)
+        if self._parsed_version is None:
+            self._parsed_version = Version(self.version)
+        return self._parsed_version
 
-    @cached_property
+    @property
     def compatible_upper_bound(self) -> Version:
-        return compatible_upper_bound_internal(self.parsed_version)
+        if self._compatible_upper_bound is None:
+            self._compatible_upper_bound = compatible_upper_bound_internal(
+                self.parsed_version
+            )
+        return self._compatible_upper_bound
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, Specifier) and (
+            self.operator,
+            self.version,
+        ) == (other.operator, other.version)
+
+    def __hash__(self) -> int:
+        return hash((self.operator, self.version))
 
     def contains(self, version: Version) -> bool:
         if self.operator == "===":
@@ -260,6 +280,7 @@ class SpecifierSet:
         self.specifiers = tuple(
             Specifier(op, ver.strip()) for op, ver in SPEC_RE.findall(self.raw)
         )
+
         if self.raw and not self.specifiers:
             raise ValueError(f"invalid version specifier: {value!r}")
         self.text_internal = ",".join(
@@ -329,18 +350,60 @@ class SpecifierSet:
         return self.raw == other.raw
 
 
-@dataclass(frozen=True)
 class Requirement:
-    name: str
-    specifier: SpecifierSet
-    extras: frozenset[str]
-    url: str | None = None
-    marker: str | None = None
-    raw: str = ""
+    __slots__ = ("name", "specifier", "extras", "url", "marker", "raw", "_canonical_name")
 
-    @cached_property
+    def __init__(
+        self,
+        name: str,
+        specifier: SpecifierSet,
+        extras: frozenset[str],
+        url: str | None = None,
+        marker: str | None = None,
+        raw: str = "",
+    ) -> None:
+        self.name = name
+        self.specifier = specifier
+        self.extras = extras
+        self.url = url
+        self.marker = marker
+        self.raw = raw
+        self._canonical_name: str | None = None
+
+    @property
     def canonical_name(self) -> str:
-        return canonicalize_name(self.name)
+        if self._canonical_name is None:
+            self._canonical_name = canonicalize_name(self.name)
+        return self._canonical_name
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, Requirement) and (
+            self.name,
+            self.specifier,
+            self.extras,
+            self.url,
+            self.marker,
+            self.raw,
+        ) == (
+            other.name,
+            other.specifier,
+            other.extras,
+            other.url,
+            other.marker,
+            other.raw,
+        )
+
+    def copy_with(self, **changes: object) -> Requirement:
+        values = {
+            "name": self.name,
+            "specifier": self.specifier,
+            "extras": self.extras,
+            "url": self.url,
+            "marker": self.marker,
+            "raw": self.raw,
+        }
+        values.update(changes)
+        return type(self)(**values)
 
     def is_satisfied_by(
         self, version: str | Version, *, allow_prereleases: bool = True

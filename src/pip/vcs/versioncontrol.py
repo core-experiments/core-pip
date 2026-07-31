@@ -8,7 +8,6 @@ import shutil
 import sys
 import urllib.parse
 from collections.abc import Iterable, Iterator, Mapping
-from dataclasses import dataclass, field
 from typing import (
     Any,
     Literal,
@@ -95,7 +94,6 @@ class RemoteNotValidError(Exception):
         self.url = url
 
 
-@dataclass(frozen=True)
 class RevOptions:
     """
     Encapsulates a VCS-specific revision to install, along with any VCS
@@ -107,10 +105,29 @@ class RevOptions:
         extra_args: a list of extra options.
     """
 
-    vc_class: type[VersionControl]
-    rev: str | None = None
-    extra_args: CommandArgs = field(default_factory=list)
-    branch_name: str | None = None
+    __slots__ = ("vc_class", "rev", "extra_args", "branch_name")
+
+    def __init__(
+        self,
+        vc_class: type[VersionControl],
+        rev: str | None = None,
+        extra_args: CommandArgs | None = None,
+        branch_name: str | None = None,
+    ) -> None:
+        self.vc_class = vc_class
+        self.rev = rev
+        self.extra_args = extra_args if extra_args is not None else []
+        self.branch_name = branch_name
+
+    def copy_with(self, **changes: object) -> RevOptions:
+        values = {
+            "vc_class": self.vc_class,
+            "rev": self.rev,
+            "extra_args": self.extra_args,
+            "branch_name": self.branch_name,
+        }
+        values.update(changes)
+        return type(self)(**values)
 
     def __repr__(self) -> str:
         return f"<RevOptions {self.vc_class.name}: rev={self.rev!r}>"

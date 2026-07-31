@@ -12,6 +12,7 @@ from pip.install.requirements import RequirementInstaller
 from pip.install.target import InstallTarget
 from pip.install.wheel_transaction import (
     WheelInstaller,
+    install_wheels_transactionally,
 )
 
 
@@ -237,6 +238,21 @@ def test_install_upgrade_uninstalls_previous_version(tmp_path: Path) -> None:
     assert not (target / "owner_demo-1.0.dist-info").exists()
     assert (target / "owner_demo-2.0.dist-info").exists()
     assert (target / "owner_demo" / "__init__.py").read_text() == "VALUE = '2.0'\n"
+
+
+def test_batch_install_rolls_back_when_destinations_overlap(tmp_path: Path) -> None:
+    wheel = make_wheel_internal(tmp_path)
+    target = tmp_path / "target"
+
+    with pytest.raises(InstallationError, match="duplicate installation destination"):
+        install_wheels_transactionally(
+            [(wheel, True, None), (wheel, False, None)],
+            target=InstallTarget.from_options("owner-demo", target=str(target)),
+            pycompile=False,
+            lookup_existing=False,
+        )
+
+    assert not target.exists()
 
 
 def test_install_rejects_wheel_member_path_traversal(tmp_path: Path) -> None:

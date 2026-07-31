@@ -1,71 +1,20 @@
 from __future__ import annotations
 
-import argparse
-import datetime
-import logging
 import os
 import sys
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
-
-from pip.build.build import build_editable_from_source
-from pip.build.check import (
-    PackageDetails,
-    check_package_set,
-    parse_installed_dependencies,
-)
-from pip.build.metadata import InstalledDistributionStore
-from pip.cli.dependency_groups import parse_dependency_groups
-from pip.cli.context import target_prefix as target_prefix_internal
-from pip.cli.parser import ArgumentParser as ArgumentParser_internal
-from pip.cli.requirements import (
-    bundle_install_requirements,
-    collect_requirements,
-    load_source_config,
-    requirements_from_script,
-)
-from pip.core.appdirs import user_cache_dir
-from pip.core.errors import (
-    CommandError,
-    DistributionNotFound,
-    InstallationError,
-)
-from pip.core.format_control import FormatControl
-from pip.core.metadata import (
-    find_installed,
-    user_lib_path,
-)
-from pip.core.packaging import (
-    Version,
-    canonicalize_name,
-    marker_applies,
-    parse_requirement,
-)
-from pip.core.pip_version import PIP_DISTRIBUTION_NAMES
-from pip.core.wheel import TargetContext
-from pip.index.links import Link
-from pip.install.report import ReportItem, write_install_report
 
 INDEX_URL_OPTIONS = frozenset(("-i", "--index-url"))
 FORMAT_OPTIONS = frozenset(("--no-binary", "--only-binary"))
 RELEASE_OPTIONS = frozenset(("--all-releases", "--only-final"))
 
 if TYPE_CHECKING:
+    import argparse
+
     from pip.resolution.req_install import InstallRequirement
 
 
 def run_install(args: list[str]) -> int:
-    from pip.core.wheel import wheel_candidate
-    from pip.index.provider import CandidateProvider
-    from pip.install.editable import prepare_editable_source
-    from pip.install.target import InstallTarget
-    from pip.install.wheel_transaction import (
-        WheelInstaller,
-        install_wheels_transactionally,
-    )
-    from pip.resolution.req_install import install_req_from_line
-    from pip.resolution.resolver import Resolver
-
     normalized_args: list[str] = []
     index = 0
     while index < len(args):
@@ -78,6 +27,54 @@ def run_install(args: list[str]) -> int:
         index += 1
     parser = create_parser()
     options = parser.parse_args(normalized_args)
+
+    import datetime
+    import logging
+    from pathlib import Path
+
+    from pip.cli.context import target_prefix as target_prefix_internal
+    from pip.cli.requirements import (
+        bundle_install_requirements,
+        collect_requirements,
+        load_source_config,
+        requirements_from_script,
+    )
+    from pip.core.errors import (
+        CommandError,
+        DistributionNotFound,
+        InstallationError,
+    )
+    from pip.core.format_control import FormatControl
+    from pip.core.packaging import (
+        canonicalize_name,
+        marker_applies,
+        parse_requirement,
+    )
+    from pip.core.wheel import TargetContext, wheel_candidate
+    from pip.index.links import Link
+    from pip.index.provider import CandidateProvider
+    from pip.install.target import InstallTarget
+    from pip.install.wheel_transaction import install_wheels_transactionally
+    from pip.resolution.req_install import install_req_from_line
+    from pip.resolution.resolver import Resolver
+
+    def target_library_is_empty(target: InstallTarget) -> bool:
+        """Return whether target-mode library roots contain any entries."""
+        seen: set[Path] = set()
+        for root in target.library_roots:
+            if root in seen:
+                continue
+            seen.add(root)
+            try:
+                with os.scandir(root) as entries:
+                    if next(entries, None) is not None:
+                        return False
+            except FileNotFoundError:
+                continue
+            except NotADirectoryError:
+                return False
+        return True
+
     if len(options.requirements_from_scripts) > 1:
         raise CommandError("--requirements-from-script can only be given once")
     if options.no_input:
@@ -123,7 +120,12 @@ def run_install(args: list[str]) -> int:
             group_items.append((os.fspath(path), group_name))
             continue
         group_items.append(("pyproject.toml", file_name))
-    grouped_requirements = parse_dependency_groups(group_items)
+    if group_items:
+        from pip.cli.dependency_groups import parse_dependency_groups
+
+        grouped_requirements = parse_dependency_groups(group_items)
+    else:
+        grouped_requirements = []
     script_requirements: list[str] = []
     if options.requirements_from_scripts:
         script_requirements = requirements_from_script(
@@ -166,6 +168,9 @@ def run_install(args: list[str]) -> int:
                 item = install_req_from_line(raw_requirement)
                 if item.req is None:
                     continue
+                from pip.build.metadata import InstalledDistributionStore
+                from pip.core.metadata import user_lib_path
+
                 installed = InstalledDistributionStore().find(item.req.name)
                 if (
                     installed is not None
@@ -263,7 +268,14 @@ def run_install(args: list[str]) -> int:
     summary_root_names: set[str] = set()
     newly_installed_names: set[str] = set()
     reported_satisfied: set[str] = set()
-    report_items: list[ReportItem] = []
+    report_items: list[Any] = []
+
+    def add_report_item(**fields: Any) -> None:
+        if not options.report:
+            return
+        from pip.install.report import ReportItem
+
+        report_items.append(ReportItem(**fields))
     reinstall = options.force_reinstall or options.ignore_installed
     requested_roots: set[str] = set()
     requested_names: dict[str, str] = {}
@@ -356,6 +368,8 @@ def run_install(args: list[str]) -> int:
             source_requirements_by_url[constraint_requirement.req.url] = (
                 constraint_requirement
             )
+    from pip.core.appdirs import user_cache_dir
+
     provider = CandidateProvider.from_options(
         find_links=bundle.find_links,
         index_url=bundle.index_url,
@@ -448,6 +462,8 @@ def run_install(args: list[str]) -> int:
         requested: bool,
         direct_url: Any = None,
     ) -> None:
+        from pip.install.wheel_transaction import WheelInstaller
+
         target = InstallTarget.from_options(
             candidate.canonical_name,
             target=options.target,
@@ -472,6 +488,7 @@ def run_install(args: list[str]) -> int:
     preinstalled_editable_reports: dict[str, tuple[Any, Any]] = {}
     if bundle.editables:
         from pip.install.editable import prepare_editable_source
+        from pip.build.build import build_editable_from_source
 
         for editable in bundle.editables:
             source_path, direct_url, metadata = prepare_editable_source(
@@ -524,6 +541,7 @@ def run_install(args: list[str]) -> int:
                 constraints=bundle.constraints,
                 allow_prereleases=options.pre,
                 require_hashes=bundle.require_hashes,
+                compute_source_hashes=bool(options.report) or bundle.require_hashes,
                 ignore_requires_python=options.ignore_requires_python,
                 python_version=python_version,
             ).resolve(requirements)
@@ -588,33 +606,64 @@ def run_install(args: list[str]) -> int:
                     direct_url = direct_url_from_link(source_requirement.link)
                 candidate_direct_urls[os.fspath(candidate.path)] = direct_url
             if not options.dry_run:
-                try:
-                    install_wheels_transactionally(
-                        [
-                            (
-                                candidate.path,
-                                candidate.canonical_name in requested_roots,
-                                candidate_direct_urls[os.fspath(candidate.path)],
-                            )
-                            for candidate in plan.candidates
-                        ],
-                        target=batch_target,
-                        pycompile=not options.no_compile,
-                        force=reinstall,
-                        preserve_existing=options.ignore_installed,
+                hybrid_installed = False
+                if (
+                    options.target is not None
+                    and options.ignore_installed
+                    and options.no_compile
+                    and not options.require_hashes
+                    and not options.report
+                    and options.root is None
+                    and not options.user
+                    and options.prefix is None
+                    and all(candidate.source_kind == "wheel" for candidate in plan.candidates)
+                    and not any(
+                        candidate.source_url in requested_source_urls
+                        for candidate in plan.candidates
                     )
-                except InstallationError as exc:
-                    prefix = "Cannot install "
-                    message = str(exc)
-                    if message.startswith(prefix):
-                        conflict_name = message[len(prefix) :].split(":", 1)[0]
-                        for candidate in plan.candidates:
-                            if candidate.canonical_name == conflict_name:
-                                print(
-                                    f"The user requested {candidate.canonical_name} "
-                                    f"{candidate.version}"
+                ):
+                    from pip.cli.commands.fast_install import (
+                        install_resolved_pure_wheels,
+                    )
+
+                    hybrid_installed = install_resolved_pure_wheels(
+                        plan.candidates,
+                        options.target,
+                        requested_roots,
+                    )
+                if not hybrid_installed:
+                    try:
+                        install_wheels_transactionally(
+                            [
+                                (
+                                    candidate.path,
+                                    candidate.canonical_name in requested_roots,
+                                    candidate_direct_urls[os.fspath(candidate.path)],
                                 )
-                    raise
+                                for candidate in plan.candidates
+                            ],
+                            target=batch_target,
+                            pycompile=not options.no_compile,
+                            force=reinstall,
+                            preserve_existing=options.ignore_installed,
+                            lookup_existing=not (
+                                options.target is not None
+                                and options.ignore_installed
+                                and target_library_is_empty(batch_target)
+                            ),
+                        )
+                    except InstallationError as exc:
+                        prefix = "Cannot install "
+                        message = str(exc)
+                        if message.startswith(prefix):
+                            conflict_name = message[len(prefix) :].split(":", 1)[0]
+                            for candidate in plan.candidates:
+                                if candidate.canonical_name == conflict_name:
+                                    print(
+                                        f"The user requested {candidate.canonical_name} "
+                                        f"{candidate.version}"
+                                    )
+                        raise
         ordered_candidates = (
             sorted(
                 plan.candidates,
@@ -687,13 +736,12 @@ def run_install(args: list[str]) -> int:
                 requested_extras = tuple(
                     sorted(set(requested_extras) | set(source_requirement.req.extras))
                 )
-            report_items.append(
-                ReportItem(
+            add_report_item(
                     candidate_name=candidate.name,
                     candidate_version=str(candidate.version),
                     requested=candidate.canonical_name in requested_roots,
                     source_url=candidate.source_url,
-                    source_hashes=candidate.source_hashes,
+                    source_hashes=(candidate.source_hashes if options.report else None),
                     yanked=candidate.yanked_reason is not None,
                     is_direct=(
                         candidate.canonical_name in bundle.locked_direct_names
@@ -707,13 +755,11 @@ def run_install(args: list[str]) -> int:
                     requires_dist=tuple(
                         str(dependency) for dependency in candidate.dependencies
                     ),
-                )
             )
     for editable in bundle.editables:
         if editable in preinstalled_editables:
             candidate, direct_url = preinstalled_editable_reports[editable]
-            report_items.append(
-                ReportItem(
+            add_report_item(
                     candidate_name=candidate.name,
                     candidate_version=str(candidate.version),
                     requested=True,
@@ -722,9 +768,11 @@ def run_install(args: list[str]) -> int:
                     yanked=False,
                     is_direct=direct_url is not None,
                     editable=True,
-                )
             )
             continue
+        from pip.install.editable import prepare_editable_source
+        from pip.build.build import build_editable_from_source
+
         source_path, direct_url, metadata = prepare_editable_source(editable)
         built = build_editable_from_source(
             source_path,
@@ -782,6 +830,7 @@ def run_install(args: list[str]) -> int:
                 constraints=bundle.constraints,
                 allow_prereleases=options.pre,
                 require_hashes=bundle.require_hashes,
+                compute_source_hashes=bool(options.report) or bundle.require_hashes,
                 ignore_requires_python=options.ignore_requires_python,
                 python_version=python_version,
             ).resolve(
@@ -791,15 +840,13 @@ def run_install(args: list[str]) -> int:
                 ]
             )
             for candidate in dependency_plan.candidates:
-                report_items.append(
-                    ReportItem(
+                add_report_item(
                         candidate_name=candidate.name,
                         candidate_version=str(candidate.version),
                         requested=False,
                         source_url=candidate.source_url,
-                        source_hashes=candidate.source_hashes,
+                        source_hashes=(candidate.source_hashes if options.report else None),
                         yanked=candidate.yanked_reason is not None,
-                    )
                 )
                 if not options.dry_run:
                     install_candidate(candidate, requested=False)
@@ -813,8 +860,7 @@ def run_install(args: list[str]) -> int:
         installed.append(f"{candidate.name}-{candidate.version}")
         installed_canonical_names.append(candidate.canonical_name)
         newly_installed_names.add(candidate.canonical_name)
-        report_items.append(
-            ReportItem(
+        add_report_item(
                 candidate_name=candidate.name,
                 candidate_version=str(candidate.version),
                 requested=True,
@@ -831,12 +877,13 @@ def run_install(args: list[str]) -> int:
                     str(dependency) for dependency in editable_dependencies
                 ),
                 editable=True,
-            )
         )
     if not installed and bundle.requirements:
         for requirement in bundle.requirements:
             item = install_req_from_line(requirement)
             requirement_name = item.req.name if item.req is not None else requirement
+            from pip.core.metadata import find_installed
+
             installed_dist = find_installed(requirement_name)
             if (
                 installed_dist is not None
@@ -849,12 +896,18 @@ def run_install(args: list[str]) -> int:
                 )
         return 0
     if options.report:
+        from pip.install.report import write_install_report
+
         write_install_report(Path(options.report), report_items)
     if (
         installed
         and not options.dry_run
         and not options.no_deps
         and not options.no_warn_conflicts
+        # A target installation is isolated from the running environment.
+        # Scanning the active environment here cannot report conflicts in the
+        # target and only adds a full installed-metadata pass to the command.
+        and options.target is None
     ):
         warn_about_install_conflicts(newly_installed_names)
     if installed and options.dry_run and not quiet:
@@ -877,34 +930,46 @@ def run_install(args: list[str]) -> int:
 
 def warn_about_install_conflicts(changed_names: set[str]) -> None:
     """Warn about broken requirements affected by the current install."""
+    from pip.build.check import (
+        PackageDetails,
+        check_package_set,
+        parse_installed_dependencies,
+    )
+    from pip.build.metadata import InstalledDistributionStore
+    from pip.core.packaging import Version, canonicalize_name
+    from pip.core.pip_version import PIP_DISTRIBUTION_NAMES
+
     distributions = InstalledDistributionStore().iter(skip=PIP_DISTRIBUTION_NAMES)
+    distributions_by_name = {dist.canonical_name: dist for dist in distributions}
+    dependencies_by_name = {}
+    dependents_by_name: dict[str, set[str]] = {}
+    for dist in distributions:
+        dependencies = parse_installed_dependencies(dist)
+        dependencies_by_name[dist.canonical_name] = dependencies
+        for requirement in dependencies:
+            dependents_by_name.setdefault(
+                canonicalize_name(requirement.name), set()
+            ).add(dist.canonical_name)
     package_set = {
         dist.canonical_name: PackageDetails.from_dependencies(
             Version(dist.raw_version),
-            parse_installed_dependencies(dist),
+            dependencies_by_name[dist.canonical_name],
         )
         for dist in distributions
     }
     affected = set(changed_names)
-    changed = True
-    while changed:
-        changed = False
-        for dist in distributions:
-            if dist.canonical_name in affected:
-                continue
-            if any(
-                canonicalize_name(requirement.name) in affected
-                for requirement in parse_installed_dependencies(dist)
-            ):
-                affected.add(dist.canonical_name)
-                changed = True
+    pending = list(changed_names)
+    while pending:
+        dependency = pending.pop()
+        for dependent in dependents_by_name.get(dependency, ()):
+            if dependent not in affected:
+                affected.add(dependent)
+                pending.append(dependent)
     missing, conflicting = check_package_set(package_set)
     for name, requirements in sorted(missing.items()):
         if name not in affected:
             continue
-        distribution = next(
-            dist for dist in distributions if dist.canonical_name == name
-        )
+        distribution = distributions_by_name[name]
         for _, requirement in requirements:
             print(
                 f"{distribution.canonical_name} {distribution.version} requires "
@@ -914,9 +979,7 @@ def warn_about_install_conflicts(changed_names: set[str]) -> None:
     for name, requirements in sorted(conflicting.items()):
         if name not in affected:
             continue
-        distribution = next(
-            dist for dist in distributions if dist.canonical_name == name
-        )
+        distribution = distributions_by_name[name]
         for dependency_name, version, requirement in requirements:
             print(
                 f"{distribution.canonical_name} {distribution.version} requires "
@@ -926,6 +989,8 @@ def warn_about_install_conflicts(changed_names: set[str]) -> None:
 
 
 def create_parser() -> argparse.ArgumentParser:
+    from pip.cli.parser import ArgumentParser as ArgumentParser_internal
+
     parser = ArgumentParser_internal(prog="pip install", allow_abbrev=False)
     parser.add_argument("requirements", nargs="*")
     parser.add_argument("--group", dest="groups", action="append", default=[])

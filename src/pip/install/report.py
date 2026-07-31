@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass
 from pathlib import Path
 
 from pip.core.packaging import canonicalize_name
@@ -12,18 +11,36 @@ from pip.core.urls import url_to_path
 from pip.resolution.req_install import file_hashes
 
 
-@dataclass(frozen=True)
 class ReportItem:
-    candidate_name: str
-    candidate_version: str
-    requested: bool
-    source_url: str | None
-    source_hashes: dict[str, str] | None
-    yanked: bool
-    is_direct: bool = False
-    requested_extras: tuple[str, ...] = ()
-    requires_dist: tuple[str, ...] = ()
-    editable: bool = False
+    __slots__ = (
+        "candidate_name", "candidate_version", "requested", "source_url",
+        "source_hashes", "yanked", "is_direct", "requested_extras",
+        "requires_dist", "editable",
+    )
+
+    def __init__(
+        self,
+        candidate_name: str,
+        candidate_version: str,
+        requested: bool,
+        source_url: str | None,
+        source_hashes: dict[str, str] | None,
+        yanked: bool,
+        is_direct: bool = False,
+        requested_extras: tuple[str, ...] = (),
+        requires_dist: tuple[str, ...] = (),
+        editable: bool = False,
+    ) -> None:
+        self.candidate_name = candidate_name
+        self.candidate_version = candidate_version
+        self.requested = requested
+        self.source_url = source_url
+        self.source_hashes = source_hashes
+        self.yanked = yanked
+        self.is_direct = is_direct
+        self.requested_extras = requested_extras
+        self.requires_dist = requires_dist
+        self.editable = editable
 
 
 def write_install_report(path: Path, items: list[ReportItem]) -> None:

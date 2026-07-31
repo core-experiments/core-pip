@@ -14,7 +14,6 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Iterator, Mapping, Sequence
-from dataclasses import dataclass, field
 from typing import Any
 
 from pip.core.urls import redact_auth_from_url
@@ -30,12 +29,20 @@ logger = logging.getLogger(__name__)
 RETRY_STATUS_CODES = frozenset((500, 502, 503, 520, 527))
 
 
-@dataclass
 class HttpRequest:
-    method: str
-    url: str
-    headers: dict[str, str] = field(default_factory=dict)
-    body: bytes | None = None
+    __slots__ = ("method", "url", "headers", "body")
+
+    def __init__(
+        self,
+        method: str,
+        url: str,
+        headers: dict[str, str] | None = None,
+        body: bytes | None = None,
+    ) -> None:
+        self.method = method
+        self.url = url
+        self.headers = headers if headers is not None else {}
+        self.body = body
 
 
 class HttpResponse:
@@ -147,9 +154,15 @@ class NetworkSession:
     def user_agent() -> str:
         import platform
 
-        from pip.core.pip_version import get_pip_version
+        from pip.cli._execution_context import current_version
 
-        return f"pip/{get_pip_version()} Python/{platform.python_version()}"
+        version = current_version()
+        if version is None:
+            from pip.core.pip_version import get_pip_version
+
+            version = get_pip_version()
+
+        return f"pip/{version} Python/{platform.python_version()}"
 
     def add_trusted_host(
         self, host: str, source: str | None = None, suppress_logging: bool = False

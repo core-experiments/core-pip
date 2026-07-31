@@ -19,8 +19,8 @@ if not __spec__ or __spec__.parent == "":
     sys.path.insert(0, path)
 
 if __name__ == "__main__":
-    from pip.cli.main import main as main_internal
     from . import __version__
+    from pip.cli.entrypoint import main as main_internal
 
     sys.exit(
         main_internal(

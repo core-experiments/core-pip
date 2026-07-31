@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import sys
 import sysconfig
-from dataclasses import dataclass
 from functools import lru_cache
 
 from .wheel import TargetContext, WheelTag, supported_wheel_tags
@@ -70,12 +69,24 @@ def get_supported_internal(
     return tuple(supported)
 
 
-@dataclass
 class TargetPython:
-    platforms: list[str] | None = None
-    py_version_info: tuple[int, ...] | None = None
-    abis: list[str] | None = None
-    implementation: str | None = None
+    __slots__ = (
+        "platforms", "py_version_info", "abis", "implementation",
+        "given_py_version_info", "py_version", "valid_tags", "valid_tags_set",
+    )
+
+    def __init__(
+        self,
+        platforms: list[str] | None = None,
+        py_version_info: tuple[int, ...] | None = None,
+        abis: list[str] | None = None,
+        implementation: str | None = None,
+    ) -> None:
+        self.platforms = platforms
+        self.py_version_info = py_version_info
+        self.abis = abis
+        self.implementation = implementation
+        self.__post_init__()
 
     def __post_init__(self) -> None:
         self.given_py_version_info = self.py_version_info

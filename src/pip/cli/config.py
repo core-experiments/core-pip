@@ -4,7 +4,6 @@ import configparser
 import os
 import sys
 import sysconfig
-from dataclasses import dataclass
 from pathlib import Path
 
 from pip.core.errors import ConfigurationError
@@ -20,17 +19,26 @@ class RawConfigParser_internal(configparser.RawConfigParser):
         return optionstr
 
 
-@dataclass(frozen=True)
 class ConfigLocation:
-    kind: str
-    path: Path
+    __slots__ = ("kind", "path")
+
+    def __init__(self, kind: str, path: Path) -> None:
+        self.kind = kind
+        self.path = path
 
 
-@dataclass(frozen=True)
 class ConfigDebugView:
-    env_vars: tuple[tuple[str, str], ...]
-    locations: tuple[ConfigLocation, ...]
-    values: tuple[tuple[str, str, str], ...]
+    __slots__ = ("env_vars", "locations", "values")
+
+    def __init__(
+        self,
+        env_vars: tuple[tuple[str, str], ...],
+        locations: tuple[ConfigLocation, ...],
+        values: tuple[tuple[str, str, str], ...],
+    ) -> None:
+        self.env_vars = env_vars
+        self.locations = locations
+        self.values = values
 
 
 class ConfigurationStore:

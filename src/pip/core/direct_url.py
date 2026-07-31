@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import urllib.parse
-from dataclasses import dataclass
 from typing import cast
 
 DIRECT_URL_METADATA_NAME = "direct_url.json"
@@ -28,10 +27,12 @@ def expect_string(data: dict[str, object], key: str, field: str | None = None) -
     return value
 
 
-@dataclass(frozen=True)
 class ArchiveInfo:
-    hash: str | None = None
-    hashes: dict[str, str] | None = None
+    __slots__ = ("hash", "hashes")
+
+    def __init__(self, hash: str | None = None, hashes: dict[str, str] | None = None) -> None:
+        self.hash = hash
+        self.hashes = hashes
 
     @classmethod
     def from_dict(cls, data: dict[str, object]) -> ArchiveInfo:
@@ -71,9 +72,11 @@ class ArchiveInfo:
         return data
 
 
-@dataclass(frozen=True)
 class DirInfo:
-    editable: bool = False
+    __slots__ = ("editable",)
+
+    def __init__(self, editable: bool = False) -> None:
+        self.editable = editable
 
     @classmethod
     def from_dict(cls, data: dict[str, object]) -> DirInfo:
@@ -90,11 +93,13 @@ class DirInfo:
         return {"editable": True} if self.editable else {}
 
 
-@dataclass(frozen=True)
 class VcsInfo:
-    vcs: str
-    commit_id: str
-    requested_revision: str | None = None
+    __slots__ = ("vcs", "commit_id", "requested_revision")
+
+    def __init__(self, vcs: str, commit_id: str, requested_revision: str | None = None) -> None:
+        self.vcs = vcs
+        self.commit_id = commit_id
+        self.requested_revision = requested_revision
 
     @classmethod
     def from_dict(cls, data: dict[str, object]) -> VcsInfo:
@@ -120,13 +125,22 @@ class VcsInfo:
         return data
 
 
-@dataclass(frozen=True)
 class DirectUrl:
-    url: str
-    info_subdir: str | None = None
-    archive_info: ArchiveInfo | None = None
-    dir_info: DirInfo | None = None
-    vcs_info: VcsInfo | None = None
+    __slots__ = ("url", "info_subdir", "archive_info", "dir_info", "vcs_info")
+
+    def __init__(
+        self,
+        url: str,
+        info_subdir: str | None = None,
+        archive_info: ArchiveInfo | None = None,
+        dir_info: DirInfo | None = None,
+        vcs_info: VcsInfo | None = None,
+    ) -> None:
+        self.url = url
+        self.info_subdir = info_subdir
+        self.archive_info = archive_info
+        self.dir_info = dir_info
+        self.vcs_info = vcs_info
 
     @property
     def subdirectory(self) -> str | None:

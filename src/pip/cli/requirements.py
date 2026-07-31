@@ -6,12 +6,6 @@ import argparse
 import os
 import sys
 
-try:
-    import tomllib
-except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility
-    from pip._vendor import tomli as tomllib
-import urllib.parse
-from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -35,33 +29,53 @@ if TYPE_CHECKING:
     from pip.resolution.req_install import InstallRequirement
 
 
-@dataclass(frozen=True)
 class RequirementsBundle:
-    requirements: list[str]
-    constraints: list[str]
-    editables: list[str]
-    requirement_config_settings: dict[str, dict[str, object]]
-    requirement_hashes: dict[str, dict[str, list[str]]]
-    constraint_hashes: dict[str, dict[str, list[str]]]
-    editable_config_settings: dict[str, dict[str, object]]
-    find_links: list[str]
-    index_url: str | None
-    extra_index_urls: list[str]
-    no_index: bool
-    format_control: FormatControl
-    locked_links: dict[str, str] = field(default_factory=dict)
-    locked_direct_names: frozenset[str] = frozenset()
-    release_control: ReleaseControl = field(default_factory=ReleaseControl)
-    require_hashes: bool = False
-    session: Any = None
+    __slots__ = tuple(
+        "requirements constraints editables requirement_config_settings "
+        "requirement_hashes constraint_hashes editable_config_settings find_links "
+        "index_url extra_index_urls no_index format_control locked_links "
+        "locked_direct_names release_control require_hashes session".split()
+    )
 
-
-@dataclass(frozen=True)
+    def __init__(
+        self,
+        requirements: list[str], constraints: list[str], editables: list[str],
+        requirement_config_settings: dict[str, dict[str, object]],
+        requirement_hashes: dict[str, dict[str, list[str]]],
+        constraint_hashes: dict[str, dict[str, list[str]]],
+        editable_config_settings: dict[str, dict[str, object]], find_links: list[str],
+        index_url: str | None, extra_index_urls: list[str], no_index: bool,
+        format_control: FormatControl, locked_links: dict[str, str] | None = None,
+        locked_direct_names: frozenset[str] = frozenset(),
+        release_control: ReleaseControl | None = None, require_hashes: bool = False,
+        session: Any = None,
+    ) -> None:
+        self.requirements = requirements
+        self.constraints = constraints
+        self.editables = editables
+        self.requirement_config_settings = requirement_config_settings
+        self.requirement_hashes = requirement_hashes
+        self.constraint_hashes = constraint_hashes
+        self.editable_config_settings = editable_config_settings
+        self.find_links = find_links
+        self.index_url = index_url
+        self.extra_index_urls = extra_index_urls
+        self.no_index = no_index
+        self.format_control = format_control
+        self.locked_links = locked_links if locked_links is not None else {}
+        self.locked_direct_names = locked_direct_names
+        self.release_control = release_control if release_control is not None else ReleaseControl()
+        self.require_hashes = require_hashes
+        self.session = session
 class SourceConfig:
-    find_links: list[str]
-    index_url: str | None
-    extra_index_urls: list[str]
-    no_index: bool
+    __slots__ = ("find_links", "index_url", "extra_index_urls", "no_index")
+
+    def __init__(self, find_links: list[str], index_url: str | None,
+                 extra_index_urls: list[str], no_index: bool) -> None:
+        self.find_links = find_links
+        self.index_url = index_url
+        self.extra_index_urls = extra_index_urls
+        self.no_index = no_index
 
 
 def load_source_config(command: str | None = None) -> SourceConfig:
@@ -111,6 +125,11 @@ def load_source_config(command: str | None = None) -> SourceConfig:
 
 
 def requirements_from_script(path: Path) -> list[str]:
+    try:
+        import tomllib
+    except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility
+        from pip._vendor import tomli as tomllib
+
     try:
         source = path.read_text(encoding="utf-8")
     except OSError as exc:
@@ -431,6 +450,8 @@ def bundle_install_requirements(
             else []
         )
         if direct_constraints:
+            import urllib.parse
+
             constrained = direct_constraints[-1]
             if item.req is not None and (
                 item.req.url is None or item.req.url == constrained.url
@@ -440,13 +461,11 @@ def bundle_install_requirements(
                     for part in (str(item.req.specifier), str(constrained.specifier))
                     if part
                 )
-                constrained = replace(
-                    constrained,
+                constrained = constrained.copy_with(
                     specifier=SpecifierSet(merged_specifier),
                     extras=constrained.extras | item.req.extras,
                 )
-                constrained = replace(
-                    constrained,
+                constrained = constrained.copy_with(
                     raw=item.req.raw,
                 )
                 item.req = constrained

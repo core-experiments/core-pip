@@ -283,17 +283,24 @@ def test_resolver_caches_candidate_counts_per_requirement(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     resolver = Resolver(no_index=True)
+    calls = 0
+    matching_versions = resolver.provider.matching_versions
+
+    def counted_matching_versions(
+        requirement: Requirement, *, allow_prereleases: bool
+    ) -> tuple[object, ...]:
+        nonlocal calls
+        calls += 1
+        return matching_versions(
+            requirement, allow_prereleases=allow_prereleases
+        )
+
+    monkeypatch.setattr(
+        resolver.provider, "matching_versions", counted_matching_versions
+    )
     pending = PendingAgenda(
         [parse_requirement("first>=1"), parse_requirement("second>=1")]
     )
-    calls = 0
-
-    def candidate_count(requirement: Requirement) -> int:
-        nonlocal calls
-        calls += 1
-        return 1
-
-    monkeypatch.setattr(resolver, "candidate_count_internal", candidate_count)
 
     resolver.choose_requirement(pending, {})
     resolver.choose_requirement(pending, {})
@@ -636,6 +643,30 @@ def test_resolver_defers_local_wheel_hashing_until_selection(
     assert [candidate.path for candidate in plan.candidates] == [selected_wheel]
     assert hashed_paths == [selected_wheel]
     assert plan.candidates[0].source_hashes == file_hashes(selected_wheel)
+
+
+def test_resolver_can_skip_source_hashing_for_install(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    wheelhouse = tmp_path / "packages"
+    wheelhouse.mkdir()
+    selected_wheel = make_wheel(wheelhouse, "demo-pkg", "demo_pkg", "1.0")
+
+    def fail_hashing(path: Path) -> dict[str, str]:
+        raise AssertionError(f"hashed install candidate: {path}")
+
+    monkeypatch.setattr("pip.resolution.resolver.file_hashes", fail_hashing)
+    provider = CandidateProvider.from_options(
+        find_links=[str(wheelhouse)], no_index=True
+    )
+
+    plan = Resolver(
+        provider=provider,
+        ignore_installed=True,
+        compute_source_hashes=False,
+    ).resolve(["demo-pkg"])
+
+    assert [candidate.path for candidate in plan.candidates] == [selected_wheel]
 
 
 def test_resolver_reuses_cataloged_wheel_filename(

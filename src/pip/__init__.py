@@ -8,6 +8,6 @@ def main(args: list[str] | None = None) -> int:
 
     For additional details, see https://github.com/pypa/pip/issues/7498.
     """
-    from pip.cli.main import main as main_internal
+    from pip.cli.entrypoint import main as main_internal
 
     return main_internal(args, version=__version__, location=__file__)

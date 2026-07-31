@@ -11,12 +11,10 @@ import shutil
 import sys
 import tempfile
 import zipfile
-from dataclasses import replace
 from pathlib import Path
 from typing import Any, Callable, Generator, Iterator, Sequence, overload
 
 from pip.core.errors import BuildError, InstallationError, UnsupportedWheel
-from pip.core.temp_dir import remove_temp_directory
 from pip.core.packaging import (
     Requirement,
     Version,
@@ -25,8 +23,6 @@ from pip.core.packaging import (
     parse_requirement,
 )
 from pip.core.wheel import WheelCandidate, validate_wheel, wheel_candidate
-from pip.index.artifacts import ArtifactLocator
-from pip.index.cache import origin_hashes, wheel_cache_path
 from pip.index.links import Link
 from pip.index.source_models import (
     ArtifactKind,
@@ -35,6 +31,7 @@ from pip.index.source_models import (
     LazyCandidateMetadata,
     SOURCE_ARTIFACT_KINDS,
 )
+from pip.index.metadata_cache import get_wheel_metadata_cache
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +74,12 @@ def vcs_scheme(url: str) -> str | None:
     from pip.index.vcs import vcs_scheme as parse_vcs_scheme
 
     return parse_vcs_scheme(url)
+
+
+def remove_temp_directory_internal(path: str | os.PathLike[str]) -> None:
+    from pip.core.temp_dir import remove_temp_directory
+
+    remove_temp_directory(path)
 
 
 class CandidateStream(Sequence[WheelCandidate]):
@@ -257,7 +260,7 @@ class LazyWheelCandidate(WheelCandidate):
                 ),
             )
             if self.record_internal.link.is_vcs:
-                remove_temp_directory(local)
+                remove_temp_directory_internal(local)
                 return None
             if local.is_file():
                 return {"sha256": hashlib.sha256(local.read_bytes()).hexdigest()}
@@ -270,6 +273,8 @@ class LazyWheelCandidate(WheelCandidate):
 
     @property
     def source_vcs(self) -> str | None:
+        if not self.record_internal.link.is_vcs:
+            return None
         return vcs_scheme(self.record_internal.link.url)
 
     @property
@@ -281,6 +286,10 @@ class LazyWheelCandidate(WheelCandidate):
     def yanked_reason(self) -> str | None:
         return self.record_internal.link.yanked_reason
 
+    @property
+    def wheel_layout(self) -> object | None:
+        return self._materialize().wheel_layout
+
 
 def emit_build_message(message: str) -> None:
     if not os.environ.get("PIP_QUIET"):
@@ -288,6 +297,8 @@ def emit_build_message(message: str) -> None:
 
 
 def source_hashes_for_link(link: Link) -> dict[str, str]:
+    from pip.index.artifacts import ArtifactLocator
+
     hashes = dict(link.hashes)
     if hashes:
         return hashes
@@ -332,7 +343,13 @@ class CandidateMaterializer:
         self.wheel_cache_dir = wheel_cache_dir
         self.build_isolation = build_isolation
         self.compute_source_hashes = compute_source_hashes
-        self.artifacts = ArtifactLocator(session)
+        self.session = session
+        self.persistent_metadata_cache = (
+            get_wheel_metadata_cache(wheel_cache_dir)
+            if wheel_cache_dir is not None
+            else None
+        )
+        self.artifacts = None
         self.invalid_links: set[str] = set()
         self.wheel_candidates: dict[
             tuple[str, int, int, frozenset[str]], WheelCandidate
@@ -350,6 +367,14 @@ class CandidateMaterializer:
             cached = self.local_artifacts.get(candidate.link.url)
             if cached is not None:
                 return cached
+        if candidate.link.is_file:
+            path = local_path or Path(candidate.link.file_path)
+            self.local_artifacts[candidate.link.url] = path
+            return path
+        if self.artifacts is None:
+            from pip.index.artifacts import ArtifactLocator
+
+            self.artifacts = ArtifactLocator(self.session)
         path = self.artifacts.ensure_local(
             candidate.link.url,
             is_vcs=candidate.link.is_vcs,
@@ -365,8 +390,7 @@ class CandidateMaterializer:
         accepted: tuple[CandidateRecord, ...],
     ) -> CandidateStream:
         records = tuple(
-            replace(
-                candidate,
+            candidate.copy_with(
                 metadata_loader=self.metadata_loader(candidate, requirement),
             )
             for candidate in accepted
@@ -462,7 +486,7 @@ class CandidateMaterializer:
                         requires_python=project.requires_python,
                     )
                 if vcs_path is not None:
-                    remove_temp_directory(vcs_path)
+                    remove_temp_directory_internal(vcs_path)
             else:
                 with (
                     path.open("rb", buffering=32768) as stream,
@@ -480,6 +504,7 @@ class CandidateMaterializer:
                         archive=archive,
                         filename_info=(candidate.name, candidate.version),
                         dist_info_dir=dist_info_dir,
+                        metadata_cache=self.persistent_metadata_cache,
                     )
                 metadata = CandidateMetadata(
                     name=built.name,
@@ -671,12 +696,12 @@ class CandidateMaterializer:
                     wheel.path.name,
                 )
                 if materialized_vcs_path is not None:
-                    remove_temp_directory(materialized_vcs_path)
+                    remove_temp_directory_internal(materialized_vcs_path)
                 continue
             seen.add(key)
             candidates.append(wheel)
             if materialized_vcs_path is not None:
-                remove_temp_directory(materialized_vcs_path)
+                remove_temp_directory_internal(materialized_vcs_path)
             logger.debug(
                 "candidate ready %s==%s kind=%s",
                 candidate.name,
@@ -742,6 +767,8 @@ def validate_build_requirements(source: Path) -> None:
 def cached_wheel_for_link(
     wheel_cache_dir: Path | None, url: str
 ) -> tuple[Path, dict[str, str] | None] | None:
+    from pip.index.cache import origin_hashes, wheel_cache_path
+
     if wheel_cache_dir is None:
         return None
     entry_dir = wheel_cache_path(wheel_cache_dir, cache_identity(url))
@@ -756,6 +783,8 @@ def cached_wheel_for_link(
 def cache_built_wheel_internal(
     wheel_cache_dir: Path | None, candidate: CandidateRecord, wheel: Path
 ) -> None:
+    from pip.index.cache import wheel_cache_path
+
     if wheel_cache_dir is None:
         return
     entry_dir = wheel_cache_path(wheel_cache_dir, cache_identity(candidate.link.url))

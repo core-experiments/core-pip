@@ -3,13 +3,17 @@ from __future__ import annotations
 import os
 import urllib.parse
 from collections.abc import Iterable
-from dataclasses import dataclass
 
 from pip.core.urls import split_auth_from_netloc
 
 
-@dataclass(frozen=True)
 class HiddenText:
+    __slots__ = ("secret", "redacted")
+
+    def __init__(self, secret: str, redacted: str) -> None:
+        self.secret = secret
+        self.redacted = redacted
+
     secret: str
     redacted: str
 

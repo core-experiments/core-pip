@@ -1,16 +1,23 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from pip.core.packaging import canonicalize_name
 
-from pip.resolution.req_install import InstallRequirement
+if TYPE_CHECKING:
+    from pip.resolution.req_install import InstallRequirement
 
 
-@dataclass
 class RequirementSet:
-    named_internal: dict[str, InstallRequirement] = field(default_factory=dict)
-    unnamed: list[InstallRequirement] = field(default_factory=list)
+    __slots__ = ("named_internal", "unnamed")
+
+    def __init__(
+        self,
+        named_internal: dict[str, InstallRequirement] | None = None,
+        unnamed: list[InstallRequirement] | None = None,
+    ) -> None:
+        self.named_internal = named_internal if named_internal is not None else {}
+        self.unnamed = unnamed if unnamed is not None else []
 
     @staticmethod
     def name_internal(requirement: InstallRequirement) -> str | None:

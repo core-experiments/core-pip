@@ -6,7 +6,6 @@ import textwrap
 import traceback
 from collections.abc import Iterable, Sequence
 from contextlib import nullcontext
-from dataclasses import dataclass, field
 from io import StringIO
 from typing import TYPE_CHECKING, Protocol
 
@@ -52,22 +51,36 @@ class BuildOptions(Protocol):
     session: NetworkSession
 
 
-@dataclass
 class BuildConfiguration:
     """Settings inherited by an isolated build dependency installation."""
 
-    session: NetworkSession
-    format_control: FormatControl = field(default_factory=FormatControl)
-    release_control: ReleaseControl | None = field(default_factory=ReleaseControl)
-    index_urls: list[str] = field(default_factory=list)
-    find_links: list[str] = field(default_factory=list)
-    proxy: str | None = None
-    no_proxy_env: bool = False
-    trusted_hosts: tuple[str, ...] = ()
-    custom_cert: str | None = None
-    client_cert: str | None = None
-    prefer_binary: bool = False
-    uploaded_prior_to: datetime.datetime | None = None
+    __slots__ = (
+        "session", "format_control", "release_control", "index_urls", "find_links",
+        "proxy", "no_proxy_env", "trusted_hosts", "custom_cert", "client_cert",
+        "prefer_binary", "uploaded_prior_to",
+    )
+
+    def __init__(
+        self, session: NetworkSession, format_control: FormatControl | None = None,
+        release_control: ReleaseControl | None = None,
+        index_urls: list[str] | None = None, find_links: list[str] | None = None,
+        proxy: str | None = None, no_proxy_env: bool = False,
+        trusted_hosts: tuple[str, ...] = (), custom_cert: str | None = None,
+        client_cert: str | None = None, prefer_binary: bool = False,
+        uploaded_prior_to: datetime.datetime | None = None,
+    ) -> None:
+        self.session = session
+        self.format_control = format_control if format_control is not None else FormatControl()
+        self.release_control = release_control if release_control is not None else ReleaseControl()
+        self.index_urls = index_urls if index_urls is not None else []
+        self.find_links = find_links if find_links is not None else []
+        self.proxy = proxy
+        self.no_proxy_env = no_proxy_env
+        self.trusted_hosts = trusted_hosts
+        self.custom_cert = custom_cert
+        self.client_cert = client_cert
+        self.prefer_binary = prefer_binary
+        self.uploaded_prior_to = uploaded_prior_to
 
 
 class InstallWheelBuildError(DiagnosticPipError):

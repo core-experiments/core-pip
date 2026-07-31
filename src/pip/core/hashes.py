@@ -3,12 +3,25 @@
 from __future__ import annotations
 
 import hashlib
+import os
 from collections.abc import Iterable, Mapping
+from pathlib import Path
 from typing import Any, BinaryIO, NoReturn
 
 from pip.core.errors import HashMissing, HashMismatch, InstallationError
 
 Hash = Any
+
+
+def file_hashes(path: str | Path) -> dict[str, str]:
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as stream:
+        size = os.fstat(stream.fileno()).st_size
+        buffer = bytearray(max(1, min(size, 1024 * 1024)))
+        view = memoryview(buffer)
+        while read := stream.readinto(buffer):
+            digest.update(view[:read])
+    return {"sha256": digest.hexdigest()}
 
 
 def read_chunks(file: BinaryIO, size: int = 1024 * 1024):

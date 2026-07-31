@@ -12,14 +12,16 @@ WINDOWS = sys.platform == "win32"
 def path_to_url(path: str) -> str:
     path = _normalize_windows_path(path)
     path = os.path.normpath(os.path.abspath(path))
-    import urllib.request
+    if WINDOWS:
+        from urllib import request
 
-    return urllib.parse.urljoin("file://", urllib.request.pathname2url(path))
+        path = request.pathname2url(path)
+    else:
+        path = urllib.parse.quote(path, safe="/:")
+    return urllib.parse.urljoin("file://", path)
 
 
 def url_to_path(url: str) -> str:
-    import urllib.request
-
     assert url.startswith("file:"), (
         f"You can only turn file: urls into filenames (not {url!r})"
     )
@@ -34,7 +36,12 @@ def url_to_path(url: str) -> str:
             f"non-local file URIs are not supported on this platform: {url!r}"
         )
 
-    path = urllib.request.url2pathname(netloc + path)
+    if WINDOWS:
+        from urllib import request
+
+        path = request.url2pathname(netloc + path)
+    else:
+        path = urllib.parse.unquote(netloc + path)
     # ``url2pathname`` has returned both ``/C:/...`` and ``\\C:\\...``
     # for drive-qualified file URLs across Python versions.  Leaving the
     # separator in place makes ``abspath`` turn it into ``C:\\C:\\...``.

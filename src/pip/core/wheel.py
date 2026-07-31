@@ -6,11 +6,9 @@ import re
 import sys
 import sysconfig
 import zipfile
-from dataclasses import dataclass
-from email.message import Message
-from email.parser import Parser
 from functools import cache, lru_cache
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from .errors import InstallationError, InvalidWheelFilename, UnsupportedWheel
 from .packaging import (
@@ -21,30 +19,80 @@ from .packaging import (
     marker_applies,
     parse_requirement,
 )
+from pip.index.metadata_cache import WheelMetadataCache
+from pip.index.wheel_metadata import parse_metadata_headers
+
+if TYPE_CHECKING:
+    from email.message import Message
 
 
-@dataclass(frozen=True)
+def Parser(*args: object, **kwargs: object) -> object:
+    """Lazily construct the legacy email parser."""
+    from email.parser import Parser as EmailParser
+
+    return EmailParser(*args, **kwargs)
+
+
 class WheelCandidate:
-    name: str
-    version: Version
-    path: Path
-    dependencies: tuple[Requirement, ...]
-    provided_extras: frozenset[str] = frozenset()
-    requires_python: str | None = None
-    source_url: str | None = None
-    source_hashes: dict[str, str] | None = None
-    source_kind: str | None = None
-    source_vcs: str | None = None
-    from_cache: bool = False
-    yanked_reason: str | None = None
+    __slots__ = (
+        "name", "version", "path", "dependencies", "provided_extras",
+        "requires_python", "source_url", "source_hashes", "source_kind",
+        "source_vcs", "from_cache", "yanked_reason", "wheel_layout",
+    )
+
+    def __init__(
+        self,
+        name: str,
+        version: Version,
+        path: Path,
+        dependencies: tuple[Requirement, ...],
+        provided_extras: frozenset[str] = frozenset(),
+        requires_python: str | None = None,
+        source_url: str | None = None,
+        source_hashes: dict[str, str] | None = None,
+        source_kind: str | None = None,
+        source_vcs: str | None = None,
+        from_cache: bool = False,
+        yanked_reason: str | None = None,
+        wheel_layout: object | None = None,
+    ) -> None:
+        self.name = name
+        self.version = version
+        self.path = path
+        self.dependencies = dependencies
+        self.provided_extras = provided_extras
+        self.requires_python = requires_python
+        self.source_url = source_url
+        self.source_hashes = source_hashes
+        self.source_kind = source_kind
+        self.source_vcs = source_vcs
+        self.from_cache = from_cache
+        self.yanked_reason = yanked_reason
+        self.wheel_layout = wheel_layout
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, WheelCandidate) and all(
+            getattr(self, name) == getattr(other, name) for name in self.__slots__
+        )
+
+    def copy_with(self, **changes: object) -> WheelCandidate:
+        values = {name: getattr(self, name) for name in self.__slots__}
+        values.update(changes)
+        return type(self)(**values)
 
     @property
     def canonical_name(self) -> str:
         return canonicalize_name(self.name)
 
 
-@dataclass(frozen=True)
 class WheelTag:
+    __slots__ = ("interpreter", "abi", "platform")
+
+    def __init__(self, interpreter: str, abi: str, platform: str) -> None:
+        self.interpreter = interpreter
+        self.abi = abi
+        self.platform = platform
+
     interpreter: str
     abi: str
     platform: str
@@ -65,8 +113,32 @@ class WheelTag:
         return hash((self.interpreter, self.abi, self.platform))
 
 
-@dataclass(frozen=True)
 class WheelFile:
+    __slots__ = ("name", "version", "build_tag", "tags")
+
+    def __init__(
+        self,
+        name: str,
+        version: Version,
+        build_tag: str | None,
+        tags: tuple[WheelTag, ...],
+    ) -> None:
+        self.name = name
+        self.version = version
+        self.build_tag = build_tag
+        self.tags = tags
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, WheelFile) and (
+            self.name,
+            self.version,
+            self.build_tag,
+            self.tags,
+        ) == (other.name, other.version, other.build_tag, other.tags)
+
+    def __hash__(self) -> int:
+        return hash((self.name, self.version, self.build_tag, self.tags))
+
     name: str
     version: Version
     build_tag: str | None
@@ -106,25 +178,65 @@ class Wheel:
         return rank
 
 
-@dataclass(frozen=True)
 class TargetContext:
-    platforms: tuple[str, ...] = ()
-    implementation: str | None = None
-    python_version: str | None = None
-    abis: tuple[str, ...] = ()
+    __slots__ = ("platforms", "implementation", "python_version", "abis")
+
+    def __init__(
+        self,
+        platforms: tuple[str, ...] = (),
+        implementation: str | None = None,
+        python_version: str | None = None,
+        abis: tuple[str, ...] = (),
+    ) -> None:
+        self.platforms = platforms
+        self.implementation = implementation
+        self.python_version = python_version
+        self.abis = abis
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, TargetContext) and (
+            self.platforms,
+            self.implementation,
+            self.python_version,
+            self.abis,
+        ) == (
+            other.platforms,
+            other.implementation,
+            other.python_version,
+            other.abis,
+        )
+
+    def __hash__(self) -> int:
+        return hash((self.platforms, self.implementation, self.python_version, self.abis))
+
+    platforms: tuple[str, ...]
+    implementation: str | None
+    python_version: str | None
+    abis: tuple[str, ...]
 
 
 VERSION_COMPATIBLE = (1, 0)
 logger = logging.getLogger(__name__)
 
-RESOLUTION_METADATA_HEADERS = frozenset(
-    {"name", "version", "requires-dist", "provides-extra", "requires-python"}
-)
 WHEEL_METADATA_CACHE_SIZE = 1024
 
 
-@dataclass(frozen=True)
 class WheelResolutionMetadata:
+    __slots__ = ("name", "version", "dependencies", "provided_extras", "requires_python")
+
+    def __init__(
+        self,
+        name: str,
+        version: Version,
+        dependencies: tuple[Requirement, ...],
+        provided_extras: frozenset[str],
+        requires_python: str | None,
+    ) -> None:
+        self.name = name
+        self.version = version
+        self.dependencies = dependencies
+        self.provided_extras = provided_extras
+        self.requires_python = requires_python
     name: str
     version: Version
     dependencies: tuple[Requirement, ...]
@@ -287,6 +399,7 @@ def wheel_candidate(
     archive: zipfile.ZipFile | None = None,
     filename_info: tuple[str, str | Version] | None = None,
     dist_info_dir: str | None = None,
+    metadata_cache: WheelMetadataCache | None = None,
 ) -> WheelCandidate:
     wheel_path = Path(path)
     parsed = filename_info or parse_wheel_filename(wheel_path)
@@ -297,7 +410,15 @@ def wheel_candidate(
     metadata = wheel_metadata_cache.get(identity) if identity is not None else None
     if metadata is None:
         if archive is not None and dist_info_dir is not None:
-            headers = read_core_metadata_headers(archive, wheel_path, dist_info_dir)
+            headers = (
+                metadata_cache.get(identity)
+                if metadata_cache is not None and identity is not None
+                else None
+            )
+            if headers is None:
+                headers = read_core_metadata_headers(archive, wheel_path, dist_info_dir)
+                if metadata_cache is not None and identity is not None:
+                    metadata_cache.put(identity, headers)
 
             def get_header(name: str) -> str | None:
                 values = headers.get(name.casefold())
@@ -348,6 +469,27 @@ def wheel_candidate(
             bounded_cache_put(wheel_metadata_cache, identity, metadata)
     requested_extras = frozenset(extras or ())
     dependencies = project_wheel_dependencies(metadata, identity, requested_extras)
+    wheel_layout = None
+    if archive is not None and dist_info_dir is not None:
+        wheel_metadata_text = archive.read(f"{dist_info_dir}/WHEEL").decode("utf-8")
+        wheel_layout = (
+            dist_info_dir,
+            tuple(
+                (
+                    name,
+                    info.compress_type,
+                    info.CRC,
+                    info.compress_size,
+                    info.file_size,
+                    info.header_offset,
+                )
+                for name, info in archive.NameToInfo.items()
+            ),
+            any(
+                line.casefold().strip() == "root-is-purelib: true"
+                for line in wheel_metadata_text.splitlines()
+            ),
+        )
     return WheelCandidate(
         name=metadata.name,
         version=metadata.version,
@@ -355,6 +497,7 @@ def wheel_candidate(
         dependencies=dependencies,
         provided_extras=metadata.provided_extras,
         requires_python=metadata.requires_python,
+        wheel_layout=wheel_layout,
     )
 
 
@@ -374,34 +517,7 @@ def read_core_metadata_headers(
             f"Error decoding metadata for {path}: {metadata_path}"
         ) from exc
 
-    separators = (
-        offset
-        for marker in ("\n\n", "\r\n\r\n")
-        if (offset := contents.find(marker)) >= 0
-    )
-    header_end = min(separators, default=len(contents))
-    headers: dict[str, list[str]] = {}
-    current_values: list[str] | None = None
-    saw_header = False
-    for line in contents[:header_end].splitlines():
-        if line[:1].isspace():
-            if current_values is None:
-                if not saw_header:
-                    break
-            else:
-                current_values[-1] += f"\n{line}"
-            continue
-        name, separator, value = line.partition(":")
-        if not separator:
-            break
-        saw_header = True
-        normalized_name = name.casefold()
-        if normalized_name in RESOLUTION_METADATA_HEADERS:
-            current_values = headers.setdefault(normalized_name, [])
-            current_values.append(value.lstrip())
-        else:
-            current_values = None
-    return headers
+    return parse_metadata_headers(contents)
 
 
 def read_wheel_metadata(path: str | Path):

@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import argparse
 import sys
-from typing import NoReturn
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from typing import NoReturn
 
 
 class ArgumentParser(argparse.ArgumentParser):

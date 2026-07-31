@@ -13,22 +13,18 @@ try:
     import tomllib
 except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility
     from pip._vendor import tomli as tomllib
-import urllib.error
 import urllib.parse
-import urllib.request
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
-
-from packaging import pylock
-from packaging.utils import parse_sdist_filename, parse_wheel_filename
+from typing import TYPE_CHECKING
 
 from pip.core.errors import InstallationError
-from pip.core.format_control import FormatControl
 from pip.core.urls import path_to_url
-from pip.index.provider import CandidateProvider
-from pip.network.http import NetworkSession
-from pip.resolution.req_install import install_req_from_editable, install_req_from_line
+
+if TYPE_CHECKING:
+    from typing import Any
+
+    from pip.index.provider import CandidateProvider
+    from pip.network.http import NetworkSession
 
 logger = logging.getLogger(__name__)
 CODING_RE = re.compile(rb"^[ \t\f]*#.*?coding[:=][ \t]*([-\w.]+)")
@@ -47,18 +43,35 @@ class RequirementsFileParseError(InstallationError):
     """A requirements file could not be parsed."""
 
 
-@dataclass(frozen=True)
 class ParsedRequirement:
-    requirement: str
-    comes_from: str
-    is_editable: bool = False
-    constraint: bool = False
-    options: dict[str, object] | None = None
-    line_source: str | None = None
-    locked_link: str | None = None
-    locked_hashes: dict[str, list[str]] | None = None
-    locked_direct: bool = False
-    locked_name: str | None = None
+    __slots__ = (
+        "requirement", "comes_from", "is_editable", "constraint", "options",
+        "line_source", "locked_link", "locked_hashes", "locked_direct", "locked_name",
+    )
+
+    def __init__(
+        self,
+        requirement: str,
+        comes_from: str,
+        is_editable: bool = False,
+        constraint: bool = False,
+        options: dict[str, object] | None = None,
+        line_source: str | None = None,
+        locked_link: str | None = None,
+        locked_hashes: dict[str, list[str]] | None = None,
+        locked_direct: bool = False,
+        locked_name: str | None = None,
+    ) -> None:
+        self.requirement = requirement
+        self.comes_from = comes_from
+        self.is_editable = is_editable
+        self.constraint = constraint
+        self.options = options
+        self.line_source = line_source
+        self.locked_link = locked_link
+        self.locked_hashes = locked_hashes
+        self.locked_direct = locked_direct
+        self.locked_name = locked_name
 
 
 def is_pylock_reference(value: str) -> bool:
@@ -82,6 +95,11 @@ def parse_pylock(
     *,
     provider: CandidateProvider | None,
 ) -> list[ParsedRequirement]:
+    from packaging import pylock
+    from packaging.utils import parse_sdist_filename, parse_wheel_filename
+
+    from pip.core.format_control import FormatControl
+
     try:
         lock = pylock.Pylock.from_dict(tomllib.loads(content))
     except Exception as exc:
@@ -534,9 +552,14 @@ def parse_requirement_line(
     requirement_for_install = requirement_text
     file_reference = urllib.parse.urlparse(requirement_for_install)
     if file_reference.scheme == "file" and not file_reference.path.startswith("/"):
-        requirement_for_install = normalize_reference(
-            requirement_for_install, filename, as_path=True
-        )
+            requirement_for_install = normalize_reference(
+                requirement_for_install, filename, as_path=True
+            )
+    from pip.resolution.req_install import (
+        install_req_from_editable,
+        install_req_from_line,
+    )
+
     try:
         if editable or option in EDITABLE_OPTIONS:
             install_req_from_editable(requirement_for_install)
@@ -582,7 +605,7 @@ def merge_config_setting(target: dict[str, object], raw: str) -> None:
     if existing is None:
         target[key] = value if _ else ""
     elif isinstance(existing, list):
-        values = cast(list[str], existing)
+        values = existing
         values.append(value if _ else "")
     else:
         target[key] = [existing, value if _ else ""]

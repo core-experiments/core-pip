@@ -1,24 +1,13 @@
 from __future__ import annotations
 
-import email.message
-import hashlib
-import json
 import logging
 import ntpath
 import os
-import subprocess
 import sys
-import tempfile
 
-try:
-    import tomllib
-except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility
-    from pip._vendor import tomli as tomllib
 import urllib.parse
-import urllib.request
-from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable, Protocol
+from typing import TYPE_CHECKING, Any, Iterable, Protocol
 
 from pip.core.errors import (
     DiagnosticPipError,
@@ -37,6 +26,15 @@ from pip.core.packaging import (
     marker_applies,
     parse_requirement,
 )
+
+if TYPE_CHECKING:
+    import email.message
+
+
+def file_hashes(path: str | Path) -> dict[str, str]:
+    from pip.core.hashes import file_hashes as compute_file_hashes
+
+    return compute_file_hashes(path)
 
 logger = logging.getLogger(__name__)
 
@@ -71,17 +69,27 @@ class MetadataProvider(Protocol):
     def version(self) -> Version: ...
 
 
-@dataclass(frozen=True)
 class VcsInfo:
-    vcs: str
+    __slots__ = ("vcs",)
+
+    def __init__(self, vcs: str) -> None:
+        self.vcs = vcs
 
 
-@dataclass(frozen=True)
 class DownloadInfo:
-    url: str
-    archive_info: ArchiveInfo | None = None
-    dir_info: DirInfo | None = None
-    vcs_info: VcsInfo | None = None
+    __slots__ = ("url", "archive_info", "dir_info", "vcs_info")
+
+    def __init__(
+        self,
+        url: str,
+        archive_info: ArchiveInfo | None = None,
+        dir_info: DirInfo | None = None,
+        vcs_info: VcsInfo | None = None,
+    ) -> None:
+        self.url = url
+        self.archive_info = archive_info
+        self.dir_info = dir_info
+        self.vcs_info = vcs_info
 
 
 class NoOpBuildEnvironment_internal:
@@ -103,39 +111,70 @@ class NoOpBuildEnvironment_internal:
         return set(), set()
 
 
-@dataclass
 class InstallRequirement:
-    req: ParsedRequirement | None
-    comes_from: InstallRequirement | str | None = None
-    link: Link | None = None
-    marker_internal: str | None = None
-    editable: bool = False
-    isolated: bool = False
-    hash_options: dict[str, list[str]] = field(default_factory=dict)
-    constraint: bool = False
-    config_settings: dict[str, object] | None = None
-    user_supplied: bool = False
-    permit_editable_wheels: bool = False
-    original_link: Link | None = None
-    satisfied_by: MetadataProvider | None = None
-    extras_override: set[str] | None = None
-    source_dir: str | None = None
-    local_file_path: str | None = None
-    download_info: Any = None
-    is_wheel_from_cache: bool = False
-    cached_wheel_source_link: Link | None = None
-    metadata_internal: email.message.Message | None = None
-    distribution_internal: MetadataProvider | None = None
-    archive_source_internal: Path | None = None
-    needs_more_preparation: bool = False
-    build_env: Any = field(default_factory=NoOpBuildEnvironment_internal)
-    pyproject_requires: list[str] | None = None
-    requirements_to_check: list[str] = field(default_factory=list)
-    metadata_directory: str | None = None
-    pyproject_data: dict[str, object] | None = None
-    pep517_backend: ConfiguredBuildBackend | None = None
-    should_reinstall: bool = False
-    install_succeeded: bool | None = None
+    __slots__ = (
+        "req", "comes_from", "link", "marker_internal", "editable", "isolated",
+        "hash_options", "constraint", "config_settings", "user_supplied",
+        "permit_editable_wheels", "original_link", "satisfied_by", "extras_override",
+        "source_dir", "local_file_path", "download_info", "is_wheel_from_cache",
+        "cached_wheel_source_link", "metadata_internal", "distribution_internal",
+        "archive_source_internal", "needs_more_preparation", "build_env",
+        "pyproject_requires", "requirements_to_check", "metadata_directory",
+        "pyproject_data", "pep517_backend", "should_reinstall", "install_succeeded",
+    )
+
+    def __init__(
+        self, req: ParsedRequirement | None,
+        comes_from: InstallRequirement | str | None = None, link: Link | None = None,
+        marker_internal: str | None = None, editable: bool = False,
+        isolated: bool = False, hash_options: dict[str, list[str]] | None = None,
+        constraint: bool = False, config_settings: dict[str, object] | None = None,
+        user_supplied: bool = False, permit_editable_wheels: bool = False,
+        original_link: Link | None = None, satisfied_by: MetadataProvider | None = None,
+        extras_override: set[str] | None = None, source_dir: str | None = None,
+        local_file_path: str | None = None, download_info: Any = None,
+        is_wheel_from_cache: bool = False, cached_wheel_source_link: Link | None = None,
+        metadata_internal: email.message.Message | None = None,
+        distribution_internal: MetadataProvider | None = None,
+        archive_source_internal: Path | None = None, needs_more_preparation: bool = False,
+        build_env: Any = None, pyproject_requires: list[str] | None = None,
+        requirements_to_check: list[str] | None = None, metadata_directory: str | None = None,
+        pyproject_data: dict[str, object] | None = None,
+        pep517_backend: ConfiguredBuildBackend | None = None,
+        should_reinstall: bool = False, install_succeeded: bool | None = None,
+    ) -> None:
+        self.req = req
+        self.comes_from = comes_from
+        self.link = link
+        self.marker_internal = marker_internal
+        self.editable = editable
+        self.isolated = isolated
+        self.hash_options = hash_options if hash_options is not None else {}
+        self.constraint = constraint
+        self.config_settings = config_settings
+        self.user_supplied = user_supplied
+        self.permit_editable_wheels = permit_editable_wheels
+        self.original_link = original_link
+        self.satisfied_by = satisfied_by
+        self.extras_override = extras_override
+        self.source_dir = source_dir
+        self.local_file_path = local_file_path
+        self.download_info = download_info
+        self.is_wheel_from_cache = is_wheel_from_cache
+        self.cached_wheel_source_link = cached_wheel_source_link
+        self.metadata_internal = metadata_internal
+        self.distribution_internal = distribution_internal
+        self.archive_source_internal = archive_source_internal
+        self.needs_more_preparation = needs_more_preparation
+        self.build_env = build_env if build_env is not None else NoOpBuildEnvironment_internal()
+        self.pyproject_requires = pyproject_requires
+        self.requirements_to_check = requirements_to_check if requirements_to_check is not None else []
+        self.metadata_directory = metadata_directory
+        self.pyproject_data = pyproject_data
+        self.pep517_backend = pep517_backend
+        self.should_reinstall = should_reinstall
+        self.install_succeeded = install_succeeded
+        self.__post_init__()
 
     def __post_init__(self) -> None:
         if self.link is None and self.req is not None and self.req.url is not None:
@@ -219,6 +258,8 @@ class InstallRequirement:
         autodelete: bool,
         parallel_builds: bool,
     ) -> str:
+        import tempfile
+
         del autodelete, parallel_builds
         root = os.path.realpath(os.path.dirname(parent_dir))
         return tempfile.mkdtemp("-build", "pip-", dir=root)
@@ -327,6 +368,11 @@ class InstallRequirement:
         )
 
     def load_pyproject_toml(self) -> dict[str, object]:
+        try:
+            import tomllib
+        except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility
+            from pip._vendor import tomli as tomllib
+
         if self.source_dir is None:
             raise InstallationError("Install requirement has no source directory")
         pyproject = Path(self.source_dir) / "pyproject.toml"
@@ -420,6 +466,8 @@ class InstallRequirement:
 
     def prepare_metadata(self) -> None:
         """Ask the configured backend to generate the project metadata."""
+        import tempfile
+
         if self.source_dir is None or self.pep517_backend is None:
             raise InstallationError(f"Cannot prepare metadata for {self}")
         metadata_root = Path(tempfile.mkdtemp(prefix="pip-modern-metadata-"))
@@ -515,6 +563,9 @@ class ConfiguredBuildBackend:
         )
 
     def call_hook(self, hook: str, *args: object) -> object:
+        import json
+        import subprocess
+
         payload = {
             "backend": self.backend,
             "hook": hook,
@@ -896,14 +947,3 @@ def path_from_file_url(parsed: urllib.parse.ParseResult) -> Path:
 def file_url_with_fragment(path: Path, fragment: str) -> str:
     url = path.resolve(strict=False).as_uri()
     return f"{url}#{fragment}" if fragment else url
-
-
-def file_hashes(path: str | Path) -> dict[str, str]:
-    digest = hashlib.sha256()
-    with Path(path).open("rb") as stream:
-        size = os.fstat(stream.fileno()).st_size
-        buffer = bytearray(max(1, min(size, 1024 * 1024)))
-        view = memoryview(buffer)
-        while read := stream.readinto(buffer):
-            digest.update(view[:read])
-    return {"sha256": digest.hexdigest()}

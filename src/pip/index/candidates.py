@@ -1,18 +1,22 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pip.core.errors import BuildError
 from pip.core.packaging import Version, canonicalize_name
-from pip.core.temp_dir import remove_temp_directory
-from pip.core.wheel import TargetContext, WheelFile
 from pip.index.source_models import CandidateRecord
 
 if TYPE_CHECKING:
+    from pip.core.wheel import TargetContext, WheelFile
     from pip.index.links import Link
     from pip.index.source_models import CandidateRecord, RejectedCandidate
+
+
+def remove_temp_directory_internal(path: str | Path) -> None:
+    from pip.core.temp_dir import remove_temp_directory
+
+    remove_temp_directory(path)
 
 
 def prepare_project_metadata(
@@ -32,13 +36,8 @@ def prepare_project_metadata(
     )
 
 
-@dataclass(frozen=True)
 class InstallationCandidate(CandidateRecord):
-    name: str
-    version: Version
-    link: Link
-    wheel: WheelFile | None = None
-    tag_rank: int | None = None
+    __slots__ = ()
 
     def __init__(
         self,
@@ -48,15 +47,13 @@ class InstallationCandidate(CandidateRecord):
         wheel: WheelFile | None = None,
         tag_rank: int | None = None,
     ) -> None:
-        object.__setattr__(self, "name", name)
-        object.__setattr__(
-            self,
-            "version",
+        super().__init__(
+            name,
             version if isinstance(version, Version) else Version(version),
+            link,
+            wheel,
+            tag_rank,
         )
-        object.__setattr__(self, "link", link)
-        object.__setattr__(self, "wheel", wheel)
-        object.__setattr__(self, "tag_rank", tag_rank)
 
     @property
     def canonical_name(self) -> str:
@@ -187,7 +184,7 @@ class InstallationCandidate(CandidateRecord):
             return RejectedCandidate(link, RejectionReason.MISSING_ARTIFACT, str(exc))
         finally:
             if local is not None:
-                remove_temp_directory(local)
+                remove_temp_directory_internal(local)
         return cls(name=metadata.name, version=version, link=link)
 
     def sort_key(self, *, prefer_binary: bool) -> tuple[object, object, object, int]:
@@ -204,13 +201,19 @@ class InstallationCandidate(CandidateRecord):
         return f"{self.name!r} candidate (version {self.version} at {self.link})"
 
 
-@dataclass(frozen=True)
 class BestCandidateResult:
-    all_candidates: list[InstallationCandidate]
-    applicable_candidates: list[InstallationCandidate]
-    best_candidate: InstallationCandidate | None
+    __slots__ = ("all_candidates", "applicable_candidates", "best_candidate")
 
-    def __post_init__(self) -> None:
+    def __init__(
+        self,
+        all_candidates: list[InstallationCandidate],
+        applicable_candidates: list[InstallationCandidate],
+        best_candidate: InstallationCandidate | None,
+    ) -> None:
+        self.all_candidates = all_candidates
+        self.applicable_candidates = applicable_candidates
+        self.best_candidate = best_candidate
+
         assert set(self.applicable_candidates) <= set(self.all_candidates)
         if self.best_candidate is None:
             assert not self.applicable_candidates

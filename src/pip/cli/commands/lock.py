@@ -2,22 +2,82 @@
 
 from __future__ import annotations
 
-import argparse
-import hashlib
 import os
-import shutil
-import tempfile
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, cast
 
-from pip.core.errors import CommandError
-from pip.core.format_control import FormatControl
-from pip.core.temp_dir import remove_temp_directory
-from pip.core.urls import path_to_url, url_to_path
+if TYPE_CHECKING:
+    import argparse
+
+    from pip.resolution.req_install import InstallRequirement
+
+
+def _toml_string(value: str) -> str:
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def _render_lock(packages: list[dict[str, object]]) -> str:
+    lines = ['created-by = "pip"', 'lock-version = "1.0"', ""]
+    for package in packages:
+        lines.append("[[packages]]")
+        lines.append(f"name = {_toml_string(str(package['name']))}")
+        if "version" in package:
+            lines.append(f"version = {_toml_string(str(package['version']))}")
+        if "vcs" in package:
+            vcs = package["vcs"]
+            assert isinstance(vcs, dict)
+            vcs = cast(dict[str, object], vcs)
+            lines.append("[packages.vcs]")
+            lines.append(f"type = {_toml_string(str(vcs['type']))}")
+            lines.append(f"url = {_toml_string(str(vcs['url']))}")
+            lines.append(
+                f"requested-revision = {_toml_string(str(vcs['requested-revision']))}"
+            )
+            lines.append(f"commit-id = {_toml_string(str(vcs['commit-id']))}")
+        if "archive" in package:
+            archive = package["archive"]
+            assert isinstance(archive, dict)
+            archive = cast(dict[str, object], archive)
+            hashes = archive["hashes"]
+            assert isinstance(hashes, dict)
+            hashes = cast(dict[str, object], hashes)
+            lines.append("[packages.archive]")
+            lines.append(f"url = {_toml_string(str(archive['url']))}")
+            lines.append("[packages.archive.hashes]")
+            lines.append(f"sha256 = {_toml_string(str(hashes['sha256']))}")
+        if "directory" in package:
+            directory = package["directory"]
+            lines.append("[packages.directory]")
+            if isinstance(directory, dict) and directory.get("editable"):
+                lines.append("editable = true")
+            lines.append('path = "."')
+        for artifact_key in ("sdist", "wheels"):
+            artifact = package.get(artifact_key)
+            if artifact is None:
+                continue
+            artifacts = artifact if isinstance(artifact, list) else [artifact]
+            for entry in artifacts:
+                assert isinstance(entry, dict)
+                entry = cast(dict[str, object], entry)
+                header = (
+                    f"[[packages.{artifact_key}]]"
+                    if artifact_key == "wheels"
+                    else f"[packages.{artifact_key}]"
+                )
+                lines.append(header)
+                lines.append(f"name = {_toml_string(str(entry['name']))}")
+                lines.append(f"url = {_toml_string(str(entry['url']))}")
+                hashes = entry["hashes"]
+                assert isinstance(hashes, dict)
+                hashes = cast(dict[str, object], hashes)
+                lines.append(f"[packages.{artifact_key}.hashes]")
+                lines.append(f"sha256 = {_toml_string(str(hashes['sha256']))}")
+        lines.append("")
+    return "\n".join(lines)
 
 
 def create_parser() -> argparse.ArgumentParser:
     """Resolve requirements and write a PEP 751 ``pylock.toml`` file."""
+    import argparse
 
     parser = argparse.ArgumentParser(prog="pip lock", allow_abbrev=False)
     parser.add_argument("requirements", nargs="*")
@@ -33,43 +93,56 @@ def create_parser() -> argparse.ArgumentParser:
 
 
 def run_lock(args: list[str]) -> int:
-    from pip.index.provider import CandidateProvider
-    from pip.resolution.req_install import install_req_from_line
-    from pip.resolution.resolver import Resolver
-
     options = create_parser().parse_args(args)
     quiet_environment = os.environ.get("PIP_QUIET")
     if options.quiet:
         os.environ["PIP_QUIET"] = "1"
 
-    format_control = FormatControl()
-    for value in options.no_binary:
-        format_control.apply("no-binary", value)
-    requirements = []
-    locked_order: list[str] = []
-    archive_packages: list[dict[str, Any]] = []
-    directory_packages: list[dict[str, Any]] = []
-    for value in options.requirements:
-        local_directory = Path(value).resolve()
-        if local_directory.is_dir():
-            from pip.build.build_backend import prepare_project_metadata
+    format_control = None
+    if options.no_binary:
+        from pip.core.format_control import FormatControl
 
-            metadata = prepare_project_metadata(local_directory, build_isolation=False)
+        format_control = FormatControl()
+        for value in options.no_binary:
+            format_control.apply("no-binary", value)
+    requirements: list[str | InstallRequirement] = []
+    locked_order: list[str] = []
+    archive_packages: list[dict] = []
+    directory_packages: list[dict] = []
+    for value in options.requirements:
+        local_directory = os.path.abspath(value)
+        if os.path.isdir(local_directory):
+            from pip.build.build_backend import prepare_project_metadata
+            from pathlib import Path
+
+            metadata = prepare_project_metadata(
+                Path(local_directory), build_isolation=False
+            )
             directory_packages.append(
                 {"name": metadata.name, "directory": {"path": "."}}
             )
             continue
-        item = install_req_from_line(value)
-        if (
-            item.req is not None
-            and item.link is not None
-            and item.req.url is not None
-            and item.req.name == item.req.url
-            and not item.link.is_vcs
+        if "://" not in value and not value.startswith(
+            ("git+", "hg+", "svn+", "bzr+")
         ):
+            requirements.append(value)
+            continue
+        from pip.core.packaging import parse_requirement
+
+        parsed = parse_requirement(value)
+        if parsed.url is None or parsed.name != parsed.url:
+            requirements.append(value)
+            continue
+        from pip.resolution.req_install import install_req_from_line
+
+        item = install_req_from_line(value)
+        if item.link is not None and not item.link.is_vcs:
+            import hashlib
+
             from pip.build.build import unpack_source
             from pip.build.build_backend import prepare_project_metadata
             from pip.index.artifacts import ArtifactLocator
+            from pathlib import Path
 
             source = ArtifactLocator().ensure_local(item.link.url)
             if source.is_dir():
@@ -78,6 +151,9 @@ def run_lock(args: list[str]) -> int:
                     {"name": metadata.name, "directory": {"path": "."}}
                 )
                 continue
+            import shutil
+            import tempfile
+
             with tempfile.TemporaryDirectory(prefix="pip-lock-source-") as directory:
                 archive = Path(directory) / "source.tar.gz"
                 shutil.copyfile(source, archive)
@@ -95,10 +171,12 @@ def run_lock(args: list[str]) -> int:
                 }
             )
             continue
-        requirements.append(item)
-    editable_packages: list[dict[str, Any]] = []
+        requirements.append(value)
+    editable_packages: list[dict] = []
     for value in options.editable:
         from pip.build.build_backend import prepare_project_metadata
+        from pip.resolution.req_install import install_req_from_line
+        from pathlib import Path
 
         item = install_req_from_line(value)
         item.editable = True
@@ -113,9 +191,11 @@ def run_lock(args: list[str]) -> int:
         )
     lock_session = None
     for filename in options.requirement:
-        if Path(filename).name.startswith("pylock") and filename.endswith(".toml"):
+        if os.path.basename(filename).startswith("pylock") and filename.endswith(".toml"):
             from pip.network.http import NetworkSession
+            from pip.core.urls import url_to_path
             from pip.resolution.req_file import parse_requirements
+            from pip.resolution.req_install import install_req_from_line
 
             if lock_session is None:
                 lock_session = NetworkSession()
@@ -129,7 +209,7 @@ def run_lock(args: list[str]) -> int:
                     and not item.locked_link.startswith(("git+", "hg+", "svn+", "bzr+"))
                     and not (
                         item.locked_link.startswith("file:")
-                        and Path(url_to_path(item.locked_link)).is_dir()
+                        and os.path.isdir(url_to_path(item.locked_link))
                     )
                 ):
                     archive_packages.append(
@@ -156,28 +236,48 @@ def run_lock(args: list[str]) -> int:
                     )
                 )
         else:
-            requirements.extend(
-                install_req_from_line(line.strip())
-                for line in Path(filename).read_text(encoding="utf-8").splitlines()
-                if line.strip() and not line.lstrip().startswith("#")
-            )
+            with open(filename, encoding="utf-8") as requirement_file:
+                requirements.extend(
+                    line.strip()
+                    for line in requirement_file.read().splitlines()
+                    if line.strip() and not line.lstrip().startswith("#")
+                )
     if not requirements and not archive_packages and not directory_packages:
+        from pip.core.errors import CommandError
+
         raise CommandError("You must give at least one requirement")
 
-    provider = CandidateProvider.from_options(
-        find_links=options.find_links,
-        no_index=options.no_index,
-        format_control=format_control,
-        build_isolation=not options.no_build_isolation,
-    )
-    plan = (
-        Resolver(provider=provider, no_deps=False, ignore_installed=True).resolve(
-            requirements
+    plan = None
+    string_requirements = [item for item in requirements if isinstance(item, str)]
+    if len(string_requirements) == len(requirements) and string_requirements:
+        if options.no_index and not options.no_binary:
+            from pip.resolution.local_wheelhouse import (
+                resolve_local_wheelhouse,
+            )
+
+            plan = resolve_local_wheelhouse(options.find_links, string_requirements)
+    if plan is None and requirements:
+        from pip.index.provider import CandidateProvider
+
+        provider = CandidateProvider.from_options(
+            find_links=options.find_links,
+            no_index=options.no_index,
+            format_control=format_control,
+            build_isolation=not options.no_build_isolation,
         )
-        if requirements
-        else None
-    )
-    packages: list[dict[str, Any]] = [
+        from pip.resolution.req_install import install_req_from_line
+        from pip.resolution.resolver import Resolver
+
+        install_requirements = [
+            item
+            if not isinstance(item, str)
+            else install_req_from_line(item)
+            for item in requirements
+        ]
+        plan = Resolver(
+            provider=provider, no_deps=False, ignore_installed=True
+        ).resolve(install_requirements)
+    packages: list[dict] = [
         *editable_packages,
         *directory_packages,
         *archive_packages,
@@ -187,9 +287,23 @@ def run_lock(args: list[str]) -> int:
         source = candidate.source_url
         if source is None:
             continue
-        source_path = Path(url_to_path(source)) if source.startswith("file:") else None
+        candidate_path = None
+        if candidate.source_kind == "wheel":
+            from pip.resolution.local_wheelhouse import LocalWheelCandidate
+
+            if isinstance(candidate, LocalWheelCandidate):
+                candidate_path = candidate.path
+        if candidate_path is not None:
+            source_path = candidate_path
+        elif source.startswith("file:"):
+            from pip.core.urls import url_to_path
+
+            source_path = url_to_path(source)
+        else:
+            source_path = None
         if candidate.source_vcs:
             from pip.index.vcs import git_revision, materialize_vcs, vcs_reference
+            from pip.core.temp_dir import remove_temp_directory
 
             reference = vcs_reference(source)
             checkout = materialize_vcs(source, emit_resolution=False)
@@ -214,6 +328,8 @@ def run_lock(args: list[str]) -> int:
             continue
         if source_path is None:
             if source.startswith(("http://", "https://")):
+                import hashlib
+
                 from pip.index.artifacts import ArtifactLocator
 
                 archive_path = ArtifactLocator().ensure_local(source)
@@ -233,10 +349,19 @@ def run_lock(args: list[str]) -> int:
             continue
         digest = (candidate.source_hashes or {}).get("sha256")
         if digest is None:
-            digest = hashlib.sha256(source_path.read_bytes()).hexdigest()
+            import hashlib
+
+            with open(source_path, "rb") as source_file:
+                digest = hashlib.sha256(source_file.read()).hexdigest()
+        if candidate_path is not None:
+            artifact_url = source
+        else:
+            from pip.core.urls import path_to_url
+
+            artifact_url = path_to_url(str(source_path))
         artifact = {
-            "name": source_path.name,
-            "url": path_to_url(str(source_path)),
+            "name": os.path.basename(source_path),
+            "url": artifact_url,
             "hashes": {"sha256": digest},
         }
         key = "sdist" if candidate.source_kind == "sdist" else "wheels"
@@ -248,58 +373,12 @@ def run_lock(args: list[str]) -> int:
         order = {name: index for index, name in enumerate(locked_order)}
         packages.sort(key=lambda package: order.get(str(package["name"]), len(order)))
 
-    def toml_string(value: str) -> str:
-        return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
-
-    lines = ['created-by = "pip"', 'lock-version = "1.0"', ""]
-    for package in packages:
-        lines.append("[[packages]]")
-        lines.append(f"name = {toml_string(str(package['name']))}")
-        if "version" in package:
-            lines.append(f"version = {toml_string(str(package['version']))}")
-        if "vcs" in package:
-            vcs = package["vcs"]
-            lines.append("[packages.vcs]")
-            lines.append(f"type = {toml_string(str(vcs['type']))}")
-            lines.append(f"url = {toml_string(str(vcs['url']))}")
-            lines.append(
-                f"requested-revision = {toml_string(str(vcs['requested-revision']))}"
-            )
-            lines.append(f"commit-id = {toml_string(str(vcs['commit-id']))}")
-        if "archive" in package:
-            archive = package["archive"]
-            lines.append("[packages.archive]")
-            lines.append(f"url = {toml_string(str(archive['url']))}")
-            lines.append("[packages.archive.hashes]")
-            lines.append(f"sha256 = {toml_string(str(archive['hashes']['sha256']))}")
-        if "directory" in package:
-            directory = package["directory"]
-            lines.append("[packages.directory]")
-            if isinstance(directory, dict) and directory.get("editable"):
-                lines.append("editable = true")
-            lines.append('path = "."')
-        for artifact_key in ("sdist", "wheels"):
-            artifact = package.get(artifact_key)
-            if artifact is None:
-                continue
-            artifacts = artifact if isinstance(artifact, list) else [artifact]
-            for entry in artifacts:
-                header = (
-                    f"[[packages.{artifact_key}]]"
-                    if artifact_key == "wheels"
-                    else f"[packages.{artifact_key}]"
-                )
-                lines.append(header)
-                lines.append(f"name = {toml_string(str(entry['name']))}")
-                lines.append(f"url = {toml_string(str(entry['url']))}")
-                lines.append(f"[packages.{artifact_key}.hashes]")
-                lines.append(f"sha256 = {toml_string(str(entry['hashes']['sha256']))}")
-        lines.append("")
-    rendered = "\n".join(lines)
+    rendered = _render_lock(packages)
     if options.output == "-":
         print(rendered, end="")
     else:
-        Path(options.output).write_text(rendered, encoding="utf-8")
+        with open(options.output, "w", encoding="utf-8") as output_file:
+            output_file.write(rendered)
     if quiet_environment is None:
         os.environ.pop("PIP_QUIET", None)
     else:

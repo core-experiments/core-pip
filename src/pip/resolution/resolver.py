@@ -4,12 +4,10 @@ import logging
 import os
 import sys
 import urllib.parse
-import urllib.request
 from bisect import bisect_left, insort
 from collections.abc import Generator, Iterable, Iterator, Mapping
-from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Callable, cast
+from typing import TYPE_CHECKING, Callable, cast
 
 from pip.core.errors import (
     DirectoryUrlHashUnsupported,
@@ -22,7 +20,6 @@ from pip.core.errors import (
     VcsHashUnsupported,
 )
 from pip.core.urls import url_to_path
-from pip.core.metadata import InstalledDistribution, iter_installed_distributions
 from pip.core.packaging import (
     Requirement,
     SpecifierSet,
@@ -36,16 +33,25 @@ from pip.index.candidate_materialization import CandidateStream, LazyWheelCandid
 from pip.index.links import Link
 from pip.index.provider import CandidateProvider
 from pip.index.source_locations import looks_like_path_requirement
-from pip.resolution.req_install import (
-    ArchiveInfo,
-    DirInfo,
-    DownloadInfo,
-    InstallRequirement,
-    VcsInfo,
-    file_hashes,
-)
 from pip.resolution.constraints import ConstraintStore
-from pip.resolution.requirement_set import RequirementSet
+
+if TYPE_CHECKING:
+    from pip.core.metadata import InstalledDistribution
+    from pip.resolution.req_install import InstallRequirement
+    from pip.resolution.requirement_set import RequirementSet
+
+
+def file_hashes(path: Path) -> dict[str, str]:
+    from pip.core.hashes import file_hashes as compute_file_hashes
+
+    return compute_file_hashes(path)
+
+
+def iter_installed_distributions() -> list[InstalledDistribution]:
+    from pip.core.metadata import iter_installed_distributions as iterate
+
+    return iterate()
+
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +74,8 @@ def as_requirement_strings(
     requirements_input: RequirementSet | Iterable[InstallRequirement] | list[str],
 ) -> list[str] | None:
     if isinstance(requirements_input, list) and (
-        not requirements_input or isinstance(requirements_input[0], str)
+        not requirements_input
+        or all(isinstance(requirement, str) for requirement in requirements_input)
     ):
         return cast(list[str], requirements_input)
     return None
@@ -77,38 +84,63 @@ def as_requirement_strings(
 def as_install_requirements(
     requirements_input: RequirementSet | Iterable[InstallRequirement] | list[str],
 ) -> list[InstallRequirement]:
+    from pip.resolution.requirement_set import RequirementSet
+
     if isinstance(requirements_input, RequirementSet):
         return list(requirements_input.all_requirements)
     string_requirements = as_requirement_strings(requirements_input)
     if string_requirements is not None:
         return []
-    return cast(list[InstallRequirement], list(requirements_input))
+    return cast(list, list(requirements_input))
 
 
-@dataclass
 class InstallPlan:
-    candidates: list[WheelCandidate]
-    graph: dict[str, set[str]] = field(default_factory=dict)
-    conflicts: list[str] = field(default_factory=list)
-    satisfied: list[SatisfiedRequirement] = field(default_factory=list)
+    __slots__ = ("candidates", "graph", "conflicts", "satisfied")
+
+    def __init__(
+        self,
+        candidates: list[WheelCandidate],
+        graph: dict[str, set[str]] | None = None,
+        conflicts: list[str] | None = None,
+        satisfied: list[SatisfiedRequirement] | None = None,
+    ) -> None:
+        self.candidates = candidates
+        self.graph = {} if graph is None else graph
+        self.conflicts = [] if conflicts is None else conflicts
+        self.satisfied = [] if satisfied is None else satisfied
 
 
-@dataclass(frozen=True)
 class SatisfiedRequirement:
+    __slots__ = ("requirement", "distribution")
+
+    def __init__(self, requirement: Requirement, distribution: InstalledDistribution) -> None:
+        self.requirement = requirement
+        self.distribution = distribution
+
     requirement: Requirement
     distribution: InstalledDistribution
 
 
-@dataclass(slots=True)
 class PackageDomain:
-    roots: list[Requirement] = field(default_factory=list)
-    incoming: dict[str, tuple[Requirement, ...]] = field(default_factory=dict)
-    requirements_internal: tuple[Requirement, ...] | None = None
-    constrained_internal: tuple[Requirement, ...] | None = None
-    constrained_roots_internal: tuple[Requirement, ...] | None = None
-    root_version_mask: int | None = None
-    incoming_version_masks: dict[str, int] = field(default_factory=dict)
-    decision_count: int | None = None
+    __slots__ = (
+        "roots", "incoming", "requirements_internal", "constrained_internal",
+        "constrained_roots_internal", "root_version_mask", "incoming_version_masks",
+        "decision_count",
+    )
+
+    def __init__(
+        self,
+        roots: list[Requirement] | None = None,
+        incoming: dict[str, tuple[Requirement, ...]] | None = None,
+    ) -> None:
+        self.roots = [] if roots is None else roots
+        self.incoming = {} if incoming is None else incoming
+        self.requirements_internal: tuple[Requirement, ...] | None = None
+        self.constrained_internal: tuple[Requirement, ...] | None = None
+        self.constrained_roots_internal: tuple[Requirement, ...] | None = None
+        self.root_version_mask: int | None = None
+        self.incoming_version_masks: dict[str, int] = {}
+        self.decision_count: int | None = None
 
     def requirements(self) -> tuple[Requirement, ...]:
         if self.requirements_internal is None:
@@ -169,30 +201,54 @@ def requirement_state_key(requirement: Requirement) -> RequirementStateKey:
     )
 
 
-@dataclass(frozen=True, slots=True)
 class LearnedIncompatibility:
-    terms: frozenset[Assignment]
-    watches: tuple[int, int]
+    __slots__ = ("terms", "watches")
+
+    def __init__(self, terms: frozenset[Assignment], watches: tuple[int, int]) -> None:
+        self.terms = terms
+        self.watches = watches
 
 
-@dataclass(slots=True)
 class AgendaEntry:
-    requirement: Requirement
-    previous: int | None
-    next: int | None
-    order: int
-    active: bool = True
+    __slots__ = ("requirement", "previous", "next", "order", "active")
+
+    def __init__(
+        self,
+        requirement: Requirement,
+        previous: int | None,
+        next: int | None,
+        order: int,
+        active: bool = True,
+    ) -> None:
+        self.requirement = requirement
+        self.previous = previous
+        self.next = next
+        self.order = order
+        self.active = active
 
 
-@dataclass(slots=True)
 class AgendaMutation:
-    kind: str
-    entry: int
-    previous: int | None
-    next: int | None
-    old_head: int | None
-    old_tail: int | None
-    old_front_order: int
+    __slots__ = (
+        "kind", "entry", "previous", "next", "old_head", "old_tail", "old_front_order"
+    )
+
+    def __init__(
+        self,
+        kind: str,
+        entry: int,
+        previous: int | None,
+        next: int | None,
+        old_head: int | None,
+        old_tail: int | None,
+        old_front_order: int,
+    ) -> None:
+        self.kind = kind
+        self.entry = entry
+        self.previous = previous
+        self.next = next
+        self.old_head = old_head
+        self.old_tail = old_tail
+        self.old_front_order = old_front_order
 
 
 class PendingAgenda:
@@ -385,16 +441,31 @@ class PendingAgenda:
             self.length_internal -= removed
 
 
-@dataclass(slots=True)
 class SearchRequest:
-    pending: PendingAgenda
-    selected: dict[str, WheelCandidate]
-    selected_extras: dict[str, frozenset[str]]
-    satisfied: dict[str, SatisfiedRequirement]
-    graph: dict[str, set[str]]
-    source_requirements: dict[str, InstallRequirement]
-    source_requirements_by_url: dict[str, InstallRequirement]
-    checkpoint: int = 0
+    __slots__ = (
+        "pending", "selected", "selected_extras", "satisfied", "graph",
+        "source_requirements", "source_requirements_by_url", "checkpoint",
+    )
+
+    def __init__(
+        self,
+        pending: PendingAgenda,
+        selected: dict[str, WheelCandidate],
+        selected_extras: dict[str, frozenset[str]],
+        satisfied: dict[str, SatisfiedRequirement],
+        graph: dict[str, set[str]],
+        source_requirements: dict[str, InstallRequirement],
+        source_requirements_by_url: dict[str, InstallRequirement],
+        checkpoint: int = 0,
+    ) -> None:
+        self.pending = pending
+        self.selected = selected
+        self.selected_extras = selected_extras
+        self.satisfied = satisfied
+        self.graph = graph
+        self.source_requirements = source_requirements
+        self.source_requirements_by_url = source_requirements_by_url
+        self.checkpoint = checkpoint
 
 
 SearchFrame = Generator[SearchRequest, bool, bool]
@@ -414,6 +485,7 @@ class Resolver:
         constraints: list[str] | None = None,
         allow_prereleases: bool = False,
         require_hashes: bool = False,
+        compute_source_hashes: bool = True,
         upgrade_strategy: str = "only-if-needed",
         ignore_requires_python: bool = False,
         python_version: str | None = None,
@@ -448,6 +520,7 @@ class Resolver:
         ):
             provider.release_control.apply("all_releases", ":all:")
         self.require_hashes = require_hashes
+        self.compute_source_hashes = compute_source_hashes or require_hashes
         self.provider.compute_source_hashes = require_hashes
         self.upgrade_strategy = upgrade_strategy
         self.ignore_requires_python = ignore_requires_python
@@ -461,7 +534,6 @@ class Resolver:
         self.candidate_count_cache: dict[
             tuple[str, str, tuple[str, ...], str | None, str | None, bool], int
         ] = {}
-        self.decision_count_cache: dict[int, int] = {}
         self.domain_viability_cache: dict[tuple[str, tuple[str, ...]], bool] = {}
         self.version_tables: dict[str, tuple[Version, ...]] = {}
         self.version_masks: dict[tuple[str, str, bool], int] = {}
@@ -543,7 +615,6 @@ class Resolver:
         self.requirement_state_keys.clear()
         self.candidate_dependency_groups.clear()
         self.candidate_count_cache.clear()
-        self.decision_count_cache.clear()
         self.domain_viability_cache.clear()
         self.version_tables.clear()
         self.version_masks.clear()
@@ -629,7 +700,12 @@ class Resolver:
         ordered = self.installation_order(selected, graph)
         plan = InstallPlan(
             candidates=[
-                self.finalize_source_hashes(selected[name]) for name in ordered
+                (
+                    self.finalize_source_hashes(selected[name])
+                    if self.compute_source_hashes
+                    else selected[name]
+                )
+                for name in ordered
             ],
             graph=graph,
             conflicts=list(self.conflicts),
@@ -651,7 +727,7 @@ class Resolver:
         ):
             return candidate
         hashes = actual_hashes_for_candidate(candidate)
-        return replace(candidate, source_hashes=hashes or None)
+        return candidate.copy_with(source_hashes=hashes or None)
 
     def get_installation_order(
         self,
@@ -689,6 +765,10 @@ class Resolver:
         self,
         requirements_input: RequirementSet | Iterable[InstallRequirement] | list[str],
     ) -> RequirementSet:
+        from pip.core.direct_url import ArchiveInfo, DirInfo
+        from pip.resolution.req_install import DownloadInfo, InstallRequirement, VcsInfo
+        from pip.resolution.requirement_set import RequirementSet
+
         plan = self.resolve(requirements_input)
         source_requirements, source_requirements_by_url = self.source_requirement_map(
             requirements_input
@@ -2081,8 +2161,7 @@ class Resolver:
         except (OSError, ValueError):
             enriched = None
         if enriched is not None and enriched.version == candidate.version:
-            return replace(
-                candidate,
+            return candidate.copy_with(
                 dependencies=enriched.dependencies,
                 provided_extras=enriched.provided_extras,
             )
@@ -2282,11 +2361,7 @@ class Resolver:
                 if active_mask is not None:
                     domain.decision_count = active_mask.bit_count()
                     return domain.decision_count
-        key = id(requirement)
-        cached = self.decision_count_cache.get(key)
-        if cached is None:
-            cached = self.candidate_count_internal(self.apply_constraints(requirement))
-            self.decision_count_cache[key] = cached
+        cached = self.candidate_count_internal(self.apply_constraints(requirement))
         if domain is not None:
             domain.decision_count = cached
         return cached

@@ -17,6 +17,7 @@ import stat
 import sys
 import tempfile
 import zipfile
+from contextlib import nullcontext
 from pathlib import Path, PurePosixPath
 from typing import Iterable
 
@@ -29,7 +30,7 @@ from pip.core.errors import InstallationError
 from pip.core.packaging import canonicalize_name
 from pip.core.wheel import WheelCandidate, parse_wheel, wheel_candidate
 from pip.install.target import InstallTarget
-from pip.install.transaction import InstallTransaction
+from pip.install.transaction import InstallTransaction, normalized_internal
 
 
 class WheelInstaller:
@@ -57,6 +58,12 @@ class WheelInstaller:
         requested: bool = False,
         direct_url: DirectUrl | None = None,
         transaction_sink: list[InstallTransaction] | None = None,
+        existing: InstalledMetadataDistribution | None = None,
+        lookup_existing: bool = True,
+        validated_dist_info: str | None = None,
+        destination_cache: dict[tuple[Path, PurePosixPath], Path] | None = None,
+        stage_root: Path | None = None,
+        transaction: InstallTransaction | None = None,
     ) -> WheelCandidate:
         return install_wheel_internal(
             path,
@@ -68,10 +75,27 @@ class WheelInstaller:
             direct_url=direct_url,
             script_executable=self.script_executable,
             transaction_sink=transaction_sink,
+            existing=existing,
+            lookup_existing=lookup_existing,
+            validated_dist_info=validated_dist_info,
+            destination_cache=destination_cache,
+            stage_root=stage_root,
+            transaction=transaction,
         )
 
-    def validate_batch(self, paths: Iterable[str | Path]) -> tuple[WheelCandidate, ...]:
-        return validate_wheel_batch(paths, target=self.target)
+    def validate_batch(
+        self,
+        paths: Iterable[str | Path],
+        *,
+        validation_cache: dict[str, str] | None = None,
+        destination_cache: dict[tuple[Path, PurePosixPath], Path] | None = None,
+    ) -> tuple[WheelCandidate, ...]:
+        return validate_wheel_batch(
+            paths,
+            target=self.target,
+            validation_cache=validation_cache,
+            destination_cache=destination_cache,
+        )
 
 
 def install_wheel_internal(
@@ -85,11 +109,18 @@ def install_wheel_internal(
     direct_url: DirectUrl | None = None,
     script_executable: str | None = None,
     transaction_sink: list[InstallTransaction] | None = None,
+    existing: InstalledMetadataDistribution | None = None,
+    lookup_existing: bool = True,
+    validated_dist_info: str | None = None,
+    destination_cache: dict[tuple[Path, PurePosixPath], Path] | None = None,
+    stage_root: Path | None = None,
+    transaction: InstallTransaction | None = None,
 ) -> WheelCandidate:
     candidate = wheel_candidate(path)
-    existing = InstalledDistributionStore(
-        paths=[os.fspath(root) for root in target.library_roots]
-    ).find(candidate.name)
+    if lookup_existing:
+        existing = InstalledDistributionStore(
+            paths=[os.fspath(root) for root in target.library_roots]
+        ).find(candidate.name)
     if (
         existing is not None
         and existing.version == str(candidate.version)
@@ -101,17 +132,25 @@ def install_wheel_internal(
     if existing is not None and (existing.version != str(candidate.version) or force):
         print(f"Uninstalling {existing.raw_name}-{existing.raw_version}")
 
-    with tempfile.TemporaryDirectory(prefix="pip-wheel-stage-") as temporary:
+    stage_context = (
+        tempfile.TemporaryDirectory(prefix="pip-wheel-stage-")
+        if stage_root is None
+        else nullcontext(stage_root)
+    )
+    with stage_context as temporary:
         stage_root = Path(temporary)
         staged: list[tuple[Path, Path, int | None]] = []
         record_destination: Path | None = None
         record_source: Path | None = None
         dist_info: str | None = None
-        resolved_directories: dict[tuple[Path, PurePosixPath], Path] = {}
+        resolved_directories = destination_cache if destination_cache is not None else {}
         record_metadata: dict[Path, tuple[str, str]] = {}
 
         with zipfile.ZipFile(path) as archive:
-            parse_wheel(archive, Path(path).name[:-4].split("-", 1)[0])
+            if validated_dist_info is None:
+                validated_dist_info, _ = parse_wheel(
+                    archive, Path(path).name[:-4].split("-", 1)[0]
+                )
             for member in archive.infolist():
                 if member.is_dir():
                     continue
@@ -120,8 +159,15 @@ def install_wheel_internal(
                     dist_info = relative.parts[0]
                 source = stage_root / Path(*relative.parts)
                 source.parent.mkdir(parents=True, exist_ok=True)
-                contents = archive.read(member)
-                if relative.name == "METADATA" and candidate.name.isalpha():
+                rewrite_metadata = relative.name == "METADATA" and candidate.name.isalpha()
+                if rewrite_metadata or is_script_member(relative):
+                    contents = archive.read(member)
+                else:
+                    record_metadata[source] = copy_member_with_metadata(
+                        archive, member, source
+                    )
+                    contents = None
+                if rewrite_metadata:
                     lines = contents.decode("utf-8").splitlines(keepends=True)
                     for index, line in enumerate(lines):
                         if line.lower().startswith("name:"):
@@ -129,10 +175,12 @@ def install_wheel_internal(
                             lines[index] = f"Name: {candidate.name.lower()}{ending}"
                             contents = "".join(lines).encode("utf-8")
                             break
-                source.write_bytes(contents)
+                if contents is not None:
+                    with open(source, "wb") as file:
+                        file.write(contents)
                 if is_script_member(relative):
                     rewrite_shebang(source, script_executable)
-                else:
+                elif contents is not None:
                     record_metadata[source] = record_metadata_internal(contents)
                 destination = destination_internal(
                     target, relative, resolved_directories=resolved_directories
@@ -159,19 +207,22 @@ def install_wheel_internal(
 
         dist_info_stage = stage_root / dist_info
         installer_source = dist_info_stage / "INSTALLER"
-        installer_source.write_bytes(b"pip\n")
+        with open(installer_source, "wb") as file:
+            file.write(b"pip\n")
         installer_destination = target.purelib / dist_info / "INSTALLER"
         staged.append((installer_source, installer_destination, None))
 
         requested_destination = target.purelib / dist_info / "REQUESTED"
         if requested:
             requested_source = dist_info_stage / "REQUESTED"
-            requested_source.write_text("", encoding="utf-8")
+            with open(requested_source, "w", encoding="utf-8"):
+                pass
             staged.append((requested_source, requested_destination, None))
 
         if direct_url is not None:
             direct_url_source = dist_info_stage / "direct_url.json"
-            direct_url_source.write_text(direct_url.to_json(), encoding="utf-8")
+            with open(direct_url_source, "w", encoding="utf-8") as file:
+                file.write(direct_url.to_json())
             staged.append(
                 (
                     direct_url_source,
@@ -206,11 +257,11 @@ def install_wheel_internal(
                     )
                 else:
                     source = script_stage / name
-                    source.write_text(
-                        script_text(target_ref, script_executable), encoding="utf-8"
-                    )
-                    source.chmod(
-                        source.stat().st_mode
+                    with open(source, "w", encoding="utf-8") as file:
+                        file.write(script_text(target_ref, script_executable))
+                    os.chmod(
+                        source,
+                        os.stat(source).st_mode
                         | stat.S_IXUSR
                         | stat.S_IXGRP
                         | stat.S_IXOTH
@@ -226,18 +277,18 @@ def install_wheel_internal(
                     # Keep the script-text form for callers that inspect the
                     # generated script path. Windows execution uses the EXE.
                     source = script_stage / name
-                    source.write_text(
-                        script_text(target_ref, script_executable), encoding="utf-8"
-                    )
-                    source.chmod(
-                        source.stat().st_mode
+                    with open(source, "w", encoding="utf-8") as file:
+                        file.write(script_text(target_ref, script_executable))
+                    os.chmod(
+                        source,
+                        os.stat(source).st_mode
                         | stat.S_IXUSR
                         | stat.S_IXGRP
                         | stat.S_IXOTH
                     )
 
         for source in script_stage.iterdir():
-            staged.append((source, target.scripts / source.name, source.stat().st_mode))
+            staged.append((source, target.scripts / source.name, os.stat(source).st_mode))
 
         if pycompile:
             staged.extend(compiled_files(stage_root, staged))
@@ -251,7 +302,8 @@ def install_wheel_internal(
                 continue
             metadata = record_metadata.get(source)
             if metadata is None:
-                metadata = record_metadata_internal(source.read_bytes())
+                with open(source, "rb") as file:
+                    metadata = record_metadata_internal(file.read())
             record_rows.append(
                 (
                     os.path.relpath(destination, target.purelib),
@@ -260,7 +312,7 @@ def install_wheel_internal(
                 )
             )
         record_rows.sort()
-        with record_source.open("w", newline="", encoding="utf-8") as file:
+        with open(record_source, "w", newline="", encoding="utf-8") as file:
             csv.writer(file).writerows(record_rows)
 
         owned_paths, old_paths = existing_paths(existing)
@@ -271,14 +323,17 @@ def install_wheel_internal(
                 if script_matches(destination, scripts):
                     owned_paths.add(destination)
         new_destinations = {destination for _, destination, _ in staged}
-        transaction = InstallTransaction(owned_paths=owned_paths)
+        active_transaction = transaction or InstallTransaction(owned_paths=owned_paths)
+        if transaction is not None:
+            transaction.owned.update(normalized_internal(path) for path in owned_paths)
         for source, destination, mode in staged:
-            transaction.add(source, destination, mode=mode)
+            active_transaction.add(source, destination, mode=mode)
         for old_path in old_paths - new_destinations:
-            transaction.delete(old_path)
-        transaction.commit(finalize=transaction_sink is None)
-        if transaction_sink is not None:
-            transaction_sink.append(transaction)
+            active_transaction.delete(old_path)
+        if transaction is None:
+            active_transaction.commit(finalize=transaction_sink is None)
+        if transaction_sink is not None and transaction is None:
+            transaction_sink.append(active_transaction)
         if existing is not None and (
             existing.version != str(candidate.version) or force
         ):
@@ -292,6 +347,8 @@ def validate_wheel_batch(
     paths: Iterable[str | Path],
     *,
     target: InstallTarget,
+    validation_cache: dict[str, str] | None = None,
+    destination_cache: dict[tuple[Path, PurePosixPath], Path] | None = None,
 ) -> tuple[WheelCandidate, ...]:
     """Validate a wheel batch before any member of the batch is installed."""
     candidates = tuple(wheel_candidate(path) for path in paths)
@@ -299,12 +356,20 @@ def validate_wheel_batch(
     for candidate in candidates:
         path = candidate.path
         with zipfile.ZipFile(path) as archive:
-            parse_wheel(archive, Path(path).name[:-4].split("-", 1)[0])
+            dist_info, _ = parse_wheel(
+                archive, Path(path).name[:-4].split("-", 1)[0]
+            )
+            if validation_cache is not None:
+                validation_cache[os.fspath(path)] = dist_info
             for member in archive.infolist():
                 if member.is_dir():
                     continue
                 destination = destination_internal(
-                    target, validate_member(member.filename)
+                    target,
+                    validate_member(member.filename),
+                    resolved_directories=(
+                        destination_cache if destination_cache is not None else {}
+                    ),
                 )
                 if destination in destinations:
                     raise InstallationError(
@@ -324,6 +389,7 @@ def install_wheels_transactionally(
     force: bool = False,
     preserve_existing: bool = False,
     script_executable: str | None = None,
+    lookup_existing: bool = True,
 ) -> tuple[WheelCandidate, ...]:
     """Install a wheel batch with rollback across every wheel in the batch."""
     requests = tuple(items)
@@ -334,24 +400,41 @@ def install_wheels_transactionally(
         preserve_existing=preserve_existing,
         script_executable=script_executable,
     )
-    installer.validate_batch(path for path, _, _ in requests)
-    transactions: list[InstallTransaction] = []
-    try:
-        candidates = tuple(
-            installer.install(
-                path,
-                requested=requested,
-                direct_url=direct_url,
-                transaction_sink=transactions,
-            )
-            for path, requested, direct_url in requests
-        )
-    except Exception:
-        for transaction in reversed(transactions):
-            transaction.rollback()
-        raise
-    for transaction in transactions:
-        transaction.finalize()
+    destination_cache: dict[tuple[Path, PurePosixPath], Path] = {}
+    existing_distributions = (
+        {
+            distribution.canonical_name: distribution
+            for distribution in InstalledDistributionStore(
+                paths=[os.fspath(root) for root in target.library_roots]
+            ).iter()
+        }
+        if lookup_existing
+        else {}
+    )
+    planned_candidates = tuple(wheel_candidate(path) for path, _, _ in requests)
+    with InstallTransaction() as transaction:
+        with tempfile.TemporaryDirectory(prefix="pip-wheel-batch-") as temporary:
+            batch_stage = Path(temporary)
+            try:
+                candidates = tuple(
+                    installer.install(
+                        path,
+                        requested=requested,
+                        direct_url=direct_url,
+                        existing=existing_distributions.get(candidate.canonical_name),
+                        lookup_existing=False,
+                        destination_cache=destination_cache,
+                        stage_root=batch_stage / str(index),
+                        transaction=transaction,
+                    )
+                    for index, ((path, requested, direct_url), candidate) in enumerate(
+                        zip(requests, planned_candidates)
+                    )
+                )
+            except Exception:
+                transaction.rollback()
+                raise
+            transaction.commit()
     return candidates
 
 
@@ -547,6 +630,20 @@ def zip_mode(info: zipfile.ZipInfo) -> int | None:
 def record_metadata_internal(contents: bytes) -> tuple[str, str]:
     digest = base64.urlsafe_b64encode(hashlib.sha256(contents).digest())
     return f"sha256={digest.rstrip(b'=').decode('ascii')}", str(len(contents))
+
+
+def copy_member_with_metadata(
+    archive: zipfile.ZipFile, member: zipfile.ZipInfo, destination: Path
+) -> tuple[str, str]:
+    digest = hashlib.sha256()
+    size = 0
+    with archive.open(member) as source, open(destination, "wb") as target:
+        while chunk := source.read(64 * 1024):
+            target.write(chunk)
+            digest.update(chunk)
+            size += len(chunk)
+    encoded = base64.urlsafe_b64encode(digest.digest())
+    return f"sha256={encoded.rstrip(b'=').decode('ascii')}", str(size)
 
 
 def is_script_member(relative: PurePosixPath) -> bool:
