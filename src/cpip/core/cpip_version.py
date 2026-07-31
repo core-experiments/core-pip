@@ -29,14 +29,14 @@ def set_cpip_version(version: str) -> None:
     """Set cpip's version for source-runner execution."""
     global cpip_version_internal
     cpip_version_internal = version
-    from cpip.cli._execution_context import configure
+    from cpip.core._execution_context import configure
 
     configure(version=version)
 
 
 def get_cpip_version() -> str:
     """Return cpip's version from the application context or distribution metadata."""
-    from cpip.cli._execution_context import current_version
+    from cpip.core._execution_context import current_version
 
     context_version = current_version()
     if context_version is not None:

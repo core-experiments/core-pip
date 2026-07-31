@@ -29,7 +29,7 @@ def run(
             ),
         )
 
-    if not quiet_fast_command:
+    if not quiet_fast_command and not os.environ.get("CPIP_QUIET"):
         from cpip.cli.logging_config import configure_logging
 
         configure_logging(log_file)

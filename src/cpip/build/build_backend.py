@@ -97,9 +97,14 @@ class BackendSpec:
             isinstance(item, str) for item in requires
         ):
             raise BuildError(f"Invalid build-system.requires in {pyproject}")
+        setup_uses_pkg_resources = False
+        if os.path.isfile(setup_py):
+            with open(setup_py, encoding="utf-8") as file:
+                setup_uses_pkg_resources = "pkg_resources" in file.read()
         if (
             backend.startswith("setuptools.build_meta")
             and os.path.isfile(setup_py)
+            and setup_uses_pkg_resources
             and not any(
                 canonicalize_name(parse_requirement(item).name) == "setuptools"
                 and not parse_requirement(item).specifier.contains(
@@ -589,19 +594,27 @@ class ProjectBuilder:
                 metadata_path.mkdir()
                 metadata = None
                 with caller.subprocess_runner(call_subprocess):
-                    dist_info = None
                     if editable:
                         try:
                             dist_info = caller.prepare_metadata_for_build_editable(
                                 os.fspath(metadata_path)
                             )
                         except HookMissing:
-                            try:
-                                dist_info = caller.prepare_metadata_for_build_wheel(
-                                    os.fspath(metadata_path)
-                                )
-                            except HookMissing:
-                                pass
+                            with tempfile.TemporaryDirectory(
+                                prefix="cpip-metadata-editable-"
+                            ) as wheel_directory:
+                                wheel_name = caller.build_editable(wheel_directory)
+                                wheel_path = Path(wheel_directory) / wheel_name
+                                with zipfile.ZipFile(wheel_path) as wheel:
+                                    metadata_name = next(
+                                        name
+                                        for name in wheel.namelist()
+                                        if name.endswith(".dist-info/METADATA")
+                                    )
+                                    metadata = email.parser.BytesParser().parsebytes(
+                                        wheel.read(metadata_name)
+                                    )
+                            dist_info = None
                     else:
                         try:
                             dist_info = caller.prepare_metadata_for_build_wheel(
@@ -623,7 +636,7 @@ class ProjectBuilder:
                                         wheel.read(metadata_name)
                                     )
                             dist_info = None
-                if dist_info is None and metadata is None:
+                if not editable and dist_info is None and metadata is None:
                     with tempfile.TemporaryDirectory(
                         prefix="cpip-metadata-wheel-"
                     ) as wheel_directory:

@@ -19,15 +19,12 @@ import urllib.request
 from collections.abc import Iterator, Mapping, Sequence
 from typing import Any
 
-from cpip.core.urls import redact_auth_from_url
 from cpip.network.exceptions import (
     ConnectionFailedError,
     ConnectionTimeoutError,
     NetworkConnectionError,
     SSLVerificationError,
 )
-from cpip.network.cache import SafeFileCache
-
 logger = logging.getLogger(__name__)
 RETRY_STATUS_CODES = frozenset((500, 502, 503, 520, 527))
 MAX_IDLE_CONNECTIONS_PER_ORIGIN = 8
@@ -264,7 +261,12 @@ class NetworkSession:
         from cpip.network.auth import MultiDomainBasicAuth
 
         self.auth: Any = MultiDomainBasicAuth(index_urls=index_urls)
-        self.cache = SafeFileCache(cache) if isinstance(cache, str) else cache
+        if isinstance(cache, str):
+            from cpip.network.cache import SafeFileCache
+
+            self.cache = SafeFileCache(cache)
+        else:
+            self.cache = cache
         self.trusted_hosts = {host.lower().split(":", 1)[0] for host in trusted_hosts}
         self.connection_pools: dict[tuple[Any, ...], PersistentConnectionPool] = {}
         self.connection_pools_lock = threading.Lock()
@@ -280,7 +282,7 @@ class NetworkSession:
     def user_agent() -> str:
         import platform
 
-        from cpip.cli._execution_context import current_version
+        from cpip.core._execution_context import current_version
 
         version = current_version()
         if version is None:
@@ -316,6 +318,8 @@ class NetworkSession:
         stream: bool = False,
         timeout: float | tuple[float | None, float | None] | None = None,
     ) -> HttpResponse:
+        from cpip.core.urls import redact_auth_from_url
+
         request_headers = dict(self.headers)
         request_headers.update(headers or {})
         if stream:

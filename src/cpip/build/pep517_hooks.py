@@ -90,14 +90,22 @@ class BuildBackendHookCaller:
                 environment["CPIP_BUILD_BACKEND_PATH"] = os.pathsep.join(
                     self.backend_path
                 )
-            subprocess.run(
-                [self.python_executable, "-c", _CALLER, hook, os.fspath(control)],
-                check=True,
-                cwd=self.source_dir,
-                env=environment,
-                capture_output=True,
-                text=True,
-            )
+            try:
+                subprocess.run(
+                    [self.python_executable, "-c", _CALLER, hook, os.fspath(control)],
+                    check=True,
+                    cwd=self.source_dir,
+                    env=environment,
+                    capture_output=True,
+                    text=True,
+                )
+            except subprocess.CalledProcessError as exc:
+                detail = (exc.stderr or exc.stdout or "").strip()
+                if detail:
+                    raise RuntimeError(
+                        f"backend hook {hook!r} failed: {detail}"
+                    ) from exc
+                raise
             result = json.loads((control / "output.json").read_text(encoding="utf-8"))
         if result.get("missing"):
             raise HookMissing(hook)

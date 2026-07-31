@@ -6,8 +6,8 @@ import shutil
 import os
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from cpip.build.build_backend import ProjectMetadata, prepare_project_metadata
 from cpip.core.direct_url import DirectUrl, DirInfo
 from cpip.core.errors import BuildError, CommandError
 from cpip.core.packaging import SpecifierSet, canonicalize_name
@@ -15,6 +15,9 @@ from cpip.core.temp_dir import remove_temp_directory
 from cpip.index.artifacts import ArtifactLocator
 from cpip.resolution.direct_url_helpers import direct_url_from_link
 from cpip.resolution.req_install import install_req_from_editable
+
+if TYPE_CHECKING:
+    from cpip.build.build_backend import ProjectMetadata
 
 
 def prepare_editable_source(
@@ -65,16 +68,27 @@ def prepare_editable_source(
         )
 
     if prepare_metadata:
+        from cpip.build.build_backend import BackendSpec, prepare_project_metadata
+
         try:
             metadata = prepare_project_metadata(
                 source_path, editable=True, build_isolation=build_isolation
             )
         except BuildError as exc:
             if "build_editable" in str(exc):
-                raise BuildError(
-                    f"Build backend for {source_path} is missing the "
-                    "'build_editable' hook"
-                ) from exc
+                backend_spec = BackendSpec.from_project(source_path)
+                if (
+                    backend_spec is not None
+                    and backend_spec.name.startswith("setuptools.build_meta")
+                    and os.path.isfile(os.fspath(source_path / "setup.py"))
+                    and os.path.isfile(os.fspath(source_path / "pyproject.toml"))
+                ):
+                    metadata = None
+                else:
+                    raise BuildError(
+                        f"Build backend for {source_path} is missing the "
+                        "'build_editable' hook"
+                    ) from exc
             if not build_isolation and (
                 "Cannot import 'setuptools.build_meta'" in str(exc)
                 or os.path.isfile(os.fspath(source_path / "pyproject.toml"))

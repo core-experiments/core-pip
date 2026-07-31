@@ -40,7 +40,7 @@ from cpip.resolution.resolver_internals.state.requests import (
     SearchFrame,
     SearchRequest,
 )
-from wheel_helpers import make_sdist, make_wheel
+from .wheel_helpers import make_sdist, make_wheel
 
 
 class CountingFailedResolver(Resolver):

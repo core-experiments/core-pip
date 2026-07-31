@@ -469,7 +469,7 @@ class Requirement:
         return "".join(parts)
 
 
-@lru_cache(maxsize=4096)
+@lru_cache(maxsize=16384)
 def parse_requirement(value: str) -> Requirement:
     raw = value.strip()
     if not raw:

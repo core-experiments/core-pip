@@ -10,14 +10,14 @@ def set_cpip_runner(path: str) -> None:
     """Set the runner path when cpip is executing from a source checkout."""
     global cpip_runner
     cpip_runner = path
-    from cpip.cli._execution_context import configure
+    from cpip.core._execution_context import configure
 
     configure(runner=path)
 
 
 def get_runnable_pip() -> str:
     """Return the cpip runner script used for isolated build dependencies."""
-    from cpip.cli._execution_context import current_runner
+    from cpip.core._execution_context import current_runner
 
     runner_override = cpip_runner or current_runner()
     if runner_override is not None:

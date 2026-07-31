@@ -16,8 +16,6 @@ from cpip.core.packaging import (
     Version,
     parse_requirement,
 )
-from cpip.core.wheel import WheelCandidate
-from cpip.index.candidate_materialization import CandidateStream
 from cpip.index.provider import CandidateProvider
 from cpip.resolution.algorithms import (
     direct_urls_equivalent,
@@ -42,6 +40,8 @@ from cpip.resolution.resolver_internals.state.plans import (
 
 if TYPE_CHECKING:
     from cpip.core.metadata import InstalledDistribution
+    from cpip.core.wheel import WheelCandidate
+    from cpip.index.candidate_materialization import CandidateStream
     from cpip.resolution.req_install import InstallRequirement
     from cpip.resolution.requirement_set import RequirementSet
 

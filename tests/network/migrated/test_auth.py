@@ -351,6 +351,13 @@ class KeyringModuleV2:
             self.username = username
             self.password = password
 
+        def __eq__(self, other: object) -> bool:
+            return (
+                isinstance(other, KeyringModuleV2.Credential)
+                and self.username == other.username
+                and self.password == other.password
+            )
+
     def get_password(self, system: str, username: str) -> None:
         pytest.fail("get_password should not ever be called")
 

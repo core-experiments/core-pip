@@ -26,7 +26,7 @@ from cpip.index.source_models import (
 )
 from cpip.index.vcs import is_immutable_vcs_link, vcs_reference
 from cpip.network.http import HttpResponse
-from wheel_helpers import make_sdist, make_wheel
+from .wheel_helpers import make_sdist, make_wheel
 
 
 @pytest.mark.parametrize(

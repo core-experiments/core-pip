@@ -476,10 +476,15 @@ class InstallRequirement:
                     error="direct references are not allowed",
                 )
         backend = build_system.get("build-backend", "setuptools.build_meta")
+        setup_uses_pkg_resources = False
+        if os.path.isfile(setup_py):
+            with open(setup_py, encoding="utf-8") as file:
+                setup_uses_pkg_resources = "pkg_resources" in file.read()
         if (
             isinstance(backend, str)
             and backend.startswith("setuptools.build_meta")
             and os.path.isfile(setup_py)
+            and setup_uses_pkg_resources
             and not any(
                 canonicalize_name(parsed.name) == "setuptools"
                 and not parsed.specifier.contains(

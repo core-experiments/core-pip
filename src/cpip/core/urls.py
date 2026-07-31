@@ -18,6 +18,7 @@ def path_to_url(path: str) -> str:
         path = request.pathname2url(path)
     else:
         path = urllib.parse.quote(path, safe="/:")
+        return "file://" + path
     return urllib.parse.urljoin("file://", path)
 
 

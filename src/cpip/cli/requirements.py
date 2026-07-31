@@ -9,7 +9,6 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-from cpip.cli.config import ConfigurationStore
 from cpip.core.errors import ConfigurationError, InstallationError
 from cpip.core.format_control import FormatControl
 from cpip.core.packaging import (
@@ -19,13 +18,13 @@ from cpip.core.packaging import (
     parse_requirement,
 )
 from cpip.core.release_control import ReleaseControl
-from cpip.core.wheel import TargetContext
-from cpip.index.links import Link
 
 NO_INDEX_VALUES = frozenset(("1", "true", "yes", "on"))
 RELEASE_OPTIONS = frozenset(("pre", "all-releases"))
 
 if TYPE_CHECKING:
+    from cpip.core.wheel import TargetContext
+    from cpip.index.links import Link
     from cpip.resolution.req_install import InstallRequirement
 
 
@@ -96,6 +95,7 @@ class SourceConfig:
 
 def load_source_config(command: str | None = None) -> SourceConfig:
     from cpip.index.config import DEFAULT_INDEX_URL
+    from cpip.cli.config import ConfigurationStore
 
     store = ConfigurationStore()
     try:
@@ -228,8 +228,8 @@ def collect_requirements(
     cache_dir: str | None = None,
 ) -> RequirementsBundle:
     from cpip.index.provider import CandidateProvider
-    from cpip.network.http import NetworkSession
-    from cpip.resolution.req_file import parse_requirements
+    from cpip.index.links import Link
+    from cpip.index.source_locations import resolve_source_location
 
     if index_url is None:
         from cpip.index.config import DEFAULT_INDEX_URL
@@ -271,18 +271,35 @@ def collect_requirements(
     bundle_format_control = format_control or FormatControl()
 
     option_state = argparse.Namespace(require_hashes=require_hashes)
-    session = NetworkSession(
-        index_urls=[url for url in (bundle_index_url, *bundle_extra_index_urls) if url],
-        cache=(os.path.join(cache_dir, "http-v1") if cache_dir else None),
+    local_only = (
+        bundle_no_index
+        and not requirement_files
+        and not constraint_files
+        and bool(bundle_find_links)
+        and all(
+            resolve_source_location(value)[1] is not None
+            for value in bundle_find_links
+        )
     )
-    session.auth.prompting = not no_input
-    session.auth.keyring_provider = keyring_provider
-    if cert:
-        session.verify = cert
-    if client_cert:
-        session.cert = client_cert
-    if proxy is not None:
-        session.proxies = {"http": proxy, "https": proxy} if proxy else {}
+    if local_only:
+        session = None
+    else:
+        from cpip.network.http import NetworkSession
+
+        session = NetworkSession(
+            index_urls=[
+                url for url in (bundle_index_url, *bundle_extra_index_urls) if url
+            ],
+            cache=(os.path.join(cache_dir, "http-v1") if cache_dir else None),
+        )
+        session.auth.prompting = not no_input
+        session.auth.keyring_provider = keyring_provider
+        if cert:
+            session.verify = cert
+        if client_cert:
+            session.cert = client_cert
+        if proxy is not None:
+            session.proxies = {"http": proxy, "https": proxy} if proxy else {}
     provider = CandidateProvider.from_options(
         find_links=bundle_find_links,
         index_url=bundle_index_url,
@@ -297,6 +314,9 @@ def collect_requirements(
                 "all_releases" if kind in RELEASE_OPTIONS else "only_final",
                 value,
             )
+
+    if requirement_files or constraint_files:
+        from cpip.resolution.req_file import parse_requirements
 
     for filename in requirement_files or []:
         for item in parse_requirements(
@@ -428,9 +448,9 @@ def bundle_install_requirements(
     *,
     target: TargetContext | None = None,
 ) -> list[InstallRequirement]:
-    from cpip.build.build_backend import prepare_project_metadata
     from cpip.resolution.req_install import install_req_from_line
     from cpip.core.wheel import parse_wheel_file, supported_wheel_tags, wheel_tag_rank
+    from cpip.index.links import Link
 
     requirements: list[InstallRequirement] = []
     direct_sources: dict[str, tuple[str, str]] = {}
@@ -438,6 +458,8 @@ def bundle_install_requirements(
         item = install_req_from_line(requirement)
         raw_path = requirement.split("[", 1)[0]
         if item.req is not None and os.path.isdir(raw_path):
+            from cpip.build.build_backend import prepare_project_metadata
+
             source_path = os.path.realpath(raw_path)
             try:
                 metadata = prepare_project_metadata(

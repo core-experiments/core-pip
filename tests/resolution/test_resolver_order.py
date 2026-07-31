@@ -6,7 +6,7 @@ import pytest
 from cpip.index.provider import CandidateProvider
 from cpip.resolution.resolver import Resolver
 
-from wheel_helpers import make_wheel
+from .wheel_helpers import make_wheel
 
 
 def _make_sat_graph(wheelhouse: Path, order: tuple[str, ...]) -> None:
