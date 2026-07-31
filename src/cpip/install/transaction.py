@@ -163,6 +163,7 @@ class InstallTransaction:
                     makedirs(destination_parent_text, exist_ok=True)
                     created_directories.add(destination_parent_text)
                 if item.contents is None:
+                    assert item.source_text is not None
                     try:
                         replace(item.source_text, item.destination_text)
                     except OSError as exc:

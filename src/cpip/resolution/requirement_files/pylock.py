@@ -7,7 +7,7 @@ import posixpath
 import re
 import sys
 import urllib.parse
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 try:
     import tomllib
@@ -73,7 +73,8 @@ def parse_pylock(
             raise InstallationError(
                 f"Cannot select requirements from pylock file {reference!r}"
             )
-        package_name = package["name"]
+        package = cast(dict[str, object], package)
+        package_name = cast(str, package["name"])
         requires_python = package.get("requires-python")
         if requires_python is not None and not SpecifierSet(
             str(requires_python)
@@ -88,24 +89,29 @@ def parse_pylock(
             raise InstallationError(
                 f"Invalid pylock file {reference!r}: {exc}"
             ) from exc
-        raw_hashes = distribution.get("hashes", {})
-        if not isinstance(raw_hashes, dict):
-            raise InstallationError(f"Invalid hashes for {package_name!r}")
-        hashes = {name: [value] for name, value in raw_hashes.items()}
+        hashes = _distribution_hashes(distribution, package_name)
         link: str
         direct = False
         if kind == "directory":
-            link = pylock_location(reference, distribution.get("path"))
+            link = pylock_location(
+                reference, _distribution_string(distribution, "path")
+            )
             requirement = link
             direct = True
         elif kind == "archive":
             link = pylock_location(
-                reference, distribution.get("path") or distribution.get("url")
+                reference,
+                _distribution_string(distribution, "path")
+                or _distribution_string(distribution, "url"),
             )
             requirement = f"{package_name} @ {link}"
             direct = True
         elif kind == "vcs":
-            link = distribution.get("url") or distribution.get("path") or ""
+            link = (
+                _distribution_string(distribution, "url")
+                or _distribution_string(distribution, "path")
+                or ""
+            )
             requirement = f"{package_name} @ {distribution['type']}+{link}@{distribution['commit-id']}"
             direct = True
         elif kind == "wheel":
@@ -117,18 +123,21 @@ def parse_pylock(
                         f"binaries are not permitted for package {package_name!r} and "
                         f"there is no source distribution for it in {reference!r}"
                     )
-                distribution = package["sdist"]
+                distribution = cast(dict[str, object], package["sdist"])
                 link = pylock_location(
-                    reference, distribution.get("path") or distribution.get("url")
+                    reference,
+                    _distribution_string(distribution, "path")
+                    or _distribution_string(distribution, "url"),
                 )
-                raw_hashes = distribution.get("hashes", {})
-                hashes = {name: [value] for name, value in raw_hashes.items()}
+                hashes = _distribution_hashes(distribution, package_name)
             else:
                 link = pylock_location(
-                    reference, distribution.get("path") or distribution.get("url")
+                    reference,
+                    _distribution_string(distribution, "path")
+                    or _distribution_string(distribution, "url"),
                 )
             parsed = parse_wheel_filename(
-                distribution.get("name") or posixpath.basename(link)
+                _distribution_string(distribution, "name") or posixpath.basename(link)
             )
             if parsed is None:
                 raise InstallationError(f"Invalid wheel filename for {package_name!r}")
@@ -143,10 +152,13 @@ def parse_pylock(
                     f"there is no compatible wheel for it in {reference!r}"
                 )
             link = pylock_location(
-                reference, distribution.get("path") or distribution.get("url")
+                reference,
+                _distribution_string(distribution, "path")
+                or _distribution_string(distribution, "url"),
             )
-            version = package.get("version") or _sdist_version(
-                distribution.get("name") or posixpath.basename(link), package_name
+            version = _distribution_string(package, "version") or _sdist_version(
+                _distribution_string(distribution, "name") or posixpath.basename(link),
+                package_name,
             )
             requirement = f"{package_name}=={version}"
         results.append(
@@ -175,16 +187,37 @@ def _select_distribution(
     ):
         distribution = package.get(key)
         if isinstance(distribution, dict):
-            return distribution, kind
+            return cast(dict[str, object], distribution), kind
     wheels = package.get("wheels")
     if isinstance(wheels, list):
         for distribution in wheels:
             if isinstance(distribution, dict):
-                return distribution, "wheel"
+                return cast(dict[str, object], distribution), "wheel"
     sdist = package.get("sdist")
     if isinstance(sdist, dict):
-        return sdist, "sdist"
+        return cast(dict[str, object], sdist), "sdist"
     raise InstallationError("Cannot select a distribution from pylock package")
+
+
+def _distribution_string(distribution: dict[str, object], key: str) -> str | None:
+    value = distribution.get(key)
+    if value is not None and not isinstance(value, str):
+        raise InstallationError(f"Invalid string value for {key!r}")
+    return value
+
+
+def _distribution_hashes(
+    distribution: dict[str, object], package_name: str
+) -> dict[str, list[str]]:
+    raw_hashes = distribution.get("hashes", {})
+    if not isinstance(raw_hashes, dict):
+        raise InstallationError(f"Invalid hashes for {package_name!r}")
+    if not all(
+        isinstance(name, str) and isinstance(value, str)
+        for name, value in raw_hashes.items()
+    ):
+        raise InstallationError(f"Invalid hashes for {package_name!r}")
+    return {cast(str, name): [cast(str, value)] for name, value in raw_hashes.items()}
 
 
 def _sdist_version(filename: str, package_name: str) -> str:

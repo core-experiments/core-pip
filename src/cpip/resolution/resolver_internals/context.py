@@ -120,7 +120,6 @@ class ResolverSearchState(Protocol):
     backtrack_count: int
     last_conflict_was_root: bool
     root_incompatibility_hits: int
-    nonchronological_jumps: int
     conflict_activity_bumps: int
     learned_clause_limit: int
     resolution_seed: dict[str, tuple[str, str]]

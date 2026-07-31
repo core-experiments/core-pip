@@ -16,7 +16,7 @@ import tempfile
 import zipfile
 from contextlib import nullcontext
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING, Iterable
+from typing import TYPE_CHECKING, Any, Iterable, cast
 
 from cpip.core.errors import InstallationError
 from cpip.core.packaging import canonicalize_name
@@ -59,7 +59,7 @@ class _RawWheelInfo:
 class _RawWheelArchive:
     __slots__ = ("_archive", "_file", "NameToInfo", "_infos")
 
-    def __init__(self, file: object, archive: object) -> None:
+    def __init__(self, file: Any, archive: Any) -> None:
         self._file = file
         self._archive = archive
         self._infos = [
@@ -317,6 +317,7 @@ def install_wheel_internal(
                 os.chmod(os.fspath(destination), mode)
 
         with _open_wheel_archive(path, candidate) as archive:
+            archive = cast(Any, archive)
             if validated_dist_info is None:
                 layout = getattr(candidate, "wheel_layout", None)
                 if layout is not None:
@@ -730,12 +731,15 @@ def _direct_batch_preflight(
     destinations: set[str] = set()
     resolved_directories: DestinationCache = {}
     resolved_roots: ResolvedRoots = {}
-    member_sets: list[tuple[object, ...]] = []
+    member_sets: list[tuple[tuple[str, int, int, int, int, int], ...]] = []
     total_size = 0
     for request, candidate in zip(requests, candidates):
         if request[2] is not None or candidate.wheel_layout is None:
             return None
-        _, raw_members, _ = candidate.wheel_layout
+        _, raw_members, _ = cast(
+            tuple[str, tuple[tuple[str, int, int, int, int, int], ...], bool],
+            candidate.wheel_layout,
+        )
         member_sets.append(raw_members)
         total_size += sum(
             raw_member[4]
@@ -934,17 +938,14 @@ def install_wheels_transactionally(
                         self.values: DestinationCache = {}
                         self.lock = Lock()
 
-                    def get(
-                        self,
-                        key: tuple[Path, PurePosixPath],
-                    ) -> Path | None:
+                    def get(self, key: tuple[str, str]) -> str | None:
                         with self.lock:
                             return self.values.get(key)
 
                     def __setitem__(
                         self,
-                        key: tuple[Path, PurePosixPath],
-                        value: Path,
+                        key: tuple[str, str],
+                        value: str,
                     ) -> None:
                         with self.lock:
                             self.values[key] = value
@@ -965,7 +966,7 @@ def install_wheels_transactionally(
                         direct_url=request[2],
                         existing=None,
                         lookup_existing=False,
-                        destination_cache=cache_for_workers,
+                        destination_cache=cast(DestinationCache, cache_for_workers),
                         stage_root=batch_stage / str(index),
                         transaction=local_transaction,
                     )

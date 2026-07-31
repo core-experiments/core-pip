@@ -152,7 +152,7 @@ class BackendRunner:
                 caller = BuildBackendHookCaller(
                     os.fspath(self.source_dir),
                     self.spec.name,
-                    backend_path=self.spec.backend_path or None,
+                    backend_path=list(self.spec.backend_path) or None,
                     python_executable=sys.executable,
                 )
                 with backend_environment(self.source_dir):
@@ -284,7 +284,7 @@ class BackendRunner:
                                 caller = BuildBackendHookCaller(
                                     os.fspath(self.source_dir),
                                     self.spec.name,
-                                    backend_path=self.spec.backend_path or None,
+                                    backend_path=list(self.spec.backend_path) or None,
                                     python_executable=sys.executable,
                                 )
                                 with backend_environment(self.source_dir):
@@ -294,7 +294,7 @@ class BackendRunner:
             caller = BuildBackendHookCaller(
                 os.fspath(self.source_dir),
                 self.spec.name,
-                backend_path=self.spec.backend_path or None,
+                backend_path=list(self.spec.backend_path) or None,
                 python_executable=os.fspath(python),
             )
             with backend_environment(self.source_dir):
@@ -602,6 +602,7 @@ class ProjectBuilder:
                                 prefix="cpip-metadata-editable-"
                             ) as wheel_directory:
                                 wheel_name = caller.build_editable(wheel_directory)
+                                assert wheel_name is not None
                                 wheel_path = Path(wheel_directory) / wheel_name
                                 with zipfile.ZipFile(wheel_path) as wheel:
                                     metadata_name = next(
@@ -623,6 +624,7 @@ class ProjectBuilder:
                                 prefix="cpip-metadata-wheel-"
                             ) as wheel_directory:
                                 wheel_name = caller.build_wheel(wheel_directory)
+                                assert wheel_name is not None
                                 wheel_path = Path(wheel_directory) / wheel_name
                                 with zipfile.ZipFile(wheel_path) as wheel:
                                     metadata_name = next(
@@ -639,6 +641,7 @@ class ProjectBuilder:
                         prefix="cpip-metadata-wheel-"
                     ) as wheel_directory:
                         wheel_name = caller.build_wheel(wheel_directory)
+                        assert wheel_name is not None
                         wheel_path = Path(wheel_directory) / wheel_name
                         with zipfile.ZipFile(wheel_path) as wheel:
                             metadata_name = next(

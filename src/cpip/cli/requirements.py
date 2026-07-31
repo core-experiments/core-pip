@@ -316,7 +316,10 @@ def collect_requirements(
     if requirement_files or constraint_files:
         from cpip.resolution.req_file import parse_requirements
 
+        assert session is not None
+
     for filename in requirement_files or []:
+        assert session is not None
         for item in parse_requirements(
             filename,
             session,
@@ -361,6 +364,7 @@ def collect_requirements(
                     )
 
     for filename in constraint_files or []:
+        assert session is not None
         for item in parse_requirements(
             filename,
             session,
