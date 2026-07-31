@@ -273,6 +273,41 @@ def test_fast_install_falls_back_for_non_pure_wheels(tmp_path: Path) -> None:
     assert not target.exists()
 
 
+def test_fast_install_skips_resolution_for_nonempty_target(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    wheelhouse = tmp_path / "wheelhouse"
+    wheelhouse.mkdir()
+    requirements = tmp_path / "requirements.in"
+    requirements.write_text("demo\n", encoding="utf-8")
+    target = tmp_path / "target"
+    target.mkdir()
+    (target / ".existing").touch()
+
+    def fail_resolution(*args: object, **kwargs: object) -> object:
+        raise AssertionError("fast resolver should not run for a non-empty target")
+
+    import cpip.resolution.fast_local_wheelhouse as fast_wheelhouse
+
+    monkeypatch.setattr(fast_wheelhouse, "resolve", fail_resolution)
+    status = run_fast_install(
+        [
+            "--no-index",
+            "--ignore-installed",
+            "--no-compile",
+            "--quiet",
+            "--find-links",
+            str(wheelhouse),
+            "--target",
+            str(target),
+            "-r",
+            str(requirements),
+        ]
+    )
+
+    assert status is None
+
+
 def test_fast_resolution_defers_wheel_validation_to_install(tmp_path: Path) -> None:
     wheelhouse = tmp_path / "wheelhouse"
     wheelhouse.mkdir()

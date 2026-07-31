@@ -13,6 +13,7 @@ def run(
     version: str | None,
     location: str | None,
     quiet_fast_command: bool,
+    fast_install_attempted: bool = False,
 ) -> int:
     if (version is not None or location is not None) and (
         not argv or argv[0] != "lock"
@@ -38,7 +39,7 @@ def run(
         return run_fallback(
             argv, require_virtualenv=require_virtualenv, location=location
         )
-    if argv and argv[0] == "install":
+    if argv and argv[0] == "install" and not fast_install_attempted:
         from cpip.cli.commands.fast_install import run as run_fast_install
 
         status = run_fast_install(argv[1:])

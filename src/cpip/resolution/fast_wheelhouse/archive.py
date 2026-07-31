@@ -15,13 +15,14 @@ class WheelhouseUnavailable(Exception):
 
 
 class WheelArchive:
-    __slots__ = ("file", "members")
+    __slots__ = ("file", "members", "modes")
 
     def __init__(self, file, members=None, target: str | None = None) -> None:
         self.file = file
         self.members: dict[str, tuple[int, int, int, int, int]] = (
             {} if members is None else members
         )
+        self.modes: dict[str, int] = {}
         if members is None:
             self.read_central_directory(target)
 
@@ -65,7 +66,7 @@ class WheelArchive:
                 comment_size,
                 _,
                 _,
-                _,
+                external_attr,
                 local_offset,
             ) = CENTRAL_DIRECTORY_HEADER.unpack(header)
             if (
@@ -87,6 +88,7 @@ class WheelArchive:
             if target_bytes is not None and name_bytes == target_bytes:
                 assert target is not None
                 self.members[target] = member
+                self.modes[target] = external_attr
                 return
             if target_bytes is not None:
                 continue
@@ -95,6 +97,7 @@ class WheelArchive:
             except UnicodeDecodeError as exc:
                 raise WheelhouseUnavailable from exc
             self.members[name] = member
+            self.modes[name] = external_attr
     def namelist(self) -> list[str]:
         return list(self.members)
 

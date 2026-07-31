@@ -190,6 +190,20 @@ def test_candidate_provider_scans_find_links_once(
     assert calls == 1
 
 
+def test_local_find_links_do_not_start_catalog_prefetcher(tmp_path: Path) -> None:
+    wheelhouse = tmp_path / "packages"
+    wheelhouse.mkdir()
+    provider = CandidateProvider.from_options(
+        find_links=[str(wheelhouse)], no_index=True, session=object()
+    )
+
+    provider.prefetch_available_versions(
+        (parse_requirement("first"), parse_requirement("second"))
+    )
+
+    assert provider.prefetcher is None
+
+
 def test_candidate_provider_groups_find_links_catalog_by_project(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

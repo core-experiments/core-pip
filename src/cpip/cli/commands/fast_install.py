@@ -111,15 +111,13 @@ def parse_arguments(args: list[str]) -> InstallOptions | None:
 
 
 def is_safe_member(name: str) -> bool:
-    if not name or "\\" in name or name.startswith("/"):
+    if not name or "\\" in name:
         return False
     return not (
-        name == ".."
-        or name.startswith("../")
+        name in ("..", ".data")
+        or name.startswith(("/", "../", ".data/"))
         or "/../" in name
         or name.endswith("/..")
-        or name == ".data"
-        or name.startswith(".data/")
     )
 
 
@@ -135,6 +133,7 @@ def install_resolved_pure_wheels(
     )
 
     target = os.path.abspath(target)
+    separator = os.sep
     if os.path.isdir(target):
         try:
             with os.scandir(target) as entries:
@@ -184,7 +183,10 @@ def install_resolved_pure_wheels(
                         continue
                     if not is_safe_member(name) or name.endswith("/entry_points.txt"):
                         return False
-                    destination = os.path.join(target, name.replace("/", os.sep))
+                    destination = os.path.join(
+                        target,
+                        name if separator == "/" else name.replace("/", separator),
+                    )
                     if destination in destinations:
                         return False
                     destinations.add(destination)
@@ -276,7 +278,7 @@ def install_resolved_pure_wheels(
                     if directory not in created_directories:
                         os.makedirs(directory, exist_ok=True)
                         created_directories.add(directory)
-                    with open(destination, "wb") as output:
+                    with open(destination, "wb", buffering=0) as output:
                         output.write(contents)
                     created_files.append(destination)
                 installer = os.path.join(target, dist_info, "INSTALLER")
@@ -301,7 +303,17 @@ def install_resolved_pure_wheels(
                     except OSError:
                         pass
             return False
-        return True
+    return True
+
+
+def _target_is_empty(target: str) -> bool:
+    if os.path.isdir(target):
+        try:
+            with os.scandir(target) as entries:
+                return not any(entries)
+        except OSError:
+            return False
+    return not os.path.exists(target)
 
 
 def run(args: list[str]) -> int | None:
@@ -316,6 +328,11 @@ def run(args: list[str]) -> int | None:
         or not options.find_links
         or not options.requirements
     ):
+        return None
+    # A non-empty target cannot use the specialized installer.  Check this
+    # before resolving so the normal fallback does not resolve the same local
+    # wheelhouse a second time just to reject the plan.
+    if not _target_is_empty(options.target):
         return None
     from cpip.resolution.fast_local_wheelhouse import (
         resolve as resolve_local_wheelhouse,

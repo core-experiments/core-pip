@@ -13,14 +13,28 @@ from cpip.core.errors import InstallationError
 
 
 class StagedFile:
-    __slots__ = ("source", "destination", "source_text", "destination_text", "mode")
+    __slots__ = (
+        "source",
+        "contents",
+        "destination",
+        "source_text",
+        "destination_text",
+        "mode",
+    )
 
     def __init__(
-        self, source: Path, destination: Path, mode: int | None = None
+        self,
+        source: Path | None,
+        destination: Path,
+        mode: int | None = None,
+        contents: bytes | None = None,
     ) -> None:
+        if source is None and contents is None:
+            raise ValueError("staged file needs a source or contents")
         self.source = source
+        self.contents = contents
         self.destination = destination
-        self.source_text = os.fspath(source)
+        self.source_text = os.fspath(source) if source is not None else None
         self.destination_text = os.fspath(destination)
         self.mode = mode
 
@@ -50,12 +64,40 @@ class InstallTransaction:
         self.staged_internal.append(StagedFile(Path(source), destination_path, mode))
         self.staged_destinations.add(destination_path)
 
+    def add_contents(
+        self,
+        destination: str | Path,
+        contents: bytes,
+        *,
+        mode: int | None = None,
+    ) -> None:
+        """Stage bytes for one destination without creating a temp source file."""
+        destination_path = Path(destination)
+        if destination_path in self.staged_destinations:
+            raise InstallationError(
+                f"duplicate installation destination: {destination_path}"
+            )
+        self.staged_internal.append(
+            StagedFile(None, destination_path, mode, contents=contents)
+        )
+        self.staged_destinations.add(destination_path)
+
     def delete(self, path: str | Path) -> None:
         self.deletions.add(Path(path))
 
+    def adopt(self, other: InstallTransaction) -> None:
+        """Merge staged actions from a transaction that has not committed."""
+        self.owned.update(other.owned)
+        for item in other.staged_internal:
+            if item.contents is None:
+                self.add(item.source, item.destination, mode=item.mode)
+            else:
+                self.add_contents(item.destination, item.contents, mode=item.mode)
+        self.deletions.update(other.deletions)
+
     def validate(self) -> None:
         for item in self.staged_internal:
-            if not os.path.isfile(item.source_text):
+            if item.source is not None and not os.path.isfile(item.source_text):
                 raise InstallationError(f"staged file does not exist: {item.source}")
             destination_exists = os.path.lexists(item.destination)
             self.destination_presence[item.destination] = destination_exists
@@ -67,8 +109,11 @@ class InstallTransaction:
                 if os.path.isfile(item.destination):
                     with open(item.destination, "rb") as destination_file:
                         destination_contents = destination_file.read()
-                    with open(item.source_text, "rb") as source_file:
-                        source_contents = source_file.read()
+                    source_contents = (
+                        item.contents
+                        if item.contents is not None
+                        else item.source.read_bytes()
+                    )
                     if destination_contents == source_contents:
                         continue
                 raise InstallationError(
@@ -99,15 +144,23 @@ class InstallTransaction:
                 if destination_parent not in created_directories:
                     makedirs(fspath(destination_parent), exist_ok=True)
                     created_directories.add(destination_parent)
-                try:
-                    replace(item.source_text, item.destination_text)
-                except OSError as exc:
-                    if exc.errno != errno.EXDEV:
-                        raise
-                    shutil.move(item.source_text, item.destination_text)
+                if item.contents is None:
+                    try:
+                        replace(item.source_text, item.destination_text)
+                    except OSError as exc:
+                        if exc.errno != errno.EXDEV:
+                            raise
+                        shutil.move(item.source_text, item.destination_text)
+                else:
+                    # Mark the path before writing: a short write must still
+                    # be removed by rollback before any backup is restored.
+                    append_created(item.destination)
+                    with open(item.destination_text, "wb") as destination_file:
+                        destination_file.write(item.contents)
                 if item.mode is not None:
                     chmod(item.destination, item.mode)
-                append_created(item.destination)
+                if item.contents is None:
+                    append_created(item.destination)
             for path in sorted(self.deletions, key=os.fspath):
                 if os.path.lexists(path):
                     self.backup_if_needed(path)

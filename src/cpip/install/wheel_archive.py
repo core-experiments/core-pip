@@ -100,12 +100,18 @@ def record_metadata_internal(contents: bytes) -> tuple[str, str]:
 
 
 def copy_member_with_metadata(
-    archive: zipfile.ZipFile, member: zipfile.ZipInfo, destination: Path
+    archive: zipfile.ZipFile,
+    member: zipfile.ZipInfo,
+    destination: Path,
+    *,
+    metadata: tuple[str, str] | None = None,
 ) -> tuple[str, str]:
     if member.file_size <= 1024 * 1024:
         contents = archive.read(member)
         with open(destination, "wb") as target:
             target.write(contents)
+        if metadata is not None:
+            return metadata
         digest = hashlib.sha256(contents).digest()
         encoded = base64.urlsafe_b64encode(digest)
         return f"sha256={encoded.rstrip(b'=').decode('ascii')}", str(len(contents))
@@ -115,8 +121,11 @@ def copy_member_with_metadata(
     with archive.open(member) as source, open(destination, "wb") as target:
         while chunk := source.read(64 * 1024):
             target.write(chunk)
-            digest.update(chunk)
+            if metadata is None:
+                digest.update(chunk)
             size += len(chunk)
+    if metadata is not None:
+        return metadata
     encoded = base64.urlsafe_b64encode(digest.digest())
     return f"sha256={encoded.rstrip(b'=').decode('ascii')}", str(size)
 

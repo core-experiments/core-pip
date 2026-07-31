@@ -14,6 +14,119 @@ if TYPE_CHECKING:
     from cpip.resolution.req_install import InstallRequirement
 
 
+def _try_local_wheelhouse_plan(
+    options: Any,
+    bundle: Any,
+    requirements: list[Any],
+    *,
+    cache_dir: str | None,
+) -> Any | None:
+    """Reuse the local resolver for the narrow pure-wheel install shape."""
+    if (
+        not bundle.no_index
+        or not bundle.find_links
+        or bundle.extra_index_urls
+        or bundle.constraints
+        or bundle.require_hashes
+        or bundle.format_control.no_binary
+        or bundle.format_control.only_binary
+        or bundle.release_control.all_releases
+        or bundle.release_control.only_final
+        or bundle.editables
+        or options.groups
+        or options.constraint_files
+        or options.no_deps
+        or options.upgrade
+        or options.pre
+        or options.all_releases
+        or options.only_final
+        or options.no_binary
+        or options.only_binary
+        or options.platform
+        or options.implementation
+        or options.abi
+        or options.dry_run
+        or options.report
+        or options.require_hashes
+        or options.ignore_requires_python
+        or options.user
+        or options.root
+        or options.prefix
+        or options.target is None
+        or not options.ignore_installed
+        or not options.no_compile
+    ):
+        return None
+    from cpip.index.source_locations import resolve_source_location
+
+    if any(resolve_source_location(value)[1] is None for value in bundle.find_links):
+        return None
+    values: list[str] = []
+    for requirement in requirements:
+        if (
+            requirement.req is None
+            or requirement.req.url is not None
+            or requirement.link is not None
+            or requirement.hash_options
+            or requirement.config_settings
+        ):
+            return None
+        values.append(requirement.req.raw)
+    from cpip.core.packaging import Requirement, SpecifierSet, Version
+    from cpip.core.wheel import WheelCandidate
+    from cpip.resolution.fast_local_wheelhouse import resolve
+    from cpip.resolution.resolver_internals.state.plans import InstallPlan
+    from pathlib import Path
+
+    local_plan = resolve(bundle.find_links, values, cache_dir=cache_dir)
+    if local_plan is None:
+        return None
+    candidates = []
+    graph: dict[str, set[str]] = {}
+    try:
+        for local_candidate in local_plan.candidates:
+            dependencies = []
+            for dependency in local_candidate.dependencies:
+                specifier = ",".join(
+                    operator + str(getattr(expected, "text", expected))
+                    for operator, expected in dependency.specifier.values
+                )
+                extras = (
+                    f"[{','.join(sorted(dependency.extras))}]"
+                    if dependency.extras
+                    else ""
+                )
+                marker = ""
+                if dependency.marker is not None:
+                    operator, value = dependency.marker
+                    marker = f"; extra {operator} '{value}'"
+                raw = f"{dependency.name}{extras}{specifier}{marker}"
+                parsed = Requirement(
+                    name=dependency.name,
+                    specifier=SpecifierSet(specifier),
+                    extras=frozenset(dependency.extras),
+                    marker=marker.removeprefix("; ") or None,
+                    raw=raw,
+                )
+                dependencies.append(parsed)
+            candidate = WheelCandidate(
+                name=local_candidate.name,
+                version=Version(str(local_candidate.version)),
+                path=Path(local_candidate.path),
+                dependencies=tuple(dependencies),
+                provided_extras=local_candidate.provided_extras,
+                requires_python=local_candidate.requires_python,
+                source_kind="wheel",
+            )
+            candidates.append(candidate)
+            graph[candidate.canonical_name] = {
+                dependency.canonical_name for dependency in candidate.dependencies
+            }
+    except (OSError, TypeError, ValueError):
+        return None
+    return InstallPlan(candidates, graph=graph)
+
+
 def run_install(args: list[str]) -> int:
     from cpip.cli.commands.install_helpers import normalize_install_args
     from cpip.cli.commands.install_helpers import (
@@ -50,11 +163,9 @@ def run_install(args: list[str]) -> int:
     )
     from cpip.core.wheel import TargetContext, wheel_candidate
     from cpip.index.links import Link
-    from cpip.index.provider import CandidateProvider
     from cpip.install.target import InstallTarget
     from cpip.install.wheel_transaction import install_wheels_transactionally
     from cpip.resolution.req_install import install_req_from_line
-    from cpip.resolution.resolver import Resolver
 
     if len(options.requirements_from_scripts) > 1:
         raise CommandError("--requirements-from-script can only be given once")
@@ -357,66 +468,75 @@ def run_install(args: list[str]) -> int:
             source_requirements_by_url[constraint_requirement.req.url] = (
                 constraint_requirement
             )
-    provider = CandidateProvider.from_options(
-        find_links=bundle.find_links,
-        index_url=bundle.index_url,
-        extra_index_urls=bundle.extra_index_urls,
-        no_index=bundle.no_index,
-        format_control=bundle.format_control,
-        build_options=build_options,
-        build_constraints=options.build_constraint_files,
-        wheel_cache_dir=(
-            None
-            if options.no_cache_dir
-            else options.cache_dir
-            or os.environ.get("CPIP_CACHE_DIR")
-            or user_cache_dir("cpip")
-        ),
-        trusted_hosts=options.trusted_hosts,
-        session=bundle.session,
-        dry_run=options.dry_run,
-        build_isolation=not options.no_build_isolation,
-        locked_links={name: Link(url) for name, url in bundle.locked_links.items()},
-        target=target,
-        uploaded_prior_to=(
-            datetime.datetime.fromisoformat(
-                options.uploaded_prior_to.replace("Z", "+00:00")
+    provider = None
+
+    def get_provider() -> Any:
+        nonlocal provider
+        if provider is not None:
+            return provider
+        from cpip.index.provider import CandidateProvider
+
+        provider = CandidateProvider.from_options(
+            find_links=bundle.find_links,
+            index_url=bundle.index_url,
+            extra_index_urls=bundle.extra_index_urls,
+            no_index=bundle.no_index,
+            format_control=bundle.format_control,
+            build_options=build_options,
+            build_constraints=options.build_constraint_files,
+            wheel_cache_dir=(
+                None
+                if options.no_cache_dir
+                else options.cache_dir
+                or os.environ.get("CPIP_CACHE_DIR")
+                or user_cache_dir("cpip")
+            ),
+            trusted_hosts=options.trusted_hosts,
+            session=bundle.session,
+            dry_run=options.dry_run,
+            build_isolation=not options.no_build_isolation,
+            locked_links={name: Link(url) for name, url in bundle.locked_links.items()},
+            target=target,
+            uploaded_prior_to=(
+                datetime.datetime.fromisoformat(
+                    options.uploaded_prior_to.replace("Z", "+00:00")
+                )
+                if options.uploaded_prior_to
+                else None
+            ),
+        )
+        provider.release_control = bundle.release_control
+        from cpip.cli.commands.install_helpers import intersect_hashes
+        from cpip.core.hashes import Hashes
+
+        provider.hashes_by_name = {}
+        for item in requirements:
+            if item.req is None or not item.hash_options:
+                continue
+            hashes = item.hashes()
+            previous = provider.hashes_by_name.get(item.req.canonical_name)
+            provider.hashes_by_name[item.req.canonical_name] = (
+                hashes if previous is None else intersect_hashes(previous, hashes)
             )
-            if options.uploaded_prior_to
-            else None
-        ),
-    )
-    provider.release_control = bundle.release_control
-    from cpip.cli.commands.install_helpers import intersect_hashes
-    from cpip.core.hashes import Hashes
+        for raw, hashes in bundle.constraint_hashes.items():
+            name = parse_requirement(raw).canonical_name
+            current = provider.hashes_by_name.get(name)
+            if current is None:
+                provider.hashes_by_name[name] = Hashes(hashes)
+            else:
+                provider.hashes_by_name[name] = intersect_hashes(
+                    current, Hashes(hashes)
+                )
 
-    provider.hashes_by_name = {}
-    for item in requirements:
-        if item.req is None or not item.hash_options:
-            continue
-        hashes = item.hashes()
-        previous = provider.hashes_by_name.get(item.req.canonical_name)
-        provider.hashes_by_name[item.req.canonical_name] = (
-            hashes if previous is None else intersect_hashes(previous, hashes)
-        )
-    for raw, hashes in bundle.constraint_hashes.items():
-        name = parse_requirement(raw).canonical_name
-        current = provider.hashes_by_name.get(name)
-        if current is None:
-            from cpip.core.hashes import Hashes
-
-            provider.hashes_by_name[name] = Hashes(hashes)
-        else:
-            provider.hashes_by_name[name] = intersect_hashes(current, Hashes(hashes))
-
-    for raw, hashes in bundle.requirement_hashes.items():
-        name = parse_requirement(raw).canonical_name
-        current = provider.hashes_by_name.get(name)
-        provider.hashes_by_name[name] = (
-            Hashes(hashes)
-            if current is None
-            else intersect_hashes(current, Hashes(hashes))
-        )
+        for raw, hashes in bundle.requirement_hashes.items():
+            name = parse_requirement(raw).canonical_name
+            current = provider.hashes_by_name.get(name)
+            provider.hashes_by_name[name] = (
+                Hashes(hashes)
+                if current is None
+                else intersect_hashes(current, Hashes(hashes))
+            )
+        return provider
     if options.verbose and bundle.no_index:
         print("Ignoring indexes:")
     if options.verbose and bundle.index_url:
@@ -485,33 +605,46 @@ def run_install(args: list[str]) -> int:
     if bundle.find_links and not quiet:
         print(f"Looking in links: {', '.join(bundle.find_links)}")
     if bundle.requirements:
-        try:
-            plan = Resolver(
-                provider=provider,
-                no_deps=options.no_deps,
-                upgrade=options.upgrade,
-                upgrade_strategy=options.upgrade_strategy,
-                ignore_installed=reinstall,
-                constraints=bundle.constraints,
-                allow_prereleases=options.pre,
-                require_hashes=bundle.require_hashes,
-                compute_source_hashes=bool(options.report) or bundle.require_hashes,
-                ignore_requires_python=options.ignore_requires_python,
-                python_version=python_version,
-            ).resolve(requirements)
-        except DistributionNotFound as exc:
-            if options.verbose:
-                message = str(exc)
-                detail = next(
-                    (
-                        line
-                        for line in message.splitlines()
-                        if line.startswith("No matching distribution found for ")
-                    ),
-                    message,
-                )
-                print(f"DistributionNotFound: {detail}")
-            raise
+        cache_dir = (
+            None
+            if options.no_cache_dir
+            else options.cache_dir
+            or os.environ.get("CPIP_CACHE_DIR")
+            or user_cache_dir("cpip")
+        )
+        plan = _try_local_wheelhouse_plan(
+            options, bundle, requirements, cache_dir=cache_dir
+        )
+        if plan is None:
+            try:
+                from cpip.resolution.resolver import Resolver
+
+                plan = Resolver(
+                    provider=get_provider(),
+                    no_deps=options.no_deps,
+                    upgrade=options.upgrade,
+                    upgrade_strategy=options.upgrade_strategy,
+                    ignore_installed=reinstall,
+                    constraints=bundle.constraints,
+                    allow_prereleases=options.pre,
+                    require_hashes=bundle.require_hashes,
+                    compute_source_hashes=bool(options.report) or bundle.require_hashes,
+                    ignore_requires_python=options.ignore_requires_python,
+                    python_version=python_version,
+                ).resolve(requirements)
+            except DistributionNotFound as exc:
+                if options.verbose:
+                    message = str(exc)
+                    detail = next(
+                        (
+                            line
+                            for line in message.splitlines()
+                            if line.startswith("No matching distribution found for ")
+                        ),
+                        message,
+                    )
+                    print(f"DistributionNotFound: {detail}")
+                raise
         unique_candidates: dict[str, Any] = {}
         for candidate in plan.candidates:
             unique_candidates.setdefault(candidate.canonical_name, candidate)
@@ -561,6 +694,7 @@ def run_install(args: list[str]) -> int:
                 candidate_direct_urls[os.fspath(candidate.path)] = direct_url
             if not options.dry_run:
                 hybrid_installed = False
+                target_is_empty = target_library_is_empty(batch_target)
                 if (
                     options.target is not None
                     and options.ignore_installed
@@ -570,6 +704,7 @@ def run_install(args: list[str]) -> int:
                     and options.root is None
                     and not options.user
                     and options.prefix is None
+                    and target_is_empty
                     and all(
                         candidate.source_kind == "wheel"
                         for candidate in plan.candidates
@@ -606,8 +741,9 @@ def run_install(args: list[str]) -> int:
                             lookup_existing=not (
                                 options.target is not None
                                 and options.ignore_installed
-                                and target_library_is_empty(batch_target)
+                                and target_is_empty
                             ),
+                            candidates=plan.candidates,
                         )
                     except InstallationError as exc:
                         prefix = "Cannot install "
@@ -782,8 +918,10 @@ def run_install(args: list[str]) -> int:
                     metadata.optional_dependencies.get(extra, ())
                 )
         if not options.no_deps and editable_dependencies:
+            from cpip.resolution.resolver import Resolver
+
             dependency_plan = Resolver(
-                provider=provider,
+                provider=get_provider(),
                 no_deps=False,
                 upgrade=options.upgrade and options.upgrade_strategy == "eager",
                 upgrade_strategy=options.upgrade_strategy,

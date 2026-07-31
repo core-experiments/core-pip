@@ -246,7 +246,12 @@ def test_batch_install_rolls_back_when_destinations_overlap(tmp_path: Path) -> N
 
     with pytest.raises(InstallationError, match="duplicate installation destination"):
         install_wheels_transactionally(
-            [(wheel, True, None), (wheel, False, None)],
+            [
+                (wheel, True, None),
+                (wheel, False, None),
+                (wheel, False, None),
+                (wheel, False, None),
+            ],
             target=InstallTarget.from_options("owner-demo", target=str(target)),
             pycompile=False,
             lookup_existing=False,

@@ -7,6 +7,7 @@ filesystem transaction engine. It deliberately does not invoke cpip again.
 from __future__ import annotations
 
 import csv
+import io
 import importlib.util
 import os
 import stat
@@ -15,12 +16,8 @@ import tempfile
 import zipfile
 from contextlib import nullcontext
 from pathlib import Path, PurePosixPath
-from typing import Iterable
+from typing import TYPE_CHECKING, Iterable
 
-from cpip.build.metadata import (
-    InstalledDistributionStore,
-    InstalledMetadataDistribution,
-)
 from cpip.core.direct_url import DirectUrl
 from cpip.core.errors import InstallationError
 from cpip.core.packaging import canonicalize_name
@@ -43,6 +40,117 @@ from cpip.install.wheel_scripts import (
     write_windows_script,
 )
 from cpip.install.wheel_state import compiled_files, existing_paths
+
+if TYPE_CHECKING:
+    from cpip.build.metadata import InstalledMetadataDistribution
+
+DIRECT_CONTENT_LIMIT = 64 * 1024
+DIRECT_CONTENT_BATCH_LIMIT = 4 * 1024 * 1024
+
+
+class _RawWheelInfo:
+    __slots__ = ("filename", "file_size", "external_attr")
+
+    def __init__(self, filename: str, file_size: int, external_attr: int) -> None:
+        self.filename = filename
+        self.file_size = file_size
+        self.external_attr = external_attr
+
+    def is_dir(self) -> bool:
+        return self.filename.endswith("/")
+
+
+class _RawWheelArchive:
+    __slots__ = ("_archive", "_file", "NameToInfo", "_infos")
+
+    def __init__(self, file: object, archive: object) -> None:
+        self._file = file
+        self._archive = archive
+        self._infos = [
+            _RawWheelInfo(
+                name,
+                member[3],
+                getattr(archive, "modes", {}).get(name, 0),
+            )
+            for name, member in archive.members.items()
+        ]
+        self.NameToInfo = {info.filename: info for info in self._infos}
+
+    def infolist(self) -> list[_RawWheelInfo]:
+        return self._infos
+
+    def namelist(self) -> list[str]:
+        return [info.filename for info in self._infos]
+
+    def read(self, member: str | _RawWheelInfo) -> bytes:
+        name = member if isinstance(member, str) else member.filename
+        return self._archive.read(name)
+
+    def open(self, member: _RawWheelInfo) -> io.BytesIO:
+        return io.BytesIO(self.read(member))
+
+    def close(self) -> None:
+        self._file.close()
+
+    def __enter__(self) -> _RawWheelArchive:
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        self.close()
+
+
+def _open_wheel_archive(
+    path: str | Path, candidate: WheelCandidate
+) -> zipfile.ZipFile | _RawWheelArchive:
+    """Open a fast raw archive when its members fit the streaming contract."""
+    from cpip.resolution.fast_wheelhouse.archive import WheelArchive, WheelhouseUnavailable
+
+    layout = getattr(candidate, "wheel_layout", None)
+    if layout is not None:
+        # The resolver layout predates external mode bits; retain ZipInfo for
+        # those candidates so executable members keep their original modes.
+        return zipfile.ZipFile(path)
+    members = None
+    if members is not None and any(
+        member[0] not in {0, 8}
+        or member[2] > 1024 * 1024
+        for member in members.values()
+    ):
+        return zipfile.ZipFile(path)
+    try:
+        file = open(path, "rb")
+        archive = WheelArchive(file, members=members)
+    except (OSError, ValueError, WheelhouseUnavailable):
+        try:
+            file.close()
+        except UnboundLocalError:
+            pass
+        return zipfile.ZipFile(path)
+    if any(
+        member[0] not in {0, 8} or member[3] > 1024 * 1024
+        for member in archive.members.values()
+    ):
+        file.close()
+        return zipfile.ZipFile(path)
+    return _RawWheelArchive(file, archive)
+
+
+def _target_has_distribution_metadata(target: InstallTarget) -> bool:
+    """Check for installed metadata before importing metadata discovery code."""
+    for root in target.library_roots:
+        try:
+            with os.scandir(root) as entries:
+                if any(
+                    entry.name.endswith((".dist-info", ".egg-info", ".egg-link"))
+                    for entry in entries
+                ):
+                    return True
+        except OSError:
+            # An unreadable or transient root must use the authoritative
+            # metadata scanner so installation does not silently skip an old
+            # distribution.
+            return True
+    return False
 
 
 class WheelInstaller:
@@ -134,9 +242,14 @@ def install_wheel_internal(
     if candidate is None:
         candidate = wheel_candidate(path)
     if lookup_existing:
-        existing = InstalledDistributionStore(
-            paths=[os.fspath(root) for root in target.library_roots]
-        ).find(candidate.name)
+        if _target_has_distribution_metadata(target):
+            from cpip.build.metadata import InstalledDistributionStore
+
+            existing = InstalledDistributionStore(
+                paths=[os.fspath(root) for root in target.library_roots]
+            ).find(candidate.name)
+        else:
+            existing = None
     if (
         existing is not None
         and existing.version == str(candidate.version)
@@ -157,7 +270,6 @@ def install_wheel_internal(
         stage_root = Path(temporary)
         staged: list[tuple[Path, Path, int | None]] = []
         record_destination: Path | None = None
-        record_source: Path | None = None
         dist_info: str | None = None
         stage_directories: set[Path] = set()
         resolved_directories = (
@@ -165,13 +277,35 @@ def install_wheel_internal(
         )
         resolved_roots: dict[Path, Path] = {}
         record_metadata: dict[Path, tuple[str, str]] = {}
+        direct_contents: dict[Path, bytes] = {}
+        direct_metadata: dict[Path, tuple[str, str]] = {}
+        direct_content_size = 0
 
-        with zipfile.ZipFile(path) as archive:
+        with _open_wheel_archive(path, candidate) as archive:
             if validated_dist_info is None:
-                validated_dist_info, _ = parse_wheel(
-                    archive,
-                    os.path.basename(os.fspath(path))[:-4].split("-", 1)[0],
-                )
+                layout = getattr(candidate, "wheel_layout", None)
+                if layout is not None:
+                    validated_dist_info = layout[0]
+                else:
+                    validated_dist_info, _ = parse_wheel(
+                        archive,
+                        os.path.basename(os.fspath(path))[:-4].split("-", 1)[0],
+                    )
+            wheel_record_metadata: dict[str, tuple[str, str]] = {}
+            try:
+                record_text = archive.read(
+                    f"{validated_dist_info}/RECORD"
+                ).decode("utf-8")
+            except (KeyError, UnicodeDecodeError):
+                pass
+            else:
+                for row in csv.reader(io.StringIO(record_text)):
+                    if (
+                        len(row) >= 3
+                        and row[1].startswith("sha256=")
+                        and row[2].isdigit()
+                    ):
+                        wheel_record_metadata[row[0]] = (row[1], row[2])
             for member in archive.infolist():
                 if member.is_dir():
                     continue
@@ -179,22 +313,39 @@ def install_wheel_internal(
                 if relative.parts and relative.parts[0].endswith(".dist-info"):
                     dist_info = relative.parts[0]
                 source = stage_root / Path(*relative.parts)
-                source_parent = source.parent
-                if source_parent not in stage_directories:
-                    source_parent.mkdir(parents=True, exist_ok=True)
-                    stage_directories.add(source_parent)
                 rewrite_metadata = (
                     relative.name == "METADATA" and candidate.name.isalpha()
                 )
                 script_member = is_script_member(relative)
                 is_record = relative.name == "RECORD" and bool(relative.parts)
+                direct_content = (
+                    not rewrite_metadata
+                    and not script_member
+                    and not is_record
+                    and member.file_size <= DIRECT_CONTENT_LIMIT
+                    and direct_content_size + member.file_size
+                    <= DIRECT_CONTENT_BATCH_LIMIT
+                    and (not pycompile or relative.suffix != ".py")
+                    and relative.name != "entry_points.txt"
+                )
+                if not direct_content:
+                    source_parent = source.parent
+                    if source_parent not in stage_directories:
+                        source_parent.mkdir(parents=True, exist_ok=True)
+                        stage_directories.add(source_parent)
                 if rewrite_metadata or script_member:
                     contents = archive.read(member)
                 elif is_record:
                     contents = None
+                elif direct_content:
+                    contents = archive.read(member)
+                    direct_content_size += len(contents)
                 else:
+                    metadata = wheel_record_metadata.get(relative.as_posix())
+                    if metadata is not None and metadata[1] != str(member.file_size):
+                        metadata = None
                     record_metadata[source] = copy_member_with_metadata(
-                        archive, member, source
+                        archive, member, source, metadata=metadata
                     )
                     contents = None
                 if rewrite_metadata:
@@ -206,26 +357,32 @@ def install_wheel_internal(
                             lines[index] = f"Name: {candidate.name.lower()}{ending}"
                             contents = "".join(lines).encode("utf-8")
                             break
-                if contents is not None:
+                if contents is not None and not direct_content:
                     with open(source, "wb") as file:
                         file.write(contents)
-                if script_member:
-                    rewrite_shebang(source, script_executable)
-                elif contents is not None:
-                    record_metadata[source] = record_metadata_internal(contents)
                 destination = destination_internal(
                     target,
                     relative,
                     resolved_directories=resolved_directories,
                     resolved_roots=resolved_roots,
                 )
+                if script_member:
+                    rewrite_shebang(source, script_executable)
+                elif contents is not None:
+                    metadata = wheel_record_metadata.get(relative.as_posix())
+                    if metadata is None or metadata[1] != str(len(contents)):
+                        metadata = record_metadata_internal(contents)
+                    if direct_content:
+                        direct_contents[destination] = contents
+                        direct_metadata[destination] = metadata
+                    else:
+                        record_metadata[source] = metadata
                 mode = zip_mode(member)
                 staged.append((source, destination, mode))
                 if relative.name == "RECORD" and relative.parts:
                     record_destination = destination
-                    record_source = source
 
-        if dist_info is None or record_destination is None or record_source is None:
+        if dist_info is None or record_destination is None:
             raise InstallationError(f"Wheel {path} has no valid dist-info metadata")
 
         managed_metadata = {
@@ -238,19 +395,24 @@ def install_wheel_internal(
             for item in staged
             if item[1] not in managed_metadata or item[1] == record_destination
         ]
+        staged_destinations = {destination for _, destination, _ in staged}
+        for destination in tuple(direct_contents):
+            if destination not in staged_destinations:
+                direct_contents.pop(destination, None)
+                direct_metadata.pop(destination, None)
 
         dist_info_stage = stage_root / dist_info
         installer_source = dist_info_stage / "INSTALLER"
-        with open(installer_source, "wb") as file:
-            file.write(b"cpip\n")
         installer_destination = target.purelib / dist_info / "INSTALLER"
+        direct_contents[installer_destination] = b"cpip\n"
+        direct_metadata[installer_destination] = record_metadata_internal(b"cpip\n")
         staged.append((installer_source, installer_destination, None))
 
         requested_destination = target.purelib / dist_info / "REQUESTED"
         if requested:
             requested_source = dist_info_stage / "REQUESTED"
-            with open(requested_source, "w", encoding="utf-8"):
-                pass
+            direct_contents[requested_destination] = b""
+            direct_metadata[requested_destination] = record_metadata_internal(b"")
             staged.append((requested_source, requested_destination, None))
 
         if direct_url is not None:
@@ -273,9 +435,9 @@ def install_wheel_internal(
         }
         staged = [item for item in staged if item[1] not in script_destinations]
         script_stage = stage_root / ".cpip-scripts"
-        script_stage.mkdir(parents=True, exist_ok=True)
         script_maker_type = None
         if scripts:
+            script_stage.mkdir(parents=True, exist_ok=True)
             try:
                 from distlib.scripts import ScriptMaker
             except ImportError:
@@ -327,10 +489,11 @@ def install_wheel_internal(
                         | stat.S_IXOTH,
                     )
 
-        for source in script_stage.iterdir():
-            staged.append(
-                (source, target.scripts / source.name, os.stat(source).st_mode)
-            )
+        if scripts:
+            for source in script_stage.iterdir():
+                staged.append(
+                    (source, target.scripts / source.name, os.stat(source).st_mode)
+                )
 
         if pycompile:
             staged.extend(compiled_files(stage_root, staged))
@@ -342,7 +505,9 @@ def install_wheel_internal(
                     (os.path.relpath(destination, target.purelib), "", "")
                 )
                 continue
-            metadata = record_metadata.get(source)
+            metadata = direct_metadata.get(destination)
+            if metadata is None:
+                metadata = record_metadata.get(source)
             if metadata is None:
                 with open(source, "rb") as file:
                     metadata = record_metadata_internal(file.read())
@@ -354,8 +519,11 @@ def install_wheel_internal(
                 )
             )
         record_rows.sort()
-        with open(record_source, "w", newline="", encoding="utf-8") as file:
-            csv.writer(file).writerows(record_rows)
+        record_file = io.StringIO(newline="")
+        csv.writer(record_file).writerows(record_rows)
+        record_contents = record_file.getvalue().encode("utf-8")
+        direct_contents[record_destination] = record_contents
+        direct_metadata[record_destination] = record_metadata_internal(record_contents)
 
         owned_paths, old_paths = existing_paths(existing)
         if preserve_existing and existing is not None:
@@ -369,7 +537,11 @@ def install_wheel_internal(
         if transaction is not None:
             transaction.owned.update(normalized_internal(path) for path in owned_paths)
         for source, destination, mode in staged:
-            active_transaction.add(source, destination, mode=mode)
+            contents = direct_contents.get(destination)
+            if contents is not None:
+                active_transaction.add_contents(destination, contents, mode=mode)
+            else:
+                active_transaction.add(source, destination, mode=mode)
         for old_path in old_paths - new_destinations:
             active_transaction.delete(old_path)
         if transaction is None:
@@ -433,6 +605,7 @@ def install_wheels_transactionally(
     preserve_existing: bool = False,
     script_executable: str | None = None,
     lookup_existing: bool = True,
+    candidates: Iterable[WheelCandidate] | None = None,
 ) -> tuple[WheelCandidate, ...]:
     """Install a wheel batch with rollback across every wheel in the batch."""
     requests = tuple(items)
@@ -444,37 +617,138 @@ def install_wheels_transactionally(
         script_executable=script_executable,
     )
     destination_cache: dict[tuple[Path, PurePosixPath], Path] = {}
-    existing_distributions = (
-        {
+    if lookup_existing and _target_has_distribution_metadata(target):
+        from cpip.build.metadata import InstalledDistributionStore
+
+        existing_distributions = {
             distribution.canonical_name: distribution
             for distribution in InstalledDistributionStore(
                 paths=[os.fspath(root) for root in target.library_roots]
             ).iter()
         }
-        if lookup_existing
-        else {}
+    else:
+        existing_distributions = {}
+    planned_candidates = (
+        tuple(candidates)
+        if candidates is not None
+        else tuple(wheel_candidate(path) for path, _, _ in requests)
     )
-    planned_candidates = tuple(wheel_candidate(path) for path, _, _ in requests)
+    if len(planned_candidates) != len(requests):
+        raise ValueError("candidate count does not match wheel request count")
     with InstallTransaction() as transaction:
         with tempfile.TemporaryDirectory(prefix="cpip-wheel-batch-") as temporary:
             batch_stage = Path(temporary)
-            try:
-                candidates = tuple(
-                    installer.install(
-                        path,
+            parallel = (
+                len(requests) >= 4
+                and len(requests) <= 64
+                and not pycompile
+                and not existing_distributions
+            )
+            cache_for_workers = destination_cache
+            if parallel:
+                from threading import Lock
+
+                class ThreadSafePathCache:
+                    def __init__(self) -> None:
+                        self.values: dict[tuple[Path, PurePosixPath], Path] = {}
+                        self.lock = Lock()
+
+                    def get(
+                        self,
+                        key: tuple[Path, PurePosixPath],
+                    ) -> Path | None:
+                        with self.lock:
+                            return self.values.get(key)
+
+                    def __setitem__(
+                        self,
+                        key: tuple[Path, PurePosixPath],
+                        value: Path,
+                    ) -> None:
+                        with self.lock:
+                            self.values[key] = value
+
+                cache_for_workers = ThreadSafePathCache()
+
+            def install_one(
+                index: int,
+                request: tuple[str | Path, bool, DirectUrl | None],
+                candidate: WheelCandidate,
+            ) -> tuple[int, InstallTransaction, WheelCandidate]:
+                local_transaction = InstallTransaction()
+                try:
+                    result = installer.install(
+                        request[0],
                         candidate=candidate,
-                        requested=requested,
-                        direct_url=direct_url,
-                        existing=existing_distributions.get(candidate.canonical_name),
+                        requested=request[1],
+                        direct_url=request[2],
+                        existing=None,
                         lookup_existing=False,
-                        destination_cache=destination_cache,
+                        destination_cache=cache_for_workers,
                         stage_root=batch_stage / str(index),
-                        transaction=transaction,
+                        transaction=local_transaction,
                     )
-                    for index, ((path, requested, direct_url), candidate) in enumerate(
-                        zip(requests, planned_candidates)
+                except Exception:
+                    local_transaction.rollback()
+                    raise
+                return index, local_transaction, result
+
+            try:
+                if parallel:
+                    from concurrent.futures import ThreadPoolExecutor
+
+                    futures = []
+                    staged_results = []
+                    try:
+                        with ThreadPoolExecutor(
+                            max_workers=min(4, len(requests))
+                        ) as pool:
+                            futures = [
+                                pool.submit(install_one, index, request, candidate)
+                                for index, (request, candidate) in enumerate(
+                                    zip(requests, planned_candidates)
+                                )
+                            ]
+                            staged_results = [future.result() for future in futures]
+                        ordered_results = sorted(
+                            staged_results, key=lambda item: item[0]
+                        )
+                        for _, local_transaction, _ in ordered_results:
+                            transaction.adopt(local_transaction)
+                        for _, local_transaction, _ in ordered_results:
+                            local_transaction.finalize()
+                    except Exception:
+                        for future in futures:
+                            if not future.done() or future.cancelled():
+                                continue
+                            try:
+                                _, local_transaction, _ = future.result()
+                            except Exception:
+                                continue
+                            local_transaction.rollback()
+                        raise
+                    candidates = tuple(
+                        result for _, _, result in ordered_results
                     )
-                )
+                else:
+                    candidates = tuple(
+                        installer.install(
+                            path,
+                            candidate=candidate,
+                            requested=requested,
+                            direct_url=direct_url,
+                            existing=existing_distributions.get(
+                                candidate.canonical_name
+                            ),
+                            lookup_existing=False,
+                            destination_cache=destination_cache,
+                            stage_root=batch_stage / str(index),
+                            transaction=transaction,
+                        )
+                        for index, ((path, requested, direct_url), candidate) in enumerate(
+                            zip(requests, planned_candidates)
+                        )
+                    )
             except Exception:
                 transaction.rollback()
                 raise
@@ -498,6 +772,8 @@ def uninstall_distribution(
     paths: list[str] | None = None,
 ) -> bool:
     """Remove an installed distribution from its RECORD manifest atomically."""
+    from cpip.build.metadata import InstalledDistributionStore
+
     distribution = InstalledDistributionStore(paths=paths).find(name)
     if distribution is None:
         return False

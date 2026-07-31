@@ -97,6 +97,7 @@ def main(
                 sys.stderr.flush()
                 return status
 
+        fast_install_attempted = False
         if (
             argv
             and argv[0] == "install"
@@ -112,6 +113,7 @@ def main(
         ):
             from cpip.cli.commands.fast_install import run as run_fast_install
 
+            fast_install_attempted = True
             status = run_fast_install(argv[1:])
             if status is not None:
                 sys.stdout.flush()
@@ -157,6 +159,7 @@ def main(
             version=version,
             location=location,
             quiet_fast_command=quiet_fast_command,
+            fast_install_attempted=fast_install_attempted,
         )
         sys.stdout.flush()
         sys.stderr.flush()

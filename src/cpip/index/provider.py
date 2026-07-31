@@ -20,6 +20,7 @@ from cpip.index.source_locations import (
     FindLinksSource,
     SimpleIndexSource,
     looks_like_path_requirement,
+    resolve_source_location,
 )
 from cpip.index.source_models import (
     INSTALLABLE_ARTIFACT_KINDS,
@@ -74,6 +75,9 @@ class CandidateProvider:
         self.find_links = find_links
         self.index_urls = index_urls
         self.no_index = no_index
+        self.prefetch_remote_sources = bool(index_urls) or any(
+            resolve_source_location(value)[1] is None for value in find_links
+        )
         self.allow_yanked = allow_yanked
         self.release_control = release_control
         self.format_control = format_control
@@ -584,7 +588,11 @@ class CandidateProvider:
         self, requirements: tuple[Requirement, ...]
     ) -> None:
         """Fetch independent project catalogs in bounded background workers."""
-        if len(requirements) < 2 or self.session is None:
+        if (
+            len(requirements) < 2
+            or self.session is None
+            or not self.prefetch_remote_sources
+        ):
             return
 
         unique: dict[tuple[str, bool, bool], Requirement] = {}

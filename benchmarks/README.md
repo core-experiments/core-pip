@@ -60,6 +60,8 @@ uv run --group benchmark python -m benchmarks.cross_tool \
   --benchmark resolve-warm \
   --benchmark install-cold \
   --benchmark install-warm \
+  --benchmark install-compile-cold \
+  --benchmark install-compile-warm \
   --output-dir benchmarks/results
 ```
 
@@ -192,7 +194,7 @@ uv run --group benchmark python -m benchmarks.cross_tool \
   --benchmark startup-help-cold \
   --benchmark startup-fast-install \
   --benchmark startup-fallback-install \
-  --benchmark startup-full-fallback-install \
+  --benchmark startup-compile-install \
   --output-dir benchmarks/results
 ```
 
@@ -204,9 +206,12 @@ startup cases measure warm cached imports, while the `*-cold` cases remove that
 cache before every sample. This avoids inheriting an ambient
 `PYTHONDONTWRITEBYTECODE` setting from the shell.
 
-`startup-fallback-install` measures the safe local-wheel capability route with
-normal output. `startup-full-fallback-install` adds an unsupported `--upgrade`
-shape to force the complete resolver/install path for regression comparisons.
+`startup-fast-install` measures the specialized pure-wheel route with
+`--no-compile`. `startup-fallback-install` starts with a marker in the target,
+which makes the target non-empty and therefore forces the normal installer
+while retaining the no-compile workload. `startup-compile-install` uses
+`--compile` for cpip and `--compile-bytecode` for uv, forcing normal
+installation and measuring bytecode generation explicitly.
 
 uv's universal resolver, workspace discovery, and tool-management benchmarks
 are intentionally omitted because cpip has no equivalent operation.

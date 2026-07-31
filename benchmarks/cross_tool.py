@@ -34,13 +34,15 @@ class Benchmark(str, Enum):
     RESOLVE_WARM = "resolve-warm"
     INSTALL_COLD = "install-cold"
     INSTALL_WARM = "install-warm"
+    INSTALL_COMPILE_COLD = "install-compile-cold"
+    INSTALL_COMPILE_WARM = "install-compile-warm"
     STARTUP_VERSION = "startup-version"
     STARTUP_VERSION_COLD = "startup-version-cold"
     STARTUP_HELP = "startup-help"
     STARTUP_HELP_COLD = "startup-help-cold"
     STARTUP_FAST_INSTALL = "startup-fast-install"
     STARTUP_FALLBACK_INSTALL = "startup-fallback-install"
-    STARTUP_FULL_FALLBACK_INSTALL = "startup-full-fallback-install"
+    STARTUP_COMPILE_INSTALL = "startup-compile-install"
 
 
 class Tool(str, Enum):
@@ -211,19 +213,21 @@ def build_command(
         return Command(tool.value, command, prepare)
 
     common.extend(
-        [
-            "--cache-dir",
-            os.fspath(cache),
-            "--target",
-            os.fspath(target),
-            "--no-compile",
-        ]
+        ["--cache-dir", os.fspath(cache), "--target", os.fspath(target)]
     )
+    compile_bytecode = benchmark in {
+        Benchmark.INSTALL_COMPILE_COLD,
+        Benchmark.INSTALL_COMPILE_WARM,
+        Benchmark.STARTUP_COMPILE_INSTALL,
+    }
+    if not compile_bytecode:
+        common.append("--no-compile")
     if tool is Tool.CPIP:
+        environment = ["env", "PYTHONDONTWRITEBYTECODE="]
+        if not compile_bytecode:
+            environment.append(f"PYTHONPYCACHEPREFIX={state / 'pycache'}")
         command = [
-            "env",
-            "PYTHONDONTWRITEBYTECODE=",
-            f"PYTHONPYCACHEPREFIX={state / 'pycache'}",
+            *environment,
             "cpip",
             "install",
             "--ignore-installed",
@@ -231,11 +235,12 @@ def build_command(
             "-r",
             os.fspath(input_file),
         ]
-        if benchmark is Benchmark.STARTUP_FULL_FALLBACK_INSTALL:
-            command.append("--upgrade")
-        if benchmark not in {
+        if compile_bytecode:
+            command.insert(-2, "--compile")
+        if benchmark in {
+            Benchmark.STARTUP_FAST_INSTALL,
             Benchmark.STARTUP_FALLBACK_INSTALL,
-            Benchmark.STARTUP_FULL_FALLBACK_INSTALL,
+            Benchmark.STARTUP_COMPILE_INSTALL,
         }:
             command.insert(-2, "--quiet")
     else:
@@ -249,14 +254,15 @@ def build_command(
             "-r",
             os.fspath(input_file),
         ]
-        if benchmark is Benchmark.STARTUP_FULL_FALLBACK_INSTALL:
-            command.append("--upgrade")
-        if benchmark not in {
-            Benchmark.STARTUP_FALLBACK_INSTALL,
-            Benchmark.STARTUP_FULL_FALLBACK_INSTALL,
-        }:
-            command.append("--quiet")
-    if benchmark is Benchmark.INSTALL_COLD:
+        if compile_bytecode:
+            command.append("--compile-bytecode")
+        command.append("--quiet")
+    if benchmark is Benchmark.STARTUP_FALLBACK_INSTALL:
+        prepare = (
+            f"rm -rf {quote_path(target)}; mkdir -p {quote_path(target)}; "
+            f"touch {quote_path(target / '.existing')}"
+        )
+    elif benchmark in {Benchmark.INSTALL_COLD, Benchmark.INSTALL_COMPILE_COLD}:
         prepare = f"rm -rf {quote_path(cache)} {quote_path(target)}"
     else:
         prepare = f"rm -rf {quote_path(target)}"
@@ -264,6 +270,7 @@ def build_command(
 
 
 def prepare_warm(command: Command) -> None:
+    subprocess.run(command.prepare, shell=True, check=True)
     run_command(command.command)
     for argument in command.command:
         if argument.endswith("/target"):
@@ -355,9 +362,10 @@ def run_comparison(
             if benchmark in {
                 Benchmark.RESOLVE_WARM,
                 Benchmark.INSTALL_WARM,
+                Benchmark.INSTALL_COMPILE_WARM,
                 Benchmark.STARTUP_FAST_INSTALL,
                 Benchmark.STARTUP_FALLBACK_INSTALL,
-                Benchmark.STARTUP_FULL_FALLBACK_INSTALL,
+                Benchmark.STARTUP_COMPILE_INSTALL,
             }:
                 prepare_warm(command)
             commands.append(command)

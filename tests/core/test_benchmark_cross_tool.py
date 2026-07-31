@@ -61,7 +61,7 @@ def test_commands_use_distinct_state_and_matching_interpreters(tmp_path: Path) -
         Benchmark.STARTUP_HELP,
         Benchmark.STARTUP_FAST_INSTALL,
         Benchmark.STARTUP_FALLBACK_INSTALL,
-        Benchmark.STARTUP_FULL_FALLBACK_INSTALL,
+        Benchmark.STARTUP_COMPILE_INSTALL,
     ],
 )
 def test_startup_commands_have_expected_shape(
@@ -87,12 +87,16 @@ def test_startup_commands_have_expected_shape(
         assert "install" in cpip.command
         assert "install" in uv.command
         assert "target" in cpip.prepare
-        if benchmark is Benchmark.STARTUP_FAST_INSTALL:
-            assert "--quiet" in cpip.command
-            assert "--quiet" in uv.command
-        else:
-            assert "--quiet" not in cpip.command
-            assert "--quiet" not in uv.command
+        assert "--quiet" in cpip.command
+        assert "--quiet" in uv.command
+        if benchmark is Benchmark.STARTUP_FALLBACK_INSTALL:
+            assert "--no-compile" in cpip.command
+            assert ".existing" in cpip.prepare
+            assert ".existing" in uv.prepare
+        elif benchmark is Benchmark.STARTUP_COMPILE_INSTALL:
+            assert "--compile" in cpip.command
+            assert "--compile-bytecode" in uv.command
+            assert "--no-compile" not in cpip.command
 
 
 @pytest.mark.parametrize(
@@ -102,6 +106,8 @@ def test_startup_commands_have_expected_shape(
         (Benchmark.RESOLVE_WARM, "pylock.toml", "pylock.toml"),
         (Benchmark.INSTALL_COLD, "cache", "target"),
         (Benchmark.INSTALL_WARM, "target", "target"),
+        (Benchmark.INSTALL_COMPILE_COLD, "cache", "target"),
+        (Benchmark.INSTALL_COMPILE_WARM, "target", "target"),
     ],
 )
 def test_cache_modes_have_explicit_prepare_commands(
