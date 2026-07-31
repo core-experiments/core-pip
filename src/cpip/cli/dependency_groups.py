@@ -47,6 +47,7 @@ def resolve_group(
     groups: dict[str, Any], group_name: str, *, stack: list[str]
 ) -> list[str]:
     resolved: list[str] = []
+    canonical_groups = {canonicalize_name(name): name for name in groups}
     pending: list[tuple[str, Any, list[str]]] = [("group", group_name, stack)]
     while pending:
         kind, payload, current_stack = pending.pop()
@@ -68,11 +69,7 @@ def resolve_group(
 
         actual_name = current_name if current_name in groups else None
         if actual_name is None:
-            normalized = canonicalize_name(current_name)
-            for key in groups:
-                if canonicalize_name(key) == normalized:
-                    actual_name = key
-                    break
+            actual_name = canonical_groups.get(canonicalize_name(current_name))
         raw_group = groups.get(actual_name)
         if not isinstance(raw_group, list):
             raise InstallationError(

@@ -11,7 +11,7 @@ from cpip.install.build_env.noop import NoOpBuildEnvironment
 from cpip.install.build_env.venv import VenvBuildEnvironment
 from cpip.core.filesystem import display_path
 from cpip.core.errors import InstallationError
-from cpip.core.subprocess import runner_with_message
+from cpip.core.subprocess import call_subprocess
 from cpip.resolution.req_install import InstallRequirement
 from cpip.vcs.versioncontrol import vcs
 from cpip.vcs.support import hide_url
@@ -150,12 +150,10 @@ class SourceMetadataPreparation:
             )
 
     def get_build_requires(self, editable: bool) -> Iterable[str]:
-        kind = "editable" if editable else "wheel"
         with self.req.build_env:
-            runner = runner_with_message(f"Getting requirements to build {kind}")
             backend = self.req.pep517_backend
             assert backend is not None
-            with backend.subprocess_runner(runner):
+            with backend.subprocess_runner(call_subprocess):
                 if editable:
                     return backend.get_requires_for_build_editable()
                 return backend.get_requires_for_build_wheel()

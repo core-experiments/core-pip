@@ -48,6 +48,30 @@ def test_requirement_include_order_is_preserved(tmp_path: Path) -> None:
     assert [item.requirement for item in results] == ["included==1", "root==1"]
 
 
+def test_repeated_requirement_include_reuses_content(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    included = tmp_path / "included.txt"
+    root = tmp_path / "requirements.txt"
+    included.write_text("included==1\n", encoding="utf-8")
+    root.write_text("-r included.txt\n-r included.txt\n", encoding="utf-8")
+
+    original_open = open
+    reads = 0
+
+    def counting_open(*args: object, **kwargs: object):
+        nonlocal reads
+        if args and args[0] == str(included):
+            reads += 1
+        return original_open(*args, **kwargs)
+
+    monkeypatch.setattr("builtins.open", counting_open)
+    results = parse_requirements(str(root), object())
+
+    assert [item.requirement for item in results] == ["included==1", "included==1"]
+    assert reads == 1
+
+
 def test_simple_requirement_fast_path_retains_validation(tmp_path: Path) -> None:
     requirements = tmp_path / "requirements.txt"
     requirements.write_text(

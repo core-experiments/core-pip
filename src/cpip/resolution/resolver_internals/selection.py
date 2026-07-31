@@ -141,7 +141,17 @@ class ResolverSelectionOperations:
                 candidate.materializer_internal.dry_run
                 and candidate.source_kind in {"sdist", "source-tree", "vcs"}
             ):
-                return candidate
+                merged_requirement = requirement.copy_with(extras=extras)
+                record = candidate.record_internal.copy_with(
+                    metadata_loader=candidate.materializer_internal.metadata_loader(
+                        candidate.record_internal, merged_requirement
+                    )
+                )
+                return LazyWheelCandidate(
+                    record,
+                    merged_requirement,
+                    candidate.materializer_internal,
+                )
             candidate = candidate.materialize()
         try:
             enriched = wheel_candidate(candidate.path, set(extras))

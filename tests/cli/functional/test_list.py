@@ -175,7 +175,7 @@ def test_uptodate_flag(script: CpipTestEnvironment, data: TestData) -> None:
     script.cpip(
         "install",
         "-e",
-        "git+https://github.com/pypa/cpip-test-package.git#egg=cpip-test-package",
+        "git+https://github.com/pypa/pip-test-package.git#egg=pip-test-package",
     )
     result = script.cpip(
         "list",
@@ -191,7 +191,7 @@ def test_uptodate_flag(script: CpipTestEnvironment, data: TestData) -> None:
             item["editable_project_location"] = "<location>"
     assert {"name": "simple", "version": "1.0"} not in json_output  # 3.0 is latest
     assert {
-        "name": "cpip-test-package",
+        "name": "pip-test-package",
         "version": "0.1.1",
         "editable_project_location": "<location>",
     } in json_output  # editables included
@@ -216,7 +216,7 @@ def test_uptodate_columns_flag(script: CpipTestEnvironment, data: TestData) -> N
     script.cpip(
         "install",
         "-e",
-        "git+https://github.com/pypa/cpip-test-package.git#egg=cpip-test-package",
+        "git+https://github.com/pypa/pip-test-package.git#egg=pip-test-package",
     )
     result = script.cpip(
         "list",
@@ -229,8 +229,8 @@ def test_uptodate_columns_flag(script: CpipTestEnvironment, data: TestData) -> N
     assert "Package" in result.stdout
     assert "Version" in result.stdout
     assert "Editable project location" in result.stdout  # editables included
-    assert "cpip-test-package (0.1.1," not in result.stdout
-    assert "cpip-test-package 0.1.1" in result.stdout, str(result)
+    assert "pip-test-package (0.1.1," not in result.stdout
+    assert "pip-test-package 0.1.1" in result.stdout, str(result)
     assert "simple2          3.0" in result.stdout, str(result)
 
 
@@ -253,7 +253,7 @@ def test_outdated_flag(script: CpipTestEnvironment, data: TestData) -> None:
     script.cpip(
         "install",
         "-e",
-        "git+https://github.com/pypa/cpip-test-package.git@0.1#egg=cpip-test-package",
+        "git+https://github.com/pypa/pip-test-package.git@0.1#egg=pip-test-package",
     )
     result = script.cpip(
         "list",
@@ -280,7 +280,7 @@ def test_outdated_flag(script: CpipTestEnvironment, data: TestData) -> None:
         "latest_filetype": "wheel",
     } in json_output
     assert {
-        "name": "cpip-test-package",
+        "name": "pip-test-package",
         "version": "0.1",
         "latest_version": "0.1.1",
         "latest_filetype": "sdist",
@@ -308,7 +308,7 @@ def test_outdated_columns_flag(script: CpipTestEnvironment, data: TestData) -> N
     script.cpip(
         "install",
         "-e",
-        "git+https://github.com/pypa/cpip-test-package.git@0.1#egg=cpip-test-package",
+        "git+https://github.com/pypa/pip-test-package.git@0.1#egg=pip-test-package",
     )
     result = script.cpip(
         "list",
@@ -349,7 +349,7 @@ def cpip_test_package_script(
         "install",
         "--no-build-isolation",
         "-e",
-        "git+https://github.com/pypa/cpip-test-package.git#egg=cpip-test-package",
+        "git+https://github.com/pypa/pip-test-package.git#egg=pip-test-package",
     )
     return script
 
@@ -362,7 +362,7 @@ def test_editables_flag(cpip_test_package_script: CpipTestEnvironment) -> None:
     result = cpip_test_package_script.cpip("list", "--editable", "--format=json")
     result2 = cpip_test_package_script.cpip("list", "--editable")
     assert {"name": "simple", "version": "1.0"} not in json.loads(result.stdout)
-    assert os.path.join("src", "cpip-test-package") in result2.stdout
+    assert os.path.join("src", "pip-test-package") in result2.stdout
 
 
 @pytest.mark.network
@@ -372,7 +372,7 @@ def test_exclude_editable_flag(cpip_test_package_script: CpipTestEnvironment) ->
     """
     result = cpip_test_package_script.cpip("list", "--exclude-editable", "--format=json")
     assert {"name": "simple", "version": "1.0"} in json.loads(result.stdout)
-    assert "cpip-test-package" not in {p["name"] for p in json.loads(result.stdout)}
+    assert "pip-test-package" not in {p["name"] for p in json.loads(result.stdout)}
 
 
 @pytest.mark.network
@@ -384,7 +384,7 @@ def test_editables_columns_flag(cpip_test_package_script: CpipTestEnvironment) -
     assert "Package" in result.stdout
     assert "Version" in result.stdout
     assert "Editable project location" in result.stdout
-    assert os.path.join("src", "cpip-test-package") in result.stdout, str(result)
+    assert os.path.join("src", "pip-test-package") in result.stdout, str(result)
 
 
 @pytest.mark.network
@@ -403,7 +403,7 @@ def test_uptodate_editables_flag(
         "--uptodate",
     )
     assert "simple" not in result.stdout
-    assert os.path.join("src", "cpip-test-package") in result.stdout, str(result)
+    assert os.path.join("src", "pip-test-package") in result.stdout, str(result)
 
 
 @pytest.mark.network
@@ -426,7 +426,7 @@ def test_uptodate_editables_columns_flag(
     assert "Package" in result.stdout
     assert "Version" in result.stdout
     assert "Editable project location" in result.stdout
-    assert os.path.join("src", "cpip-test-package") in result.stdout, str(result)
+    assert os.path.join("src", "pip-test-package") in result.stdout, str(result)
 
 
 @pytest.mark.network
@@ -446,7 +446,7 @@ def test_outdated_editables_flag(script: CpipTestEnvironment, data: TestData) ->
         "install",
         "--no-build-isolation",
         "-e",
-        "git+https://github.com/pypa/cpip-test-package.git@0.1#egg=cpip-test-package",
+        "git+https://github.com/pypa/pip-test-package.git@0.1#egg=pip-test-package",
     )
     result = script.cpip(
         "list",
@@ -457,7 +457,7 @@ def test_outdated_editables_flag(script: CpipTestEnvironment, data: TestData) ->
         "--outdated",
     )
     assert "simple" not in result.stdout
-    assert os.path.join("src", "cpip-test-package") in result.stdout
+    assert os.path.join("src", "pip-test-package") in result.stdout
 
 
 @pytest.mark.network
@@ -479,7 +479,7 @@ def test_outdated_editables_columns_flag(
         "install",
         "--no-build-isolation",
         "-e",
-        "git+https://github.com/pypa/cpip-test-package.git@0.1#egg=cpip-test-package",
+        "git+https://github.com/pypa/pip-test-package.git@0.1#egg=pip-test-package",
     )
     result = script.cpip(
         "list",
@@ -493,7 +493,7 @@ def test_outdated_editables_columns_flag(
     assert "Package" in result.stdout
     assert "Version" in result.stdout
     assert "Editable project location" in result.stdout
-    assert os.path.join("src", "cpip-test-package") in result.stdout, str(result)
+    assert os.path.join("src", "pip-test-package") in result.stdout, str(result)
 
 
 def test_outdated_not_required_flag(script: CpipTestEnvironment, data: TestData) -> None:

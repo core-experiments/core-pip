@@ -31,12 +31,12 @@ import traceback
 
 hook_name, control_dir = sys.argv[1:]
 module_name, _, object_path = os.environ["CPIP_BUILD_BACKEND"].partition(":")
-backend = importlib.import_module(module_name)
-for part in object_path.split(".") if object_path else ():
-    backend = getattr(backend, part)
 backend_path = os.environ.get("CPIP_BUILD_BACKEND_PATH")
 if backend_path:
     sys.path[:0] = backend_path.split(os.pathsep)
+backend = importlib.import_module(module_name)
+for part in object_path.split(".") if object_path else ():
+    backend = getattr(backend, part)
 with open(os.path.join(control_dir, "input.json"), encoding="utf-8") as stream:
     kwargs = json.load(stream)
 try:

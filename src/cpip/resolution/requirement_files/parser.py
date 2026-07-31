@@ -137,6 +137,7 @@ def parse_requirements_internal(
         _RequirementFileTask(filename, constraint, stack)
     ]
     results: list[ParsedRequirement] = []
+    content_cache: dict[str, str] = {}
     while pending:
         task = pending.pop()
         if isinstance(task, _RequirementLineTask):
@@ -167,7 +168,11 @@ def parse_requirements_internal(
             raise RequirementsFileParseError(
                 f"{normalized} recursively references itself in {previous}"
             )
-        content = _read_requirement_content(normalized, session, prefetcher)
+        if normalized not in content_cache:
+            content_cache[normalized] = _read_requirement_content(
+                normalized, session, prefetcher
+            )
+        content = content_cache[normalized]
         if is_pylock_reference(normalized):
             print(
                 "WARNING: Using pylock.toml as a requirements source is an experimental "

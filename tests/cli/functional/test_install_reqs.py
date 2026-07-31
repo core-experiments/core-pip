@@ -976,9 +976,9 @@ class TestEditableDirectURL:
     def test_install_remote_git_repo_with_extra(
         self, script: CpipTestEnvironment, data: TestData, common_wheels: Path
     ) -> None:
-        req = "cpip-test-package[extra] @ git+https://github.com/pypa/cpip-test-package"
+        req = "pip-test-package[extra] @ git+https://github.com/pypa/pip-test-package"
         script.cpip(
             "install", "--no-index", "-e", req, "-f", common_wheels, "-f", data.packages
         )
-        script.assert_installed(cpip_test_package="0.1.1")
+        script.assert_installed(pip_test_package="0.1.1")
         script.assert_installed(simple="3.0")

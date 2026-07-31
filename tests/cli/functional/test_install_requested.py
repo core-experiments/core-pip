@@ -139,7 +139,7 @@ def test_install_requested_from_cli_with_url_constraint(
     script: CpipTestEnvironment, data: TestData
 ) -> None:
     script.scratch_path.joinpath("constraints.txt").write_text(
-        "cpip-test-package @ git+https://github.com/pypa/cpip-test-package@0.1.1\n"
+        "pip-test-package @ git+https://github.com/pypa/pip-test-package@0.1.1\n"
     )
     result = script.cpip(
         "install",
@@ -147,7 +147,7 @@ def test_install_requested_from_cli_with_url_constraint(
         "--no-index",
         "-c",
         script.scratch_path / "constraints.txt",
-        "cpip-test-package",
+        "pip-test-package",
     )
-    # cpip-test-package must have REQUESTED because it was provided on the command line
-    assert_requested_present(script, result, "cpip_test_package", "0.1.1")
+    # pip-test-package must have REQUESTED because it was provided on the command line
+    assert_requested_present(script, result, "pip_test_package", "0.1.1")

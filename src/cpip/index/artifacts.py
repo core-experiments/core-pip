@@ -47,10 +47,11 @@ def download_dir_internal() -> Path:
 class ArtifactLocator:
     """Locate local artifacts and materialize remote distribution URLs."""
 
-    __slots__ = ("session",)
+    __slots__ = ("session", "download_cache")
 
     def __init__(self, session: Any = None) -> None:
         self.session = session
+        self.download_cache: dict[str, Path] = {}
 
     def ensure_local(
         self,
@@ -81,6 +82,9 @@ class ArtifactLocator:
             / hashlib.sha256(url_or_path.encode()).hexdigest()
             / filename
         )
+        cached = self.download_cache.get(url_or_path)
+        if cached is not None and cached.is_file():
+            return cached
         os.makedirs(os.fspath(target.parent), exist_ok=True)
         parsed = urllib.parse.urlparse(url_or_path)
         url = parsed._replace(fragment="").geturl()
@@ -105,6 +109,7 @@ class ArtifactLocator:
             with open(target, "wb") as file:
                 for chunk in response.iter_content(chunk_size=1024 * 1024):
                     file.write(chunk)
+        self.download_cache[url_or_path] = target
         return target
 
     def local_path(self, link: str) -> Path | None:

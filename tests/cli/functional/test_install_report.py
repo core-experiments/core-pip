@@ -237,7 +237,7 @@ def test_install_report_vcs_and_wheel_cache(
     report_path = tmp_path / "report.json"
     script.cpip(
         "install",
-        "git+https://github.com/pypa/cpip-test-package"
+        "git+https://github.com/pypa/pip-test-package"
         "@5547fa909e83df8bd743d3978d6667497983a4b7",
         "--cache-dir",
         str(cache_dir),
@@ -251,7 +251,7 @@ def test_install_report_vcs_and_wheel_cache(
     assert cpip_test_package_report["requested"] is True
     assert (
         cpip_test_package_report["download_info"]["url"]
-        == "https://github.com/pypa/cpip-test-package"
+        == "https://github.com/pypa/pip-test-package"
     )
     assert cpip_test_package_report["download_info"]["vcs_info"]["vcs"] == "git"
     assert (
@@ -263,7 +263,7 @@ def test_install_report_vcs_and_wheel_cache(
     report_path.unlink()
     result = script.cpip(
         "install",
-        "cpip-test-package @ git+https://github.com/pypa/cpip-test-package"
+        "pip-test-package @ git+https://github.com/pypa/pip-test-package"
         "@5547fa909e83df8bd743d3978d6667497983a4b7",
         "--ignore-installed",
         "--cache-dir",
@@ -271,7 +271,7 @@ def test_install_report_vcs_and_wheel_cache(
         "--report",
         str(report_path),
     )
-    assert "Using cached cpip_test_package" in result.stdout
+    assert "Using cached pip_test_package" in result.stdout
     report = json.loads(report_path.read_text())
     assert len(report["install"]) == 1
     cpip_test_package_report = report["install"][0]
@@ -279,7 +279,7 @@ def test_install_report_vcs_and_wheel_cache(
     assert cpip_test_package_report["requested"] is True
     assert (
         cpip_test_package_report["download_info"]["url"]
-        == "https://github.com/pypa/cpip-test-package"
+        == "https://github.com/pypa/pip-test-package"
     )
     assert cpip_test_package_report["download_info"]["vcs_info"]["vcs"] == "git"
     assert (
@@ -297,9 +297,9 @@ def test_install_report_vcs_editable(
     script.cpip(
         "install",
         "--editable",
-        "git+https://github.com/pypa/cpip-test-package"
+        "git+https://github.com/pypa/pip-test-package"
         "@5547fa909e83df8bd743d3978d6667497983a4b7"
-        "#egg=cpip-test-package",
+        "#egg=pip-test-package",
         "--report",
         str(report_path),
     )
@@ -309,7 +309,7 @@ def test_install_report_vcs_editable(
     assert cpip_test_package_report["is_direct"] is True
     assert cpip_test_package_report["download_info"]["url"].startswith("file://")
     assert cpip_test_package_report["download_info"]["url"].endswith(
-        "/src/cpip-test-package"
+        "/src/pip-test-package"
     )
     assert cpip_test_package_report["download_info"]["dir_info"]["editable"] is True
 

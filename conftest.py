@@ -410,6 +410,10 @@ def isolate(tmpdir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # Configure git, because without an author name/email git will complain
     # and cause test failures.
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    # Keep VCS tests deterministic and non-interactive. Normal cpip commands
+    # retain their interactive prompting behavior outside the pytest harness.
+    monkeypatch.setenv("GIT_TERMINAL_PROMPT", "0")
+    monkeypatch.setenv("GIT_SSH_COMMAND", "ssh -oBatchMode=yes")
     monkeypatch.setenv("GIT_AUTHOR_NAME", "cpip")
     monkeypatch.setenv("GIT_AUTHOR_EMAIL", "distutils-sig@python.org")
     monkeypatch.delenv("CPIP_NO_PARTIAL_CLONE_FOR_BROKEN_GIT_SERVER", False)

@@ -223,12 +223,12 @@ def test_git_remote_local_path(tmp_path: pathlib.Path) -> None:
     "git_url, target_url_prefix",
     [
         (
-            "https://github.com/pypa/cpip-test-package",
-            "git+https://github.com/pypa/cpip-test-package",
+            "https://github.com/pypa/pip-test-package",
+            "git+https://github.com/pypa/pip-test-package",
         ),
         (
-            "git@github.com:pypa/cpip-test-package",
-            "git+ssh://git@github.com/pypa/cpip-test-package",
+            "git@github.com:pypa/pip-test-package",
+            "git+ssh://git@github.com/pypa/pip-test-package",
         ),
     ],
     ids=["https", "ssh"],
@@ -247,9 +247,9 @@ def test_git_get_src_requirements(
     mock_get_revision.return_value = sha
     mock_get_subdirectory.return_value = None
 
-    ret = Git.get_src_requirement(".", "cpip-test-package")
+    ret = Git.get_src_requirement(".", "pip-test-package")
 
-    target = f"{target_url_prefix}@{sha}#egg=cpip_test_package"
+    target = f"{target_url_prefix}@{sha}#egg=pip_test_package"
     assert ret == target
 
 

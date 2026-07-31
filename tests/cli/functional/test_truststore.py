@@ -21,7 +21,7 @@ def cpip_no_truststore(script: CpipTestEnvironment) -> CpipRunner:
     "package",
     [
         "INITools",
-        "https://github.com/pypa/cpip-test-package/archive/refs/heads/master.zip",
+        "https://github.com/pypa/pip-test-package/archive/refs/heads/master.zip",
     ],
     ids=["PyPI", "GitHub"],
 )

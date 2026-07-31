@@ -6,7 +6,7 @@ import os
 from cpip.build.pep517_hooks import HookMissing
 from typing import Any
 
-from cpip.core.subprocess import runner_with_message
+from cpip.core.subprocess import call_subprocess
 
 logger = logging.getLogger(__name__)
 
@@ -28,8 +28,7 @@ def build_wheel_pep517(
     try:
         logger.debug("Destination directory: %s", wheel_directory)
 
-        runner = runner_with_message(f"Building {artifact} for {name} (pyproject.toml)")
-        with backend.subprocess_runner(runner):
+        with backend.subprocess_runner(call_subprocess):
             if editable:
                 try:
                     wheel_name = backend.build_editable(

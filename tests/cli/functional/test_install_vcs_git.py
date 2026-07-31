@@ -184,11 +184,11 @@ def test_install_editable_from_git_with_https(
     """
     Test cloning from Git with https.
     """
-    url_path = "pypa/cpip-test-package.git"
-    local_url = github_checkout(url_path, tmpdir, egg="cpip-test-package")
+    url_path = "pypa/pip-test-package.git"
+    local_url = github_checkout(url_path, tmpdir, egg="pip-test-package")
     result = script.cpip("install", "-e", local_url)
     result.assert_installed(
-        "piptestpackage", dist_name="cpip-test-package", with_files=[".git"]
+        "piptestpackage", dist_name="pip-test-package", with_files=[".git"]
     )
 
 
@@ -199,11 +199,11 @@ def test_install_noneditable_git(script: CpipTestEnvironment) -> None:
     """
     result = script.cpip(
         "install",
-        "git+https://github.com/pypa/cpip-test-package.git@0.1.1#egg=cpip-test-package",
+        "git+https://github.com/pypa/pip-test-package.git@0.1.1#egg=pip-test-package",
     )
-    dist_info_folder = script.site_packages / "cpip_test_package-0.1.1.dist-info"
+    dist_info_folder = script.site_packages / "pip_test_package-0.1.1.dist-info"
     result.assert_installed(
-        "piptestpackage", dist_name="cpip-test-package", editable=False
+        "piptestpackage", dist_name="pip-test-package", editable=False
     )
     result.did_create(dist_info_folder)
 
@@ -338,9 +338,9 @@ def test_install_git_logs_commit_sha(
     """
     Test installing from a git repository logs a commit SHA.
     """
-    url_path = "pypa/cpip-test-package.git"
+    url_path = "pypa/pip-test-package.git"
     base_local_url = github_checkout(url_path, tmpdir)
-    local_url = f"{base_local_url}{rev}#egg=cpip-test-package"
+    local_url = f"{base_local_url}{rev}#egg=pip-test-package"
     result = script.cpip("install", local_url)
     # `[4:]` removes a 'git+' prefix
     assert f"Resolved {base_local_url[4:]} to commit {expected_sha}" in result.stdout
@@ -354,10 +354,10 @@ def test_git_branch_should_not_be_changed(
     Editable installations should not change branch
     related to issue #32 and #161
     """
-    url_path = "pypa/cpip-test-package.git"
-    local_url = github_checkout(url_path, tmpdir, egg="cpip-test-package")
+    url_path = "pypa/pip-test-package.git"
+    local_url = github_checkout(url_path, tmpdir, egg="pip-test-package")
     script.cpip("install", "-e", local_url)
-    branch = get_editable_branch(script, "cpip-test-package")
+    branch = get_editable_branch(script, "pip-test-package")
     assert "master" == branch
 
 
@@ -368,12 +368,12 @@ def test_git_with_non_editable_unpacking(
     """
     Test cloning a git repository from a non-editable URL with a given tag.
     """
-    url_path = "pypa/cpip-test-package.git"
+    url_path = "pypa/pip-test-package.git"
     local_url = github_checkout(
         url_path,
         tmpdir,
         rev="0.1.2",
-        egg="cpip-test-package",
+        egg="pip-test-package",
     )
     result = script.cpip(
         "install",

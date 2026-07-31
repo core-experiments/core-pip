@@ -94,6 +94,11 @@ def create_parser() -> argparse.ArgumentParser:
 
 def run_lock(args: list[str]) -> int:
     options = create_parser().parse_args(args)
+    from cpip.network.http import NetworkSession
+    from cpip.index.artifacts import ArtifactLocator
+
+    resolution_session = NetworkSession()
+    artifact_locator = ArtifactLocator(resolution_session)
     quiet_environment = os.environ.get("CPIP_QUIET")
     if options.quiet:
         os.environ["CPIP_QUIET"] = "1"
@@ -139,10 +144,9 @@ def run_lock(args: list[str]) -> int:
 
             from cpip.build.build import unpack_source
             from cpip.build.build_backend import prepare_project_metadata
-            from cpip.index.artifacts import ArtifactLocator
             from pathlib import Path
 
-            source = ArtifactLocator().ensure_local(item.link.url)
+            source = artifact_locator.ensure_local(item.link.url)
             if source.is_dir():
                 metadata = prepare_project_metadata(source, build_isolation=False)
                 directory_packages.append(
@@ -187,19 +191,15 @@ def run_lock(args: list[str]) -> int:
                 "directory": {"editable": True, "path": "."},
             }
         )
-    lock_session = None
     for filename in options.requirement:
         if os.path.basename(filename).startswith("pylock") and filename.endswith(
             ".toml"
         ):
-            from cpip.network.http import NetworkSession
             from cpip.core.urls import url_to_path
             from cpip.resolution.req_file import parse_requirements
             from cpip.resolution.req_install import install_req_from_line
 
-            if lock_session is None:
-                lock_session = NetworkSession()
-            for item in parse_requirements(filename, lock_session):
+            for item in parse_requirements(filename, resolution_session):
                 if item.locked_name is not None:
                     locked_order.append(item.locked_name)
                 if (
@@ -264,6 +264,7 @@ def run_lock(args: list[str]) -> int:
             no_index=options.no_index,
             format_control=format_control,
             build_isolation=not options.no_build_isolation,
+            session=resolution_session,
         )
         from cpip.resolution.req_install import install_req_from_line
         from cpip.resolution.resolver import Resolver
@@ -304,9 +305,11 @@ def run_lock(args: list[str]) -> int:
             from cpip.core.temp_dir import remove_temp_directory
 
             reference = vcs_reference(source)
-            checkout = materialize_vcs(source, emit_resolution=False)
-            commit_id = git_revision(checkout)
-            remove_temp_directory(checkout)
+            commit_id = getattr(candidate, "source_vcs_revision", None)
+            if commit_id is None:
+                checkout = materialize_vcs(source, emit_resolution=False)
+                commit_id = git_revision(checkout)
+                remove_temp_directory(checkout)
             packages.append(
                 {
                     "name": candidate.name,
@@ -328,9 +331,7 @@ def run_lock(args: list[str]) -> int:
             if source.startswith(("http://", "https://")):
                 import hashlib
 
-                from cpip.index.artifacts import ArtifactLocator
-
-                archive_path = ArtifactLocator().ensure_local(source)
+                archive_path = artifact_locator.ensure_local(source)
                 packages.append(
                     {
                         "name": candidate.name,

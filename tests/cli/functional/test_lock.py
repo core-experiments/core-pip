@@ -172,7 +172,7 @@ def test_lock_local_editable_with_dep(
 def test_lock_vcs(script: CpipTestEnvironment, shared_data: TestData) -> None:
     result = script.cpip(
         "lock",
-        "git+https://github.com/pypa/cpip-test-package@0.1.2",
+        "git+https://github.com/pypa/pip-test-package@0.1.2",
         "--quiet",
         "--output=-",
         "--no-build-isolation",  # to use the pre-installed setuptools
@@ -182,10 +182,10 @@ def test_lock_vcs(script: CpipTestEnvironment, shared_data: TestData) -> None:
     pylock = tomllib.loads(result.stdout)
     assert pylock["packages"] == [
         {
-            "name": "cpip-test-package",
+            "name": "pip-test-package",
             "vcs": {
                 "type": "git",
-                "url": "https://github.com/pypa/cpip-test-package",
+                "url": "https://github.com/pypa/pip-test-package",
                 "requested-revision": "0.1.2",
                 "commit-id": "f1c1020ebac81f9aeb5c766ff7a772f709e696ee",
             },
@@ -197,7 +197,7 @@ def test_lock_vcs(script: CpipTestEnvironment, shared_data: TestData) -> None:
 def test_lock_archive(script: CpipTestEnvironment, shared_data: TestData) -> None:
     result = script.cpip(
         "lock",
-        "https://github.com/pypa/cpip-test-package/tarball/0.1.2",
+        "https://github.com/pypa/pip-test-package/tarball/0.1.2",
         "--quiet",
         "--output=-",
         "--no-build-isolation",  # to use the pre-installed setuptools
@@ -207,9 +207,9 @@ def test_lock_archive(script: CpipTestEnvironment, shared_data: TestData) -> Non
     pylock = tomllib.loads(result.stdout)
     assert pylock["packages"] == [
         {
-            "name": "cpip-test-package",
+            "name": "pip-test-package",
             "archive": {
-                "url": "https://github.com/pypa/cpip-test-package/tarball/0.1.2",
+                "url": "https://github.com/pypa/pip-test-package/tarball/0.1.2",
                 "hashes": {
                     "sha256": (
                         "1b176298e5ecd007da367bfda91aad3c"

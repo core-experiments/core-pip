@@ -31,12 +31,12 @@ def test_install_archive_direct_url(script: CpipTestEnvironment, data: TestData)
 def test_install_vcs_constraint_direct_url(script: CpipTestEnvironment) -> None:
     constraints_file = script.scratch_path / "constraints.txt"
     constraints_file.write_text(
-        "git+https://github.com/pypa/cpip-test-package"
+        "git+https://github.com/pypa/pip-test-package"
         "@5547fa909e83df8bd743d3978d6667497983a4b7"
-        "#egg=cpip-test-package"
+        "#egg=pip-test-package"
     )
-    result = script.cpip("install", "cpip-test-package", "-c", constraints_file)
-    assert result.get_created_direct_url("cpip_test_package")
+    result = script.cpip("install", "pip-test-package", "-c", constraints_file)
+    assert result.get_created_direct_url("pip_test_package")
 
 
 def test_install_vcs_constraint_direct_file_url(script: CpipTestEnvironment) -> None:

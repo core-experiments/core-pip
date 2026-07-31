@@ -189,6 +189,12 @@ class LazyWheelCandidate(WheelCandidate):
         if hashes:
             return dict(hashes)
         if self.record_internal.link.kind in SOURCE_ARTIFACT_KINDS:
+            if self.record_internal.link.is_vcs:
+                url = self.record_internal.link.url
+                if self.materializer_internal.vcs_revision(url) is None:
+                    local = self.materializer_internal.ensure_local(self.record_internal)
+                    remove_temp_directory_internal(local)
+                return None
             if (
                 self.materializer_internal.dry_run
                 and not self.record_internal.link.is_file
@@ -202,9 +208,6 @@ class LazyWheelCandidate(WheelCandidate):
                     else None
                 ),
             )
-            if self.record_internal.link.is_vcs:
-                remove_temp_directory_internal(local)
-                return None
             if os.path.isfile(local):
                 with open(local, "rb") as file:
                     return {"sha256": hashlib.sha256(file.read()).hexdigest()}
@@ -220,6 +223,12 @@ class LazyWheelCandidate(WheelCandidate):
         if not self.record_internal.link.is_vcs:
             return None
         return vcs_scheme(self.record_internal.link.url)
+
+    @property
+    def source_vcs_revision(self) -> str | None:
+        if not self.record_internal.link.is_vcs:
+            return None
+        return self.materializer_internal.vcs_revision(self.record_internal.link.url)
 
     @property
     def from_cache(self) -> bool:
@@ -282,6 +291,7 @@ class CandidateMaterializer:
             | None,
         ] = {}
         self.local_artifacts: dict[str, Path] = {}
+        self.vcs_revisions: dict[str, str] = {}
         self.metadata_prefetcher: Prefetcher[Any, str] | None = None
 
     def ensure_local(
@@ -307,9 +317,18 @@ class CandidateMaterializer:
             is_vcs=candidate.link.is_vcs,
             local_path=local_path,
         )
+        if candidate.link.is_vcs:
+            from cpip.index.vcs import git_revision
+
+            self.vcs_revisions.setdefault(candidate.link.url, git_revision(path))
         if not candidate.link.is_vcs:
             self.local_artifacts[candidate.link.url] = path
         return path
+
+    def vcs_revision(self, url: str) -> str | None:
+        """Return the revision observed while materializing a VCS candidate."""
+
+        return self.vcs_revisions.get(url)
 
     def materialize(
         self,
@@ -414,7 +433,7 @@ class CandidateMaterializer:
                     return cached
             if candidate.link.kind in SOURCE_ARTIFACT_KINDS and self.dry_run:
                 metadata = self.pypi_metadata(candidate, requested_extras)
-                if metadata is not None:
+                if metadata is not None and requested_extras <= metadata.provided_extras:
                     self.metadata_cache[key] = metadata
                     if self.persistent_candidate_metadata_cache is not None:
                         self.persistent_candidate_metadata_cache.put(

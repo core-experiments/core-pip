@@ -14,7 +14,7 @@ from cpip.resolution.req_file import parse_requirements
 INDEX_COUNTS = (10, 100, 1_000, 10_000)
 REQUIREMENT_COUNTS = (10, 100, 1_000, 10_000)
 INDEX_MODES = ("wheels", "mixed")
-REQUIREMENT_MODES = ("flat", "nested", "constraints")
+REQUIREMENT_MODES = ("flat", "nested", "constraints", "repeated")
 
 
 def wheel_name(index: int) -> str:
@@ -49,11 +49,18 @@ def create_requirements_workload(root: Path) -> dict[str, str]:
                 child = path.with_name(f"{path.stem}-child.txt")
                 child.write_text("\n".join(lines) + "\n", encoding="utf-8")
                 path.write_text(f"-r {child.name}\n", encoding="utf-8")
-            else:
+            elif mode == "constraints":
                 constraints = path.with_name(f"{path.stem}-constraints.txt")
                 constraints.write_text("\n".join(lines) + "\n", encoding="utf-8")
                 path.write_text(
                     f"-c {constraints.name}\n" + "\n".join(lines) + "\n",
+                    encoding="utf-8",
+                )
+            else:
+                child = path.with_name(f"{path.stem}-child.txt")
+                child.write_text("\n".join(lines) + "\n", encoding="utf-8")
+                path.write_text(
+                    "\n".join(f"-r {child.name}" for _ in range(8)) + "\n",
                     encoding="utf-8",
                 )
             paths[f"{count}-{mode}"] = os.fspath(path)

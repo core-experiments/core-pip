@@ -34,7 +34,7 @@ from cpip.core.packaging import (
     canonicalize_name,
     parse_requirement,
 )
-from cpip.core.subprocess import runner_with_message
+from cpip.core.subprocess import call_subprocess
 
 if TYPE_CHECKING:
     from cpip.build.pep517_hooks import BuildBackendHookCaller
@@ -477,11 +477,7 @@ class ProjectBuilder:
                 build_constraints=self.build_constraints,
                 build_isolation=self.build_isolation,
             ).caller() as (caller, _):
-                runner = runner_with_message(
-                    f"Building {'editable ' if editable else ''}wheel for "
-                    f"{self.source_dir} (pyproject.toml)"
-                )
-                with caller.subprocess_runner(runner):
+                with caller.subprocess_runner(call_subprocess):
                     if editable:
                         wheel_name = caller.build_editable(
                             os.fspath(wheel_directory), config_settings=config_settings
@@ -577,6 +573,8 @@ class ProjectBuilder:
         if self.backend_spec is None:
             return ProjectMetadataReader(self.source_dir).read()
         backend_name = self.backend_spec.name
+        from cpip.build.pep517_hooks import HookMissing
+
         try:
             with BackendRunner(
                 self.source_dir,
@@ -589,24 +587,65 @@ class ProjectBuilder:
             ):
                 metadata_path = Path(env_path) / "metadata"
                 metadata_path.mkdir()
-                runner = runner_with_message(
-                    f"Preparing {'editable ' if editable else ''}metadata for "
-                    f"{self.source_dir} (pyproject.toml)"
-                )
-                with caller.subprocess_runner(runner):
+                metadata = None
+                with caller.subprocess_runner(call_subprocess):
+                    dist_info = None
                     if editable:
-                        dist_info = caller.prepare_metadata_for_build_editable(
-                            os.fspath(metadata_path)
-                        )
+                        try:
+                            dist_info = caller.prepare_metadata_for_build_editable(
+                                os.fspath(metadata_path)
+                            )
+                        except HookMissing:
+                            try:
+                                dist_info = caller.prepare_metadata_for_build_wheel(
+                                    os.fspath(metadata_path)
+                                )
+                            except HookMissing:
+                                pass
                     else:
-                        dist_info = caller.prepare_metadata_for_build_wheel(
-                            os.fspath(metadata_path)
+                        try:
+                            dist_info = caller.prepare_metadata_for_build_wheel(
+                                os.fspath(metadata_path)
+                            )
+                        except HookMissing:
+                            with tempfile.TemporaryDirectory(
+                                prefix="cpip-metadata-wheel-"
+                            ) as wheel_directory:
+                                wheel_name = caller.build_wheel(wheel_directory)
+                                wheel_path = Path(wheel_directory) / wheel_name
+                                with zipfile.ZipFile(wheel_path) as wheel:
+                                    metadata_name = next(
+                                        name
+                                        for name in wheel.namelist()
+                                        if name.endswith(".dist-info/METADATA")
+                                    )
+                                    metadata = email.parser.BytesParser().parsebytes(
+                                        wheel.read(metadata_name)
+                                    )
+                            dist_info = None
+                if dist_info is None and metadata is None:
+                    with tempfile.TemporaryDirectory(
+                        prefix="cpip-metadata-wheel-"
+                    ) as wheel_directory:
+                        wheel_name = caller.build_wheel(wheel_directory)
+                        wheel_path = Path(wheel_directory) / wheel_name
+                        with zipfile.ZipFile(wheel_path) as wheel:
+                            metadata_name = next(
+                                name
+                                for name in wheel.namelist()
+                                if name.endswith(".dist-info/METADATA")
+                            )
+                            metadata = email.parser.BytesParser().parsebytes(
+                                wheel.read(metadata_name)
+                            )
+                if dist_info is not None:
+                    metadata = email.parser.Parser().parsestr(
+                        (metadata_path / dist_info / "METADATA").read_text(
+                            encoding="utf-8"
                         )
-                if dist_info is None:
-                    raise BuildError("Build backend returned no metadata directory")
-                metadata = email.parser.Parser().parsestr(
-                    (metadata_path / dist_info / "METADATA").read_text(encoding="utf-8")
-                )
+                    )
+                if metadata is None:
+                    raise BuildError("Build backend returned no metadata")
         except Exception as exc:
             raise BuildError(
                 "Failed to prepare metadata for "

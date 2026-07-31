@@ -349,9 +349,9 @@ def test_upgrade_vcs_req_with_no_dists_found(
     script: CpipTestEnvironment, tmpdir: Path
 ) -> None:
     """It can upgrade a VCS requirement that has no distributions otherwise."""
-    req = "{checkout}#egg=cpip-test-package".format(
+    req = "{checkout}#egg=pip-test-package".format(
         checkout=local_checkout(
-            "git+https://github.com/pypa/cpip-test-package.git",
+            "git+https://github.com/pypa/pip-test-package.git",
             tmpdir,
         )
     )

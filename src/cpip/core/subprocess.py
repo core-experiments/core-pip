@@ -105,15 +105,3 @@ def call_subprocess(
             output=combined,
         )
     return combined
-
-
-def runner_with_message(message: str):
-    def runner(cmd, cwd=None, extra_environ=None):
-        call_subprocess(
-            cmd,
-            command_desc=message,
-            cwd=cwd,
-            extra_environ=extra_environ,
-        )
-
-    return runner
