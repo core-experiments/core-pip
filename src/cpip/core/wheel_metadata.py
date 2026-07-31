@@ -1,11 +1,11 @@
-"""Shared parsing for the metadata fields used during resolution."""
+"""Small, dependency-free helpers for reading wheel core metadata."""
 
 from __future__ import annotations
 
-TYPE_CHECKING = False
-if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable
-    from cpip.index.metadata_cache import MetadataHeaders
+from collections.abc import Callable, Iterable
+from typing import TypeAlias
+
+MetadataHeaders: TypeAlias = dict[str, list[str]]
 
 RESOLUTION_METADATA_HEADERS = frozenset(
     {"name", "version", "requires-dist", "provides-extra", "requires-python"}

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import datetime
 import marshal
-from typing import Any
+from typing import Any, cast
 
 from cpip.index.datetime import parse_iso_datetime
 from cpip.index.links import Link
@@ -72,15 +72,29 @@ def link_record(link: Link) -> tuple[object, ...]:
 def link_from_record(record: object) -> Link:
     if not isinstance(record, tuple) or len(record) != 8:
         raise ValueError("invalid catalog record")
-    url, source_url, text, hashes, requires_python, yanked, metadata, upload_time = record
+    url, source_url, text, hashes, requires_python, yanked, metadata, upload_time = (
+        record
+    )
     if not isinstance(url, str) or not isinstance(text, str):
         raise ValueError("invalid catalog link")
     if source_url is not None and not isinstance(source_url, str):
         raise ValueError("invalid catalog source")
-    if hashes is not None and not isinstance(hashes, dict):
+    if hashes is not None and (
+        not isinstance(hashes, dict)
+        or not all(isinstance(key, str) for key in hashes)
+        or not all(isinstance(value, str) for value in hashes.values())
+    ):
         raise ValueError("invalid catalog hashes")
-    if metadata is not None and not isinstance(metadata, dict):
+    if metadata is not None and (
+        not isinstance(metadata, dict)
+        or not all(isinstance(key, str) for key in metadata)
+        or not all(isinstance(value, str) for value in metadata.values())
+    ):
         raise ValueError("invalid catalog metadata")
+    hashes_value = cast(dict[str, object], hashes) if isinstance(hashes, dict) else None
+    metadata_value = (
+        cast(dict[str, str], metadata) if isinstance(metadata, dict) else None
+    )
     parsed_upload_time: datetime.datetime | None = None
     if upload_time is not None:
         if not isinstance(upload_time, str):
@@ -90,9 +104,11 @@ def link_from_record(record: object) -> Link:
         url,
         source_url=source_url,
         text=text,
-        hashes=hashes,
+        hashes=hashes_value,
         requires_python=requires_python if isinstance(requires_python, str) else None,
         yanked_reason=yanked if isinstance(yanked, str) else None,
-        metadata_file=(MetadataFile(metadata) if isinstance(metadata, dict) else None),
+        metadata_file=(
+            MetadataFile(metadata_value) if metadata_value is not None else None
+        ),
         upload_time=parsed_upload_time,
     )

@@ -5,7 +5,7 @@ from __future__ import annotations
 import atexit
 import os
 from pathlib import Path
-from typing import Any
+from typing import cast
 
 from cpip.core.marshal_cache import load_snapshot, save_snapshot
 from cpip.core.packaging import Version, parse_requirement
@@ -15,6 +15,8 @@ VERSION = 1
 NAME = "candidate-metadata-v1.marshal"
 MAX_ENTRIES = 16_384
 INSTANCES: dict[str, CandidateMetadataCache] = {}
+CacheKey = tuple[str, str, tuple[str, ...]]
+CacheValue = tuple[str, str, tuple[str, ...], tuple[str, ...], str | None]
 
 
 class CandidateMetadataCache:
@@ -24,7 +26,7 @@ class CandidateMetadataCache:
 
     def __init__(self, cache_dir: str | os.PathLike[str]) -> None:
         self.path = Path(cache_dir) / NAME
-        self.entries: dict[tuple[str, str, tuple[str, ...]], tuple[Any, ...]] = {}
+        self.entries: dict[CacheKey, CacheValue] = {}
         self.dirty = False
         self.load()
         atexit.register(self.flush)
@@ -41,7 +43,7 @@ class CandidateMetadataCache:
             return
         for key, value in payload[2].items():
             if self.valid_key(key) and self.valid_value(value):
-                self.entries[key] = value
+                self.entries[cast(CacheKey, key)] = cast(CacheValue, value)
 
     @staticmethod
     def valid_key(value: object) -> bool:
@@ -68,9 +70,7 @@ class CandidateMetadataCache:
             and (value[4] is None or isinstance(value[4], str))
         )
 
-    def get(
-        self, key: tuple[str, str, tuple[str, ...]]
-    ) -> CandidateMetadata | None:
+    def get(self, key: tuple[str, str, tuple[str, ...]]) -> CandidateMetadata | None:
         value = self.entries.get(key)
         if value is None:
             return None

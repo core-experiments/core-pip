@@ -8,7 +8,7 @@ import sysconfig
 import zipfile
 from functools import cache, lru_cache
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from .errors import InstallationError, InvalidWheelFilename, UnsupportedWheel
 from .packaging import (
@@ -19,8 +19,7 @@ from .packaging import (
     marker_applies,
     parse_requirement,
 )
-from cpip.index.metadata_cache import WheelMetadataCache
-from cpip.index.wheel_metadata import (
+from .wheel_metadata import (
     metadata_paths,
     parse_metadata_member,
 )
@@ -28,6 +27,18 @@ from cpip.index.wheel_metadata import (
 if TYPE_CHECKING:
     from email.message import Message
     from email.parser import Parser as EmailParser
+
+
+class MetadataCache(Protocol):
+    """Minimal cache contract needed by wheel parsing."""
+
+    def get_reference(
+        self, identity: tuple[str, int, int]
+    ) -> dict[str, list[str]] | None: ...
+
+    def put(
+        self, identity: tuple[str, int, int], headers: dict[str, list[str]]
+    ) -> None: ...
 
 
 def Parser() -> EmailParser:
@@ -433,7 +444,7 @@ def wheel_candidate(
     archive: zipfile.ZipFile | None = None,
     filename_info: tuple[str, str | Version] | None = None,
     dist_info_dir: str | None = None,
-    metadata_cache: WheelMetadataCache | None = None,
+    metadata_cache: MetadataCache | None = None,
 ) -> WheelCandidate:
     wheel_path = Path(path)
     parsed = filename_info or parse_wheel_filename(wheel_path)

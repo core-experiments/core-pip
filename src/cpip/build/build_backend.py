@@ -913,11 +913,13 @@ def infer_metadata_from_package_dir(source_dir: Path) -> ProjectMetadata | None:
 
 
 def read_legacy_metadata(source_dir: Path) -> ProjectMetadata | None:
-    candidates = [
-        source_dir / "PKG-INFO",
-        source_dir / "METADATA",
-    ]
-    candidates.extend(source_dir.glob("*.egg-info/PKG-INFO"))
+    candidates = list(source_dir.glob("*.egg-info/PKG-INFO"))
+    candidates.extend(
+        [
+            source_dir / "METADATA",
+            source_dir / "PKG-INFO",
+        ]
+    )
     candidates.extend(source_dir.glob("*.dist-info/METADATA"))
     for candidate in candidates:
         if not candidate.is_file():
@@ -949,6 +951,11 @@ def read_legacy_metadata(source_dir: Path) -> ProjectMetadata | None:
         Version(version)
         summary = fields.get("Summary", [None])[0]
         requires_python = fields.get("Requires-Python", [None])[0]
+        dependencies = fields.get("Requires-Dist", [])
+        if not dependencies and candidate.parent.name.endswith(".egg-info"):
+            requires_path = candidate.parent / "requires.txt"
+            if requires_path.is_file():
+                dependencies = _read_legacy_requirements(requires_path)
         return ProjectMetadata(
             name=name,
             version=version,
@@ -956,11 +963,30 @@ def read_legacy_metadata(source_dir: Path) -> ProjectMetadata | None:
             requires_python=(
                 requires_python if isinstance(requires_python, str) else None
             ),
-            dependencies=tuple(fields.get("Requires-Dist", [])),
+            dependencies=tuple(dependencies),
             optional_dependencies={},
             scripts={},
         )
     return None
+
+
+def _read_legacy_requirements(path: Path) -> list[str]:
+    """Read setuptools' legacy ``requires.txt`` format."""
+    dependencies: list[str] = []
+    extra: str | None = None
+    for raw_line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("[") and line.endswith("]"):
+            extra = line[1:-1].strip() or None
+            continue
+        if line.startswith("-"):
+            continue
+        dependencies.append(
+            f'{line}; extra == "{extra}"' if extra is not None else line
+        )
+    return dependencies
 
 
 def infer_name_version_from_path(source_dir: Path) -> tuple[str, str] | None:

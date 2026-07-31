@@ -6,12 +6,8 @@ filesystem transaction engine. It deliberately does not invoke cpip again.
 
 from __future__ import annotations
 
-import base64
-import compileall
 import csv
-import hashlib
 import importlib.util
-import io
 import os
 import stat
 import sys
@@ -31,6 +27,22 @@ from cpip.core.packaging import canonicalize_name
 from cpip.core.wheel import WheelCandidate, parse_wheel, wheel_candidate
 from cpip.install.target import InstallTarget
 from cpip.install.transaction import InstallTransaction, normalized_internal
+from cpip.install.wheel_archive import (
+    copy_member_with_metadata,
+    destination_internal,
+    is_script_member,
+    record_metadata_internal,
+    validate_member,
+    zip_mode,
+)
+from cpip.install.wheel_scripts import (
+    entry_point_scripts,
+    rewrite_shebang,
+    script_matches,
+    script_text,
+    write_windows_script,
+)
+from cpip.install.wheel_state import compiled_files, existing_paths
 
 
 class WheelInstaller:
@@ -548,231 +560,4 @@ def uninstall_distribution(
     for path in existing:
         transaction.delete(path)
     transaction.commit()
-    return True
-
-
-def validate_member(name: str) -> PurePosixPath:
-    if "\\" in name:
-        raise InstallationError(f"wheel member uses an invalid separator: {name!r}")
-    relative = PurePosixPath(name)
-    if relative.is_absolute() or ".." in relative.parts:
-        raise InstallationError(
-            f"wheel member is outside the install destination: {name!r}"
-        )
-    return relative
-
-
-def destination_internal(
-    target: InstallTarget,
-    relative: PurePosixPath,
-    *,
-    resolved_directories: dict[tuple[Path, PurePosixPath], Path] | None = None,
-) -> Path:
-    parts = relative.parts
-    if parts and parts[0].endswith(".data"):
-        if len(parts) < 3 or parts[1] not in {
-            "purelib",
-            "platlib",
-            "scripts",
-            "data",
-            "headers",
-        }:
-            raise InstallationError(f"invalid wheel data path: {relative}")
-    for index in range(len(parts) - 1):
-        if parts[index].endswith(".data") and index + 1 < len(parts):
-            base = {
-                "purelib": target.purelib,
-                "platlib": target.platlib,
-                "scripts": target.scripts,
-                "data": target.data,
-                "headers": target.headers,
-            }.get(parts[index + 1])
-            if base is not None:
-                return safe_destination(
-                    base,
-                    PurePosixPath(*parts[index + 2 :]),
-                    resolved_directories=resolved_directories,
-                )
-    return safe_destination(
-        target.purelib,
-        relative,
-        resolved_directories=resolved_directories,
-    )
-
-
-def safe_destination(
-    root: Path,
-    relative: PurePosixPath,
-    *,
-    resolved_directories: dict[tuple[Path, PurePosixPath], Path] | None = None,
-) -> Path:
-    parent = relative.parent
-    cache_key = (root, parent)
-    resolved_parent = (
-        resolved_directories.get(cache_key)
-        if resolved_directories is not None
-        else None
-    )
-    if resolved_parent is None:
-        resolved_root = root.resolve(strict=False)
-        resolved_parent = (root / Path(*parent.parts)).resolve(strict=False)
-        try:
-            resolved_parent.relative_to(resolved_root)
-        except ValueError as exc:
-            raise InstallationError(
-                f"wheel member escapes installation root: {relative}"
-            ) from exc
-        if resolved_directories is not None:
-            resolved_directories[cache_key] = resolved_parent
-    return resolved_parent / relative.name
-
-
-def zip_mode(info: zipfile.ZipInfo) -> int | None:
-    mode = info.external_attr >> 16
-    return mode if mode and stat.S_ISREG(mode) else None
-
-
-def record_metadata_internal(contents: bytes) -> tuple[str, str]:
-    digest = base64.urlsafe_b64encode(hashlib.sha256(contents).digest())
-    return f"sha256={digest.rstrip(b'=').decode('ascii')}", str(len(contents))
-
-
-def copy_member_with_metadata(
-    archive: zipfile.ZipFile, member: zipfile.ZipInfo, destination: Path
-) -> tuple[str, str]:
-    digest = hashlib.sha256()
-    size = 0
-    with archive.open(member) as source, open(destination, "wb") as target:
-        while chunk := source.read(64 * 1024):
-            target.write(chunk)
-            digest.update(chunk)
-            size += len(chunk)
-    encoded = base64.urlsafe_b64encode(digest.digest())
-    return f"sha256={encoded.rstrip(b'=').decode('ascii')}", str(size)
-
-
-def is_script_member(relative: PurePosixPath) -> bool:
-    return len(relative.parts) >= 2 and relative.parts[-2] == "scripts"
-
-
-def rewrite_shebang(path: Path, executable: str | None) -> None:
-    contents = path.read_bytes()
-    if contents.startswith(b"#!python\n"):
-        path.write_bytes(
-            f"#!{executable or sys.executable}\n".encode()
-            + contents[len(b"#!python\n") :]
-        )
-
-
-def entry_point_scripts(path: Path) -> dict[str, tuple[str, bool]]:
-    if not path.is_file():
-        return {}
-    active = False
-    result: dict[str, tuple[str, bool]] = {}
-    gui = False
-    for raw_line in path.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if line.startswith("[") and line.endswith("]"):
-            section = line[1:-1].strip()
-            active = section in {"console_scripts", "gui_scripts"}
-            gui = section == "gui_scripts"
-        elif active and "=" in line and not line.startswith("#"):
-            name, target = line.split("=", 1)
-            result[name.strip()] = (target.strip(), gui)
-    return result
-
-
-def script_text(target_ref: str, executable: str | None) -> str:
-    module, _, attribute = target_ref.partition(":")
-    entry = attribute or "main"
-    return (
-        f"#!{executable or sys.executable}\n"
-        "import re\nimport sys\n"
-        f"from {module} import {entry}\n\n"
-        "if __name__ == '__main__':\n"
-        "    sys.argv[0] = re.sub(r'(-script\\.pyw|\\.exe)?$', '', sys.argv[0])\n"
-        f"    sys.exit({entry}())\n"
-    )
-
-
-def write_windows_script(path: Path, script: str, *, gui: bool) -> None:
-    """Create a distlib-compatible Windows launcher without importing distlib."""
-    from importlib.resources import files
-    from io import BytesIO
-
-    machine = os.environ.get("PROCESSOR_ARCHITECTURE", "").lower()
-    suffix = "-arm" if "arm" in machine else ""
-    bits = "64" if sys.maxsize > 2**32 else "32"
-    launcher_name = f"{'w' if gui else 't'}{bits}{suffix}.exe"
-    launcher = (files("cpip._vendor.launchers") / launcher_name).read_bytes()
-    archive = BytesIO()
-    with zipfile.ZipFile(archive, "w") as package:
-        package.writestr("__main__.py", script.encode("utf-8"))
-    path.write_bytes(launcher + archive.getvalue())
-
-
-def script_matches(path: Path, scripts: dict[str, tuple[str, bool]]) -> bool:
-    name = path.stem if path.suffix.lower() == ".exe" else path.name
-    script = scripts.get(name)
-    if script is None:
-        return False
-    target_ref, _ = script
-    module, _, attribute = target_ref.partition(":")
-    entry = attribute or "main"
-    try:
-        if path.suffix.lower() == ".exe":
-            with zipfile.ZipFile(io.BytesIO(path.read_bytes())) as archive:
-                text = archive.read("__main__.py").decode("utf-8")
-        else:
-            text = path.read_text(encoding="utf-8")
-    except (OSError, KeyError, UnicodeDecodeError, zipfile.BadZipFile):
-        return False
-    return f"from {module} import {entry}" in text
-
-
-def compiled_files(
-    stage_root: Path,
-    staged: Iterable[tuple[Path, Path, int | None]],
-) -> list[tuple[Path, Path, int | None]]:
-    result = []
-    for source, destination, _ in staged:
-        if source.suffix != ".py":
-            continue
-        if not compileall.compile_file(os.fspath(source), force=True, quiet=True):
-            continue
-        cache = Path(importlib.util.cache_from_source(os.fspath(source)))
-        if cache.is_file():
-            relative = cache.relative_to(stage_root)
-            result.append(
-                (cache, destination.parent / Path(*relative.parts[-2:]), None)
-            )
-    return result
-
-
-def existing_paths(
-    distribution: InstalledMetadataDistribution | None,
-) -> tuple[set[Path], set[Path]]:
-    if distribution is None:
-        return set(), set()
-    entries = distribution.iter_declared_entries()
-    if distribution.info_location and distribution.info_location.endswith(".dist-info"):
-        try:
-            distribution.read_text("RECORD")
-        except FileNotFoundError as exc:
-            raise InstallationError(
-                f"Cannot replace {distribution.raw_name} {distribution.version}: "
-                "no RECORD file was found"
-            ) from exc
-    paths = {
-        (Path(distribution.location) / entry).resolve(strict=False) for entry in entries
-    }
-    existing = {path for path in paths if path.exists() or path.is_symlink()}
-    return existing, existing
-
-
-def is_within(path: Path, root: Path) -> bool:
-    try:
-        path.relative_to(root)
-    except ValueError:
-        return False
     return True

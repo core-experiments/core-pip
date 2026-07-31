@@ -170,7 +170,10 @@ class LazyWheelCandidate(WheelCandidate):
         if hashes:
             return dict(hashes)
         if self.record_internal.link.kind in SOURCE_ARTIFACT_KINDS:
-            if self.materializer_internal.dry_run and not self.record_internal.link.is_file:
+            if (
+                self.materializer_internal.dry_run
+                and not self.record_internal.link.is_file
+            ):
                 return None
             local = self.materializer_internal.ensure_local(
                 self.record_internal,
@@ -441,9 +444,7 @@ class CandidateMaterializer:
                             build_isolation=self.build_isolation,
                         )
                     except BuildError as exc:
-                        metadata = self.pypi_metadata(
-                            candidate, requested_extras
-                        )
+                        metadata = self.pypi_metadata(candidate, requested_extras)
                         if metadata is None:
                             raise BuildError(
                                 f"Failed to build '{candidate.name}': {exc}"
@@ -508,7 +509,7 @@ class CandidateMaterializer:
             if response is None:
                 response = self.session.get(metadata_link.url)
             response.raise_for_status()
-            from cpip.index.wheel_metadata import parse_metadata_headers
+            from cpip.core.wheel_metadata import parse_metadata_headers
 
             headers = parse_metadata_headers(response.text)
             name = headers.get("name", (None,))[0]
@@ -693,9 +694,7 @@ class CandidateMaterializer:
                             display_name,
                             candidate.link.url,
                         )
-                        store_cached_wheel(
-                            self.wheel_cache_dir, candidate, path
-                        )
+                        store_cached_wheel(self.wheel_cache_dir, candidate, path)
             try:
                 if candidate.link.kind is ArtifactKind.WHEEL:
                     try:

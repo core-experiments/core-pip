@@ -31,6 +31,31 @@ def test_build_backend_builds_static_wheel_with_typed_marker(tmp_path: Path) -> 
     assert "Version: 1.0\n" in metadata
 
 
+def test_legacy_metadata_reads_egg_info_requirements(tmp_path: Path) -> None:
+    project = tmp_path / "legacy-pkg"
+    egg_info = project / "legacy_pkg.egg-info"
+    egg_info.mkdir(parents=True)
+    (project / "PKG-INFO").write_text(
+        "Metadata-Version: 1.0\nName: legacy-pkg\nVersion: 1.0\n",
+        encoding="utf-8",
+    )
+    (egg_info / "PKG-INFO").write_text(
+        "Metadata-Version: 1.0\nName: legacy-pkg\nVersion: 1.0\n",
+        encoding="utf-8",
+    )
+    (egg_info / "requires.txt").write_text(
+        "dependency>=2\n[extra]\noptional>=1\n",
+        encoding="utf-8",
+    )
+
+    metadata = ProjectMetadataReader(project).read()
+
+    assert metadata.dependencies == (
+        "dependency>=2",
+        'optional>=1; extra == "extra"',
+    )
+
+
 def test_build_backend_includes_package_data(tmp_path: Path) -> None:
     project = write_project(tmp_path, "data-pkg", "data_pkg", "1.0")
     package_dir = project / "src" / "data_pkg"

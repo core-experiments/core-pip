@@ -15,16 +15,13 @@ if TYPE_CHECKING:
 
 
 def run_install(args: list[str]) -> int:
-    normalized_args: list[str] = []
-    index = 0
-    while index < len(args):
-        token = args[index]
-        if token in INDEX_URL_OPTIONS and index + 1 < len(args):
-            normalized_args.append(f"{token}={args[index + 1]}")
-            index += 2
-            continue
-        normalized_args.append(token)
-        index += 1
+    from cpip.cli.commands.install_helpers import normalize_install_args
+    from cpip.cli.commands.install_helpers import (
+        install_candidate,
+        target_library_is_empty,
+    )
+
+    normalized_args = normalize_install_args(args, INDEX_URL_OPTIONS)
     parser = create_parser()
     options = parser.parse_args(normalized_args)
 
@@ -58,23 +55,6 @@ def run_install(args: list[str]) -> int:
     from cpip.install.wheel_transaction import install_wheels_transactionally
     from cpip.resolution.req_install import install_req_from_line
     from cpip.resolution.resolver import Resolver
-
-    def target_library_is_empty(target: InstallTarget) -> bool:
-        """Return whether target-mode library roots contain any entries."""
-        seen: set[Path] = set()
-        for root in target.library_roots:
-            if root in seen:
-                continue
-            seen.add(root)
-            try:
-                with os.scandir(root) as entries:
-                    if next(entries, None) is not None:
-                        return False
-            except FileNotFoundError:
-                continue
-            except NotADirectoryError:
-                return False
-        return True
 
     if len(options.requirements_from_scripts) > 1:
         raise CommandError("--requirements-from-script can only be given once")
@@ -407,20 +387,8 @@ def run_install(args: list[str]) -> int:
         ),
     )
     provider.release_control = bundle.release_control
+    from cpip.cli.commands.install_helpers import intersect_hashes
     from cpip.core.hashes import Hashes
-
-    def intersect_hashes(left: Hashes, right: Hashes) -> Hashes:
-        return Hashes(
-            {
-                algorithm: [
-                    digest
-                    for digest in left.allowed_internal.get(algorithm, [])
-                    if digest in right.allowed_internal.get(algorithm, [])
-                ]
-                for algorithm in left.allowed_internal.keys()
-                & right.allowed_internal.keys()
-            }
-        )
 
     provider.hashes_by_name = {}
     for item in requirements:
@@ -464,34 +432,6 @@ def run_install(args: list[str]) -> int:
             if find_link.startswith(("http://", "https://")):
                 print(f"Fetching project page and analyzing links: {find_link}")
 
-    def install_candidate(
-        candidate: Any,
-        *,
-        requested: bool,
-        direct_url: Any = None,
-    ) -> None:
-        from cpip.install.wheel_transaction import WheelInstaller
-
-        target = InstallTarget.from_options(
-            candidate.canonical_name,
-            target=options.target,
-            user=options.user,
-            root=options.root,
-            prefix=options.prefix or target_prefix_internal(),
-        )
-        WheelInstaller(
-            target,
-            pycompile=not options.no_compile,
-            force=(
-                reinstall or (direct_url is not None and direct_url.is_local_editable())
-            ),
-            preserve_existing=options.ignore_installed,
-        ).install(
-            candidate.path,
-            requested=requested,
-            direct_url=direct_url,
-        )
-
     preinstalled_editables: set[str] = set()
     preinstalled_editable_reports: dict[str, tuple[Any, Any]] = {}
     if bundle.editables:
@@ -529,7 +469,13 @@ def run_install(args: list[str]) -> int:
                         f"these package versions have conflicting dependencies."
                     )
             if not options.dry_run:
-                install_candidate(candidate, requested=True, direct_url=direct_url)
+                install_candidate(
+                    candidate,
+                    options,
+                    requested=True,
+                    reinstall=reinstall,
+                    direct_url=direct_url,
+                )
             installed.append(f"{candidate.name}-{candidate.version}")
             installed_canonical_names.append(candidate.canonical_name)
             newly_installed_names.add(candidate.canonical_name)
@@ -860,14 +806,25 @@ def run_install(args: list[str]) -> int:
                     yanked=candidate.yanked_reason is not None,
                 )
                 if not options.dry_run:
-                    install_candidate(candidate, requested=False)
+                    install_candidate(
+                        candidate,
+                        options,
+                        requested=False,
+                        reinstall=reinstall,
+                    )
                 installed.append(f"{candidate.name}-{candidate.version}")
                 installed_canonical_names.append(candidate.canonical_name)
         if options.dry_run:
             candidate = wheel_candidate(built)
         else:
             candidate = wheel_candidate(built)
-            install_candidate(candidate, requested=True, direct_url=direct_url)
+            install_candidate(
+                candidate,
+                options,
+                requested=True,
+                reinstall=reinstall,
+                direct_url=direct_url,
+            )
         installed.append(f"{candidate.name}-{candidate.version}")
         installed_canonical_names.append(candidate.canonical_name)
         newly_installed_names.add(candidate.canonical_name)
@@ -914,7 +871,8 @@ def run_install(args: list[str]) -> int:
             report_items,
             network_stats=(
                 bundle.session.network_stats.as_dict()
-                if bundle.session is not None and bundle.session.network_stats is not None
+                if bundle.session is not None
+                and bundle.session.network_stats is not None
                 else None
             ),
         )

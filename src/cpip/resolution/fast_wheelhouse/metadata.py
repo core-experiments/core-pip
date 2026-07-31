@@ -8,7 +8,7 @@ import sys
 from functools import lru_cache
 from typing import TYPE_CHECKING
 
-from cpip.index.wheel_metadata import (
+from cpip.core.wheel_metadata import (
     metadata_paths,
     parse_metadata_headers,
     parse_metadata_member,
