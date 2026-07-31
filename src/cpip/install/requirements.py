@@ -11,8 +11,8 @@ from cpip.build.metadata import (
 from cpip.core.packaging import canonicalize_name
 from cpip.resolution.req_install import InstallRequirement
 from cpip.install.target import InstallTarget
+from cpip.install.uninstall import DistributionUninstaller
 from cpip.install.wheel_transaction import (
-    DistributionUninstaller,
     WheelInstaller,
 )
 
