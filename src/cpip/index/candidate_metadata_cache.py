@@ -11,11 +11,11 @@ from cpip.core.marshal_cache import load_snapshot, save_snapshot
 from cpip.core.packaging import Version, parse_requirement
 from cpip.index.source_models import CandidateMetadata
 
-VERSION = 1
-NAME = "candidate-metadata-v1.marshal"
+VERSION = 2
+NAME = "candidate-metadata-v2.marshal"
 MAX_ENTRIES = 16_384
 INSTANCES: dict[str, CandidateMetadataCache] = {}
-CacheKey = tuple[str, str, tuple[str, ...]]
+CacheKey = tuple[str, str, tuple[str, ...], str]
 CacheValue = tuple[str, str, tuple[str, ...], tuple[str, ...], str | None]
 
 
@@ -49,11 +49,12 @@ class CandidateMetadataCache:
     def valid_key(value: object) -> bool:
         return (
             isinstance(value, tuple)
-            and len(value) == 3
+            and len(value) == 4
             and isinstance(value[0], str)
             and isinstance(value[1], str)
             and isinstance(value[2], tuple)
             and all(isinstance(item, str) for item in value[2])
+            and isinstance(value[3], str)
         )
 
     @staticmethod
@@ -70,7 +71,7 @@ class CandidateMetadataCache:
             and (value[4] is None or isinstance(value[4], str))
         )
 
-    def get(self, key: tuple[str, str, tuple[str, ...]]) -> CandidateMetadata | None:
+    def get(self, key: tuple[str, str, tuple[str, ...], str]) -> CandidateMetadata | None:
         value = self.entries.get(key)
         if value is None:
             return None
@@ -91,7 +92,7 @@ class CandidateMetadataCache:
 
     def put(
         self,
-        key: tuple[str, str, tuple[str, ...]],
+        key: tuple[str, str, tuple[str, ...], str],
         metadata: CandidateMetadata,
     ) -> None:
         if key not in self.entries and len(self.entries) >= MAX_ENTRIES:

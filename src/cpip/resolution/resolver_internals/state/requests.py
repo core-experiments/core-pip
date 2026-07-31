@@ -11,6 +11,22 @@ from cpip.resolution.resolver_internals.state.plans import SatisfiedRequirement
 
 if TYPE_CHECKING:
     from cpip.resolution.req_install import InstallRequirement
+    from cpip.resolution.resolver_internals.state.domains import (
+        LearnedIncompatibility,
+    )
+
+
+class SearchFailure:
+    """Internal false result carrying a conflict-directed jump target."""
+
+    __slots__ = ("conflict", "target_level")
+
+    def __init__(self, conflict: LearnedIncompatibility, target_level: int) -> None:
+        self.conflict = conflict
+        self.target_level = target_level
+
+    def __bool__(self) -> bool:
+        return False
 
 
 class SearchRequest:
@@ -48,4 +64,4 @@ class SearchRequest:
         self.checkpoint = checkpoint
 
 
-SearchFrame = Generator[SearchRequest, bool, bool]
+SearchFrame = Generator[SearchRequest, bool | SearchFailure, bool | SearchFailure]

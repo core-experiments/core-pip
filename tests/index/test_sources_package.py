@@ -455,7 +455,7 @@ def test_candidate_provider_parses_index_artifacts_once(
 
     monkeypatch.setattr(CandidateEvaluator, "evaluate_parsed_link", counting_evaluate)
     assert len(provider.find_candidates(parse_requirement("demo-pkg==2"))) == 1
-    assert evaluations == 1
+    assert evaluations == 0
     assert len(provider.find_candidates(parse_requirement("demo-pkg<2"))) == 1
     assert calls == 2
 

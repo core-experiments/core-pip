@@ -9,7 +9,12 @@ from cpip.index.source_models import CandidateMetadata
 
 def test_candidate_metadata_cache_roundtrip(tmp_path: Path) -> None:
     cache = get_candidate_metadata_cache(tmp_path)
-    key = ("https://files.example.test/demo.whl", "1.2.3", ("docs",))
+    key = (
+        "https://files.example.test/demo.whl",
+        "1.2.3",
+        ("docs",),
+        "sha256:abc",
+    )
     metadata = CandidateMetadata(
         name="demo",
         version=Version("1.2.3"),

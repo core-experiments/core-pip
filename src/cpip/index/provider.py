@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime
+import time
 import urllib.parse
 from bisect import bisect_left, bisect_right
 from types import MappingProxyType
@@ -15,7 +16,7 @@ from cpip.core.release_control import ReleaseControl
 from cpip.index.candidates import InstallationCandidate
 from cpip.index.config import DEFAULT_INDEX_URL
 from cpip.index.links import Link
-from cpip.index.prefetch import Prefetcher
+from cpip.index.prefetch import PrefetchPolicy, Prefetcher
 from cpip.index.source_locations import (
     FindLinksSource,
     SimpleIndexSource,
@@ -102,6 +103,7 @@ class CandidateProvider:
         self.package_catalog_cache = {}
         self.cache_lock = RLock()
         self.prefetcher = None
+        self.prefetch_policy = PrefetchPolicy()
         self.materializer_internal = None
 
     @classmethod
@@ -282,6 +284,35 @@ class CandidateProvider:
                 links = tuple(dict.fromkeys(matching_links))
         if links is None:
             links = self.catalog_links(requirement)
+        if (
+            requirement.url is None
+            and exact_version is not None
+            and catalog is not None
+            and self.uploaded_prior_to is None
+        ):
+            from cpip.index.candidate_evaluators import CandidateEvaluator
+
+            for link in links:
+                parsed = self.parsed_link_cache.get(link)
+                if not isinstance(parsed, InstallationCandidate):
+                    continue
+                if link.kind is ArtifactKind.WHEEL and parsed.tag_rank is None:
+                    rejected.append(
+                        CandidateEvaluator.reject(
+                            link,
+                            RejectionReason.UNSUPPORTED_WHEEL,
+                            "wheel tags are not supported by this interpreter",
+                        )
+                    )
+                    continue
+                accepted.append(parsed.to_record())
+            accepted.sort(
+                key=lambda candidate: candidate.sort_key(
+                    prefer_binary=self.prefer_binary
+                ),
+                reverse=True,
+            )
+            return CandidateSelection(tuple(accepted), tuple(rejected))
         if (
             requirement.url is None
             and links
@@ -582,7 +613,11 @@ class CandidateProvider:
         value: tuple[Requirement, tuple[str, bool, bool]],
     ) -> tuple[CandidateSummary, ...]:
         requirement, cache_key = value
-        return self.load_available_versions(requirement, cache_key)
+        started = time.perf_counter()
+        result = self.load_available_versions(requirement, cache_key)
+        elapsed = time.perf_counter() - started
+        self.prefetch_policy.observe(cache_key, elapsed, len(result))
+        return result
 
     def prefetch_available_versions(
         self, requirements: tuple[Requirement, ...]
@@ -609,7 +644,11 @@ class CandidateProvider:
             return
         if self.prefetcher is None:
             self.prefetcher = Prefetcher(self.load_prefetched_versions, max_workers=8)
-        for key, requirement in unique.items():
+        for key, requirement in sorted(
+            unique.items(),
+            key=lambda item: self.prefetch_policy.priority(item[0]),
+            reverse=True,
+        ):
             if not self.prefetcher.pending(key):
                 self.prefetcher.submit(key, (requirement, key))
 

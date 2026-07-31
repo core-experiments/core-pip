@@ -168,6 +168,38 @@ class SharedDependencyResolution(GeneralResolverAdversarial):
         assert len(plan.candidates) == packages + 2
 
 
+class SeededResolution(GeneralResolverAdversarial):
+    """Measure repeated resolution using the previous successful candidates."""
+
+    @staticmethod
+    def setup_cache() -> dict[int, str]:
+        return GeneralResolverAdversarial._setup(
+            "resolver-seeded", create_shared_dependency_graph
+        )
+
+    def setup(self, wheelhouses: dict[int, str], packages: int) -> None:
+        self.resolver = Resolver(
+            provider=CandidateProvider.from_options(
+                find_links=[wheelhouses[packages]], no_index=True
+            ),
+            ignore_installed=True,
+            compute_source_hashes=False,
+        )
+        self.resolver.resolve(["root"])
+
+    def time_resolve(self, wheelhouses: dict[int, str], packages: int) -> None:
+        del wheelhouses
+        plan = self.resolver.resolve(["root"])
+        assert len(plan.candidates) == packages + 2
+
+    def time_resolve_changed(
+        self, wheelhouses: dict[int, str], packages: int
+    ) -> None:
+        del wheelhouses
+        plan = self.resolver.resolve(["root", "leaf-0==1.0.0"])
+        assert len(plan.candidates) == packages + 2
+
+
 class SatResolution:
     params = SAT_SIZES
     param_names = ("variables",)

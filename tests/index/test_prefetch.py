@@ -5,7 +5,15 @@ import time
 
 import pytest
 
-from cpip.index.prefetch import Prefetcher
+from cpip.index.prefetch import PrefetchPolicy, Prefetcher
+
+
+def test_prefetch_policy_prefers_fast_high_yield_sources() -> None:
+    policy = PrefetchPolicy()
+    policy.observe("slow", 1.0, 10)
+    policy.observe("fast", 0.1, 10)
+
+    assert policy.priority("fast") > policy.priority("slow")
 
 
 def test_prefetcher_deduplicates_and_overlaps_work() -> None:

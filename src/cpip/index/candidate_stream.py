@@ -35,13 +35,26 @@ class CandidateStream(Sequence[WheelCandidate]):
 
     def __iter__(self) -> Iterator[WheelCandidate]:
         index = 0
+        items = self.items_internal
+        while index < len(items):
+            yield items[index]
+            index += 1
+        if self.error_internal is not None:
+            raise self.error_internal
+        if self.exhausted:
+            return
+        source = self.source_internal
         while True:
-            if index < len(self.items_internal):
-                yield self.items_internal[index]
-                index += 1
-                continue
-            if not self.advance():
+            try:
+                item = next(source)
+            except StopIteration:
+                self.exhausted = True
                 return
+            except Exception as exc:
+                self.error_internal = exc
+                raise
+            items.append(item)
+            yield item
 
     def __bool__(self) -> bool:
         return bool(self.items_internal) or self.advance()

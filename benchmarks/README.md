@@ -65,6 +65,11 @@ uv run --group benchmark asv --config benchmarks/asv.conf.json run \
   --bench 'resolver_adversarial.*'
 ```
 
+The `SeededResolution` cases resolve the same graph once during setup and then
+measure both a repeated no-op resolution and a resolution with one additional
+root constraint using the previous candidates as warm seeds. They preserve
+normal candidate validity and fallback behavior.
+
 These are deterministic metadata-only cases for late candidate conflicts and
 wide shared-dependency graphs. They complement the real-world fast wheelhouse
 benchmarks; they do not measure the specialized local resolver.

@@ -615,6 +615,17 @@ class ResolverSelectionOperations:
             "candidate cache ready requirement=%s",
             requirement.raw or requirement.name,
         )
-        if self.ignore_requires_python:
-            return candidates
-        return candidates.prefer(self.candidate_matches_python)
+        if not self.ignore_requires_python:
+            candidates = candidates.prefer(self.candidate_matches_python)
+        seed = self.resolution_seed.get(requirement.canonical_name)
+        if seed is not None:
+            candidates = candidates.prefer(
+                lambda candidate: self.candidate_matches_seed(candidate, seed)
+            )
+        return candidates
+
+    @staticmethod
+    def candidate_matches_seed(
+        candidate: WheelCandidate, seed: tuple[str, str]
+    ) -> bool:
+        return (str(candidate.version), candidate.source_url or "") == seed

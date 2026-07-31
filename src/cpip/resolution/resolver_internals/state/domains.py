@@ -18,6 +18,7 @@ class PackageDomain:
         "constrained_roots_internal",
         "root_version_mask",
         "incoming_version_masks",
+        "active_version_mask",
         "decision_count",
     )
 
@@ -33,6 +34,7 @@ class PackageDomain:
         self.constrained_roots_internal: tuple[Requirement, ...] | None = None
         self.root_version_mask: int | None = None
         self.incoming_version_masks: dict[str, int] = {}
+        self.active_version_mask: int | None = None
         self.decision_count: int | None = None
 
     def requirements(self) -> tuple[Requirement, ...]:
@@ -68,6 +70,7 @@ class PackageDomain:
         self.requirements_internal = None
         self.constrained_internal = None
         self.incoming_version_masks.pop(source, None)
+        self.active_version_mask = None
         self.decision_count = None
 
     def remove_incoming(self, source: str) -> None:
@@ -75,6 +78,7 @@ class PackageDomain:
         self.requirements_internal = None
         self.constrained_internal = None
         self.incoming_version_masks.pop(source, None)
+        self.active_version_mask = None
         self.decision_count = None
 
 
@@ -95,8 +99,16 @@ def requirement_state_key(requirement: Requirement) -> RequirementStateKey:
 
 
 class LearnedIncompatibility:
-    __slots__ = ("terms", "watches")
+    __slots__ = ("terms", "watches", "decision_levels", "activity", "last_used")
 
-    def __init__(self, terms: frozenset[Assignment], watches: tuple[int, int]) -> None:
+    def __init__(
+        self,
+        terms: frozenset[Assignment],
+        watches: tuple[int, int],
+        decision_levels: tuple[tuple[Assignment, int], ...] = (),
+    ) -> None:
         self.terms = terms
         self.watches = watches
+        self.decision_levels = decision_levels
+        self.activity = 0
+        self.last_used = 0

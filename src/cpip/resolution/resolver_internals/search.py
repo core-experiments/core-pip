@@ -15,12 +15,14 @@ from cpip.resolution.algorithms import (
 )
 from cpip.resolution.resolver_internals.state.agenda import PendingAgenda
 from cpip.resolution.resolver_internals.state.domains import (
+    LearnedIncompatibility,
     RequirementStateKey,
     requirement_state_key,
 )
 from cpip.resolution.resolver_internals.state.plans import SatisfiedRequirement
 from cpip.resolution.resolver_internals.state.requests import (
     SearchFrame,
+    SearchFailure,
     SearchRequest,
 )
 from cpip.resolution.resolver_internals.selection import ResolverSelectionOperations
@@ -32,6 +34,38 @@ if TYPE_CHECKING:
 
 class ResolverSearchEngine:
     """Backtracking search operations for the resolver."""
+
+    def should_backjump_after_failure(
+        self: ResolverContext,
+        learned_start: int,
+        decision_level: int,
+    ) -> SearchFailure | None:
+        conflict = self.backjump_conflict
+        if conflict is None and len(self.learned_incompatibilities) > learned_start:
+            conflict = self.learned_incompatibilities[-1]
+        if conflict is None:
+            return None
+        self.backjump_conflict = None
+        if not conflict.decision_levels:
+            return None
+        levels = sorted({level for _, level in conflict.decision_levels})
+        if len(levels) < 2:
+            return None
+        # A propagated conflict is actionable only when its highest decision
+        # level is the branch that just failed.  If it contains a level from
+        # a deeper or already-unwound branch, its stored metadata is not an
+        # active conflict at this frame; treating it as one can skip valid
+        # candidates and make the result depend on traversal order.
+        if levels[-1] != decision_level:
+            return None
+        target_level = levels[-2]
+        if target_level >= decision_level:
+            return None
+        failure = SearchFailure(conflict, target_level)
+        self.backjump_conflict = conflict
+        if self.metrics.enabled:
+            self.metrics.nonchronological_jumps += 1
+        return failure
 
     def search_internal(
         self: ResolverContext,
@@ -57,7 +91,7 @@ class ResolverSearchEngine:
                 )
             )
         ]
-        result: bool | None = None
+        result: bool | SearchFailure | None = None
         while frames:
             frame = frames[-1]
             try:
@@ -118,10 +152,10 @@ class ResolverSearchEngine:
                 )
             )
         state: tuple[object, ...] | None = None
-        # Small searches are cheap to key and retain the eager behavior used by
-        # callers that inspect the memoization hook.  Once the graph is broad,
-        # defer key construction until there is a failed state to consult.
-        if self.failed_search_states or len(selected) <= 8:
+        # There is no failed state to consult on the first pass.  Defer key
+        # construction until a search actually fails; later branches will
+        # still build the key before consulting the populated memo.
+        if self.failed_search_states:
             state = self.search_state_key_internal(
                 pending, selected, selected_extras, satisfied, graph
             )
@@ -165,11 +199,15 @@ class ResolverSearchEngine:
         def candidate_key(candidate: WheelCandidate) -> tuple[str, str, str, str]:
             key = self.candidate_state_keys.get(id(candidate))
             if key is None:
+                source_url = candidate.source_url or ""
                 key = (
                     candidate.canonical_name,
                     str(candidate.version),
-                    candidate.source_url or "",
-                    os.fspath(candidate.path),
+                    source_url,
+                    # Lazy candidates expose their link URL without building
+                    # the artifact.  Only concrete candidates without a URL
+                    # need their path to distinguish same-version entries.
+                    "" if source_url else os.fspath(candidate.path),
                 )
                 self.candidate_state_keys[id(candidate)] = key
             return key
@@ -365,39 +403,37 @@ class ResolverSearchEngine:
             source_requirements=source_requirements,
             source_requirements_by_url=source_requirements_by_url,
         )
-        if candidates and (
-            name.startswith("file://")
-            or (
-                requirement.url is not None
-                and candidates[0].canonical_name != requirement.canonical_name
-            )
-        ):
-            resolved_name = candidates[0].canonical_name
-            graph["<root>"].discard(name)
-            self.root_requirement_names.discard(name)
-            self.root_requirement_names.add(resolved_name)
-            normalized = Requirement(
-                name=candidates[0].name,
-                specifier=constrained.specifier,
-                extras=constrained.extras,
-                url=constrained.url,
-                marker=constrained.marker,
-                raw=constrained.raw,
-            )
-            branch_checkpoint = remaining.checkpoint()
-            remaining.prepend((normalized,))
-            return (
-                yield SearchRequest(
-                    remaining,
-                    selected,
-                    selected_extras,
-                    satisfied,
-                    graph,
-                    source_requirements,
-                    source_requirements_by_url,
-                    checkpoint=branch_checkpoint,
+        if name.startswith("file://") or requirement.url is not None:
+            if candidates and (
+                name.startswith("file://")
+                or candidates[0].canonical_name != requirement.canonical_name
+            ):
+                resolved_name = candidates[0].canonical_name
+                graph["<root>"].discard(name)
+                self.root_requirement_names.discard(name)
+                self.root_requirement_names.add(resolved_name)
+                normalized = Requirement(
+                    name=candidates[0].name,
+                    specifier=constrained.specifier,
+                    extras=constrained.extras,
+                    url=constrained.url,
+                    marker=constrained.marker,
+                    raw=constrained.raw,
                 )
-            )
+                branch_checkpoint = remaining.checkpoint()
+                remaining.prepend((normalized,))
+                return (
+                    yield SearchRequest(
+                        remaining,
+                        selected,
+                        selected_extras,
+                        satisfied,
+                        graph,
+                        source_requirements,
+                        source_requirements_by_url,
+                        checkpoint=branch_checkpoint,
+                    )
+                )
         best_candidate = best_candidate_internal(
             candidates,
             constrained,
@@ -476,6 +512,10 @@ class ResolverSearchEngine:
 
         attempted_candidates = 0
         root_rejections = 0
+        candidate_conflicts: list[LearnedIncompatibility] = []
+        all_candidates_conflicted = True
+        learned_start = len(self.learned_incompatibilities)
+        decision_level = len(selected)
         for candidate in candidates:
             if self.metrics.enabled:
                 self.metrics.candidates_considered += 1
@@ -483,10 +523,12 @@ class ResolverSearchEngine:
                 candidate.version,
                 allow_prereleases=allow_prereleases,
             ):
+                all_candidates_conflicted = False
                 continue
             self.validate_candidate_policy(candidate)
             self.validate_candidate_constraints(candidate)
             attempted_candidates += 1
+            self.last_candidate_conflict = None
             incompatibility_key: tuple[int, frozenset[str]] | None = None
             if self.root_incompatibilities:
                 incompatibility_key = self.candidate_incompatibility_key(
@@ -497,11 +539,13 @@ class ResolverSearchEngine:
                     if self.metrics.enabled:
                         self.metrics.root_incompatibility_hits += 1
                     root_rejections += 1
+                    all_candidates_conflicted = False
                     self.emit_backtracking_message()
                     continue
             if self.violates_watched_incompatibility(
                 candidate, constrained.extras, selected, selected_extras
             ):
+                all_candidates_conflicted = False
                 self.emit_backtracking_message()
                 continue
             if self.candidate_dependencies_conflict(
@@ -510,6 +554,10 @@ class ResolverSearchEngine:
                 selected=selected,
                 selected_extras=selected_extras,
             ):
+                if self.last_candidate_conflict is None:
+                    all_candidates_conflicted = False
+                else:
+                    candidate_conflicts.append(self.last_candidate_conflict)
                 if self.last_conflict_was_root:
                     root_rejections += 1
                 self.conflicts.append(
@@ -525,11 +573,20 @@ class ResolverSearchEngine:
                 source_requirements=source_requirements,
                 source_requirements_by_url=source_requirements_by_url,
             )
+            seed = self.resolution_seed.get(name)
+            if seed is not None and self.candidate_matches_seed(candidate, seed):
+                if self.metrics.enabled:
+                    self.metrics.resolution_seed_hits += 1
             selected[name] = candidate
+            self.assignment_levels[self.candidate_assignment(
+                candidate, constrained.extras
+            )] = len(selected) - 1
             self.add_candidate_dependencies(name, candidate)
             selected_extras[name] = frozenset(constrained.extras)
             graph.setdefault(name, set())
             branch_checkpoint = remaining.checkpoint()
+            learned_start = len(self.learned_incompatibilities)
+            decision_level = len(selected) - 1
             if not self.no_deps:
                 dependency_pending: list[Requirement] = []
                 for dep in candidate.dependencies:
@@ -541,19 +598,20 @@ class ResolverSearchEngine:
                     self.metrics.propagations += len(dependency_pending)
                 remaining.prepend(dependency_pending)
             satisfied_snapshot = dict(satisfied)
-            if (
-                yield SearchRequest(
-                    remaining,
-                    selected,
-                    selected_extras,
-                    satisfied,
-                    graph,
-                    source_requirements,
-                    source_requirements_by_url,
-                    checkpoint=branch_checkpoint,
-                )
-            ):
+            child_result = yield SearchRequest(
+                remaining,
+                selected,
+                selected_extras,
+                satisfied,
+                graph,
+                source_requirements,
+                source_requirements_by_url,
+                checkpoint=branch_checkpoint,
+            )
+            if child_result:
                 return True
+            if isinstance(child_result, SearchFailure):
+                self.backjump_conflict = child_result.conflict
             if any(
                 self.candidate_cache_key(dependency) in self.root_unsatisfiable_domains
                 for _, dependencies in self.grouped_candidate_dependencies(
@@ -567,7 +625,15 @@ class ResolverSearchEngine:
                     )
                 self.root_incompatibilities.add(incompatibility_key)
                 root_rejections += 1
+            candidate_assignment = self.candidate_assignment(
+                candidate, constrained.extras
+            )
             selected.pop(name, None)
+            # Assignment levels describe the active trail only.  Retaining a
+            # level after backtracking lets a later learned clause backjump
+            # using a different branch's history, making search order affect
+            # correctness.
+            self.assignment_levels.pop(candidate_assignment, None)
             self.remove_candidate_dependencies(name, candidate)
             selected_extras.pop(name, None)
             satisfied.clear()
@@ -577,6 +643,22 @@ class ResolverSearchEngine:
                 f"does not satisfy the active dependency set"
             )
             self.emit_backtracking_message()
+            failure = self.should_backjump_after_failure(
+                learned_start, decision_level
+            )
+            if failure is not None:
+                return failure
+        if all_candidates_conflicted and candidate_conflicts:
+            derived = self.derive_candidate_domain_conflict(
+                candidate_conflicts, self.package_id_internal(name)
+            )
+            if derived is not None:
+                self.backjump_conflict = derived
+                failure = self.should_backjump_after_failure(
+                    learned_start, decision_level
+                )
+                if failure is not None:
+                    return failure
         if attempted_candidates and root_rejections == attempted_candidates:
             self.root_unsatisfiable_domains.add(self.candidate_cache_key(constrained))
         return False

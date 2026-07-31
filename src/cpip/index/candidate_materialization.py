@@ -24,7 +24,11 @@ from cpip.core.packaging import (
     marker_applies,
     parse_requirement,
 )
-from cpip.core.wheel import WheelCandidate, validate_wheel, wheel_candidate
+from cpip.core.wheel import (
+    WheelCandidate,
+    validate_wheel_with_metadata,
+    wheel_candidate,
+)
 from cpip.index.candidate_cache import (
     cached_wheel_for_link,
     emit_build_message,
@@ -71,6 +75,21 @@ def project_dependencies(
         if (requirement := parse_requirement(value)) is not None
         if marker_applies(requirement.marker, extras=requested_extras)
     )
+
+
+def candidate_metadata_fingerprint(candidate: CandidateRecord) -> str:
+    """Return a cheap identity for persistent candidate metadata."""
+    sha256 = candidate.link.hashes.get("sha256")
+    if sha256 is not None:
+        return f"sha256:{sha256}"
+    if candidate.link.is_file:
+        try:
+            stat = os.stat(candidate.link.file_path)
+        except OSError:
+            pass
+        else:
+            return f"stat:{stat.st_size}:{stat.st_mtime_ns}"
+    return candidate.link.url
 
 
 def vcs_scheme(url: str) -> str | None:
@@ -385,6 +404,7 @@ class CandidateMaterializer:
                 candidate.link.url,
                 str(candidate.version),
                 tuple(sorted(requested_extras)),
+                candidate_metadata_fingerprint(candidate),
             )
             if self.persistent_candidate_metadata_cache is not None:
                 cached = self.persistent_candidate_metadata_cache.get(persistent_key)
@@ -467,7 +487,7 @@ class CandidateMaterializer:
                     zipfile.ZipFile(stream) as archive,
                 ):
                     try:
-                        dist_info_dir = validate_wheel(
+                        dist_info_dir, wheel_metadata_text = validate_wheel_with_metadata(
                             archive,
                             os.path.basename(os.fspath(path))[:-4].split("-", 1)[0],
                         )
@@ -479,6 +499,8 @@ class CandidateMaterializer:
                         archive=archive,
                         filename_info=(candidate.name, candidate.version),
                         dist_info_dir=dist_info_dir,
+                        wheel_metadata_text=wheel_metadata_text,
+                        include_layout=False,
                         metadata_cache=self.persistent_metadata_cache,
                     )
                 metadata = CandidateMetadata(
@@ -714,9 +736,11 @@ class CandidateMaterializer:
                             path.open("rb", buffering=32768) as stream,
                             zipfile.ZipFile(stream) as archive,
                         ):
-                            dist_info_dir = validate_wheel(
+                            dist_info_dir, wheel_metadata_text = (
+                                validate_wheel_with_metadata(
                                 archive,
                                 os.path.basename(os.fspath(path))[:-4].split("-", 1)[0],
+                                )
                             )
                             built = wheel_candidate(
                                 path,
@@ -724,6 +748,7 @@ class CandidateMaterializer:
                                 archive=archive,
                                 filename_info=(candidate.name, candidate.version),
                                 dist_info_dir=dist_info_dir,
+                                wheel_metadata_text=wheel_metadata_text,
                             )
                         if stat is not None:
                             self.wheel_candidates[cache_key] = built

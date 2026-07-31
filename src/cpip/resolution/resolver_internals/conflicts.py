@@ -90,6 +90,7 @@ class ResolverConflicts:
                         extras,
                         selected_target,
                         selected_extras.get(target, frozenset()),
+                        decision_level=len(selected),
                     )
                 if (
                     self.candidate_cache_key(constrained_dependency)
@@ -101,7 +102,9 @@ class ResolverConflicts:
                     self.bump_conflict_activity(candidate.canonical_name, target)
                     self.last_conflict_was_root = True
                     return True
-        active_targets = self.domains_internal.keys() & dict(grouped).keys()
+        active_targets = self.domains_internal.keys() & {
+            target for target, _ in grouped
+        }
         if not active_targets:
             return False
         for target, dependencies in grouped:
@@ -146,6 +149,7 @@ class ResolverConflicts:
         extras: frozenset[str],
         selected_candidate: WheelCandidate,
         selected_extras: frozenset[str],
+        decision_level: int,
     ) -> None:
         """Learn the cheapest nogood when a dependency meets a selected value.
 
@@ -164,19 +168,66 @@ class ResolverConflicts:
         if len(terms) < 2 or terms in self.learned_incompatibility_terms:
             return
         candidate_term = self.candidate_assignment(candidate, extras)
+        # This candidate is being rejected at the current trail level.  A
+        # previous branch may have assigned the same candidate identity at a
+        # different level, so do not reuse that historical level.
+        self.assignment_levels[candidate_term] = decision_level
         other_term = next(term for term in terms if term != candidate_term)
         watches = candidate_term[0], other_term[0]
-        incompatibility_id = len(self.learned_incompatibilities)
-        self.learned_incompatibilities.append(
-            LearnedIncompatibility(terms, watches)
-        )
-        self.learned_incompatibility_terms.add(terms)
-        for package_id in watches:
-            self.incompatibility_watches.setdefault(package_id, set()).add(
-                incompatibility_id
+        decision_levels = tuple(
+            sorted(
+                (
+                    (
+                        term,
+                        self.assignment_levels.get(
+                            term, decision_level if term == candidate_term else 0
+                        ),
+                    )
+                    for term in terms
+                ),
+                key=lambda item: (item[0][0], item[0][1], tuple(sorted(item[0][2]))),
             )
+        )
+        self.record_learned_incompatibility(
+            LearnedIncompatibility(terms, watches, decision_levels)
+        )
+
+    def derive_candidate_domain_conflict(
+        self: ResolverContext,
+        conflicts: list[LearnedIncompatibility],
+        blocked_package_id: int,
+    ) -> LearnedIncompatibility | None:
+        """Resolve fresh candidate nogoods into a domain-level conflict.
+
+        The blocked package's candidate terms are eliminated because exactly
+        one candidate can satisfy the pending package requirement. The
+        resulting clause is ephemeral until the search driver proves it can
+        safely backjump; it is not inserted into the watched-conflict index.
+        """
+
+        levels: dict[Assignment, int] = {}
+        for conflict in conflicts:
+            for term, level in conflict.decision_levels:
+                if term[0] != blocked_package_id:
+                    levels.setdefault(term, level)
+        if not levels:
+            return None
+        terms = frozenset(levels)
+        package_ids = tuple(dict.fromkeys(term[0] for term in terms))
+        watches = (
+            package_ids[0],
+            package_ids[1] if len(package_ids) > 1 else package_ids[0],
+        )
+        decision_levels = tuple(
+            sorted(
+                levels.items(),
+                key=lambda item: (item[0][0], item[0][1], tuple(sorted(item[0][2]))),
+            )
+        )
+        return LearnedIncompatibility(terms, watches, decision_levels)
 
     def package_id_internal(self: ResolverContext, name: str) -> int:
+        """Return a stable compact package id for conflict clauses."""
         package_id = self.package_ids.get(name)
         canonical_name = name
         if package_id is None:
@@ -205,9 +256,50 @@ class ResolverConflicts:
         return package_id, candidate_id, extras
 
     def bump_conflict_activity(self: ResolverContext, *names: str) -> None:
+        self.conflict_activity_bumps += 1
         for name in names:
             package_id = self.package_id_internal(name)
             self.conflict_activity[package_id] += 1
+
+    def record_learned_incompatibility(
+        self: ResolverContext, incompatibility: LearnedIncompatibility
+    ) -> None:
+        self.learned_incompatibilities.append(incompatibility)
+        self.learned_incompatibility_terms.add(incompatibility.terms)
+        self.last_candidate_conflict = incompatibility
+        incompatibility_id = len(self.learned_incompatibilities) - 1
+        for package_id in incompatibility.watches:
+            self.incompatibility_watches.setdefault(package_id, set()).add(
+                incompatibility_id
+            )
+        non_binary_count = sum(
+            len(clause.terms) != 2 for clause in self.learned_incompatibilities
+        )
+        if non_binary_count > self.learned_clause_limit:
+            self.compact_learned_incompatibilities()
+
+    def compact_learned_incompatibilities(self: ResolverContext) -> None:
+        """Retain useful learned clauses while keeping watch indexes compact."""
+        clauses = self.learned_incompatibilities
+        limit = self.learned_clause_limit
+        protected = [clause for clause in clauses if len(clause.terms) == 2]
+        remaining = [clause for clause in clauses if len(clause.terms) != 2]
+        if len(remaining) <= limit:
+            return
+        remaining.sort(key=lambda clause: (clause.activity, clause.last_used))
+        kept = protected + remaining[-limit:]
+        evicted = len(clauses) - len(kept)
+        self.learned_incompatibilities[:] = kept
+        self.learned_incompatibility_terms.clear()
+        self.incompatibility_watches.clear()
+        for incompatibility_id, clause in enumerate(kept):
+            self.learned_incompatibility_terms.add(clause.terms)
+            for package_id in clause.watches:
+                self.incompatibility_watches.setdefault(package_id, set()).add(
+                    incompatibility_id
+                )
+        if self.metrics.enabled:
+            self.metrics.learned_clause_evictions += evicted
 
     def learn_watched_incompatibility(
         self: ResolverContext,
@@ -219,6 +311,10 @@ class ResolverConflicts:
         selected_extras: dict[str, frozenset[str]],
     ) -> None:
         candidate_term = self.candidate_assignment(candidate, extras)
+        # The candidate is not selected yet.  Its assignment level may be
+        # stale from an earlier branch, so always record the level for this
+        # conflict rather than retaining historical trail state.
+        self.assignment_levels[candidate_term] = len(selected)
         terms = {candidate_term}
         sources = [source for source in domain.incoming if source in selected]
         if len(sources) > 1:
@@ -262,15 +358,18 @@ class ResolverConflicts:
             return
         other_watch = next(term[0] for term in frozen_terms if term != candidate_term)
         watches = candidate_term[0], other_watch
-        incompatibility_id = len(self.learned_incompatibilities)
-        self.learned_incompatibilities.append(
-            LearnedIncompatibility(frozen_terms, watches)
-        )
-        self.learned_incompatibility_terms.add(frozen_terms)
-        for package_id in watches:
-            self.incompatibility_watches.setdefault(package_id, set()).add(
-                incompatibility_id
+        decision_levels = tuple(
+            sorted(
+                (
+                    (term, self.assignment_levels.get(term, len(selected)))
+                    for term in frozen_terms
+                ),
+                key=lambda item: (item[0][0], item[0][1], tuple(sorted(item[0][2]))),
             )
+        )
+        self.record_learned_incompatibility(
+            LearnedIncompatibility(frozen_terms, watches, decision_levels)
+        )
 
     @staticmethod
     def minimal_exact_conflict_sources(
@@ -332,6 +431,27 @@ class ResolverConflicts:
             incompatibility = self.learned_incompatibilities[incompatibility_id]
             if candidate_term not in incompatibility.terms:
                 continue
+            incompatibility.activity += 1
+            incompatibility.last_used = self.conflict_activity_bumps
+            if len(incompatibility.terms) == 2:
+                other_term = next(
+                    term for term in incompatibility.terms if term != candidate_term
+                )
+                selected_candidate = selected.get(
+                    self.package_names_internal[other_term[0]]
+                )
+                if selected_candidate is None or self.candidate_assignment(
+                    selected_candidate,
+                    selected_extras.get(
+                        self.package_names_internal[other_term[0]], frozenset()
+                    ),
+                ) != other_term:
+                    continue
+                self.bump_conflict_activity(
+                    self.package_names_internal[candidate_term[0]],
+                    self.package_names_internal[other_term[0]],
+                )
+                return True
             if all(
                 term == candidate_term
                 or (
@@ -500,6 +620,8 @@ class ResolverConflicts:
         return mask
 
     def domain_version_mask(self: ResolverContext, domain: PackageDomain) -> int | None:
+        if domain.active_version_mask is not None:
+            return domain.active_version_mask
         requirements = domain.requirements()
         if not requirements or any(item.url is not None for item in requirements):
             return None
@@ -528,6 +650,7 @@ class ResolverConflicts:
             mask &= incoming_mask
             if not mask:
                 break
+        domain.active_version_mask = mask
         return mask
 
     def active_allowed_versions(

@@ -40,6 +40,9 @@ class ResolverMetrics:
         "failed_state_hits",
         "root_incompatibility_hits",
         "max_trail_depth",
+        "nonchronological_jumps",
+        "learned_clause_evictions",
+        "resolution_seed_hits",
     )
 
     def __init__(self, enabled: bool = False) -> None:
@@ -54,6 +57,9 @@ class ResolverMetrics:
         self.failed_state_hits = 0
         self.root_incompatibility_hits = 0
         self.max_trail_depth = 0
+        self.nonchronological_jumps = 0
+        self.learned_clause_evictions = 0
+        self.resolution_seed_hits = 0
 
     def snapshot(self) -> dict[str, int]:
         return {
@@ -116,6 +122,13 @@ class ResolverSearchState(Protocol):
     backtrack_count: int
     last_conflict_was_root: bool
     root_incompatibility_hits: int
+    nonchronological_jumps: int
+    conflict_activity_bumps: int
+    learned_clause_limit: int
+    resolution_seed: dict[str, tuple[str, str]]
+    assignment_levels: dict[Assignment, int]
+    backjump_conflict: LearnedIncompatibility | None
+    last_candidate_conflict: LearnedIncompatibility | None
     metrics: ResolverMetrics
 
 

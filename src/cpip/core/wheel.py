@@ -470,6 +470,8 @@ def wheel_candidate(
     archive: zipfile.ZipFile | None = None,
     filename_info: tuple[str, str | Version] | None = None,
     dist_info_dir: str | None = None,
+    wheel_metadata_text: str | None = None,
+    include_layout: bool = True,
     metadata_cache: MetadataCache | None = None,
 ) -> WheelCandidate:
     wheel_path = Path(path)
@@ -541,8 +543,11 @@ def wheel_candidate(
     requested_extras = frozenset(extras or ())
     dependencies = project_wheel_dependencies(metadata, identity, requested_extras)
     wheel_layout = None
-    if archive is not None and dist_info_dir is not None:
-        wheel_metadata_text = archive.read(f"{dist_info_dir}/WHEEL").decode("utf-8")
+    if include_layout and archive is not None and dist_info_dir is not None:
+        if wheel_metadata_text is None:
+            wheel_metadata_text = archive.read(f"{dist_info_dir}/WHEEL").decode(
+                "utf-8"
+            )
         wheel_layout = (
             dist_info_dir,
             tuple(
@@ -724,8 +729,10 @@ def check_compatibility(version: tuple[int, ...], name: str) -> None:
         )
 
 
-def validate_wheel(source: zipfile.ZipFile, name: str) -> str:
-    """Validate a wheel without materializing its WHEEL metadata message."""
+def validate_wheel_with_metadata(
+    source: zipfile.ZipFile, name: str
+) -> tuple[str, str]:
+    """Validate a wheel and return its metadata directory and WHEEL text."""
     try:
         info_dir = wheel_dist_info_dir(source, name)
         wheel_path = f"{info_dir}/WHEEL"
@@ -739,7 +746,12 @@ def validate_wheel(source: zipfile.ZipFile, name: str) -> str:
         raise UnsupportedWheel(f"{name} has an invalid wheel, {exc}") from exc
 
     check_compatibility(version, name)
-    return info_dir
+    return info_dir, text
+
+
+def validate_wheel(source: zipfile.ZipFile, name: str) -> str:
+    """Validate a wheel without materializing its WHEEL metadata message."""
+    return validate_wheel_with_metadata(source, name)[0]
 
 
 def parse_wheel(wheel_zip: zipfile.ZipFile, name: str) -> tuple[str, Message]:

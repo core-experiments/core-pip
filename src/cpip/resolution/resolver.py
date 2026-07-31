@@ -155,10 +155,16 @@ class Resolver(
         self.seen_candidate_conflicts: set[tuple[int, frozenset[str]]] = set()
         self.root_incompatibility_hits = 0
         self.last_conflict_was_root = False
+        self.assignment_levels: dict[Assignment, int] = {}
+        self.backjump_conflict: LearnedIncompatibility | None = None
+        self.last_candidate_conflict: LearnedIncompatibility | None = None
         self.package_ids: dict[str, int] = {}
         self.package_names_internal: list[str] = []
         self.candidate_ids: dict[tuple[int, Version, str], int] = {}
         self.conflict_activity: list[int] = []
+        self.conflict_activity_bumps = 0
+        self.learned_clause_limit = 4096
+        self.resolution_seed: dict[str, tuple[str, str]] = {}
         self.learned_incompatibilities: list[LearnedIncompatibility] = []
         self.learned_incompatibility_terms: set[frozenset[Assignment]] = set()
         self.incompatibility_watches: dict[int, set[int]] = {}
@@ -233,10 +239,14 @@ class Resolver(
         self.seen_candidate_conflicts.clear()
         self.root_incompatibility_hits = 0
         self.last_conflict_was_root = False
+        self.assignment_levels.clear()
+        self.backjump_conflict = None
+        self.last_candidate_conflict = None
         self.package_ids.clear()
         self.package_names_internal.clear()
         self.candidate_ids.clear()
         self.conflict_activity.clear()
+        self.conflict_activity_bumps = 0
         self.learned_incompatibilities.clear()
         self.learned_incompatibility_terms.clear()
         self.incompatibility_watches.clear()
@@ -321,6 +331,10 @@ class Resolver(
                 satisfied[name] for name in sorted(satisfied) if name not in selected
             ],
         )
+        self.resolution_seed = {
+            name: (str(candidate.version), candidate.source_url or "")
+            for name, candidate in selected.items()
+        }
         self.last_graph = graph
         return plan
 
