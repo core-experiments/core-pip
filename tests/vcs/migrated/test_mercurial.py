@@ -6,10 +6,10 @@ import configparser
 import os
 from pathlib import Path
 
-from pip.vcs.support import hide_url
-from pip.vcs.mercurial import Mercurial
+from cpip.vcs.support import hide_url
+from cpip.vcs.mercurial import Mercurial
 
-from pip_test_support import need_mercurial
+from cpip_test_support import need_mercurial
 
 
 @need_mercurial

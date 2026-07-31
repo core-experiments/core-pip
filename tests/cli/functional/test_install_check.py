@@ -1,6 +1,6 @@
 from collections.abc import Iterable
 
-from pip_test_support import PipTestEnvironment, create_test_package_with_setup
+from cpip_test_support import CpipTestEnvironment, create_test_package_with_setup
 
 
 def assert_contains_expected_lines(string: str, expected_lines: Iterable[str]) -> None:
@@ -8,7 +8,7 @@ def assert_contains_expected_lines(string: str, expected_lines: Iterable[str]) -
         assert (expected_line + "\n") in string
 
 
-def test_check_install_canonicalization(script: PipTestEnvironment) -> None:
+def test_check_install_canonicalization(script: CpipTestEnvironment) -> None:
     pkga_path = create_test_package_with_setup(
         script,
         name="pkgA",
@@ -27,14 +27,14 @@ def test_check_install_canonicalization(script: PipTestEnvironment) -> None:
     )
 
     # Let's install pkgA without its dependency
-    result = script.pip(
+    result = script.cpip(
         "install", "--no-build-isolation", "--no-index", pkga_path, "--no-deps"
     )
     assert "Successfully installed pkgA-1.0" in result.stdout, str(result)
 
     # Install the first missing dependency. Only an error for the
     # second dependency should remain.
-    result = script.pip(
+    result = script.cpip(
         "install",
         "--no-build-isolation",
         "--no-index",
@@ -51,8 +51,8 @@ def test_check_install_canonicalization(script: PipTestEnvironment) -> None:
 
     # Install the second missing package and expect that there is no warning
     # during the installation. This is special as the package name requires
-    # name normalization (as in https://github.com/pypa/pip/issues/5134)
-    result = script.pip(
+    # name normalization (as in https://github.com/pypa/cpip/issues/5134)
+    result = script.cpip(
         "install",
         "--no-build-isolation",
         "--no-index",
@@ -63,7 +63,7 @@ def test_check_install_canonicalization(script: PipTestEnvironment) -> None:
     assert result.returncode == 0
 
     # Double check that all errors are resolved in the end
-    result = script.pip("check")
+    result = script.cpip("check")
     expected_lines = [
         "No broken requirements found.",
     ]
@@ -72,7 +72,7 @@ def test_check_install_canonicalization(script: PipTestEnvironment) -> None:
 
 
 def test_check_install_does_not_warn_for_out_of_graph_issues(
-    script: PipTestEnvironment,
+    script: CpipTestEnvironment,
 ) -> None:
     pkg_broken_path = create_test_package_with_setup(
         script,
@@ -92,13 +92,13 @@ def test_check_install_does_not_warn_for_out_of_graph_issues(
     )
 
     # Install a package without it's dependencies
-    result = script.pip(
+    result = script.cpip(
         "install", "--no-build-isolation", "--no-index", pkg_broken_path, "--no-deps"
     )
     assert "requires" not in result.stderr
 
     # Install conflict package
-    result = script.pip(
+    result = script.cpip(
         "install",
         "--no-build-isolation",
         "--no-index",
@@ -115,7 +115,7 @@ def test_check_install_does_not_warn_for_out_of_graph_issues(
     )
 
     # Install unrelated package
-    result = script.pip(
+    result = script.cpip(
         "install",
         "--no-build-isolation",
         "--no-index",
@@ -125,7 +125,7 @@ def test_check_install_does_not_warn_for_out_of_graph_issues(
     # should not warn about broken's deps when installing unrelated package
     assert "requires" not in result.stderr
 
-    result = script.pip("check", expect_error=True)
+    result = script.cpip("check", expect_error=True)
     expected_lines = [
         "broken 1.0 requires missing, which is not installed.",
         "broken 1.0 has requirement conflict<1.0, but you have conflict 1.0.",

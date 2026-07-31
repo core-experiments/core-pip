@@ -3,17 +3,17 @@ from typing import Any
 
 import pytest
 
-from pip_test_support import PipTestEnvironment, TestPipResult
+from cpip_test_support import CpipTestEnvironment, TestCpipResult
 
-PipRunner = Callable[..., TestPipResult]
+CpipRunner = Callable[..., TestCpipResult]
 
 
 @pytest.fixture
-def pip_no_truststore(script: PipTestEnvironment) -> PipRunner:
-    def pip(*args: str, **kwargs: Any) -> TestPipResult:
-        return script.pip(*args, "--use-deprecated=legacy-certs", **kwargs)
+def cpip_no_truststore(script: CpipTestEnvironment) -> CpipRunner:
+    def cpip(*args: str, **kwargs: Any) -> TestCpipResult:
+        return script.cpip(*args, "--use-deprecated=legacy-certs", **kwargs)
 
-    return pip
+    return cpip
 
 
 @pytest.mark.network
@@ -21,14 +21,14 @@ def pip_no_truststore(script: PipTestEnvironment) -> PipRunner:
     "package",
     [
         "INITools",
-        "https://github.com/pypa/pip-test-package/archive/refs/heads/master.zip",
+        "https://github.com/pypa/cpip-test-package/archive/refs/heads/master.zip",
     ],
     ids=["PyPI", "GitHub"],
 )
 def test_no_truststore_can_install(
-    script: PipTestEnvironment,
-    pip_no_truststore: PipRunner,
+    script: CpipTestEnvironment,
+    cpip_no_truststore: CpipRunner,
     package: str,
 ) -> None:
-    result = pip_no_truststore("install", package)
+    result = cpip_no_truststore("install", package)
     assert "Successfully installed" in result.stdout

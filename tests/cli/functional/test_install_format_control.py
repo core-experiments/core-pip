@@ -6,14 +6,14 @@ matching the pattern established by --all-releases and --only-final tests.
 
 from __future__ import annotations
 
-from pip_test_support import (
-    PipTestEnvironment,
+from cpip_test_support import (
+    CpipTestEnvironment,
     create_basic_sdist_for_package,
     create_basic_wheel_for_package,
 )
 
 
-def test_order_no_binary_then_only_binary(script: PipTestEnvironment) -> None:
+def test_order_no_binary_then_only_binary(script: CpipTestEnvironment) -> None:
     """Test --no-binary=:all: --only-binary=<package>.
 
     When the user specifies --no-binary=:all: --only-binary=simple, they
@@ -22,7 +22,7 @@ def test_order_no_binary_then_only_binary(script: PipTestEnvironment) -> None:
     wheel_path = create_basic_wheel_for_package(script, "simple", "1.0")
 
     # This should allow wheels for 'simple' because --only-binary comes after
-    result = script.pip_install_local(
+    result = script.cpip_install_local(
         "--no-binary=:all:",
         "--only-binary=simple",
         "simple==1.0",
@@ -33,7 +33,7 @@ def test_order_no_binary_then_only_binary(script: PipTestEnvironment) -> None:
     assert "Building wheel for simple" not in result.stdout
 
 
-def test_order_only_binary_then_no_binary(script: PipTestEnvironment) -> None:
+def test_order_only_binary_then_no_binary(script: CpipTestEnvironment) -> None:
     """Test --only-binary=:all: --no-binary=<package>.
 
     When the user specifies --only-binary=:all: --no-binary=simple,
@@ -43,7 +43,7 @@ def test_order_only_binary_then_no_binary(script: PipTestEnvironment) -> None:
     create_basic_sdist_for_package(script, "simple", "1.0")
 
     # This should build from source for 'simple' because --no-binary comes after
-    result = script.pip_install_local(
+    result = script.cpip_install_local(
         "--only-binary=:all:",
         "--no-binary=simple",
         "simple==1.0",
@@ -54,7 +54,7 @@ def test_order_only_binary_then_no_binary(script: PipTestEnvironment) -> None:
 
 
 def test_reqfile_no_binary_overrides_cmdline_only_binary(
-    script: PipTestEnvironment,
+    script: CpipTestEnvironment,
 ) -> None:
     """Test requirements file --no-binary overrides command line --only-binary."""
     wheel_path = create_basic_wheel_for_package(script, "simple", "1.0")
@@ -66,7 +66,7 @@ def test_reqfile_no_binary_overrides_cmdline_only_binary(
         "--no-binary :all:\nsimple==1.0\n",
     )
 
-    result = script.pip_install_local(
+    result = script.cpip_install_local(
         "--only-binary=:all:", "-r", req_file, find_links=[]
     )
     script.assert_installed(simple="1.0")
@@ -75,7 +75,7 @@ def test_reqfile_no_binary_overrides_cmdline_only_binary(
 
 
 def test_reqfile_only_binary_overrides_cmdline_no_binary(
-    script: PipTestEnvironment,
+    script: CpipTestEnvironment,
 ) -> None:
     """Test requirements file --only-binary overrides command line --no-binary."""
     # Create only a wheel, no sdist
@@ -87,7 +87,7 @@ def test_reqfile_only_binary_overrides_cmdline_no_binary(
         "--only-binary :all:\nsimple==1.0\n",
     )
 
-    result = script.pip_install_local(
+    result = script.cpip_install_local(
         "--no-binary=:all:", "-r", req_file, find_links=[]
     )
     result.assert_installed("simple", editable=False)
@@ -96,7 +96,7 @@ def test_reqfile_only_binary_overrides_cmdline_no_binary(
 
 
 def test_package_specific_overrides_all_in_requirements_file(
-    script: PipTestEnvironment,
+    script: CpipTestEnvironment,
 ) -> None:
     """Test package-specific setting overrides :all: in requirements file."""
     wheel_path = create_basic_wheel_for_package(script, "simple", "1.0")
@@ -107,7 +107,7 @@ def test_package_specific_overrides_all_in_requirements_file(
         "--only-binary simple\nsimple==1.0\n",
     )
 
-    result = script.pip_install_local("-r", req_file, find_links=[])
+    result = script.cpip_install_local("-r", req_file, find_links=[])
     result.assert_installed("simple", editable=False)
     # Package-specific --only-binary should override --no-binary :all:
     assert "Building wheel for simple" not in result.stdout

@@ -7,6 +7,6 @@ __pycache__/
 .mypy_cache/
 
 .venv/
-build/
+/build/
 dist/
 *.egg-info/

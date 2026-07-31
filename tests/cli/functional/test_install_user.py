@@ -1,5 +1,5 @@
 """
-tests specific to "pip install --user"
+tests specific to "cpip install --user"
 """
 
 import os
@@ -9,15 +9,15 @@ from pathlib import Path
 
 import pytest
 
-from pip_test_support import (
-    PipTestEnvironment,
+from cpip_test_support import (
+    CpipTestEnvironment,
     TestData,
     create_basic_wheel_for_package,
     need_svn,
     pyversion,  # noqa: F401
 )
-from pip_test_support.local_repos import local_checkout
-from pip_test_support.venv import VirtualEnvironment
+from cpip_test_support.local_repos import local_checkout
+from cpip_test_support.venv import VirtualEnvironment
 
 
 def patch_dist_in_site_packages(virtualenv: VirtualEnvironment) -> None:
@@ -29,7 +29,7 @@ def patch_dist_in_site_packages(virtualenv: VirtualEnvironment) -> None:
         def dist_in_site_packages(dist):
             return False
 
-        from pip.build.metadata import InstalledMetadataDistribution
+        from cpip.build.metadata import InstalledMetadataDistribution
         InstalledMetadataDistribution.in_site_packages = property(dist_in_site_packages)
     """)
 
@@ -38,13 +38,13 @@ def patch_dist_in_site_packages(virtualenv: VirtualEnvironment) -> None:
 class Tests_UserSite:
     def test_reset_env_system_site_packages_usersite(
         self,
-        script: PipTestEnvironment,
+        script: CpipTestEnvironment,
         data: TestData,
     ) -> None:
         """
         Check user site works as expected.
         """
-        script.pip_install_local("--user", "INITools==0.2", "-f", data.pypi_packages)
+        script.cpip_install_local("--user", "INITools==0.2", "-f", data.pypi_packages)
         result = script.run(
             "python",
             "-c",
@@ -58,13 +58,13 @@ class Tests_UserSite:
     @pytest.mark.network
     @need_svn
     def test_install_subversion_usersite_editable_with_distribute(
-        self, script: PipTestEnvironment, tmpdir: Path
+        self, script: CpipTestEnvironment, tmpdir: Path
     ) -> None:
         """
         Test installing current directory ('.') into usersite after installing
         distribute
         """
-        result = script.pip(
+        result = script.cpip(
             "install",
             "--user",
             "-e",
@@ -77,13 +77,13 @@ class Tests_UserSite:
         result.assert_installed("INITools")
 
     def test_install_from_current_directory_into_usersite(
-        self, script: PipTestEnvironment, data: TestData
+        self, script: CpipTestEnvironment, data: TestData
     ) -> None:
         """
         Test installing current directory ('.') into usersite
         """
         run_from = data.packages.joinpath("FSPkg")
-        result = script.pip(
+        result = script.cpip(
             "install",
             "--no-build-isolation",
             "-vvv",
@@ -99,7 +99,7 @@ class Tests_UserSite:
         result.did_create(dist_info_folder)
 
     def test_install_user_venv_nositepkgs_fails(
-        self, virtualenv: VirtualEnvironment, script: PipTestEnvironment, data: TestData
+        self, virtualenv: VirtualEnvironment, script: CpipTestEnvironment, data: TestData
     ) -> None:
         """
         user install in virtualenv (with no system packages) fails with message
@@ -108,7 +108,7 @@ class Tests_UserSite:
         # honoured by virtualenv's custom site.py.
         virtualenv.user_site_packages = False
         run_from = data.packages.joinpath("FSPkg")
-        result = script.pip(
+        result = script.cpip(
             "install",
             "--user",
             curdir,
@@ -121,15 +121,15 @@ class Tests_UserSite:
         )
 
     def test_install_user_conflict_in_usersite(
-        self, script: PipTestEnvironment, data: TestData
+        self, script: CpipTestEnvironment, data: TestData
     ) -> None:
         """
         Test user install with conflict in usersite updates usersite.
         """
 
-        script.pip_install_local("--user", "INITools==0.2", "-f", data.pypi_packages)
+        script.cpip_install_local("--user", "INITools==0.2", "-f", data.pypi_packages)
 
-        result2 = script.pip_install_local(
+        result2 = script.cpip_install_local(
             "--user", "INITools==0.1", "-f", data.pypi_packages
         )
 
@@ -143,7 +143,7 @@ class Tests_UserSite:
         assert not isfile(initools_v2_file), initools_v2_file
 
     def test_install_user_conflict_in_globalsite(
-        self, virtualenv: VirtualEnvironment, script: PipTestEnvironment
+        self, virtualenv: VirtualEnvironment, script: CpipTestEnvironment
     ) -> None:
         """
         Test user install with conflict in global site ignores site and
@@ -154,14 +154,14 @@ class Tests_UserSite:
 
         patch_dist_in_site_packages(virtualenv)
 
-        script.pip(
+        script.cpip(
             "install",
             "--no-index",
             "--find-links",
             script.scratch_path,
             "initools==0.2",
         )
-        result2 = script.pip(
+        result2 = script.cpip(
             "install",
             "--no-index",
             "--find-links",
@@ -185,7 +185,7 @@ class Tests_UserSite:
         assert isdir(initools_folder)
 
     def test_upgrade_user_conflict_in_globalsite(
-        self, virtualenv: VirtualEnvironment, script: PipTestEnvironment
+        self, virtualenv: VirtualEnvironment, script: CpipTestEnvironment
     ) -> None:
         """
         Test user install/upgrade with conflict in global site ignores site and
@@ -196,14 +196,14 @@ class Tests_UserSite:
 
         patch_dist_in_site_packages(virtualenv)
 
-        script.pip(
+        script.cpip(
             "install",
             "--no-index",
             "--find-links",
             script.scratch_path,
             "initools==0.2",
         )
-        result2 = script.pip(
+        result2 = script.cpip(
             "install",
             "--no-index",
             "--find-links",
@@ -228,7 +228,7 @@ class Tests_UserSite:
         assert isdir(initools_folder)
 
     def test_install_user_conflict_in_globalsite_and_usersite(
-        self, virtualenv: VirtualEnvironment, script: PipTestEnvironment
+        self, virtualenv: VirtualEnvironment, script: CpipTestEnvironment
     ) -> None:
         """
         Test user install with conflict in globalsite and usersite ignores
@@ -246,14 +246,14 @@ class Tests_UserSite:
 
         patch_dist_in_site_packages(virtualenv)
 
-        script.pip(
+        script.cpip(
             "install",
             "--no-index",
             "--find-links",
             script.scratch_path,
             "initools==0.2",
         )
-        script.pip(
+        script.cpip(
             "install",
             "--no-index",
             "--find-links",
@@ -261,7 +261,7 @@ class Tests_UserSite:
             "--user",
             "initools==0.3",
         )
-        result3 = script.pip(
+        result3 = script.cpip(
             "install",
             "--no-index",
             "--find-links",
@@ -285,7 +285,7 @@ class Tests_UserSite:
         assert isdir(initools_folder)
 
     def test_install_user_in_global_virtualenv_with_conflict_fails(
-        self, script: PipTestEnvironment
+        self, script: CpipTestEnvironment
     ) -> None:
         """
         Test user install in --system-site-packages virtualenv with conflict in
@@ -294,7 +294,7 @@ class Tests_UserSite:
         create_basic_wheel_for_package(script, "pkg", "0.1")
         create_basic_wheel_for_package(script, "pkg", "0.2")
 
-        script.pip(
+        script.cpip(
             "install",
             "--no-cache-dir",
             "--no-index",
@@ -303,7 +303,7 @@ class Tests_UserSite:
             "pkg==0.2",
         )
 
-        result2 = script.pip(
+        result2 = script.cpip(
             "install",
             "--no-cache-dir",
             "--no-index",
@@ -316,7 +316,7 @@ class Tests_UserSite:
         resultp = script.run(
             "python",
             "-c",
-            "from pip.build.metadata import InstalledDistributionStore; "
+            "from cpip.build.metadata import InstalledDistributionStore; "
             "print(InstalledDistributionStore().find('pkg').location)",
         )
         dist_location = resultp.stdout.strip()
@@ -328,7 +328,7 @@ class Tests_UserSite:
 
     def test_install_user_nositepkgs_fails(
         self,
-        script: PipTestEnvironment,
+        script: CpipTestEnvironment,
         data: TestData,
     ) -> None:
         """
@@ -336,7 +336,7 @@ class Tests_UserSite:
         """
         create_basic_wheel_for_package(script, "pkg", "0.1")
 
-        # Create a custom Python script that disables user site and runs pip via exec
+        # Create a custom Python script that disables user site and runs cpip via exec
         test_script = script.scratch_path / "test_disable_user_site.py"
         test_script.write_text(
             textwrap.dedent(f"""
@@ -349,9 +349,9 @@ class Tests_UserSite:
             sys.base_prefix = sys.prefix
             site.ENABLE_USER_SITE = False
 
-            # Set up sys.argv to simulate running pip install --user
+            # Set up sys.argv to simulate running cpip install --user
             sys.argv = [
-                "pip", "install",
+                "cpip", "install",
                 "--no-cache-dir",
                 "--no-index",
                 "--find-links",
@@ -360,8 +360,8 @@ class Tests_UserSite:
                 "--user"
             ]
 
-            # Import and run pip's main
-            from pip.cli.main import main
+            # Import and run cpip's main
+            from cpip.cli.main import main
             sys.exit(main())
             """)
         )

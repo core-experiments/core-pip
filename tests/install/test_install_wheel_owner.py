@@ -6,11 +6,11 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from pip.core.errors import InstallationError
-from pip.core.metadata import default_lib_path
-from pip.install.requirements import RequirementInstaller
-from pip.install.target import InstallTarget
-from pip.install.wheel_transaction import (
+from cpip.core.errors import InstallationError
+from cpip.core.metadata import default_lib_path
+from cpip.install.requirements import RequirementInstaller
+from cpip.install.target import InstallTarget
+from cpip.install.wheel_transaction import (
     WheelInstaller,
     install_wheels_transactionally,
 )
@@ -77,7 +77,7 @@ def make_wheel_internal(
     return wheel
 
 
-def test_install_and_uninstall_are_owned_by_pip_install(tmp_path: Path) -> None:
+def test_install_and_uninstall_are_owned_by_cpip_install(tmp_path: Path) -> None:
     wheel = make_wheel_internal(tmp_path)
     target = tmp_path / "site-packages"
 
@@ -86,7 +86,7 @@ def test_install_and_uninstall_are_owned_by_pip_install(tmp_path: Path) -> None:
     assert candidate.name == "owner-demo"
     assert target.joinpath("owner_demo", "__init__.py").read_text() == "VALUE = '1.0'\n"
     assert (
-        target.joinpath("owner_demo-1.0.dist-info", "INSTALLER").read_text() == "pip\n"
+        target.joinpath("owner_demo-1.0.dist-info", "INSTALLER").read_text() == "cpip\n"
     )
     assert RequirementInstaller().uninstall("owner-demo", paths=[str(target)])
     assert not target.joinpath("owner_demo").exists()

@@ -1,0 +1,30 @@
+import os
+import sys
+
+# Remove '' and current working directory from the first entry
+# of sys.path, if present to avoid using current directory
+# in cpip commands check, freeze, install, list and show,
+# when invoked as python -m cpip <command>
+if sys.path[0] in ("", os.getcwd()):
+    sys.path.pop(0)
+
+# If we are running from a wheel, add the wheel to sys.path
+# This allows the usage python cpip-*.whl/cpip install cpip-*.whl
+if not __spec__ or __spec__.parent == "":
+    # __file__ is cpip-*.whl/cpip/__main__.py
+    # first dirname call strips of '/__main__.py', second strips off '/cpip'
+    # Resulting path is the name of the wheel itself
+    # Add that to sys.path so we can import cpip
+    path = os.path.dirname(os.path.dirname(__file__))
+    sys.path.insert(0, path)
+
+if __name__ == "__main__":
+    from . import __version__
+    from cpip.cli.entrypoint import main as main_internal
+
+    sys.exit(
+        main_internal(
+            version=__version__,
+            location=os.path.join(os.path.dirname(__file__), "__init__.py"),
+        )
+    )

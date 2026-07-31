@@ -1,4 +1,4 @@
-"""Ports of pip-relevant Criterion benchmarks from uv."""
+"""Ports of cpip-relevant Criterion benchmarks from uv."""
 
 from __future__ import annotations
 
@@ -6,11 +6,11 @@ import shutil
 import zipfile
 from pathlib import Path
 
-from pip.core.packaging import SpecifierSet
-from pip.core.wheel import validate_wheel
-from pip.install.target import InstallTarget
-from pip.install.unpacking import untar_file, unzip_file
-from pip.install.wheel_transaction import WheelInstaller
+from cpip.core.packaging import SpecifierSet
+from cpip.core.wheel import validate_wheel
+from cpip.install.target import InstallTarget
+from cpip.install.unpacking import untar_file, unzip_file
+from cpip.install.wheel_transaction import WheelInstaller
 
 from .uv_scenarios import create_many_files_archives
 

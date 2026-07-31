@@ -27,7 +27,7 @@ from unittest.mock import patch
 from zipfile import ZipFile
 
 if sys.version_info < (3, 11):
-    from pip._vendor import tomli
+    from cpip._vendor import tomli
 
     sys.modules.setdefault("tomllib", tomli)
 
@@ -46,26 +46,26 @@ from _pytest.config.argparsing import Parser
 from installer import install
 from installer.destinations import SchemeDictionaryDestination
 from installer.sources import WheelFile
-from pip.core.temp_dir import global_tempdir_manager
-from pip_test_support import (
+from cpip.core.temp_dir import global_tempdir_manager
+from cpip_test_support import (
     DATA_DIR,
     SRC_DIR,
     CertFactory,
-    InMemoryPip,
-    PipTestEnvironment,
+    InMemoryCpip,
+    CpipTestEnvironment,
     ScriptFactory,
     TestData,
 )
-from pip_test_support.server import MockServer, make_mock_server, patch_getfqdn
-from pip_test_support.venv import VirtualEnvironment, VirtualEnvironmentType
+from cpip_test_support.server import MockServer, make_mock_server, patch_getfqdn
+from cpip_test_support.venv import VirtualEnvironment, VirtualEnvironmentType
 
 if TYPE_CHECKING:
     from typing_extensions import Self
 
-# For the pip zipapp, Python modules are replaced with their .pyc equivalent to
-# speed up startup, but some modules must remain as .py files for pip to function.
+# For the cpip zipapp, Python modules are replaced with their .pyc equivalent to
+# speed up startup, but some modules must remain as .py files for cpip to function.
 ZIPAPP_PYC_BLOCKLIST = [
-    "pip/__pip-runner__.py",
+    "cpip/__cpip-runner__.py",
 ]
 
 
@@ -94,7 +94,7 @@ def pytest_addoption(parser: Parser) -> None:
         "--run-search",
         action="store_true",
         default=False,
-        help="run 'pip search' tests",
+        help="run 'cpip search' tests",
     )
     parser.addoption(
         "--proxy",
@@ -106,7 +106,7 @@ def pytest_addoption(parser: Parser) -> None:
         "--use-zipapp",
         action="store_true",
         default=False,
-        help="use a zipapp when running pip in tests",
+        help="use a zipapp when running cpip in tests",
     )
     parser.addoption(
         "--num-test-groups",
@@ -129,7 +129,7 @@ def pytest_configure(config: Config) -> None:
     from _pytest import pathlib as pytest_pathlib
 
     original = pytest_pathlib.on_rm_rf_error
-    if getattr(original, "_pip_retry_enotempty", False):
+    if getattr(original, "_cpip_retry_enotempty", False):
         return
 
     def on_rm_rf_error(
@@ -152,7 +152,7 @@ def pytest_configure(config: Config) -> None:
             return True
         return original(func, path, excinfo, start_path=start_path)
 
-    on_rm_rf_error._pip_retry_enotempty = True  # type: ignore[attr-defined]
+    on_rm_rf_error._cpip_retry_enotempty = True  # type: ignore[attr-defined]
     pytest_pathlib.on_rm_rf_error = on_rm_rf_error
 
 
@@ -162,7 +162,7 @@ def pytest_collection_modifyitems(config: Config, items: list[pytest.Function]) 
             continue
 
         if item.get_closest_marker("search") and not config.getoption("--run-search"):
-            item.add_marker(pytest.mark.skip("pip search test skipped"))
+            item.add_marker(pytest.mark.skip("cpip search test skipped"))
 
         # Exempt tests known to use the network from pytest-subket.
         if item.get_closest_marker("network") is not None:
@@ -288,12 +288,12 @@ def shard_collected_items(config: Config, items: list[pytest.Function]) -> None:
 
 @pytest.fixture(scope="session", autouse=True)
 def resolver_variant(request: pytest.FixtureRequest) -> Iterator[str]:
-    """Set environment variable to make pip default to the correct resolver."""
+    """Set environment variable to make cpip default to the correct resolver."""
     resolver = request.config.getoption("--resolver")
 
     # Handle the environment variables for this test.
-    features = set(os.environ.get("PIP_USE_FEATURE", "").split())
-    deprecated_features = set(os.environ.get("PIP_USE_DEPRECATED", "").split())
+    features = set(os.environ.get("CPIP_USE_FEATURE", "").split())
+    deprecated_features = set(os.environ.get("CPIP_USE_DEPRECATED", "").split())
 
     if resolver == "legacy":
         deprecated_features.add("legacy-resolver")
@@ -301,8 +301,8 @@ def resolver_variant(request: pytest.FixtureRequest) -> Iterator[str]:
         deprecated_features.discard("legacy-resolver")
 
     env = {
-        "PIP_USE_FEATURE": " ".join(features),
-        "PIP_USE_DEPRECATED": " ".join(deprecated_features),
+        "CPIP_USE_FEATURE": " ".join(features),
+        "CPIP_USE_DEPRECATED": " ".join(deprecated_features),
     }
     with patch.dict(os.environ, env):
         yield resolver
@@ -410,15 +410,15 @@ def isolate(tmpdir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # Configure git, because without an author name/email git will complain
     # and cause test failures.
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
-    monkeypatch.setenv("GIT_AUTHOR_NAME", "pip")
+    monkeypatch.setenv("GIT_AUTHOR_NAME", "cpip")
     monkeypatch.setenv("GIT_AUTHOR_EMAIL", "distutils-sig@python.org")
-    monkeypatch.delenv("PIP_NO_PARTIAL_CLONE_FOR_BROKEN_GIT_SERVER", False)
+    monkeypatch.delenv("CPIP_NO_PARTIAL_CLONE_FOR_BROKEN_GIT_SERVER", False)
 
     # We want to disable the version check from running in the tests
-    monkeypatch.setenv("PIP_DISABLE_PIP_VERSION_CHECK", "true")
+    monkeypatch.setenv("CPIP_DISABLE_CPIP_VERSION_CHECK", "true")
 
     # Make sure tests don't share a requirements tracker.
-    monkeypatch.delenv("PIP_BUILD_TRACKER", False)
+    monkeypatch.delenv("CPIP_BUILD_TRACKER", False)
 
     # Make sure color control variables don't affect internal output.
     monkeypatch.delenv("FORCE_COLOR", False)
@@ -427,7 +427,7 @@ def isolate(tmpdir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # FIXME: Windows...
     os.makedirs(os.path.join(home_dir, ".config", "git"))
     with open(os.path.join(home_dir, ".config", "git", "config"), "wb") as fp:
-        fp.write(b"[user]\n\tname = pip\n\temail = distutils-sig@python.org\n")
+        fp.write(b"[user]\n\tname = cpip\n\temail = distutils-sig@python.org\n")
 
 
 @pytest.fixture(autouse=True)
@@ -447,7 +447,7 @@ def scoped_global_tempdir_manager(request: pytest.FixtureRequest) -> Iterator[No
 
 
 @pytest.fixture(scope="session")
-def pip_src(tmpdir_factory: pytest.TempPathFactory) -> Path:
+def cpip_src(tmpdir_factory: pytest.TempPathFactory) -> Path:
     def not_code_files_and_folders(path: str, names: list[str]) -> Iterable[str]:
         # In the root directory...
         if os.path.samefile(path, SRC_DIR):
@@ -463,60 +463,60 @@ def pip_src(tmpdir_factory: pytest.TempPathFactory) -> Path:
 
         # Ignore all compiled files and egg-info.
         ignored = set()
-        for pattern in ("__pycache__", "*.pyc", "pip.egg-info"):
+        for pattern in ("__pycache__", "*.pyc", "cpip.egg-info"):
             ignored.update(fnmatch.filter(names, pattern))
         return ignored
 
-    pip_src = tmpdir_factory.mktemp("pip_src").joinpath("pip_src")
+    cpip_src = tmpdir_factory.mktemp("cpip_src").joinpath("cpip_src")
     # Copy over our source tree so that each use is self contained
     shutil.copytree(
         SRC_DIR,
-        pip_src.resolve(),
+        cpip_src.resolve(),
         ignore=not_code_files_and_folders,
     )
-    return pip_src
+    return cpip_src
 
 
 @pytest.fixture(scope="session")
-def pip_editable_parts(
-    pip_src: Path, tmpdir_factory: pytest.TempPathFactory
+def cpip_editable_parts(
+    cpip_src: Path, tmpdir_factory: pytest.TempPathFactory
 ) -> tuple[Path, ...]:
-    pip_editable = tmpdir_factory.mktemp("pip") / "pip"
-    shutil.copytree(pip_src, pip_editable, symlinks=True)
+    cpip_editable = tmpdir_factory.mktemp("cpip") / "cpip"
+    shutil.copytree(cpip_src, cpip_editable, symlinks=True)
     assert compileall.compile_dir(
-        pip_editable,
+        cpip_editable,
         quiet=1,
     )
-    pip_self_install_path = tmpdir_factory.mktemp("pip_self_install")
-    shutil.copytree(SRC_DIR / "src" / "pip", pip_self_install_path / "pip")
+    cpip_self_install_path = tmpdir_factory.mktemp("cpip_self_install")
+    shutil.copytree(SRC_DIR / "src" / "cpip", cpip_self_install_path / "cpip")
     # Target installs still generate console scripts in the active Python
     # environment.  Every xdist worker builds this session fixture, so the
-    # installs must not concurrently replace the shared ``.venv/bin/pip``.
+    # installs must not concurrently replace the shared ``.venv/bin/cpip``.
     # Otherwise one worker can move that file into its transaction backup just
-    # as another worker tries to move it, leaving the subprocess without pip.
-    lock_path = Path(tempfile.gettempdir()) / "pip-tests-editable-install.lock"
+    # as another worker tries to move it, leaving the subprocess without cpip.
+    lock_path = Path(tempfile.gettempdir()) / "cpip-tests-editable-install.lock"
     with FileLock(lock_path):
         subprocess.check_call(
             [
                 sys.executable,
                 "-m",
-                "pip",
+                "cpip",
                 "install",
                 "--target",
-                pip_self_install_path,
+                cpip_self_install_path,
                 "--no-deps",
                 "-e",
-                pip_editable,
+                cpip_editable,
             ]
         )
-    pth = next(pip_self_install_path.glob("*pip*.pth"))
+    pth = next(cpip_self_install_path.glob("*cpip*.pth"))
     pth.write_text(
         pth.read_text(encoding="utf-8")
         + os.linesep
-        + str(pip_self_install_path.resolve()),
+        + str(cpip_self_install_path.resolve()),
         encoding="utf-8",
     )
-    dist_info = next(pip_self_install_path.glob("*.dist-info"))
+    dist_info = next(cpip_self_install_path.glob("*.dist-info"))
     return (pth, dist_info)
 
 
@@ -575,7 +575,7 @@ def socket_install(tmpdir_factory: pytest.TempPathFactory, common_wheels: Path) 
         tmpdir_factory, common_wheels, "pytest_subket"
     )
     # pytest-subket is only included so it can intercept and block unexpected
-    # network requests. It should NOT be visible to the pip under test.
+    # network requests. It should NOT be visible to the cpip under test.
     dist_info = next(lib_dir.glob("*.dist-info"))
     shutil.rmtree(dist_info)
     return lib_dir
@@ -584,7 +584,7 @@ def socket_install(tmpdir_factory: pytest.TempPathFactory, common_wheels: Path) 
 def install_pth_link(
     venv: VirtualEnvironment, project_name: str, lib_dir: Path
 ) -> None:
-    venv.site.joinpath(f"_pip_testsuite_{project_name}.pth").write_text(
+    venv.site.joinpath(f"_cpip_testsuite_{project_name}.pth").write_text(
         str(lib_dir.resolve()), encoding="utf-8"
     )
 
@@ -593,8 +593,8 @@ def install_pth_link(
 def virtualenv_template(
     request: pytest.FixtureRequest,
     tmpdir_factory: pytest.TempPathFactory,
-    pip_src: Path,
-    pip_editable_parts: tuple[Path, ...],
+    cpip_src: Path,
+    cpip_editable_parts: tuple[Path, ...],
     setuptools_install: Path,
     coverage_install: Path,
     socket_install: Path,
@@ -609,10 +609,10 @@ def virtualenv_template(
     tmpdir = tmpdir_factory.mktemp("virtualenv")
     venv = VirtualEnvironment(tmpdir.joinpath("venv_orig"), venv_type=venv_type)
 
-    # Install setuptools, pytest-subket, and pip.
+    # Install setuptools, pytest-subket, and cpip.
     install_pth_link(venv, "setuptools", setuptools_install)
     install_pth_link(venv, "pytest_subket", socket_install)
-    dependency_root = tmpdir_factory.mktemp("pip_test_dependencies")
+    dependency_root = tmpdir_factory.mktemp("cpip_test_dependencies")
     for name, package_names in {
         "msgpack": ("msgpack",),
         "packaging": ("packaging",),
@@ -625,14 +625,14 @@ def virtualenv_template(
                 (dependency_root / package_name).symlink_to(
                     package_path, target_is_directory=package_path.is_dir()
                 )
-    venv.site.joinpath("_pip_testsuite_dependencies.pth").write_text(
+    venv.site.joinpath("_cpip_testsuite_dependencies.pth").write_text(
         str(dependency_root), encoding="utf-8"
     )
     # Also copy pytest-subket's .pth file so it can intercept socket calls.
     with open(venv.site / "pytest_socket.pth", "w") as f:
         f.write(socket_install.joinpath("pytest_socket.pth").read_text())
 
-    pth, dist_info = pip_editable_parts
+    pth, dist_info = cpip_editable_parts
 
     shutil.copy(pth, venv.site)
     shutil.copytree(
@@ -640,7 +640,7 @@ def virtualenv_template(
     )
     # Create placeholder ``easy-install.pth``, as several tests depend on its
     # existence.  TODO: Ensure
-    # ``pip_test_support.TestPipResult.files_updated`` correctly detects changed files.
+    # ``cpip_test_support.TestCpipResult.files_updated`` correctly detects changed files.
     venv.site.joinpath("easy-install.pth").touch()
 
     if request.config.getoption("--cov"):
@@ -681,7 +681,7 @@ def virtualenv(
     Return a virtual environment which is unique to each test function
     invocation created inside of a sub directory of the test function's
     temporary directory. The returned object is a
-    ``pip_test_support.venv.VirtualEnvironment`` object.
+    ``cpip_test_support.venv.VirtualEnvironment`` object.
     """
     return virtualenv_factory(tmpdir.joinpath("workspace", "venv"))
 
@@ -696,13 +696,13 @@ def script_factory(
         tmpdir: Path,
         virtualenv: VirtualEnvironment | None = None,
         environ: dict[AnyStr, AnyStr] | None = None,
-    ) -> PipTestEnvironment:
+    ) -> CpipTestEnvironment:
         kwargs = {}
         if environ:
             kwargs["environ"] = environ
         if virtualenv is None:
             virtualenv = virtualenv_factory(tmpdir.joinpath("venv"))
-        return PipTestEnvironment(
+        return CpipTestEnvironment(
             # The base location for our test environment
             tmpdir,
             # Tell the Test Environment where our virtualenv is located
@@ -712,12 +712,12 @@ def script_factory(
             # We are starting with an already empty directory
             start_clear=False,
             # We want to ensure no temporary files are left behind, so the
-            # PipTestEnvironment needs to capture and assert against temp
+            # CpipTestEnvironment needs to capture and assert against temp
             capture_temp=True,
             assert_no_temp=True,
             # Deprecated python versions produce an extra deprecation warning
-            pip_expect_warning=deprecated_python,
-            # Tell the Test Environment if we want to run pip via a zipapp
+            cpip_expect_warning=deprecated_python,
+            # Tell the Test Environment if we want to run cpip via a zipapp
             zipapp=zipapp,
             **kwargs,
         )
@@ -735,40 +735,40 @@ import sys
 lib = os.path.join(os.path.dirname(__file__), "lib")
 sys.path.insert(0, lib)
 
-runpy.run_module("pip", run_name="__main__")
+runpy.run_module("cpip", run_name="__main__")
 """
 
 
-def make_zipapp_from_pip(pip_src: Path, zipapp_path: Path) -> None:
-    # pip_src will exclude existing .pyc files, but to speed up zipapp
+def make_zipapp_from_pip(cpip_src: Path, zipapp_path: Path) -> None:
+    # cpip_src will exclude existing .pyc files, but to speed up zipapp
     # startup, replace the .py files with their equivalent .pyc (CPython only)
-    src_dir = pip_src / "src"
+    src_dir = cpip_src / "src"
     with zipapp_path.open("wb") as zipapp_file:
         zipapp_file.write(b"#!/usr/bin/env python\n")
         with ZipFile(zipapp_file, "w") as zipapp:
-            for pip_file in src_dir.rglob("*"):
-                rel_name = pip_file.relative_to(src_dir)
+            for cpip_file in src_dir.rglob("*"):
+                rel_name = cpip_file.relative_to(src_dir)
                 if (
                     sys.implementation.name == "cpython"
-                    and pip_file.suffix == ".py"
+                    and cpip_file.suffix == ".py"
                     and str(rel_name) not in ZIPAPP_PYC_BLOCKLIST
                 ):
-                    pyc_path = pip_file.with_suffix(".pyc")
-                    py_compile.compile(str(pip_file), str(pyc_path), doraise=True)
-                    pip_file = pyc_path
+                    pyc_path = cpip_file.with_suffix(".pyc")
+                    py_compile.compile(str(cpip_file), str(pyc_path), doraise=True)
+                    cpip_file = pyc_path
                     rel_name = rel_name.with_suffix(".pyc")
-                zipapp.write(pip_file, arcname=f"lib/{rel_name}")
+                zipapp.write(cpip_file, arcname=f"lib/{rel_name}")
             zipapp.writestr("__main__.py", ZIPAPP_MAIN)
 
 
 @pytest.fixture(scope="session")
 def zipapp(
     request: pytest.FixtureRequest,
-    pip_src: Path,
+    cpip_src: Path,
     tmpdir_factory: pytest.TempPathFactory,
 ) -> str | None:
     """
-    If the user requested for pip to be run from a zipapp, build that zipapp
+    If the user requested for cpip to be run from a zipapp, build that zipapp
     and return its location. If the user didn't request a zipapp, return None.
 
     This fixture is session scoped, so the zipapp will only be created once.
@@ -777,12 +777,12 @@ def zipapp(
         return None
 
     temp_location = tmpdir_factory.mktemp("zipapp")
-    # pip_src has session scope, so make a copy to avoid littering it with
+    # cpip_src has session scope, so make a copy to avoid littering it with
     # .pyc files.
-    pip_src_copy = temp_location / "pip-src"
-    shutil.copytree(pip_src, pip_src_copy)
-    pyz_file = temp_location / "pip.pyz"
-    make_zipapp_from_pip(pip_src_copy, pyz_file)
+    cpip_src_copy = temp_location / "cpip-src"
+    shutil.copytree(cpip_src, cpip_src_copy)
+    pyz_file = temp_location / "cpip.pyz"
+    make_zipapp_from_pip(cpip_src_copy, pyz_file)
     return str(pyz_file)
 
 
@@ -792,12 +792,12 @@ def script(
     tmpdir: Path,
     virtualenv: VirtualEnvironment,
     script_factory: ScriptFactory,
-) -> PipTestEnvironment:
+) -> CpipTestEnvironment:
     """
-    Return a PipTestEnvironment which is unique to each test function and
+    Return a CpipTestEnvironment which is unique to each test function and
     will execute all commands inside of the unique virtual environment for this
     test function. The returned object is a
-    ``pip_test_support.PipTestEnvironment``.
+    ``cpip_test_support.CpipTestEnvironment``.
     """
     return script_factory(tmpdir.joinpath("workspace"), virtualenv)
 
@@ -819,13 +819,13 @@ def data(tmpdir: Path) -> TestData:
 
 
 @pytest.fixture
-def in_memory_pip() -> InMemoryPip:
-    return InMemoryPip()
+def in_memory_pip() -> InMemoryCpip:
+    return InMemoryCpip()
 
 
 @pytest.fixture(scope="session")
 def deprecated_python() -> bool:
-    """Used to indicate whether pip deprecated this Python version"""
+    """Used to indicate whether cpip deprecated this Python version"""
     return sys.version_info[:2] in []
 
 
@@ -834,7 +834,7 @@ def cert_factory(tmpdir_factory: pytest.TempPathFactory) -> CertFactory:
     # Delay the import requiring cryptography in order to make it possible
     # to deselect relevant tests on systems where cryptography cannot
     # be installed.
-    from pip_test_support.certs import make_tls_cert, serialize_cert, serialize_key
+    from cpip_test_support.certs import make_tls_cert, serialize_cert, serialize_key
 
     def factory() -> str:
         """Returns path to cert/key file."""
@@ -943,7 +943,7 @@ def fake_packages() -> dict[str, list[FakePackage]]:
             FakePackage("simple", "3.0", "simple-3.0.tar.gz", MetadataKind.WrongHash),
         ],
         "simple2": [
-            # Override the dependencies here in order to force pip to download
+            # Override the dependencies here in order to force cpip to download
             # simple-1.0.tar.gz as well.
             FakePackage(
                 "simple2",
@@ -952,7 +952,7 @@ def fake_packages() -> dict[str, list[FakePackage]]:
                 MetadataKind.Unhashed,
                 ("simple==1.0",),
             ),
-            # This will raise an error when pip attempts to fetch the metadata file.
+            # This will raise an error when cpip attempts to fetch the metadata file.
             FakePackage("simple2", "2.0", "simple2-2.0.tar.gz", MetadataKind.NoFile),
             # This has a METADATA file with a mismatched name.
             FakePackage(
@@ -1065,7 +1065,7 @@ def html_index_for_packages(
 
         download_links: list[str] = []
         for package_link in links:
-            # (3.1) Generate the <a> tag which pip can crawl pointing to this
+            # (3.1) Generate the <a> tag which cpip can crawl pointing to this
             # specific package version.
             download_links.append(
                 f'    <a href="{package_link.filename}" {package_link.generate_additional_tag()}>{package_link.filename}</a><br/>'  # noqa: E501
@@ -1127,7 +1127,7 @@ def html_index_with_onetime_server(
     """Serve files from a generated pypi index, erroring if a file is downloaded more
     than once.
 
-    Provide `-i http://localhost:8000` to pip invocations to point them at this server.
+    Provide `-i http://localhost:8000` to cpip invocations to point them at this server.
     """
 
     class InDirectoryServer(http.server.ThreadingHTTPServer):

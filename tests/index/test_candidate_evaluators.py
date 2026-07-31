@@ -1,9 +1,9 @@
 import pytest
-from pip.core.packaging import SpecifierSet
-from pip.core.wheel import WheelTag
-from pip.index.candidate_evaluators import CandidateEvaluator
-from pip.index.candidates import InstallationCandidate
-from pip.index.links import Link
+from cpip.core.packaging import SpecifierSet
+from cpip.core.wheel import WheelTag
+from cpip.index.candidate_evaluators import CandidateEvaluator
+from cpip.index.candidates import InstallationCandidate
+from cpip.index.links import Link
 
 
 def test_sort_key_uses_best_supported_tag_rank() -> None:
@@ -45,7 +45,7 @@ def test_sort_key_reuses_preparsed_wheel(
     def fail_wheel_parse(filename: str) -> None:
         raise AssertionError(f"reparsed wheel filename: {filename}")
 
-    monkeypatch.setattr("pip.index.candidate_evaluators.Wheel", fail_wheel_parse)
+    monkeypatch.setattr("cpip.index.candidate_evaluators.Wheel", fail_wheel_parse)
 
     assert evaluator.sort_key_internal(candidate)[6] == 0
 

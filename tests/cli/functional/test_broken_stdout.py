@@ -12,9 +12,9 @@ def setup_broken_stdout_test(
         args,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        # Make the write happen while pip is still inside its exception
+        # Make the write happen while cpip is still inside its exception
         # handler.  Buffered interpreter shutdown is reported differently on
-        # Windows and would bypass pip's broken-pipe handling entirely.
+        # Windows and would bypass cpip's broken-pipe handling entirely.
         env={**os.environ, "PYTHONUNBUFFERED": "1"},
     )
     # Call close() on stdout to cause a broken pipe.
@@ -38,7 +38,7 @@ def test_broken_stdout_pipe(deprecated_python: bool) -> None:
     Test a broken pipe to stdout.
     """
     stderr, returncode = setup_broken_stdout_test(
-        ["pip", "list"],
+        ["cpip", "list"],
         deprecated_python=deprecated_python,
     )
 
@@ -55,7 +55,7 @@ def test_broken_stdout_pipe__log_option(deprecated_python: bool, tmpdir: Path) -
     """
     log_path = os.path.join(str(tmpdir), "log.txt")
     stderr, returncode = setup_broken_stdout_test(
-        ["pip", "--log", log_path, "list"],
+        ["cpip", "--log", log_path, "list"],
         deprecated_python=deprecated_python,
     )
 
@@ -71,7 +71,7 @@ def test_broken_stdout_pipe__verbose(deprecated_python: bool) -> None:
     Test a broken pipe to stdout with verbose logging enabled.
     """
     stderr, returncode = setup_broken_stdout_test(
-        ["pip", "-vv", "list"],
+        ["cpip", "-vv", "list"],
         deprecated_python=deprecated_python,
     )
 

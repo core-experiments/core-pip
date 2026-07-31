@@ -1,12 +1,12 @@
 import os
 
-from pip.vcs.mercurial import Mercurial
+from cpip.vcs.mercurial import Mercurial
 
-from pip_test_support import PipTestEnvironment, create_test_package, need_mercurial
+from cpip_test_support import CpipTestEnvironment, create_test_package, need_mercurial
 
 
 @need_mercurial
-def test_get_repository_root(script: PipTestEnvironment) -> None:
+def test_get_repository_root(script: CpipTestEnvironment) -> None:
     version_pkg_path = create_test_package(script.scratch_path, vcs="hg")
     tests_path = version_pkg_path.joinpath("tests")
     tests_path.mkdir()

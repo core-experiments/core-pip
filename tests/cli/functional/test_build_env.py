@@ -10,24 +10,24 @@ from textwrap import dedent
 from typing import Literal
 
 import pytest
-from pip.install.build_env.base import (
+from cpip.install.build_env.base import (
     BuildEnvironment,
     BuildEnvironmentInstaller,
 )
-from pip.install.build_env.installer import (
+from cpip.install.build_env.installer import (
     InprocessBuildEnvironmentInstaller,
 )
-from pip.install.build_env.venv import VenvBuildEnvironment
-from pip.build.tracker import get_build_tracker
-from pip.build.cache import WheelCache
-from pip_test_support import (
-    PipTestEnvironment,
+from cpip.install.build_env.venv import VenvBuildEnvironment
+from cpip.build.tracker import get_build_tracker
+from cpip.build.cache import WheelCache
+from cpip_test_support import (
+    CpipTestEnvironment,
     TestData,
-    TestPipResult,
+    TestCpipResult,
     create_basic_wheel_for_package,
     make_test_build_options,
 )
-from pip_test_support.wheel import make_wheel
+from cpip_test_support.wheel import make_wheel
 
 InstallMethod = Literal["inprocess"]
 IsolationMethod = Literal["venv"]
@@ -58,12 +58,12 @@ def make_test_build_env_installer(
 
 
 def run_with_build_env(
-    script: PipTestEnvironment,
+    script: CpipTestEnvironment,
     setup_script_contents: str,
     test_script_contents: str | None = None,
     install_method: InstallMethod = "inprocess",
     isolation_method: IsolationMethod = "venv",
-) -> TestPipResult:
+) -> TestCpipResult:
     build_env_script = script.scratch_path / "build_env.py"
     scratch_path = str(script.scratch_path)
     build_env_script.write_text(
@@ -71,15 +71,15 @@ def run_with_build_env(
             import subprocess
             import sys
 
-            from pip.install.build_env.venv import VenvBuildEnvironment
-            from pip.install.build_env.installer import (
+            from cpip.install.build_env.venv import VenvBuildEnvironment
+            from cpip.install.build_env.installer import (
                 BuildConfiguration,
                 InprocessBuildEnvironmentInstaller,
             )
-            from pip.build.cache import WheelCache
-            from pip.build.tracker import get_build_tracker
-            from pip.network.http import NetworkSession
-            from pip.core.temp_dir import global_tempdir_manager
+            from cpip.build.cache import WheelCache
+            from cpip.build.tracker import get_build_tracker
+            from cpip.network.http import NetworkSession
+            from cpip.core.temp_dir import global_tempdir_manager
 
             session = NetworkSession()
             options = BuildConfiguration(
@@ -147,14 +147,14 @@ def test_build_env_restores_unset_path_variables(
 
 @with_both_isolation_methods
 def test_build_env_requirements_check(
-    script: PipTestEnvironment, isolation_method: IsolationMethod
+    script: CpipTestEnvironment, isolation_method: IsolationMethod
 ) -> None:
     create_basic_wheel_for_package(script, "foo", "2.0")
     create_basic_wheel_for_package(script, "bar", "1.0")
     create_basic_wheel_for_package(script, "bar", "3.0")
     create_basic_wheel_for_package(script, "other", "0.5")
 
-    script.pip_install_local("-f", script.scratch_path, "foo", "bar", "other")
+    script.cpip_install_local("-f", script.scratch_path, "foo", "bar", "other")
 
     run_with_build_env(
         script,
@@ -260,7 +260,7 @@ else:
 @with_both_isolation_methods
 @pytest.mark.usefixtures("enable_user_site")
 def test_build_env_isolation(
-    script: PipTestEnvironment,
+    script: CpipTestEnvironment,
     install_method: InstallMethod,
     isolation_method: IsolationMethod,
 ) -> None:
@@ -268,19 +268,19 @@ def test_build_env_isolation(
     pkg_whl = create_basic_wheel_for_package(script, "pkg", "1.0")
 
     # Install it to site packages.
-    script.pip_install_local(pkg_whl)
+    script.cpip_install_local(pkg_whl)
 
     # And a copy in the user site.
-    script.pip_install_local("--ignore-installed", "--user", pkg_whl)
+    script.cpip_install_local("--ignore-installed", "--user", pkg_whl)
 
     # And to another directory available through a .pth file.
     target = script.scratch_path / "pth_install"
-    script.pip_install_local("-t", target, pkg_whl)
+    script.cpip_install_local("-t", target, pkg_whl)
     (script.site_packages_path / "build_requires.pth").write_text(str(target) + "\n")
 
     # And finally to yet another directory available through PYTHONPATH.
     target = script.scratch_path / "pypath_install"
-    script.pip_install_local("-t", target, pkg_whl)
+    script.cpip_install_local("-t", target, pkg_whl)
     script.environ["PYTHONPATH"] = target
 
     system_sites = {os.path.normcase(path) for path in site.getsitepackages()}
@@ -315,19 +315,19 @@ def test_build_env_isolation(
 
 
 def test_build_env_can_still_access_python_tools_on_system_path(
-    script: PipTestEnvironment, data: TestData
+    script: CpipTestEnvironment, data: TestData
 ) -> None:
     """
     Ensure that backend subprocesses can still run system Python tools available
     on PATH and that those tools can import their own dependencies from the system
     Python.
 
-    This is a regression test for https://github.com/pypa/pip/issues/13222 where
+    This is a regression test for https://github.com/pypa/cpip/issues/13222 where
     our legacy sitecustomize.py trick for achieving isolation broke this use-case.
     """
     if shutil.which("cmake") is None:
         pytest.skip("requires a system cmake executable")
-    script.pip_install_local(
+    script.cpip_install_local(
         data.src / "python-cmake-issue-13222",
         "--use-feature=venv-isolation",
         find_links=[data.common_wheels],
@@ -337,7 +337,7 @@ def test_build_env_can_still_access_python_tools_on_system_path(
 
 @with_both_installers
 def test_build_env_console_scripts_use_venv_python(
-    script: PipTestEnvironment, install_method: InstallMethod
+    script: CpipTestEnvironment, install_method: InstallMethod
 ) -> None:
     """
     When using venv isolation, it's important that the build environment

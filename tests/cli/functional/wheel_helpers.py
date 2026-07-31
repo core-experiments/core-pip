@@ -75,7 +75,7 @@ def make_sdist(
         backend_dir = root / "backend"
         backend_dir.mkdir()
         backend_dir.joinpath("local_backend.py").write_text(
-            "from pip.build.build_backend import build_wheel\n",
+            "from cpip.build.build_backend import build_wheel\n",
             encoding="utf-8",
         )
         pyproject_lines.extend(

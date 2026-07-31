@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import pytest
-from pip.core.packaging import (
+from cpip.core.packaging import (
     SpecifierSet,
     Version,
     canonicalize_name,
@@ -31,7 +31,7 @@ def test_standard_requirement_skips_url_parsing(
     def fail_url_parse(value: str) -> None:
         raise AssertionError(f"parsed colon-free requirement as a URL: {value}")
 
-    monkeypatch.setattr("pip.core.packaging.urllib.parse.urlparse", fail_url_parse)
+    monkeypatch.setattr("cpip.core.packaging.urllib.parse.urlparse", fail_url_parse)
 
     requirement = parse_requirement("demo-pkg>=1")
 

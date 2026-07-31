@@ -39,7 +39,7 @@ jobs:
           uv run --group benchmark asv
           --config benchmarks/asv.conf.json run
           ${{ (github.event_name == 'workflow_dispatch' && inputs.quick) && '--quick' || '' }}
-      - name: Run deterministic pip versus uv comparisons
+      - name: Run deterministic cpip versus uv comparisons
         run: >-
           uv run --group benchmark python -m benchmarks.cross_tool
           --scenario trio

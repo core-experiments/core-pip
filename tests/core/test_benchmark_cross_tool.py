@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 import pytest
@@ -8,8 +7,8 @@ import pytest
 from benchmarks.cross_tool import (
     Benchmark,
     Tool,
-    _command,
-    _normalize_output,
+    build_command,
+    normalize_output,
 )
 from benchmarks.uv_scenarios import create_offline_scenarios
 
@@ -23,20 +22,20 @@ def test_normalize_pylock_and_requirements_outputs(tmp_path: Path) -> None:
     requirements = tmp_path / "requirements.txt"
     requirements.write_text("demo-pkg==1.2\n# comment\n", encoding="utf-8")
 
-    assert _normalize_output(pylock) == {("demo-pkg", "1.2")}
-    assert _normalize_output(requirements) == {("demo-pkg", "1.2")}
+    assert normalize_output(pylock) == {("demo-pkg", "1.2")}
+    assert normalize_output(requirements) == {("demo-pkg", "1.2")}
 
 
 def test_commands_use_distinct_state_and_matching_interpreters(tmp_path: Path) -> None:
     scenario = next(iter(create_offline_scenarios(tmp_path).values()))
-    pip = _command(
+    cpip = build_command(
         scenario,
-        Tool.CORE_PIP,
+        Tool.CPIP,
         Benchmark.RESOLVE_COLD,
-        tmp_path / "pip",
+        tmp_path / "cpip",
         uv_path="/opt/uv",
     )
-    uv = _command(
+    uv = build_command(
         scenario,
         Tool.UV_PIP,
         Benchmark.RESOLVE_COLD,
@@ -44,14 +43,14 @@ def test_commands_use_distinct_state_and_matching_interpreters(tmp_path: Path) -
         uv_path="/opt/uv",
     )
 
-    assert pip.name == "core-pip"
+    assert cpip.name == "cpip"
     assert uv.name == "uv-pip"
-    assert str(tmp_path / "pip") in pip.prepare
+    assert str(tmp_path / "cpip") in cpip.prepare
     assert str(tmp_path / "uv") in uv.prepare
-    assert pip.command[0] == "env"
-    assert pip.command[4:7] == [sys.executable, "-m", "pip"]
+    assert cpip.command[0] == "env"
+    assert cpip.command[4] == "cpip"
     assert uv.command[:2] == ["/opt/uv", "pip"]
-    assert "--find-links" in pip.command
+    assert "--find-links" in cpip.command
     assert "--find-links" in uv.command
 
 
@@ -69,30 +68,30 @@ def test_startup_commands_have_expected_shape(
     tmp_path: Path, benchmark: Benchmark
 ) -> None:
     scenario = next(iter(create_offline_scenarios(tmp_path).values()))
-    pip = _command(
-        scenario, Tool.CORE_PIP, benchmark, tmp_path / "pip", uv_path="/opt/uv"
+    cpip = build_command(
+        scenario, Tool.CPIP, benchmark, tmp_path / "cpip", uv_path="/opt/uv"
     )
-    uv = _command(
+    uv = build_command(
         scenario, Tool.UV_PIP, benchmark, tmp_path / "uv", uv_path="/opt/uv"
     )
 
     if benchmark is Benchmark.STARTUP_VERSION:
-        assert pip.command[-1] == "--version"
+        assert cpip.command[-1] == "--version"
         assert uv.command == ["/opt/uv", "--version"]
-        assert pip.prepare == uv.prepare == "true"
+        assert cpip.prepare == uv.prepare == "true"
     elif benchmark is Benchmark.STARTUP_HELP:
-        assert pip.command[-1] == "--help"
+        assert cpip.command[-1] == "--help"
         assert uv.command == ["/opt/uv", "pip", "--help"]
-        assert pip.prepare == uv.prepare == "true"
+        assert cpip.prepare == uv.prepare == "true"
     else:
-        assert "install" in pip.command
+        assert "install" in cpip.command
         assert "install" in uv.command
-        assert "target" in pip.prepare
+        assert "target" in cpip.prepare
         if benchmark is Benchmark.STARTUP_FAST_INSTALL:
-            assert "--quiet" in pip.command
+            assert "--quiet" in cpip.command
             assert "--quiet" in uv.command
         else:
-            assert "--quiet" not in pip.command
+            assert "--quiet" not in cpip.command
             assert "--quiet" not in uv.command
 
 
@@ -112,9 +111,9 @@ def test_cache_modes_have_explicit_prepare_commands(
     output_fragment: str,
 ) -> None:
     scenario = next(iter(create_offline_scenarios(tmp_path).values()))
-    command = _command(
+    command = build_command(
         scenario,
-        Tool.CORE_PIP,
+        Tool.CPIP,
         benchmark,
         tmp_path / "state",
         uv_path=None,

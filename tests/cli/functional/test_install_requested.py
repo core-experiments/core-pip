@@ -1,10 +1,10 @@
 import pytest
 
-from pip_test_support import PipTestEnvironment, TestData, TestPipResult
+from cpip_test_support import CpipTestEnvironment, TestData, TestCpipResult
 
 
 def assert_requested_present(
-    script: PipTestEnvironment, result: TestPipResult, name: str, version: str
+    script: CpipTestEnvironment, result: TestCpipResult, name: str, version: str
 ) -> None:
     dist_info = script.site_packages / f"{name}-{version}.dist-info"
     requested = dist_info / "REQUESTED"
@@ -13,7 +13,7 @@ def assert_requested_present(
 
 
 def assert_requested_absent(
-    script: PipTestEnvironment, result: TestPipResult, name: str, version: str
+    script: CpipTestEnvironment, result: TestCpipResult, name: str, version: str
 ) -> None:
     dist_info = script.site_packages / f"{name}-{version}.dist-info"
     requested = dist_info / "REQUESTED"
@@ -21,8 +21,8 @@ def assert_requested_absent(
     assert requested not in result.files_created
 
 
-def test_install_requested_basic(script: PipTestEnvironment, data: TestData) -> None:
-    result = script.pip(
+def test_install_requested_basic(script: CpipTestEnvironment, data: TestData) -> None:
+    result = script.cpip(
         "install",
         "--no-build-isolation",
         "--no-index",
@@ -36,10 +36,10 @@ def test_install_requested_basic(script: PipTestEnvironment, data: TestData) -> 
 
 
 def test_install_requested_requirements(
-    script: PipTestEnvironment, data: TestData
+    script: CpipTestEnvironment, data: TestData
 ) -> None:
     script.scratch_path.joinpath("requirements.txt").write_text("require_simple\n")
-    result = script.pip(
+    result = script.cpip(
         "install",
         "--no-build-isolation",
         "--no-index",
@@ -53,12 +53,12 @@ def test_install_requested_requirements(
 
 
 def test_install_requested_dep_in_requirements(
-    script: PipTestEnvironment, data: TestData
+    script: CpipTestEnvironment, data: TestData
 ) -> None:
     script.scratch_path.joinpath("requirements.txt").write_text(
         "require_simple\nsimple<3\n"
     )
-    result = script.pip(
+    result = script.cpip(
         "install",
         "--no-build-isolation",
         "--no-index",
@@ -73,11 +73,11 @@ def test_install_requested_dep_in_requirements(
 
 
 def test_install_requested_reqs_and_constraints(
-    script: PipTestEnvironment, data: TestData
+    script: CpipTestEnvironment, data: TestData
 ) -> None:
     script.scratch_path.joinpath("requirements.txt").write_text("require_simple\n")
     script.scratch_path.joinpath("constraints.txt").write_text("simple<3\n")
-    result = script.pip(
+    result = script.cpip(
         "install",
         "--no-build-isolation",
         "--no-index",
@@ -94,13 +94,13 @@ def test_install_requested_reqs_and_constraints(
 
 
 def test_install_requested_in_reqs_and_constraints(
-    script: PipTestEnvironment, data: TestData
+    script: CpipTestEnvironment, data: TestData
 ) -> None:
     script.scratch_path.joinpath("requirements.txt").write_text(
         "require_simple\nsimple\n"
     )
     script.scratch_path.joinpath("constraints.txt").write_text("simple<3\n")
-    result = script.pip(
+    result = script.cpip(
         "install",
         "--no-build-isolation",
         "--no-index",
@@ -117,10 +117,10 @@ def test_install_requested_in_reqs_and_constraints(
 
 
 def test_install_requested_from_cli_with_constraint(
-    script: PipTestEnvironment, data: TestData
+    script: CpipTestEnvironment, data: TestData
 ) -> None:
     script.scratch_path.joinpath("constraints.txt").write_text("simple<3\n")
-    result = script.pip(
+    result = script.cpip(
         "install",
         "--no-build-isolation",
         "--no-index",
@@ -136,18 +136,18 @@ def test_install_requested_from_cli_with_constraint(
 
 @pytest.mark.network
 def test_install_requested_from_cli_with_url_constraint(
-    script: PipTestEnvironment, data: TestData
+    script: CpipTestEnvironment, data: TestData
 ) -> None:
     script.scratch_path.joinpath("constraints.txt").write_text(
-        "pip-test-package @ git+https://github.com/pypa/pip-test-package@0.1.1\n"
+        "cpip-test-package @ git+https://github.com/pypa/cpip-test-package@0.1.1\n"
     )
-    result = script.pip(
+    result = script.cpip(
         "install",
         "--no-build-isolation",
         "--no-index",
         "-c",
         script.scratch_path / "constraints.txt",
-        "pip-test-package",
+        "cpip-test-package",
     )
-    # pip-test-package must have REQUESTED because it was provided on the command line
-    assert_requested_present(script, result, "pip_test_package", "0.1.1")
+    # cpip-test-package must have REQUESTED because it was provided on the command line
+    assert_requested_present(script, result, "cpip_test_package", "0.1.1")

@@ -5,19 +5,19 @@ import os
 from pathlib import Path
 
 import pytest
-from pip.cli.main import main
-from pip.core.packaging import parse_requirement, Requirement, Version
-from pip.core.wheel import TargetContext
-from pip.index.cache import origin_hashes
-from pip.index.candidate_evaluators import CandidateEvaluator
-from pip.index.candidate_materialization import CandidateMaterializer
-from pip.index.candidates import InstallationCandidate
-from pip.index.directory_index import local_source_files
-from pip.index.links import Link
-from pip.index.provider import CandidateProvider
-from pip.index.source_locations import FindLinksSource
-from pip.index.source_models import ArtifactKind, MetadataFile, RejectionReason
-from pip.index.vcs import is_immutable_vcs_link, vcs_reference
+from cpip.cli.main import main
+from cpip.core.packaging import parse_requirement, Requirement, Version
+from cpip.core.wheel import TargetContext
+from cpip.index.cache import origin_hashes
+from cpip.index.candidate_evaluators import CandidateEvaluator
+from cpip.index.candidate_materialization import CandidateMaterializer
+from cpip.index.candidates import InstallationCandidate
+from cpip.index.directory_index import local_source_files
+from cpip.index.links import Link
+from cpip.index.provider import CandidateProvider
+from cpip.index.source_locations import FindLinksSource
+from cpip.index.source_models import ArtifactKind, MetadataFile, RejectionReason
+from cpip.index.vcs import is_immutable_vcs_link, vcs_reference
 from wheel_helpers import make_sdist, make_wheel
 
 
@@ -391,7 +391,7 @@ def test_origin_hashes_with_invalid_json(
     origin_file = tmp_path / "origin.json"
     origin_file.write_text("{", encoding="utf-8")
 
-    with caplog.at_level(logging.WARNING, logger="pip.index.candidate_evaluators"):
+    with caplog.at_level(logging.WARNING, logger="cpip.index.candidate_evaluators"):
         hashes = origin_hashes(origin_file)
 
     assert hashes is None
@@ -421,7 +421,7 @@ def test_evaluate_links_propagates_unexpected_source_tree_error(
 
     provider = CandidateProvider.from_options(no_index=True)
     monkeypatch.setattr(
-        "pip.index.candidates.prepare_project_metadata",
+        "cpip.index.candidates.prepare_project_metadata",
         lambda *args_internal: (_ for _ in ()).throw(RuntimeError("boom")),
     )
 
@@ -757,7 +757,7 @@ def test_candidate_provider_defers_sdist_build_when_matching_wheel_exists(
     def fail_build(*args_internal, **kwargs_internal):
         raise AssertionError("sdist build should be skipped when a wheel exists")
 
-    monkeypatch.setattr("pip.build.build.build_wheel_from_source", fail_build)
+    monkeypatch.setattr("cpip.build.build.build_wheel_from_source", fail_build)
 
     provider = CandidateProvider.from_options(index_url=index.as_uri())
     candidates = provider.find_candidates(parse_requirement("demo-pkg"))
@@ -778,7 +778,7 @@ def test_candidate_provider_only_builds_highest_ranked_source_candidate(
 
     built: list[str] = []
     real_build = __import__(
-        "pip.build.build", fromlist=["build_wheel_from_source"]
+        "cpip.build.build", fromlist=["build_wheel_from_source"]
     ).build_wheel_from_source
 
     def tracking_build(path, *args, **kwargs):
@@ -786,7 +786,7 @@ def test_candidate_provider_only_builds_highest_ranked_source_candidate(
         return real_build(path, *args, **kwargs)
 
     monkeypatch.setattr(
-        "pip.build.build.build_wheel_from_source",
+        "cpip.build.build.build_wheel_from_source",
         tracking_build,
     )
 

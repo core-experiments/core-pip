@@ -10,8 +10,8 @@ from benchmarks.uv_scenarios import (
     create_many_files_archives,
     create_offline_scenarios,
 )
-from pip.index.provider import CandidateProvider
-from pip.resolution.resolver import Resolver
+from cpip.index.provider import CandidateProvider
+from cpip.resolution.resolver import Resolver
 
 
 def test_offline_scenarios_resolve_within_disk_budget(tmp_path: Path) -> None:

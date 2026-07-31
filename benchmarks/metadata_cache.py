@@ -7,7 +7,7 @@ import shutil
 from pathlib import Path
 from typing import cast
 
-from pip.resolution.fast_local_wheelhouse import _load, _wheel_name
+from cpip.resolution.fast_local_wheelhouse import load_candidate, wheel_name
 
 from .uv_scenarios import make_metadata_wheel
 
@@ -60,18 +60,18 @@ class MetadataCacheScaling:
         wheelhouses = cast(dict[str, str], state["wheelhouses"])
         wheelhouse = Path(wheelhouses[wheel_count])
         self.entries = sorted(wheelhouse.glob("*.whl"))
-        self.parsed = {str(path): _wheel_name(str(path)) for path in self.entries}
+        self.parsed = {str(path): wheel_name(str(path)) for path in self.entries}
         self.cache = {}
         if cache_state in {"warm", "invalidate"}:
-            self._load_all()
+            self.load_all()
         if cache_state == "invalidate":
             self.invalidated = self.entries[len(self.entries) // 2]
 
-    def _load_all(self) -> None:
+    def load_all(self) -> None:
         for path in self.entries:
             parsed = self.parsed[str(path)]
             assert parsed is not None
-            _load(str(path), self.cache, parsed)
+            load_candidate(str(path), self.cache, parsed)
 
     def time_metadata(
         self, state: dict[str, object], wheel_count: str, cache_state: str
@@ -84,4 +84,4 @@ class MetadataCacheScaling:
                 self.invalidated,
                 ns=(stat.st_atime_ns, stat.st_mtime_ns + 1),
             )
-        self._load_all()
+        self.load_all()

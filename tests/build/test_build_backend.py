@@ -4,13 +4,13 @@ import zipfile
 from pathlib import Path
 
 import pytest
-from pip.build import build as build_module
-from pip.build.build_backend import (
+from cpip.build import build as build_module
+from cpip.build.build_backend import (
     ProjectBuilder,
     prepare_project_metadata,
     ProjectMetadataReader,
 )
-from pip.core.errors import BuildError
+from cpip.core.errors import BuildError
 
 
 def test_build_backend_builds_static_wheel_with_typed_marker(tmp_path: Path) -> None:

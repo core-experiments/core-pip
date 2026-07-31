@@ -1,8 +1,8 @@
 from pathlib import Path
 
 import pytest
-from pip.core.errors import InstallationError
-from pip.install.transaction import InstallTransaction
+from cpip.core.errors import InstallationError
+from cpip.install.transaction import InstallTransaction
 
 
 def test_transaction_commits_and_replaces_owned_file(tmp_path: Path) -> None:

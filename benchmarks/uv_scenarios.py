@@ -92,7 +92,7 @@ def make_metadata_wheel(
         archive.writestr(
             f"{dist_info}/WHEEL",
             "Wheel-Version: 1.0\n"
-            "Generator: core-pip-asv\n"
+            "Generator: cpip-asv\n"
             "Root-Is-Purelib: true\n"
             "Tag: py3-none-any\n",
         )

@@ -1,11 +1,11 @@
-"""Benchmarks for the lockfile serializers used by pip lock."""
+"""Benchmarks for the lockfile serializers used by cpip lock."""
 
 from __future__ import annotations
 
 from typing import cast
 
-from pip.cli.commands.fast_lock import _render_lock as render_fast_lock
-from pip.cli.commands.lock import _render_lock as render_lock
+from cpip.cli.commands.fast_lock import render_lock as render_fast_lock
+from cpip.cli.commands.lock import render_lock as render_lock
 
 PACKAGE_COUNTS = (10, 100, 1_000, 10_000)
 

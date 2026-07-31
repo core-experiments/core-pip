@@ -6,8 +6,8 @@ import os
 import shutil
 from pathlib import Path
 
-from pip.index.provider import CandidateProvider
-from pip.resolution.resolver import Resolver
+from cpip.index.provider import CandidateProvider
+from cpip.resolution.resolver import Resolver
 
 from .cache_materialization import make_wheel_internal
 

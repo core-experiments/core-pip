@@ -5,7 +5,7 @@ from typing import NoReturn
 from unittest.mock import Mock
 
 import pytest
-from pip.platform.filesystem import retry
+from cpip.platform.filesystem import retry
 
 
 def test_retry_no_error() -> None:

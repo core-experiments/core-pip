@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pip.index.metadata_cache import WheelMetadataCache, metadata_identity
+from cpip.index.metadata_cache import WheelMetadataCache, metadata_identity
 
 
 def test_metadata_cache_round_trips_versioned_headers(tmp_path: Path) -> None:

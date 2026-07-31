@@ -7,8 +7,8 @@ from pathlib import Path
 from zipfile import ZipFile
 
 import pytest
-from pip.core import wheel
-from pip.core.errors import UnsupportedWheel
+from cpip.core import wheel
+from cpip.core.errors import UnsupportedWheel
 
 ZipDir = Callable[[Path], ZipFile]
 

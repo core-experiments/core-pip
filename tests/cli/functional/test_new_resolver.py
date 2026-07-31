@@ -8,20 +8,20 @@ from typing import TYPE_CHECKING, Protocol
 import pytest
 
 from conftest import ScriptFactory
-from pip_test_support import (
-    PipTestEnvironment,
+from cpip_test_support import (
+    CpipTestEnvironment,
     create_basic_sdist_for_package,
     create_basic_wheel_for_package,
     create_test_package_with_setup,
 )
-from pip_test_support.venv import VirtualEnvironment
-from pip_test_support.wheel import make_wheel
+from cpip_test_support.venv import VirtualEnvironment
+from cpip_test_support.wheel import make_wheel
 
 MakeFakeWheel = Callable[[str, str, str], pathlib.Path]
 
 
 @pytest.fixture
-def make_fake_wheel(script: PipTestEnvironment) -> MakeFakeWheel:
+def make_fake_wheel(script: CpipTestEnvironment) -> MakeFakeWheel:
     def make_fake_wheel_internal(
         name: str, version: str, wheel_tag: str
     ) -> pathlib.Path:
@@ -39,13 +39,13 @@ def make_fake_wheel(script: PipTestEnvironment) -> MakeFakeWheel:
     return make_fake_wheel_internal
 
 
-def test_new_resolver_can_install(script: PipTestEnvironment) -> None:
+def test_new_resolver_can_install(script: CpipTestEnvironment) -> None:
     create_basic_wheel_for_package(
         script,
         "simple",
         "0.1.0",
     )
-    script.pip(
+    script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -56,13 +56,13 @@ def test_new_resolver_can_install(script: PipTestEnvironment) -> None:
     script.assert_installed(simple="0.1.0")
 
 
-def test_new_resolver_can_install_with_version(script: PipTestEnvironment) -> None:
+def test_new_resolver_can_install_with_version(script: CpipTestEnvironment) -> None:
     create_basic_wheel_for_package(
         script,
         "simple",
         "0.1.0",
     )
-    script.pip(
+    script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -73,7 +73,7 @@ def test_new_resolver_can_install_with_version(script: PipTestEnvironment) -> No
     script.assert_installed(simple="0.1.0")
 
 
-def test_new_resolver_picks_latest_version(script: PipTestEnvironment) -> None:
+def test_new_resolver_picks_latest_version(script: CpipTestEnvironment) -> None:
     create_basic_wheel_for_package(
         script,
         "simple",
@@ -84,7 +84,7 @@ def test_new_resolver_picks_latest_version(script: PipTestEnvironment) -> None:
         "simple",
         "0.2.0",
     )
-    script.pip(
+    script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -95,7 +95,7 @@ def test_new_resolver_picks_latest_version(script: PipTestEnvironment) -> None:
     script.assert_installed(simple="0.2.0")
 
 
-def test_new_resolver_picks_installed_version(script: PipTestEnvironment) -> None:
+def test_new_resolver_picks_installed_version(script: CpipTestEnvironment) -> None:
     create_basic_wheel_for_package(
         script,
         "simple",
@@ -106,7 +106,7 @@ def test_new_resolver_picks_installed_version(script: PipTestEnvironment) -> Non
         "simple",
         "0.2.0",
     )
-    script.pip(
+    script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -116,7 +116,7 @@ def test_new_resolver_picks_installed_version(script: PipTestEnvironment) -> Non
     )
     script.assert_installed(simple="0.1.0")
 
-    result = script.pip(
+    result = script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -129,7 +129,7 @@ def test_new_resolver_picks_installed_version(script: PipTestEnvironment) -> Non
 
 
 def test_new_resolver_picks_installed_version_if_no_match_found(
-    script: PipTestEnvironment,
+    script: CpipTestEnvironment,
 ) -> None:
     create_basic_wheel_for_package(
         script,
@@ -141,7 +141,7 @@ def test_new_resolver_picks_installed_version_if_no_match_found(
         "simple",
         "0.2.0",
     )
-    script.pip(
+    script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -151,12 +151,12 @@ def test_new_resolver_picks_installed_version_if_no_match_found(
     )
     script.assert_installed(simple="0.1.0")
 
-    result = script.pip("install", "--no-cache-dir", "--no-index", "simple")
+    result = script.cpip("install", "--no-cache-dir", "--no-index", "simple")
     assert "Collecting" not in result.stdout, "Should not fetch new version"
     script.assert_installed(simple="0.1.0")
 
 
-def test_new_resolver_installs_dependencies(script: PipTestEnvironment) -> None:
+def test_new_resolver_installs_dependencies(script: CpipTestEnvironment) -> None:
     create_basic_wheel_for_package(
         script,
         "base",
@@ -168,7 +168,7 @@ def test_new_resolver_installs_dependencies(script: PipTestEnvironment) -> None:
         "dep",
         "0.1.0",
     )
-    script.pip(
+    script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -179,7 +179,7 @@ def test_new_resolver_installs_dependencies(script: PipTestEnvironment) -> None:
     script.assert_installed(base="0.1.0", dep="0.1.0")
 
 
-def test_new_resolver_ignore_dependencies(script: PipTestEnvironment) -> None:
+def test_new_resolver_ignore_dependencies(script: CpipTestEnvironment) -> None:
     create_basic_wheel_for_package(
         script,
         "base",
@@ -191,7 +191,7 @@ def test_new_resolver_ignore_dependencies(script: PipTestEnvironment) -> None:
         "dep",
         "0.1.0",
     )
-    script.pip(
+    script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -212,7 +212,7 @@ def test_new_resolver_ignore_dependencies(script: PipTestEnvironment) -> None:
     ],
 )
 def test_new_resolver_installs_extras(
-    tmpdir: pathlib.Path, script: PipTestEnvironment, root_dep: str
+    tmpdir: pathlib.Path, script: CpipTestEnvironment, root_dep: str
 ) -> None:
     req_file = tmpdir.joinpath("requirements.txt")
     req_file.write_text(root_dep)
@@ -228,7 +228,7 @@ def test_new_resolver_installs_extras(
         "dep",
         "0.1.0",
     )
-    script.pip(
+    script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -240,7 +240,7 @@ def test_new_resolver_installs_extras(
     script.assert_installed(base="0.1.0", dep="0.1.0")
 
 
-def test_new_resolver_installs_extras_warn_missing(script: PipTestEnvironment) -> None:
+def test_new_resolver_installs_extras_warn_missing(script: CpipTestEnvironment) -> None:
     create_basic_wheel_for_package(
         script,
         "base",
@@ -252,7 +252,7 @@ def test_new_resolver_installs_extras_warn_missing(script: PipTestEnvironment) -
         "dep",
         "0.1.0",
     )
-    result = script.pip(
+    result = script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -266,9 +266,9 @@ def test_new_resolver_installs_extras_warn_missing(script: PipTestEnvironment) -
     script.assert_installed(base="0.1.0", dep="0.1.0")
 
 
-def test_new_resolver_installed_message(script: PipTestEnvironment) -> None:
+def test_new_resolver_installed_message(script: CpipTestEnvironment) -> None:
     create_basic_wheel_for_package(script, "A", "1.0")
-    result = script.pip(
+    result = script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -280,9 +280,9 @@ def test_new_resolver_installed_message(script: PipTestEnvironment) -> None:
     assert "Successfully installed A-1.0" in result.stdout, str(result)
 
 
-def test_new_resolver_no_dist_message(script: PipTestEnvironment) -> None:
+def test_new_resolver_no_dist_message(script: CpipTestEnvironment) -> None:
     create_basic_wheel_for_package(script, "A", "1.0")
-    result = script.pip(
+    result = script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -304,7 +304,7 @@ def test_new_resolver_no_dist_message(script: PipTestEnvironment) -> None:
     assert "No matching distribution found for B" in result.stderr, str(result)
 
 
-def test_new_resolver_installs_editable(script: PipTestEnvironment) -> None:
+def test_new_resolver_installs_editable(script: CpipTestEnvironment) -> None:
     create_basic_wheel_for_package(
         script,
         "base",
@@ -316,7 +316,7 @@ def test_new_resolver_installs_editable(script: PipTestEnvironment) -> None:
         name="dep",
         version="0.1.0",
     )
-    script.pip(
+    script.cpip(
         "install",
         "--no-build-isolation",
         "--no-cache-dir",
@@ -343,7 +343,7 @@ def test_new_resolver_installs_editable(script: PipTestEnvironment) -> None:
     ],
 )
 def test_new_resolver_requires_python(
-    script: PipTestEnvironment,
+    script: CpipTestEnvironment,
     requires_python: str,
     ignore_requires_python: bool,
     dep_version: str,
@@ -378,19 +378,19 @@ def test_new_resolver_requires_python(
         args.append("--ignore-requires-python")
     args.append("base")
 
-    script.pip(*args)
+    script.cpip(*args)
 
     script.assert_installed(base="0.1.0", dep=dep_version)
 
 
-def test_new_resolver_requires_python_error(script: PipTestEnvironment) -> None:
+def test_new_resolver_requires_python_error(script: CpipTestEnvironment) -> None:
     create_basic_wheel_for_package(
         script,
         "base",
         "0.1.0",
         requires_python="<2",
     )
-    result = script.pip(
+    result = script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -407,7 +407,7 @@ def test_new_resolver_requires_python_error(script: PipTestEnvironment) -> None:
 
 
 def test_new_resolver_requires_python_ok_with_python_version_flag(
-    script: PipTestEnvironment,
+    script: CpipTestEnvironment,
 ) -> None:
     create_basic_wheel_for_package(
         script,
@@ -415,7 +415,7 @@ def test_new_resolver_requires_python_ok_with_python_version_flag(
         "0.1.0",
         requires_python="<3",
     )
-    result = script.pip(
+    result = script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -430,7 +430,7 @@ def test_new_resolver_requires_python_ok_with_python_version_flag(
     assert not result.stderr, str(result)
 
 
-def test_new_resolver_installed(script: PipTestEnvironment) -> None:
+def test_new_resolver_installed(script: CpipTestEnvironment) -> None:
     create_basic_wheel_for_package(
         script,
         "base",
@@ -443,7 +443,7 @@ def test_new_resolver_installed(script: PipTestEnvironment) -> None:
         "0.1.0",
     )
 
-    result = script.pip(
+    result = script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -453,7 +453,7 @@ def test_new_resolver_installed(script: PipTestEnvironment) -> None:
     )
     assert "Requirement already satisfied" not in result.stdout, str(result)
 
-    result = script.pip(
+    result = script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -467,7 +467,7 @@ def test_new_resolver_installed(script: PipTestEnvironment) -> None:
     )
 
 
-def test_new_resolver_ignore_installed(script: PipTestEnvironment) -> None:
+def test_new_resolver_ignore_installed(script: CpipTestEnvironment) -> None:
     create_basic_wheel_for_package(
         script,
         "base",
@@ -475,7 +475,7 @@ def test_new_resolver_ignore_installed(script: PipTestEnvironment) -> None:
     )
     satisfied_output = "Requirement already satisfied"
 
-    result = script.pip(
+    result = script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -485,7 +485,7 @@ def test_new_resolver_ignore_installed(script: PipTestEnvironment) -> None:
     )
     assert satisfied_output not in result.stdout, str(result)
 
-    result = script.pip(
+    result = script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -501,7 +501,7 @@ def test_new_resolver_ignore_installed(script: PipTestEnvironment) -> None:
 
 
 def test_new_resolver_only_builds_sdists_when_needed(
-    script: PipTestEnvironment,
+    script: CpipTestEnvironment,
 ) -> None:
     create_basic_wheel_for_package(
         script,
@@ -522,7 +522,7 @@ def test_new_resolver_only_builds_sdists_when_needed(
         "0.2.0",
     )
     # We only ever need to check dep 0.2.0 as it's the latest version
-    script.pip(
+    script.cpip(
         "install",
         "--no-build-isolation",
         "--no-cache-dir",
@@ -534,7 +534,7 @@ def test_new_resolver_only_builds_sdists_when_needed(
     script.assert_installed(base="0.1.0", dep="0.2.0")
 
     # We merge criteria here, as we have two "dep" requirements
-    script.pip(
+    script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -546,11 +546,11 @@ def test_new_resolver_only_builds_sdists_when_needed(
     script.assert_installed(base="0.1.0", dep="0.2.0")
 
 
-def test_new_resolver_install_different_version(script: PipTestEnvironment) -> None:
+def test_new_resolver_install_different_version(script: CpipTestEnvironment) -> None:
     create_basic_wheel_for_package(script, "base", "0.1.0")
     create_basic_wheel_for_package(script, "base", "0.2.0")
 
-    script.pip(
+    script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -560,7 +560,7 @@ def test_new_resolver_install_different_version(script: PipTestEnvironment) -> N
     )
 
     # This should trigger an uninstallation of base.
-    result = script.pip(
+    result = script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -575,10 +575,10 @@ def test_new_resolver_install_different_version(script: PipTestEnvironment) -> N
     script.assert_installed(base="0.2.0")
 
 
-def test_new_resolver_force_reinstall(script: PipTestEnvironment) -> None:
+def test_new_resolver_force_reinstall(script: CpipTestEnvironment) -> None:
     create_basic_wheel_for_package(script, "base", "0.1.0")
 
-    script.pip(
+    script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -589,7 +589,7 @@ def test_new_resolver_force_reinstall(script: PipTestEnvironment) -> None:
 
     # This should trigger an uninstallation of base due to --force-reinstall,
     # even though the installed version matches.
-    result = script.pip(
+    result = script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -606,7 +606,7 @@ def test_new_resolver_force_reinstall(script: PipTestEnvironment) -> None:
 
 
 @pytest.mark.parametrize(
-    "available_versions, pip_args, expected_version",
+    "available_versions, cpip_args, expected_version",
     [
         # Choose the latest non-prerelease by default.
         (["1.0", "2.0a1"], ["pkg"], "1.0"),
@@ -620,20 +620,20 @@ def test_new_resolver_force_reinstall(script: PipTestEnvironment) -> None:
     ids=["default", "exact-pre", "explicit-pre", "no-stable"],
 )
 def test_new_resolver_handles_prerelease(
-    script: PipTestEnvironment,
+    script: CpipTestEnvironment,
     available_versions: list[str],
-    pip_args: list[str],
+    cpip_args: list[str],
     expected_version: str,
 ) -> None:
     for version in available_versions:
         create_basic_wheel_for_package(script, "pkg", version)
-    script.pip(
+    script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",
         "--find-links",
         script.scratch_path,
-        *pip_args,
+        *cpip_args,
     )
     script.assert_installed(pkg=expected_version)
 
@@ -648,12 +648,12 @@ def test_new_resolver_handles_prerelease(
     ],
 )
 def test_new_resolver_skips_marker(
-    script: PipTestEnvironment, pkg_deps: list[str], root_deps: list[str]
+    script: CpipTestEnvironment, pkg_deps: list[str], root_deps: list[str]
 ) -> None:
     create_basic_wheel_for_package(script, "pkg", "1.0", depends=pkg_deps)
     create_basic_wheel_for_package(script, "dep", "1.0")
 
-    script.pip(
+    script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -670,19 +670,19 @@ def test_new_resolver_skips_marker(
     [
         ["pkg<2.0", "constraint_only<1.0"],
         # This also tests the pkg constraint don't get merged with the
-        # requirement prematurely. (pypa/pip#8134)
+        # requirement prematurely. (pypa/cpip#8134)
         ["pkg<2.0"],
     ],
 )
 def test_new_resolver_constraints(
-    script: PipTestEnvironment, constraints: list[str]
+    script: CpipTestEnvironment, constraints: list[str]
 ) -> None:
     create_basic_wheel_for_package(script, "pkg", "1.0")
     create_basic_wheel_for_package(script, "pkg", "2.0")
     create_basic_wheel_for_package(script, "pkg", "3.0")
     constraints_file = script.scratch_path / "constraints.txt"
     constraints_file.write_text("\n".join(constraints))
-    script.pip(
+    script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -696,12 +696,12 @@ def test_new_resolver_constraints(
     script.assert_not_installed("constraint_only")
 
 
-def test_new_resolver_constraint_no_specifier(script: PipTestEnvironment) -> None:
+def test_new_resolver_constraint_no_specifier(script: CpipTestEnvironment) -> None:
     "It's allowed (but useless...) for a constraint to have no specifier"
     create_basic_wheel_for_package(script, "pkg", "1.0")
     constraints_file = script.scratch_path / "constraints.txt"
     constraints_file.write_text("pkg")
-    script.pip(
+    script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -732,14 +732,14 @@ def test_new_resolver_constraint_no_specifier(script: PipTestEnvironment) -> Non
     ],
 )
 def test_new_resolver_constraint_reject_invalid(
-    script: PipTestEnvironment, constraint: str, error: str
+    script: CpipTestEnvironment, constraint: str, error: str
 ) -> None:
-    # Make sure PipDeprecationWarnings don't turn into errors
-    script.environ["_PIP_TEST_ENV"] = ""
+    # Make sure CpipDeprecationWarnings don't turn into errors
+    script.environ["_CPIP_TEST_ENV"] = ""
     create_basic_wheel_for_package(script, "pkg", "1.0")
     constraints_file = script.scratch_path / "constraints.txt"
     constraints_file.write_text(constraint)
-    result = script.pip(
+    result = script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -754,14 +754,14 @@ def test_new_resolver_constraint_reject_invalid(
     assert error in result.stderr, str(result)
 
 
-def test_new_resolver_constraint_on_dependency(script: PipTestEnvironment) -> None:
+def test_new_resolver_constraint_on_dependency(script: CpipTestEnvironment) -> None:
     create_basic_wheel_for_package(script, "base", "1.0", depends=["dep"])
     create_basic_wheel_for_package(script, "dep", "1.0")
     create_basic_wheel_for_package(script, "dep", "2.0")
     create_basic_wheel_for_package(script, "dep", "3.0")
     constraints_file = script.scratch_path / "constraints.txt"
     constraints_file.write_text("dep==2.0")
-    script.pip(
+    script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -783,7 +783,7 @@ def test_new_resolver_constraint_on_dependency(script: PipTestEnvironment) -> No
     ],
 )
 def test_new_resolver_constraint_on_path_empty(
-    script: PipTestEnvironment,
+    script: CpipTestEnvironment,
     constraint_version: str,
     expect_error: bool,
     message: str,
@@ -796,7 +796,7 @@ def test_new_resolver_constraint_on_path_empty(
     constraints_txt = script.scratch_path / "constraints.txt"
     constraints_txt.write_text(f"foo=={constraint_version}")
 
-    result = script.pip(
+    result = script.cpip(
         "install",
         "--no-build-isolation",
         "--no-cache-dir",
@@ -813,7 +813,7 @@ def test_new_resolver_constraint_on_path_empty(
         assert message in result.stdout, str(result)
 
 
-def test_new_resolver_constraint_only_marker_match(script: PipTestEnvironment) -> None:
+def test_new_resolver_constraint_only_marker_match(script: CpipTestEnvironment) -> None:
     create_basic_wheel_for_package(script, "pkg", "1.0")
     create_basic_wheel_for_package(script, "pkg", "2.0")
     create_basic_wheel_for_package(script, "pkg", "3.0")
@@ -825,7 +825,7 @@ def test_new_resolver_constraint_only_marker_match(script: PipTestEnvironment) -
     constraints_txt = script.scratch_path / "constraints.txt"
     constraints_txt.write_text(constraints_content)
 
-    script.pip(
+    script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -838,10 +838,10 @@ def test_new_resolver_constraint_only_marker_match(script: PipTestEnvironment) -
     script.assert_installed(pkg="1.0")
 
 
-def test_new_resolver_upgrade_needs_option(script: PipTestEnvironment) -> None:
+def test_new_resolver_upgrade_needs_option(script: CpipTestEnvironment) -> None:
     # Install pkg 1.0.0
     create_basic_wheel_for_package(script, "pkg", "1.0.0")
-    script.pip(
+    script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -854,7 +854,7 @@ def test_new_resolver_upgrade_needs_option(script: PipTestEnvironment) -> None:
     create_basic_wheel_for_package(script, "pkg", "2.0.0")
 
     # This should not upgrade because we don't specify --upgrade
-    result = script.pip(
+    result = script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -867,7 +867,7 @@ def test_new_resolver_upgrade_needs_option(script: PipTestEnvironment) -> None:
     script.assert_installed(pkg="1.0.0")
 
     # This should upgrade
-    result = script.pip(
+    result = script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -883,10 +883,10 @@ def test_new_resolver_upgrade_needs_option(script: PipTestEnvironment) -> None:
     script.assert_installed(pkg="2.0.0")
 
 
-def test_new_resolver_upgrade_strategy(script: PipTestEnvironment) -> None:
+def test_new_resolver_upgrade_strategy(script: CpipTestEnvironment) -> None:
     create_basic_wheel_for_package(script, "base", "1.0.0", depends=["dep"])
     create_basic_wheel_for_package(script, "dep", "1.0.0")
-    script.pip(
+    script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -902,7 +902,7 @@ def test_new_resolver_upgrade_strategy(script: PipTestEnvironment) -> None:
     create_basic_wheel_for_package(script, "base", "2.0.0", depends=["dep"])
     create_basic_wheel_for_package(script, "dep", "2.0.0")
 
-    script.pip(
+    script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -918,7 +918,7 @@ def test_new_resolver_upgrade_strategy(script: PipTestEnvironment) -> None:
     script.assert_installed(dep="1.0.0")
 
     create_basic_wheel_for_package(script, "base", "3.0.0", depends=["dep"])
-    script.pip(
+    script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -939,7 +939,7 @@ if TYPE_CHECKING:
     class PackageBuilder(Protocol):
         def __call__(
             self,
-            script: PipTestEnvironment,
+            script: CpipTestEnvironment,
             name: str,
             version: str,
             requires: list[str],
@@ -948,7 +948,7 @@ if TYPE_CHECKING:
 
 
 def local_with_setup(
-    script: PipTestEnvironment,
+    script: CpipTestEnvironment,
     name: str,
     version: str,
     requires: list[str],
@@ -966,7 +966,7 @@ def local_with_setup(
 
 
 def direct_wheel(
-    script: PipTestEnvironment,
+    script: CpipTestEnvironment,
     name: str,
     version: str,
     requires: list[str],
@@ -984,7 +984,7 @@ def direct_wheel(
 
 
 def wheel_from_index(
-    script: PipTestEnvironment,
+    script: CpipTestEnvironment,
     name: str,
     version: str,
     requires: list[str],
@@ -1016,7 +1016,7 @@ class TestExtraMerge:
         ],
     )
     def test_new_resolver_extra_merge_in_package(
-        self, script: PipTestEnvironment, pkg_builder: "PackageBuilder"
+        self, script: CpipTestEnvironment, pkg_builder: "PackageBuilder"
     ) -> None:
         create_basic_wheel_for_package(script, "depdev", "1.0.0")
         create_basic_wheel_for_package(
@@ -1033,7 +1033,7 @@ class TestExtraMerge:
             extras={"dev": ["dep[dev]"]},
         )
 
-        script.pip(
+        script.cpip(
             "install",
             "--no-build-isolation",
             "--no-cache-dir",
@@ -1045,7 +1045,7 @@ class TestExtraMerge:
         script.assert_installed(pkg="1.0.0", dep="1.0.0", depdev="1.0.0")
 
 
-def test_new_resolver_build_directory_error_zazo_19(script: PipTestEnvironment) -> None:
+def test_new_resolver_build_directory_error_zazo_19(script: CpipTestEnvironment) -> None:
     """https://github.com/pradyunsg/zazo/issues/19#issuecomment-631615674
 
     This will first resolve like this:
@@ -1061,9 +1061,9 @@ def test_new_resolver_build_directory_error_zazo_19(script: PipTestEnvironment) 
     The preparer would fail with the following message if the different
     versions end up using the same build directory::
 
-        ERROR: pip can't proceed with requirements 'pkg-b ...' due to a
+        ERROR: cpip can't proceed with requirements 'pkg-b ...' due to a
         pre-existing build directory (...). This is likely due to a previous
-        installation that failed. pip is being responsible and not assuming it
+        installation that failed. cpip is being responsible and not assuming it
         can delete this. Please delete it and try again.
     """
     create_basic_wheel_for_package(
@@ -1078,7 +1078,7 @@ def test_new_resolver_build_directory_error_zazo_19(script: PipTestEnvironment) 
     create_basic_sdist_for_package(script, "pkg_b", "2.0.0")
     create_basic_sdist_for_package(script, "pkg_b", "1.0.0")
 
-    script.pip(
+    script.cpip(
         "install",
         "--no-build-isolation",
         "--no-cache-dir",
@@ -1091,11 +1091,11 @@ def test_new_resolver_build_directory_error_zazo_19(script: PipTestEnvironment) 
     script.assert_installed(pkg_a="3.0.0", pkg_b="1.0.0")
 
 
-def test_new_resolver_upgrade_same_version(script: PipTestEnvironment) -> None:
+def test_new_resolver_upgrade_same_version(script: CpipTestEnvironment) -> None:
     create_basic_wheel_for_package(script, "pkg", "2")
     create_basic_wheel_for_package(script, "pkg", "1")
 
-    script.pip(
+    script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -1105,7 +1105,7 @@ def test_new_resolver_upgrade_same_version(script: PipTestEnvironment) -> None:
     )
     script.assert_installed(pkg="2")
 
-    script.pip(
+    script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -1117,13 +1117,13 @@ def test_new_resolver_upgrade_same_version(script: PipTestEnvironment) -> None:
     script.assert_installed(pkg="2")
 
 
-def test_new_resolver_local_and_req(script: PipTestEnvironment) -> None:
+def test_new_resolver_local_and_req(script: CpipTestEnvironment) -> None:
     source_dir = create_test_package_with_setup(
         script,
         name="pkg",
         version="0.1.0",
     )
-    script.pip(
+    script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -1134,7 +1134,7 @@ def test_new_resolver_local_and_req(script: PipTestEnvironment) -> None:
 
 
 def test_new_resolver_no_deps_checks_requires_python(
-    script: PipTestEnvironment,
+    script: CpipTestEnvironment,
 ) -> None:
     create_basic_wheel_for_package(
         script,
@@ -1149,7 +1149,7 @@ def test_new_resolver_no_deps_checks_requires_python(
         "0.2.0",
     )
 
-    result = script.pip(
+    result = script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -1167,13 +1167,13 @@ def test_new_resolver_no_deps_checks_requires_python(
 
 
 def test_new_resolver_prefers_installed_in_upgrade_if_latest(
-    script: PipTestEnvironment,
+    script: CpipTestEnvironment,
 ) -> None:
     create_basic_wheel_for_package(script, "pkg", "1")
     local_pkg = create_test_package_with_setup(script, name="pkg", version="2")
 
     # Install the version that's not on the index.
-    script.pip(
+    script.cpip(
         "install",
         "--no-build-isolation",
         "--no-cache-dir",
@@ -1182,7 +1182,7 @@ def test_new_resolver_prefers_installed_in_upgrade_if_latest(
     )
 
     # Now --upgrade should still pick the local version because it's "better".
-    script.pip(
+    script.cpip(
         "install",
         "--no-build-isolation",
         "--no-cache-dir",
@@ -1197,7 +1197,7 @@ def test_new_resolver_prefers_installed_in_upgrade_if_latest(
 
 @pytest.mark.parametrize("N", [2, 10, 20])
 def test_new_resolver_presents_messages_when_backtracking_a_lot(
-    script: PipTestEnvironment, N: int
+    script: CpipTestEnvironment, N: int
 ) -> None:
     # Generate a set of wheels that will definitely cause backtracking.
     for index in range(1, N + 1):
@@ -1226,7 +1226,7 @@ def test_new_resolver_presents_messages_when_backtracking_a_lot(
         create_basic_wheel_for_package(script, "C", C_version)
 
     # Install A
-    result = script.pip(
+    result = script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -1268,7 +1268,7 @@ def test_new_resolver_presents_messages_when_backtracking_a_lot(
     ids=["file_dot", "file_underscore"],
 )
 def test_new_resolver_check_wheel_version_normalized(
-    script: PipTestEnvironment,
+    script: CpipTestEnvironment,
     metadata_version: str,
     filename_version: str,
 ) -> None:
@@ -1277,7 +1277,7 @@ def test_new_resolver_check_wheel_version_normalized(
     wheel_builder = make_wheel(name="simple", version=metadata_version)
     wheel_builder.save_to(script.scratch_path / filename)
 
-    script.pip(
+    script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -1288,13 +1288,13 @@ def test_new_resolver_check_wheel_version_normalized(
     script.assert_installed(simple="0.1.0+local.1")
 
 
-def test_new_resolver_does_reinstall_local_sdists(script: PipTestEnvironment) -> None:
+def test_new_resolver_does_reinstall_local_sdists(script: CpipTestEnvironment) -> None:
     archive_path = create_basic_sdist_for_package(
         script,
         "pkg",
         "1.0",
     )
-    script.pip(
+    script.cpip(
         "install",
         "--no-build-isolation",
         "--no-cache-dir",
@@ -1303,7 +1303,7 @@ def test_new_resolver_does_reinstall_local_sdists(script: PipTestEnvironment) ->
     )
     script.assert_installed(pkg="1.0")
 
-    result = script.pip(
+    result = script.cpip(
         "install",
         "--no-build-isolation",
         "--no-cache-dir",
@@ -1315,9 +1315,9 @@ def test_new_resolver_does_reinstall_local_sdists(script: PipTestEnvironment) ->
     script.assert_installed(pkg="1.0")
 
 
-def test_new_resolver_does_reinstall_local_paths(script: PipTestEnvironment) -> None:
+def test_new_resolver_does_reinstall_local_paths(script: CpipTestEnvironment) -> None:
     pkg = create_test_package_with_setup(script, name="pkg", version="1.0")
-    script.pip(
+    script.cpip(
         "install",
         "--no-build-isolation",
         "--no-cache-dir",
@@ -1326,7 +1326,7 @@ def test_new_resolver_does_reinstall_local_paths(script: PipTestEnvironment) -> 
     )
     script.assert_installed(pkg="1.0")
 
-    result = script.pip(
+    result = script.cpip(
         "install",
         "--no-build-isolation",
         "--no-cache-dir",
@@ -1338,14 +1338,14 @@ def test_new_resolver_does_reinstall_local_paths(script: PipTestEnvironment) -> 
 
 
 def test_new_resolver_does_not_reinstall_when_from_a_local_index(
-    script: PipTestEnvironment,
+    script: CpipTestEnvironment,
 ) -> None:
     create_basic_sdist_for_package(
         script,
         "simple",
         "0.1.0",
     )
-    script.pip(
+    script.cpip(
         "install",
         "--no-build-isolation",
         "--no-cache-dir",
@@ -1356,7 +1356,7 @@ def test_new_resolver_does_not_reinstall_when_from_a_local_index(
     )
     script.assert_installed(simple="0.1.0")
 
-    result = script.pip(
+    result = script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -1370,13 +1370,13 @@ def test_new_resolver_does_not_reinstall_when_from_a_local_index(
     script.assert_installed(simple="0.1.0")
 
 
-def test_new_resolver_skip_inconsistent_metadata(script: PipTestEnvironment) -> None:
+def test_new_resolver_skip_inconsistent_metadata(script: CpipTestEnvironment) -> None:
     create_basic_wheel_for_package(script, "A", "1")
 
     a_2 = create_basic_wheel_for_package(script, "A", "2")
     a_2.rename(a_2.parent.joinpath("a-3-py2.py3-none-any.whl"))
 
-    result = script.pip(
+    result = script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -1394,14 +1394,14 @@ def test_new_resolver_skip_inconsistent_metadata(script: PipTestEnvironment) -> 
 
 
 def test_new_resolver_inconsistent_metadata_keeps_extras(
-    script: PipTestEnvironment,
+    script: CpipTestEnvironment,
 ) -> None:
     create_basic_wheel_for_package(script, "A", "1", extras={"foo": []})
 
     a_2 = create_basic_wheel_for_package(script, "A", "2", extras={"foo": []})
     a_2.rename(a_2.parent.joinpath("a-3-py2.py3-none-any.whl"))
 
-    result = script.pip(
+    result = script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -1422,14 +1422,14 @@ def test_new_resolver_inconsistent_metadata_keeps_extras(
     ids=["upgrade", "no-upgrade"],
 )
 def test_new_resolver_lazy_fetch_candidates(
-    script: PipTestEnvironment, upgrade: bool
+    script: CpipTestEnvironment, upgrade: bool
 ) -> None:
     create_basic_wheel_for_package(script, "myuberpkg", "1")
     create_basic_wheel_for_package(script, "myuberpkg", "2")
     create_basic_wheel_for_package(script, "myuberpkg", "3")
 
     # Install an old version first.
-    script.pip(
+    script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -1440,20 +1440,20 @@ def test_new_resolver_lazy_fetch_candidates(
 
     # Now install the same package again, maybe with the upgrade flag.
     if upgrade:
-        pip_upgrade_args = ["--upgrade"]
+        cpip_upgrade_args = ["--upgrade"]
     else:
-        pip_upgrade_args = []
-    result = script.pip(
+        cpip_upgrade_args = []
+    result = script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",
         "--find-links",
         script.scratch_path,
         "myuberpkg",
-        *pip_upgrade_args,  # Trailing comma fails on Python 2.
+        *cpip_upgrade_args,  # Trailing comma fails on Python 2.
     )
 
-    # pip should install the version preferred by the strategy...
+    # cpip should install the version preferred by the strategy...
     if upgrade:
         script.assert_installed(myuberpkg="3")
     else:
@@ -1464,12 +1464,12 @@ def test_new_resolver_lazy_fetch_candidates(
     assert "myuberpkg-2" not in result.stdout, str(result)
 
 
-def test_new_resolver_no_fetch_no_satisfying(script: PipTestEnvironment) -> None:
+def test_new_resolver_no_fetch_no_satisfying(script: CpipTestEnvironment) -> None:
     create_basic_wheel_for_package(script, "myuberpkg", "1")
 
     # Install the package. This should emit a "Processing" message for
     # fetching the distribution from the --find-links page.
-    result = script.pip(
+    result = script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -1481,7 +1481,7 @@ def test_new_resolver_no_fetch_no_satisfying(script: PipTestEnvironment) -> None
 
     # Try to upgrade the package. This should NOT emit the "Processing"
     # message because the currently installed version is latest.
-    result = script.pip(
+    result = script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -1494,7 +1494,7 @@ def test_new_resolver_no_fetch_no_satisfying(script: PipTestEnvironment) -> None
 
 
 def test_new_resolver_does_not_install_unneeded_packages_with_url_constraint(
-    script: PipTestEnvironment,
+    script: CpipTestEnvironment,
 ) -> None:
     archive_path = create_basic_wheel_for_package(
         script,
@@ -1513,7 +1513,7 @@ def test_new_resolver_does_not_install_unneeded_packages_with_url_constraint(
     (script.scratch_path / "index").mkdir()
     archive_path.rename(script.scratch_path / "index" / archive_path.name)
 
-    script.pip(
+    script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -1529,7 +1529,7 @@ def test_new_resolver_does_not_install_unneeded_packages_with_url_constraint(
 
 
 def test_new_resolver_installs_packages_with_url_constraint(
-    script: PipTestEnvironment,
+    script: CpipTestEnvironment,
 ) -> None:
     installed_path = create_basic_wheel_for_package(
         script,
@@ -1540,7 +1540,7 @@ def test_new_resolver_installs_packages_with_url_constraint(
     constraints_file = script.scratch_path / "constraints.txt"
     constraints_file.write_text(f"installed @ {installed_path.as_uri()}")
 
-    script.pip(
+    script.cpip(
         "install", "--no-cache-dir", "--no-index", "-c", constraints_file, "installed"
     )
 
@@ -1548,7 +1548,7 @@ def test_new_resolver_installs_packages_with_url_constraint(
 
 
 def test_new_resolver_reinstall_link_requirement_with_constraint(
-    script: PipTestEnvironment,
+    script: CpipTestEnvironment,
 ) -> None:
     installed_path = create_basic_wheel_for_package(
         script,
@@ -1559,7 +1559,7 @@ def test_new_resolver_reinstall_link_requirement_with_constraint(
     cr_file = script.scratch_path / "constraints.txt"
     cr_file.write_text(f"installed @ {installed_path.as_uri()}")
 
-    script.pip(
+    script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -1567,7 +1567,7 @@ def test_new_resolver_reinstall_link_requirement_with_constraint(
         cr_file,
     )
 
-    script.pip(
+    script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -1582,7 +1582,7 @@ def test_new_resolver_reinstall_link_requirement_with_constraint(
     script.assert_installed(installed="0.1.0")
 
 
-def test_new_resolver_prefers_url_constraint(script: PipTestEnvironment) -> None:
+def test_new_resolver_prefers_url_constraint(script: CpipTestEnvironment) -> None:
     installed_path = create_basic_wheel_for_package(
         script,
         "test_pkg",
@@ -1600,7 +1600,7 @@ def test_new_resolver_prefers_url_constraint(script: PipTestEnvironment) -> None
     (script.scratch_path / "index").mkdir()
     not_installed_path.rename(script.scratch_path / "index" / not_installed_path.name)
 
-    script.pip(
+    script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -1615,7 +1615,7 @@ def test_new_resolver_prefers_url_constraint(script: PipTestEnvironment) -> None
 
 
 def test_new_resolver_prefers_url_constraint_on_update(
-    script: PipTestEnvironment,
+    script: CpipTestEnvironment,
 ) -> None:
     installed_path = create_basic_wheel_for_package(
         script,
@@ -1634,7 +1634,7 @@ def test_new_resolver_prefers_url_constraint_on_update(
     (script.scratch_path / "index").mkdir()
     not_installed_path.rename(script.scratch_path / "index" / not_installed_path.name)
 
-    script.pip(
+    script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -1645,7 +1645,7 @@ def test_new_resolver_prefers_url_constraint_on_update(
 
     script.assert_installed(test_pkg="0.2.0")
 
-    script.pip(
+    script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -1661,7 +1661,7 @@ def test_new_resolver_prefers_url_constraint_on_update(
 
 @pytest.mark.parametrize("version_option", ["--constraint", "--requirement"])
 def test_new_resolver_fails_with_url_constraint_and_incompatible_version(
-    script: PipTestEnvironment,
+    script: CpipTestEnvironment,
     version_option: str,
 ) -> None:
     not_installed_path = create_basic_wheel_for_package(
@@ -1681,7 +1681,7 @@ def test_new_resolver_fails_with_url_constraint_and_incompatible_version(
     version_req = script.scratch_path / "requirements.txt"
     version_req.write_text("test_pkg<0.2.0")
 
-    result = script.pip(
+    result = script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -1705,8 +1705,8 @@ def test_new_resolver_fails_with_url_constraint_and_incompatible_version(
 
     script.assert_not_installed("test_pkg")
 
-    # Assert that pip works properly in the absence of the constraints file.
-    script.pip(
+    # Assert that cpip works properly in the absence of the constraints file.
+    script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -1719,7 +1719,7 @@ def test_new_resolver_fails_with_url_constraint_and_incompatible_version(
 
 
 def test_new_resolver_ignores_unneeded_conflicting_constraints(
-    script: PipTestEnvironment,
+    script: CpipTestEnvironment,
 ) -> None:
     version_1 = create_basic_wheel_for_package(
         script,
@@ -1745,7 +1745,7 @@ def test_new_resolver_ignores_unneeded_conflicting_constraints(
     constraints_file = script.scratch_path / "constraints.txt"
     constraints_file.write_text("\n".join(constraints))
 
-    script.pip(
+    script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -1761,7 +1761,7 @@ def test_new_resolver_ignores_unneeded_conflicting_constraints(
 
 
 def test_new_resolver_fails_on_needed_conflicting_constraints(
-    script: PipTestEnvironment,
+    script: CpipTestEnvironment,
 ) -> None:
     version_1 = create_basic_wheel_for_package(
         script,
@@ -1782,7 +1782,7 @@ def test_new_resolver_fails_on_needed_conflicting_constraints(
     constraints_file = script.scratch_path / "constraints.txt"
     constraints_file.write_text("\n".join(constraints))
 
-    result = script.pip(
+    result = script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -1801,8 +1801,8 @@ def test_new_resolver_fails_on_needed_conflicting_constraints(
 
     script.assert_not_installed("test_pkg")
 
-    # Assert that pip works properly in the absence of the constraints file.
-    script.pip(
+    # Assert that cpip works properly in the absence of the constraints file.
+    script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -1813,7 +1813,7 @@ def test_new_resolver_fails_on_needed_conflicting_constraints(
 
 
 def test_new_resolver_fails_on_conflicting_constraint_and_requirement(
-    script: PipTestEnvironment,
+    script: CpipTestEnvironment,
 ) -> None:
     version_1 = create_basic_wheel_for_package(
         script,
@@ -1829,7 +1829,7 @@ def test_new_resolver_fails_on_conflicting_constraint_and_requirement(
     constraints_file = script.scratch_path / "constraints.txt"
     constraints_file.write_text(f"test_pkg @ {version_1.as_uri()}")
 
-    result = script.pip(
+    result = script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -1848,8 +1848,8 @@ def test_new_resolver_fails_on_conflicting_constraint_and_requirement(
 
     script.assert_not_installed("test_pkg")
 
-    # Assert that pip works properly in the absence of the constraints file.
-    script.pip(
+    # Assert that cpip works properly in the absence of the constraints file.
+    script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -1861,7 +1861,7 @@ def test_new_resolver_fails_on_conflicting_constraint_and_requirement(
 
 @pytest.mark.parametrize("editable", [False, True])
 def test_new_resolver_succeeds_on_matching_constraint_and_requirement(
-    script: PipTestEnvironment, editable: bool
+    script: CpipTestEnvironment, editable: bool
 ) -> None:
     if editable:
         source_dir = create_test_package_with_setup(
@@ -1885,7 +1885,7 @@ def test_new_resolver_succeeds_on_matching_constraint_and_requirement(
     else:
         last_args = (req_line,)
 
-    script.pip(
+    script.cpip(
         "install",
         "--no-build-isolation",
         "--no-cache-dir",
@@ -1900,7 +1900,7 @@ def test_new_resolver_succeeds_on_matching_constraint_and_requirement(
         script.assert_installed_editable("test_pkg")
 
 
-def test_new_resolver_applies_url_constraint_to_dep(script: PipTestEnvironment) -> None:
+def test_new_resolver_applies_url_constraint_to_dep(script: CpipTestEnvironment) -> None:
     version_1 = create_basic_wheel_for_package(
         script,
         "dep",
@@ -1921,7 +1921,7 @@ def test_new_resolver_applies_url_constraint_to_dep(script: PipTestEnvironment) 
     constraints_file = script.scratch_path / "constraints.txt"
     constraints_file.write_text(f"dep @ {version_1.as_uri()}")
 
-    script.pip(
+    script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -1936,7 +1936,7 @@ def test_new_resolver_applies_url_constraint_to_dep(script: PipTestEnvironment) 
 
 
 def test_new_resolver_handles_compatible_wheel_tags_in_constraint_url(
-    script: PipTestEnvironment, make_fake_wheel: MakeFakeWheel
+    script: CpipTestEnvironment, make_fake_wheel: MakeFakeWheel
 ) -> None:
     initial_path = make_fake_wheel("base", "0.1.0", "fakepy1-fakeabi-fakeplat")
 
@@ -1950,7 +1950,7 @@ def test_new_resolver_handles_compatible_wheel_tags_in_constraint_url(
     constraints_file = script.scratch_path / "constraints.txt"
     constraints_file.write_text(f"base @ {final_path.as_uri()}")
 
-    result = script.pip(
+    result = script.cpip(
         "install",
         "--implementation",
         "fakepy",
@@ -1975,7 +1975,7 @@ def test_new_resolver_handles_compatible_wheel_tags_in_constraint_url(
 
 
 def test_new_resolver_handles_incompatible_wheel_tags_in_constraint_url(
-    script: PipTestEnvironment, make_fake_wheel: MakeFakeWheel
+    script: CpipTestEnvironment, make_fake_wheel: MakeFakeWheel
 ) -> None:
     initial_path = make_fake_wheel("base", "0.1.0", "fakepy1-fakeabi-fakeplat")
 
@@ -1989,7 +1989,7 @@ def test_new_resolver_handles_incompatible_wheel_tags_in_constraint_url(
     constraints_file = script.scratch_path / "constraints.txt"
     constraints_file.write_text(f"base @ {final_path.as_uri()}")
 
-    result = script.pip(
+    result = script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -2008,7 +2008,7 @@ def test_new_resolver_handles_incompatible_wheel_tags_in_constraint_url(
 
 
 def test_new_resolver_avoids_incompatible_wheel_tags_in_constraint_url(
-    script: PipTestEnvironment, make_fake_wheel: MakeFakeWheel
+    script: CpipTestEnvironment, make_fake_wheel: MakeFakeWheel
 ) -> None:
     initial_path = make_fake_wheel("dep", "0.1.0", "fakepy1-fakeabi-fakeplat")
 
@@ -2034,7 +2034,7 @@ def test_new_resolver_avoids_incompatible_wheel_tags_in_constraint_url(
     base.rename(index / base.name)
     base_2.rename(index / base_2.name)
 
-    script.pip(
+    script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -2104,7 +2104,7 @@ def test_new_resolver_avoids_incompatible_wheel_tags_in_constraint_url(
 )
 def test_new_resolver_direct_url_equivalent(
     tmp_path: pathlib.Path,
-    script: PipTestEnvironment,
+    script: CpipTestEnvironment,
     suffixes_equivalent: bool,
     depend_suffix: str,
     request_suffix: str,
@@ -2125,7 +2125,7 @@ def test_new_resolver_direct_url_equivalent(
 
     # Install pkgb from --find-links, and pkga directly but from a different
     # URL suffix as specified in pkgb. This should work!
-    script.pip(
+    script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -2143,7 +2143,7 @@ def test_new_resolver_direct_url_equivalent(
 
 
 def test_new_resolver_direct_url_with_extras(
-    tmp_path: pathlib.Path, script: PipTestEnvironment
+    tmp_path: pathlib.Path, script: CpipTestEnvironment
 ) -> None:
     pkg1 = create_basic_wheel_for_package(script, name="pkg1", version="1")
     pkg2 = create_basic_wheel_for_package(
@@ -2169,7 +2169,7 @@ def test_new_resolver_direct_url_with_extras(
 
     # Install with pkg2 only available with direct URL. The extra-ed direct
     # URL pkg2 should be able to provide pkg2[ext] required by pkg3.
-    result = script.pip(
+    result = script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -2186,7 +2186,7 @@ def test_new_resolver_direct_url_with_extras(
 
 
 def test_new_resolver_modifies_installed_incompatible(
-    script: PipTestEnvironment,
+    script: CpipTestEnvironment,
 ) -> None:
     create_basic_wheel_for_package(script, name="a", version="1")
     create_basic_wheel_for_package(script, name="a", version="2")
@@ -2197,7 +2197,7 @@ def test_new_resolver_modifies_installed_incompatible(
     create_basic_wheel_for_package(script, name="c", version="2", depends=["a!=1"])
     create_basic_wheel_for_package(script, name="d", version="1", depends=["b", "c"])
 
-    script.pip(
+    script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -2210,7 +2210,7 @@ def test_new_resolver_modifies_installed_incompatible(
     # pinned, but later found to be incompatible since the "a==1" dependency
     # makes all c versions impossible to satisfy. The resolver should be able to
     # discard b-1 and backtrack, so b-2 is selected instead.
-    script.pip(
+    script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -2222,7 +2222,7 @@ def test_new_resolver_modifies_installed_incompatible(
 
 
 def test_new_resolver_transitively_depends_on_unnamed_local(
-    script: PipTestEnvironment,
+    script: CpipTestEnvironment,
 ) -> None:
     create_basic_wheel_for_package(script, name="certbot-docs", version="1")
     certbot = create_test_package_with_setup(
@@ -2238,7 +2238,7 @@ def test_new_resolver_transitively_depends_on_unnamed_local(
         install_requires=["certbot>=99.99.0.dev0"],
     )
 
-    script.pip(
+    script.cpip(
         "install",
         "--no-build-isolation",
         "--no-cache-dir",
@@ -2276,7 +2276,7 @@ def to_localhost_uri(path: pathlib.Path) -> str:
     ],
 )
 def test_new_resolver_file_url_normalize(
-    script: PipTestEnvironment,
+    script: CpipTestEnvironment,
     format_dep: Callable[[pathlib.Path], str],
     format_input: Callable[[pathlib.Path], str],
 ) -> None:
@@ -2292,7 +2292,7 @@ def test_new_resolver_file_url_normalize(
         install_requires=[f"lib_a @ {format_dep(lib_a)}"],
     )
 
-    script.pip(
+    script.cpip(
         "install",
         "--no-build-isolation",
         "--no-cache-dir",
@@ -2304,7 +2304,7 @@ def test_new_resolver_file_url_normalize(
 
 
 def test_new_resolver_dont_backtrack_on_extra_if_base_constrained(
-    script: PipTestEnvironment,
+    script: CpipTestEnvironment,
 ) -> None:
     create_basic_wheel_for_package(script, "dep", "1.0")
     create_basic_wheel_for_package(script, "pkg", "1.0", extras={"ext": ["dep"]})
@@ -2312,7 +2312,7 @@ def test_new_resolver_dont_backtrack_on_extra_if_base_constrained(
     constraints_file = script.scratch_path / "constraints.txt"
     constraints_file.write_text("pkg==1.0")
 
-    result = script.pip(
+    result = script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -2329,7 +2329,7 @@ def test_new_resolver_dont_backtrack_on_extra_if_base_constrained(
 @pytest.mark.parametrize("swap_order", [True, False])
 @pytest.mark.parametrize("two_extras", [True, False])
 def test_new_resolver_dont_backtrack_on_extra_if_base_constrained_in_requirement(
-    script: PipTestEnvironment, swap_order: bool, two_extras: bool
+    script: CpipTestEnvironment, swap_order: bool, two_extras: bool
 ) -> None:
     """
     Verify that a requirement with a constraint on a package (either on the base
@@ -2352,7 +2352,7 @@ def test_new_resolver_dont_backtrack_on_extra_if_base_constrained_in_requirement
         "pkg[ext2]==1.0" if two_extras else "pkg==1.0",
     )
 
-    result = script.pip(
+    result = script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -2381,10 +2381,10 @@ def test_new_resolver_dont_backtrack_on_conflicting_constraints_on_extras(
     :param swap_order: swap the order the install specifiers appear in
     :param two_extras: also add an extra for the second specifier
     """
-    script: PipTestEnvironment = script_factory(
+    script: CpipTestEnvironment = script_factory(
         tmpdir.joinpath("workspace"),
         virtualenv,
-        {**os.environ, "PIP_RESOLVER_DEBUG": "1"},
+        {**os.environ, "CPIP_RESOLVER_DEBUG": "1"},
     )
     create_basic_wheel_for_package(script, "dep", "1.0")
     create_basic_wheel_for_package(
@@ -2399,7 +2399,7 @@ def test_new_resolver_dont_backtrack_on_conflicting_constraints_on_extras(
         "pkg[ext2]==1.0" if two_extras else "pkg==1.0",
     )
 
-    result = script.pip(
+    result = script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -2424,7 +2424,7 @@ def test_new_resolver_dont_backtrack_on_conflicting_constraints_on_extras(
 
 
 def test_new_resolver_respect_user_requested_if_extra_is_installed(
-    script: PipTestEnvironment,
+    script: CpipTestEnvironment,
 ) -> None:
     create_basic_wheel_for_package(script, "pkg1", "1.0")
     create_basic_wheel_for_package(script, "pkg2", "1.0", extras={"ext": ["pkg1"]})
@@ -2432,7 +2432,7 @@ def test_new_resolver_respect_user_requested_if_extra_is_installed(
     create_basic_wheel_for_package(script, "pkg3", "1.0", depends=["pkg2[ext]"])
 
     # Install pkg3 with an older pkg2.
-    script.pip(
+    script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -2445,7 +2445,7 @@ def test_new_resolver_respect_user_requested_if_extra_is_installed(
 
     # Now upgrade both pkg3 and pkg2. pkg2 should be upgraded although pkg2[ext]
     # is not requested by the user.
-    script.pip(
+    script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -2459,7 +2459,7 @@ def test_new_resolver_respect_user_requested_if_extra_is_installed(
 
 
 def test_new_resolver_constraint_on_link_with_extra(
-    script: PipTestEnvironment,
+    script: CpipTestEnvironment,
 ) -> None:
     """
     Verify that installing works from a link with both an extra and a constraint.
@@ -2468,7 +2468,7 @@ def test_new_resolver_constraint_on_link_with_extra(
         script, "pkg", "1.0", extras={"ext": []}
     )
 
-    script.pip(
+    script.cpip(
         "install",
         "--no-cache-dir",
         # no index, no --find-links: only the explicit path
@@ -2480,7 +2480,7 @@ def test_new_resolver_constraint_on_link_with_extra(
 
 
 def test_new_resolver_constraint_on_link_with_extra_indirect(
-    script: PipTestEnvironment,
+    script: CpipTestEnvironment,
 ) -> None:
     """
     Verify that installing works from a link with an extra if there is an indirect
@@ -2493,7 +2493,7 @@ def test_new_resolver_constraint_on_link_with_extra_indirect(
         script, "pkg2", "1.0", depends=["pkg1[ext]==1.0"]
     )
 
-    script.pip(
+    script.cpip(
         "install",
         "--no-cache-dir",
         # no index, no --find-links: only the explicit path
@@ -2504,12 +2504,12 @@ def test_new_resolver_constraint_on_link_with_extra_indirect(
 
 
 def test_new_resolver_do_not_backtrack_on_build_failure(
-    script: PipTestEnvironment,
+    script: CpipTestEnvironment,
 ) -> None:
     create_basic_sdist_for_package(script, "pkg1", "2.0", fails_build=True)
     create_basic_wheel_for_package(script, "pkg1", "1.0")
 
-    result = script.pip(
+    result = script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -2523,7 +2523,7 @@ def test_new_resolver_do_not_backtrack_on_build_failure(
 
 
 def test_new_resolver_works_when_failing_package_builds_are_disallowed(
-    script: PipTestEnvironment,
+    script: CpipTestEnvironment,
 ) -> None:
     create_basic_wheel_for_package(script, "pkg2", "1.0", depends=["pkg1"])
     create_basic_sdist_for_package(script, "pkg1", "2.0", fails_build=True)
@@ -2531,7 +2531,7 @@ def test_new_resolver_works_when_failing_package_builds_are_disallowed(
     constraints_file = script.scratch_path / "constraints.txt"
     constraints_file.write_text("pkg1 != 2.0")
 
-    script.pip(
+    script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -2547,7 +2547,7 @@ def test_new_resolver_works_when_failing_package_builds_are_disallowed(
 
 @pytest.mark.parametrize("swap_order", [True, False])
 def test_new_resolver_comes_from_with_extra(
-    script: PipTestEnvironment, swap_order: bool
+    script: CpipTestEnvironment, swap_order: bool
 ) -> None:
     """
     Verify that reporting where a dependency comes from is accurate when it comes
@@ -2560,7 +2560,7 @@ def test_new_resolver_comes_from_with_extra(
 
     to_install: tuple[str, str] = ("pkg", "pkg[ext]")
 
-    result = script.pip(
+    result = script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",

@@ -5,7 +5,7 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
-from pip.resolution.fast_local_wheelhouse import resolve
+from cpip.resolution.fast_local_wheelhouse import resolve
 
 from .uv_scenarios import make_metadata_wheel
 
@@ -24,7 +24,7 @@ CASE_NAMES = (
 CACHE_STATES = ("cold", "warm")
 
 
-def _make_versioned_case(root: Path, size: int, *, unsatisfiable: bool) -> dict[str, object]:
+def make_versioned_case(root: Path, size: int, *, unsatisfiable: bool) -> dict[str, object]:
     wheelhouse = root / ("unsatisfiable" if unsatisfiable else "backtracking") / str(size)
     wheelhouse.mkdir(parents=True)
     for index in range(1, size + 1):
@@ -57,7 +57,7 @@ def _make_versioned_case(root: Path, size: int, *, unsatisfiable: bool) -> dict[
     }
 
 
-def _make_many_versions_case(root: Path, size: int) -> dict[str, object]:
+def make_many_versions_case(root: Path, size: int) -> dict[str, object]:
     wheelhouse = root / "many-versions" / str(size)
     wheelhouse.mkdir(parents=True)
     for index in range(1, size + 1):
@@ -75,7 +75,7 @@ def _make_many_versions_case(root: Path, size: int) -> dict[str, object]:
     }
 
 
-def _make_extras_conflict_case(root: Path, size: int) -> dict[str, object]:
+def make_extras_conflict_case(root: Path, size: int) -> dict[str, object]:
     wheelhouse = root / "extras-conflict" / str(size)
     wheelhouse.mkdir(parents=True)
     for index in range(1, size + 1):
@@ -109,7 +109,7 @@ def _make_extras_conflict_case(root: Path, size: int) -> dict[str, object]:
     }
 
 
-def _make_nested_extras_case(root: Path, size: int) -> dict[str, object]:
+def make_nested_extras_case(root: Path, size: int) -> dict[str, object]:
     wheelhouse = root / "nested-extras" / str(size)
     wheelhouse.mkdir(parents=True)
     for index in range(1, size + 1):
@@ -145,7 +145,7 @@ def _make_nested_extras_case(root: Path, size: int) -> dict[str, object]:
     }
 
 
-def _make_requires_python_case(root: Path, size: int) -> dict[str, object]:
+def make_requires_python_case(root: Path, size: int) -> dict[str, object]:
     wheelhouse = root / "requires-python" / str(size)
     wheelhouse.mkdir(parents=True)
     for index in range(1, size + 1):
@@ -168,7 +168,7 @@ def _make_requires_python_case(root: Path, size: int) -> dict[str, object]:
     }
 
 
-def _make_large_catalog_case(root: Path, size: int) -> dict[str, object]:
+def make_large_catalog_case(root: Path, size: int) -> dict[str, object]:
     wheelhouse = root / "large-catalog" / str(size)
     wheelhouse.mkdir(parents=True)
     for index in range(size):
@@ -181,7 +181,7 @@ def _make_large_catalog_case(root: Path, size: int) -> dict[str, object]:
     }
 
 
-def _make_no_match_case(root: Path, size: int) -> dict[str, object]:
+def make_no_match_case(root: Path, size: int) -> dict[str, object]:
     wheelhouse = root / "no-match" / str(size)
     wheelhouse.mkdir(parents=True)
     for index in range(1, size + 1):
@@ -202,30 +202,30 @@ def _make_no_match_case(root: Path, size: int) -> dict[str, object]:
 def create_cases(root: Path) -> dict[str, dict[int, dict[str, object]]]:
     return {
         "many-versions": {
-            size: _make_many_versions_case(root, size) for size in SIZES
+            size: make_many_versions_case(root, size) for size in SIZES
         },
         "backtracking": {
-            size: _make_versioned_case(root, size, unsatisfiable=False)
+            size: make_versioned_case(root, size, unsatisfiable=False)
             for size in SIZES
         },
         "unsatisfiable": {
-            size: _make_versioned_case(root, size, unsatisfiable=True)
+            size: make_versioned_case(root, size, unsatisfiable=True)
             for size in SIZES
         },
         "extras-conflict": {
-            size: _make_extras_conflict_case(root, size) for size in SIZES
+            size: make_extras_conflict_case(root, size) for size in SIZES
         },
         "nested-extras": {
-            size: _make_nested_extras_case(root, size) for size in SIZES
+            size: make_nested_extras_case(root, size) for size in SIZES
         },
         "requires-python": {
-            size: _make_requires_python_case(root, size) for size in SIZES
+            size: make_requires_python_case(root, size) for size in SIZES
         },
         "large-catalog": {
-            size: _make_large_catalog_case(root, size) for size in SIZES
+            size: make_large_catalog_case(root, size) for size in SIZES
         },
         "no-match": {
-            size: _make_no_match_case(root, size) for size in SIZES
+            size: make_no_match_case(root, size) for size in SIZES
         },
     }
 
@@ -264,9 +264,9 @@ class LocalResolverRealWorld:
         )
         shutil.rmtree(self.cache, ignore_errors=True)
         if cache_state == "warm":
-            self._resolve()
+            self.resolve_case()
 
-    def _resolve(self):
+    def resolve_case(self):
         return resolve(
             [str(self.state["wheelhouse"])],
             list(self.state["requirements"]),
@@ -280,5 +280,5 @@ class LocalResolverRealWorld:
         versions: int,
         cache_state: str,
     ) -> None:
-        plan = self._resolve()
+        plan = self.resolve_case()
         assert (plan is not None) is self.state["expected"]

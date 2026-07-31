@@ -8,7 +8,7 @@ body:
       value: >-
         Hi there!
 
-        We'd appreciate it if you could search on pip's existing issues prior to filing
+        We'd appreciate it if you could search on cpip's existing issues prior to filing
         a feature request.
 
         We get a lot of duplicate tickets and have limited maintainer capacity to triage
@@ -18,7 +18,7 @@ body:
     attributes:
       label: What's the problem this feature will solve?
       description: >-
-        What are you trying to do, that you are unable to achieve with pip as it
+        What are you trying to do, that you are unable to achieve with cpip as it
         currently stands?
     validations:
       required: true
@@ -37,7 +37,7 @@ body:
     attributes:
       label: Alternative Solutions
       description: >-
-        Have you tried to workaround the problem using pip or other tools? Or a
+        Have you tried to workaround the problem using cpip or other tools? Or a
         different approach to solving this issue? Please elaborate here.
     validations:
       required: true

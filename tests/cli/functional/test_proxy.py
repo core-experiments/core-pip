@@ -8,8 +8,8 @@ import pytest
 from proxy.http.proxy import HttpProxyBasePlugin
 
 from conftest import CertFactory
-from pip_test_support import PipTestEnvironment, TestData
-from pip_test_support.server import (
+from cpip_test_support import CpipTestEnvironment, TestData
+from cpip_test_support.server import (
     authorization_response,
     make_mock_server,
     package_page,
@@ -24,7 +24,7 @@ class AccessLogPlugin(HttpProxyBasePlugin):
 
 @pytest.mark.network
 def test_proxy_overrides_env(
-    script: PipTestEnvironment, capfd: pytest.CaptureFixture[str]
+    script: CpipTestEnvironment, capfd: pytest.CaptureFixture[str]
 ) -> None:
     capfd.readouterr()
     with (
@@ -34,23 +34,23 @@ def test_proxy_overrides_env(
         environment_proxy = f"http://127.0.0.1:{proxy2.flags.port}"
         script.environ["http_proxy"] = environment_proxy
         script.environ["https_proxy"] = environment_proxy
-        result = script.pip(
+        result = script.cpip(
             "download",
             "--proxy",
             f"http://127.0.0.1:{proxy1.flags.port}",
             "--trusted-host",
             "127.0.0.1",
             "-d",
-            "pip_downloads",
+            "cpip_downloads",
             "INITools==0.1",
         )
-        result.did_create(Path("scratch") / "pip_downloads" / "INITools-0.1.tar.gz")
+        result.did_create(Path("scratch") / "cpip_downloads" / "INITools-0.1.tar.gz")
         out, _ = capfd.readouterr()
         assert "CONNECT" not in out
 
 
 def test_proxy_does_not_override_netrc(
-    script: PipTestEnvironment,
+    script: CpipTestEnvironment,
     data: TestData,
     cert_factory: CertFactory,
 ) -> None:
@@ -76,7 +76,7 @@ def test_proxy_does_not_override_netrc(
     netrc.write_text(f"machine {server.host} login USERNAME password PASSWORD")
     with proxy.Proxy(port=0, num_acceptors=1) as proxy1, server_running(server):
         script.environ["NETRC"] = netrc
-        script.pip(
+        script.cpip(
             "install",
             "--no-build-isolation",
             "--proxy",
@@ -103,13 +103,13 @@ def test_proxy_does_not_override_netrc(
 @pytest.mark.network
 @pytest.mark.parametrize("flag", ["", "--use-feature=inprocess-build-deps"])
 def test_build_deps_use_proxy_from_cli(
-    script: PipTestEnvironment,
+    script: CpipTestEnvironment,
     capfd: pytest.CaptureFixture[str],
     data: TestData,
     flag: str,
 ) -> None:
     with proxy.Proxy(port=0, num_acceptors=1, plugins=[AccessLogPlugin]) as proxy1:
-        result = script.pip(
+        result = script.cpip(
             "wheel",
             "-v",
             str(data.packages / "pep517_setup_and_pyproject"),

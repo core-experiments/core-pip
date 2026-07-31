@@ -7,9 +7,9 @@ import shutil
 from pathlib import Path
 from typing import cast
 
-from pip.index.directory_index import DirectoryIndex
-from pip.network.http import NetworkSession
-from pip.resolution.req_file import parse_requirements
+from cpip.index.directory_index import DirectoryIndex
+from cpip.network.http import NetworkSession
+from cpip.resolution.req_file import parse_requirements
 
 INDEX_COUNTS = (10, 100, 1_000, 10_000)
 REQUIREMENT_COUNTS = (10, 100, 1_000, 10_000)
@@ -17,7 +17,7 @@ INDEX_MODES = ("wheels", "mixed")
 REQUIREMENT_MODES = ("flat", "nested", "constraints")
 
 
-def _wheel_name(index: int) -> str:
+def wheel_name(index: int) -> str:
     return f"index-bench-{index:05}-1.0-py3-none-any.whl"
 
 
@@ -28,7 +28,7 @@ def create_index_workload(root: Path) -> dict[str, str]:
             path = root / f"{count}-{mode}"
             path.mkdir(parents=True)
             for index in range(count):
-                (path / _wheel_name(index)).touch()
+                (path / wheel_name(index)).touch()
             if mode == "mixed":
                 (path / "index-bench-archive-1.0.tar.gz").touch()
                 (path / "simple.html").write_text("<html></html>", encoding="utf-8")

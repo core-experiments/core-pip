@@ -9,10 +9,10 @@ setup(
     long_description="""\
 File system test package""",
     classifiers=[],  # Get strings from https://pypi.org/pypi?%3Aaction=list_classifiers
-    keywords="pip tests",
-    author="pip",
-    author_email="pip@openplans.org",
-    url="http://pip.openplans.org",
+    keywords="cpip tests",
+    author="cpip",
+    author_email="cpip@openplans.org",
+    url="http://cpip.openplans.org",
     license="",
     packages=find_packages(exclude=["ez_setup", "examples", "tests"]),
     include_package_data=True,

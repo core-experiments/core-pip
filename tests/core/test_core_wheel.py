@@ -4,8 +4,8 @@ import zipfile
 from pathlib import Path
 
 import pytest
-from pip.core.errors import InstallationError
-from pip.core.wheel import (
+from cpip.core.errors import InstallationError
+from cpip.core.wheel import (
     TargetContext,
     WheelTag,
     parse_wheel_file,
@@ -166,7 +166,7 @@ def test_wheel_candidate_reuses_metadata_across_extras(
         )
     base = wheel_candidate(wheel)
     monkeypatch.setattr(
-        "pip.core.wheel.read_wheel_metadata_internal",
+        "cpip.core.wheel.read_wheel_metadata_internal",
         lambda *args_internal, **kwargs_internal: pytest.fail("metadata was reparsed"),
     )
 

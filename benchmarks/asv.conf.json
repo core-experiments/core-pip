@@ -1,12 +1,12 @@
 {
   "version": 1,
-  "project": "pip",
-  "project_url": "https://pip.pypa.io/",
+  "project": "cpip",
+  "project_url": "https://cpip.pypa.io/",
   "repo": "..",
-  "branches": ["main"],
+  "branches": ["HEAD"],
   "benchmark_dir": ".",
   "environment_type": "virtualenv",
-  "build_command": "python -m pip wheel --no-deps -w {build_cache_dir} {build_dir}",
+  "build_command": "PYTHONPATH={build_dir}/src python -m cpip wheel --no-deps -w {build_cache_dir} {build_dir}",
   "uninstall_command": [],
   "pythons": ["3.12"],
   "matrix": {

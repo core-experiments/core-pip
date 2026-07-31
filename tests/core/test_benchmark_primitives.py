@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from benchmarks.pip_primitives import (
+from benchmarks.cpip_primitives import (
     LocalSpecifierChecks,
     NameNormalization,
     RequirementParsing,

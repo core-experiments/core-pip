@@ -8,7 +8,7 @@ body:
       value: >-
         Hi there!
 
-        We'd appreciate it if you could search on pip's existing issues prior to filing
+        We'd appreciate it if you could search on cpip's existing issues prior to filing
         a bug report.
 
         We get a lot of duplicate tickets and have limited maintainer capacity to triage
@@ -30,7 +30,7 @@ body:
 
   - type: input
     attributes:
-      label: pip version
+      label: cpip version
     validations:
       required: true
   - type: input
@@ -60,7 +60,7 @@ body:
       label: Output
       description: >-
         Provide the output of the steps above, including the commands
-        themselves and pip's output/traceback etc.
+        themselves and cpip's output/traceback etc.
 
         If you want to present output from multiple commands, please prefix
         the line containing the command with `$ `. Please also ensure that

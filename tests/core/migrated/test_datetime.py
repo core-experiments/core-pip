@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import pytest
-from pip.index.datetime import parse_iso_datetime
+from cpip.index.datetime import parse_iso_datetime
 
 
 @pytest.mark.parametrize(

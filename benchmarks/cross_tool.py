@@ -1,6 +1,6 @@
-"""Compare core-pip and uv over the same deterministic workloads.
+"""Compare cpip and uv over the same deterministic workloads.
 
-The ASV suite is useful for tracking pip over time.  This module is deliberately
+The ASV suite is useful for tracking cpip over time.  This module is deliberately
 separate: Hyperfine runs both tools as peer commands and reports their relative
 performance on the same machine.
 """
@@ -44,7 +44,7 @@ class Benchmark(str, Enum):
 
 
 class Tool(str, Enum):
-    CORE_PIP = "core-pip"
+    CPIP = "cpip"
     UV_PIP = "uv-pip"
 
 
@@ -78,24 +78,24 @@ class ScenarioPaths:
         self.expected_projects = cast(int, values["expected_projects"])
 
 
-def _as_scenario(values: ScenarioPaths | Mapping[str, object]) -> ScenarioPaths:
+def as_scenario(values: ScenarioPaths | Mapping[str, object]) -> ScenarioPaths:
     return values if isinstance(values, ScenarioPaths) else ScenarioPaths(values)
 
 
-def _quote(path: Path) -> str:
+def quote_path(path: Path) -> str:
     import shlex
 
     return shlex.quote(os.fspath(path))
 
 
-def _run(command: list[str]) -> None:
+def run_command(command: list[str]) -> None:
     environment = os.environ.copy()
     environment.pop("PYTHONDONTWRITEBYTECODE", None)
     environment.update(
         {
-            "PIP_DISABLE_PIP_VERSION_CHECK": "1",
-            "PIP_NO_INPUT": "1",
-            "PIP_QUIET": "1",
+            "CPIP_DISABLE_CPIP_VERSION_CHECK": "1",
+            "CPIP_NO_INPUT": "1",
+            "CPIP_QUIET": "1",
         }
     )
     result = subprocess.run(
@@ -111,14 +111,14 @@ def _run(command: list[str]) -> None:
         raise subprocess.CalledProcessError(result.returncode, command)
 
 
-def _uv(path: str | None) -> str:
+def uv_command(path: str | None) -> str:
     executable = path or shutil.which("uv")
     if executable is None:
         raise RuntimeError("uv is not installed; pass --uv-path or install uv")
     return executable
 
 
-def _command(
+def build_command(
     scenario: ScenarioPaths | Mapping[str, object],
     tool: Tool,
     benchmark: Benchmark,
@@ -126,11 +126,11 @@ def _command(
     *,
     uv_path: str | None,
 ) -> Command:
-    scenario = _as_scenario(scenario)
+    scenario = as_scenario(scenario)
     wheelhouse = scenario.wheelhouse
     input_file = scenario.input
     cache = state / "cache"
-    output = state / ("pylock.toml" if tool is Tool.CORE_PIP else "requirements.txt")
+    output = state / ("pylock.toml" if tool is Tool.CPIP else "requirements.txt")
     target = state / "target"
     common = [
         "--no-index",
@@ -139,55 +139,49 @@ def _command(
     ]
 
     if benchmark in {Benchmark.STARTUP_VERSION, Benchmark.STARTUP_VERSION_COLD}:
-        if tool is Tool.CORE_PIP:
+        if tool is Tool.CPIP:
             command = [
                 "env",
                 "PYTHONDONTWRITEBYTECODE=",
                 f"PYTHONPYCACHEPREFIX={state / 'pycache'}",
-                sys.executable,
-                "-m",
-                "pip",
+                "cpip",
                 "--version",
             ]
         else:
-            command = [_uv(uv_path), "--version"]
+            command = [uv_command(uv_path), "--version"]
         prepare = (
-            f"rm -rf {_quote(state / 'pycache')}"
+            f"rm -rf {quote_path(state / 'pycache')}"
             if benchmark is Benchmark.STARTUP_VERSION_COLD
             else "true"
         )
         return Command(tool.value, command, prepare)
 
     if benchmark in {Benchmark.STARTUP_HELP, Benchmark.STARTUP_HELP_COLD}:
-        if tool is Tool.CORE_PIP:
+        if tool is Tool.CPIP:
             command = [
                 "env",
                 "PYTHONDONTWRITEBYTECODE=",
                 f"PYTHONPYCACHEPREFIX={state / 'pycache'}",
-                sys.executable,
-                "-m",
-                "pip",
+                "cpip",
                 "--help",
             ]
         else:
-            command = [_uv(uv_path), "pip", "--help"]
+            command = [uv_command(uv_path), "pip", "--help"]
         prepare = (
-            f"rm -rf {_quote(state / 'pycache')}"
+            f"rm -rf {quote_path(state / 'pycache')}"
             if benchmark is Benchmark.STARTUP_HELP_COLD
             else "true"
         )
         return Command(tool.value, command, prepare)
 
     if benchmark.value.startswith("resolve"):
-        if tool is Tool.CORE_PIP:
+        if tool is Tool.CPIP:
             command = [
                 "env",
-                f"PIP_CACHE_DIR={os.fspath(cache)}",
+                f"CPIP_CACHE_DIR={os.fspath(cache)}",
                 "PYTHONDONTWRITEBYTECODE=",
                 f"PYTHONPYCACHEPREFIX={state / 'pycache'}",
-                sys.executable,
-                "-m",
-                "pip",
+                "cpip",
                 "lock",
                 *common,
                 "--output",
@@ -198,7 +192,7 @@ def _command(
             ]
         else:
             command = [
-                _uv(uv_path),
+                uv_command(uv_path),
                 "pip",
                 "compile",
                 os.fspath(input_file),
@@ -209,9 +203,9 @@ def _command(
                 os.fspath(output),
                 "--quiet",
             ]
-        output_reset = f"rm -f {_quote(output)}"
+        output_reset = f"rm -f {quote_path(output)}"
         if benchmark is Benchmark.RESOLVE_COLD:
-            prepare = f"rm -rf {_quote(cache)} {_quote(output)}"
+            prepare = f"rm -rf {quote_path(cache)} {quote_path(output)}"
         else:
             prepare = output_reset
         return Command(tool.value, command, prepare)
@@ -225,14 +219,12 @@ def _command(
             "--no-compile",
         ]
     )
-    if tool is Tool.CORE_PIP:
+    if tool is Tool.CPIP:
         command = [
             "env",
             "PYTHONDONTWRITEBYTECODE=",
             f"PYTHONPYCACHEPREFIX={state / 'pycache'}",
-            sys.executable,
-            "-m",
-            "pip",
+            "cpip",
             "install",
             "--ignore-installed",
             *common,
@@ -248,7 +240,7 @@ def _command(
             command.insert(-2, "--quiet")
     else:
         command = [
-            _uv(uv_path),
+            uv_command(uv_path),
             "pip",
             "install",
             "--python",
@@ -265,14 +257,14 @@ def _command(
         }:
             command.append("--quiet")
     if benchmark is Benchmark.INSTALL_COLD:
-        prepare = f"rm -rf {_quote(cache)} {_quote(target)}"
+        prepare = f"rm -rf {quote_path(cache)} {quote_path(target)}"
     else:
-        prepare = f"rm -rf {_quote(target)}"
+        prepare = f"rm -rf {quote_path(target)}"
     return Command(tool.value, command, prepare)
 
 
-def _prepare_warm(command: Command) -> None:
-    _run(command.command)
+def prepare_warm(command: Command) -> None:
+    run_command(command.command)
     for argument in command.command:
         if argument.endswith("/target"):
             shutil.rmtree(argument, ignore_errors=True)
@@ -288,12 +280,12 @@ def _prepare_warm(command: Command) -> None:
         output.unlink(missing_ok=True)
 
 
-def _version(command: list[str]) -> str:
+def command_version(command: list[str]) -> str:
     result = subprocess.run(command, check=True, capture_output=True, text=True)
     return (result.stdout or result.stderr).strip()
 
 
-def _fixture_digest(wheelhouse: Path) -> str:
+def fixture_digest(wheelhouse: Path) -> str:
     digest = hashlib.sha256()
     for path in sorted(wheelhouse.glob("*.whl")):
         digest.update(path.name.encode("utf-8"))
@@ -301,7 +293,7 @@ def _fixture_digest(wheelhouse: Path) -> str:
     return digest.hexdigest()
 
 
-def _normalize_output(path: Path) -> set[tuple[str, str]]:
+def normalize_output(path: Path) -> set[tuple[str, str]]:
     if path.name == "pylock.toml":
         data = tomllib.loads(path.read_text(encoding="utf-8"))
         return {
@@ -317,23 +309,23 @@ def _normalize_output(path: Path) -> set[tuple[str, str]]:
     return {(name.lower().replace("_", "-"), version) for name, version in matches}
 
 
-def _validate_scenario(
+def validate_scenario(
     scenario: ScenarioPaths, *, uv_path: str | None, root: Path
 ) -> None:
     """Run both resolvers once and verify the deterministic fixture agrees."""
     outputs: dict[Tool, set[tuple[str, str]]] = {}
     for tool in Tool:
         state = root / f"validate-{tool.value}"
-        command = _command(
+        command = build_command(
             scenario, tool, Benchmark.RESOLVE_COLD, state, uv_path=uv_path
         )
         state.mkdir(parents=True, exist_ok=True)
-        _run(command.command)
-        output = state / ("pylock.toml" if tool is Tool.CORE_PIP else "requirements.txt")
-        outputs[tool] = _normalize_output(output)
-    if outputs[Tool.CORE_PIP] != outputs[Tool.UV_PIP]:
+        run_command(command.command)
+        output = state / ("pylock.toml" if tool is Tool.CPIP else "requirements.txt")
+        outputs[tool] = normalize_output(output)
+    if outputs[Tool.CPIP] != outputs[Tool.UV_PIP]:
         raise RuntimeError(
-            "core-pip and uv selected different deterministic resolutions for "
+            "cpip and uv selected different deterministic resolutions for "
             f"{scenario.name}: {outputs}"
         )
 
@@ -353,13 +345,13 @@ def run_comparison(
     if hyperfine is None:
         raise RuntimeError("hyperfine is not installed")
 
-    with tempfile.TemporaryDirectory(prefix="core-pip-benchmark-") as directory:
+    with tempfile.TemporaryDirectory(prefix="cpip-benchmark-") as directory:
         root = Path(directory)
         commands: list[Command] = []
         for tool in tools:
             state = root / tool.value
             state.mkdir()
-            command = _command(scenario, tool, benchmark, state, uv_path=uv_path)
+            command = build_command(scenario, tool, benchmark, state, uv_path=uv_path)
             if benchmark in {
                 Benchmark.RESOLVE_WARM,
                 Benchmark.INSTALL_WARM,
@@ -367,7 +359,7 @@ def run_comparison(
                 Benchmark.STARTUP_FALLBACK_INSTALL,
                 Benchmark.STARTUP_FULL_FALLBACK_INSTALL,
             }:
-                _prepare_warm(command)
+                prepare_warm(command)
             commands.append(command)
 
         json_path = output or (Path.cwd() / f"{scenario_name}-{benchmark.value}.json")
@@ -389,12 +381,12 @@ def run_comparison(
             "benchmark": benchmark.value,
             "bytecode_policy": "dedicated-pycache-prefix",
             "tools": [command.name for command in commands],
-            "python": _version([sys.executable, "--version"]),
-            "pip": _version([sys.executable, "-m", "pip", "--version"]),
-            "uv": _version([_uv(uv_path), "--version"]),
+            "python": command_version([sys.executable, "--version"]),
+            "cpip": command_version(["cpip", "--version"]),
+            "uv": command_version([uv_command(uv_path), "--version"]),
             "platform": platform.platform(),
             "machine": platform.machine(),
-            "fixture_sha256": _fixture_digest(
+            "fixture_sha256": fixture_digest(
                 scenario.wheelhouse
             ),
             "expected_projects": scenario.expected_projects,
@@ -423,7 +415,7 @@ def main(argv: list[str] | None = None) -> int:
     selected_benchmarks = tuple(
         Benchmark(value) for value in (args.benchmark or [Benchmark.RESOLVE_COLD.value, Benchmark.RESOLVE_WARM.value])
     )
-    root = Path(tempfile.mkdtemp(prefix="core-pip-scenarios-"))
+    root = Path(tempfile.mkdtemp(prefix="cpip-scenarios-"))
     try:
         scenarios = create_offline_scenarios(root)
         names = tuple(args.scenario or scenarios)
@@ -433,7 +425,7 @@ def main(argv: list[str] | None = None) -> int:
         args.output_dir.mkdir(parents=True, exist_ok=True)
         for name in names:
             scenario = ScenarioPaths(scenarios[name])
-            _validate_scenario(scenario, uv_path=args.uv_path, root=root)
+            validate_scenario(scenario, uv_path=args.uv_path, root=root)
             for benchmark in selected_benchmarks:
                 output = args.output_dir / f"{name}-{benchmark.value}.json"
                 run_comparison(

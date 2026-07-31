@@ -1,6 +1,6 @@
 [project]
-name = "core-pip"
-version = "0.0.0"
+name = "cpip"
+version = "0.0.1"
 description = "The PyPA recommended tool for installing Python packages."
 license = "MIT"
 license-files = ["LICENSE.txt"]
@@ -19,9 +19,9 @@ classifiers = [
     "Programming Language :: Python :: Implementation :: CPython",
     "Programming Language :: Python :: Implementation :: PyPy",
 ]
-authors = [{ name = "The pip developers", email = "distutils-sig@python.org" }]
+authors = [{ name = "The cpip developers", email = "distutils-sig@python.org" }]
 
-# NOTE: requires-python is duplicated in __pip-runner__.py.
+# NOTE: requires-python is duplicated in __cpip-runner__.py.
 # When changing this value, please change the other copy as well.
 requires-python = ">=3.9"
 dependencies = [
@@ -31,14 +31,12 @@ dependencies = [
 ]
 
 [project.scripts]
-pip = "pip.cli.main:main"
-pip3 = "pip.cli.main:main"
-pip-core = "pip.cli.main:main"
+cpip = "cpip.cli.main:main"
 
 [project.urls]
-Homepage = "https://pip.pypa.io/"
-Documentation = "https://pip.pypa.io"
-Source = "https://github.com/pypa/pip"
+Homepage = "https://cpip.pypa.io/"
+Documentation = "https://cpip.pypa.io"
+Source = "https://github.com/pypa/cpip"
 
 [build-system]
 requires = [
@@ -75,7 +73,7 @@ test = [
 default-groups = ["typing"]
 
 [tool.uv.build-backend]
-module-name = "pip"
+module-name = "cpip"
 
 [tool.ruff]
 extend-exclude = [
@@ -91,7 +89,7 @@ markers = [
     "integration: integration test",
     "mercurial: tests requiring Mercurial",
     "network: test requiring network access",
-    "search: pip search test",
+    "search: cpip search test",
     "svn: tests requiring Subversion",
     "unit: unit test",
 ]
@@ -99,7 +97,7 @@ markers = [
 [tool.ty.environment]
 python-version = "3.14"
 
-[tool.pip.architecture]
+[tool.cpip.architecture]
 domains = [
     "core",
     "platform",
@@ -112,7 +110,7 @@ domains = [
     "cli",
 ]
 
-[tool.pip.architecture.dependencies]
+[tool.cpip.architecture.dependencies]
 core = []
 platform = ["core"]
 build = ["core", "platform"]

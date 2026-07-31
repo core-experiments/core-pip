@@ -10,7 +10,7 @@ from pathlib import Path
 
 
 CUTOFF = "2024-08-08"
-TOOLS = ("core-pip", "uv-pip")
+TOOLS = ("cpip", "uv-pip")
 RESOLVE_MODES = ("cold", "warm", "incremental", "noop")
 LIVE_CASES = {
     "jupyter": ("jupyter==1.0.0",),
@@ -86,8 +86,8 @@ TRIO_COMPILED = (
 
 
 def require_live_benchmarks() -> None:
-    if os.environ.get("PIP_BENCH_LIVE") != "1":
-        raise NotImplementedError("set PIP_BENCH_LIVE=1 to run live-PyPI cases")
+    if os.environ.get("CPIP_BENCH_LIVE") != "1":
+        raise NotImplementedError("set CPIP_BENCH_LIVE=1 to run live-PyPI cases")
 
 
 def uv() -> str:
@@ -101,9 +101,9 @@ def run_internal(command: list[str]) -> None:
     environment = os.environ.copy()
     environment.update(
         {
-            "PIP_DISABLE_PIP_VERSION_CHECK": "1",
-            "PIP_NO_INPUT": "1",
-            "PIP_QUIET": "1",
+            "CPIP_DISABLE_CPIP_VERSION_CHECK": "1",
+            "CPIP_NO_INPUT": "1",
+            "CPIP_QUIET": "1",
         }
     )
     subprocess.run(
@@ -141,11 +141,11 @@ def resolve_command(
     state: dict[str, str], tool: str, cache: Path, output: Path, *, incremental: bool
 ) -> list[str]:
     input_file = state["incremental"] if incremental else state["input"]
-    if tool == "core-pip":
+    if tool == "cpip":
         return [
             sys.executable,
             "-m",
-            "pip",
+            "cpip",
             "install",
             "--dry-run",
             "--ignore-installed",
@@ -205,7 +205,7 @@ class LiveResolution(LiveBenchmark):
         work = Path.cwd() / "uv-live-work" / scenario / tool
         work.mkdir(parents=True, exist_ok=True)
         cache = work / "cache"
-        output = work / ("report.json" if tool == "core-pip" else "requirements.txt")
+        output = work / ("report.json" if tool == "cpip" else "requirements.txt")
         incremental = cache_state == "incremental"
         command = resolve_command(
             states[scenario], tool, cache, output, incremental=incremental
@@ -264,11 +264,11 @@ class LiveTrioInstallation(LiveBenchmark):
             "-r",
             states["trio"]["compiled"],
         ]
-        if tool == "core-pip":
+        if tool == "cpip":
             command = [
                 sys.executable,
                 "-m",
-                "pip",
+                "cpip",
                 "install",
                 "--ignore-installed",
                 "--uploaded-prior-to",

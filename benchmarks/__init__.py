@@ -1,1 +1,1 @@
-"""ASV benchmarks for pip."""
+"""ASV benchmarks for cpip."""

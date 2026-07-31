@@ -10,11 +10,11 @@ from setuptools.build_meta import (
 
 
 def build_wheel(*a, **kw):
-    if os.environ.get("PIP_TEST_FAIL_BUILD_WHEEL"):
+    if os.environ.get("CPIP_TEST_FAIL_BUILD_WHEEL"):
         raise RuntimeError("Failing build_wheel, as requested.")
 
     # Create the marker file to record that the hook was called
-    with open(os.environ["PIP_TEST_MARKER_FILE"], "wb"):
+    with open(os.environ["CPIP_TEST_MARKER_FILE"], "wb"):
         pass
 
     return setuptools_build_wheel(*a, **kw)

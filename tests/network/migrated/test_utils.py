@@ -3,9 +3,9 @@ from io import BytesIO
 
 import pytest
 
-from pip.network.exceptions import NetworkConnectionError
-from pip.network.http import HttpResponse
-from pip.network.utils import raise_for_status, response_chunks
+from cpip.network.exceptions import NetworkConnectionError
+from cpip.network.http import HttpResponse
+from cpip.network.utils import raise_for_status, response_chunks
 
 
 def response(status: int = 200, body: bytes = b"downloaded") -> HttpResponse:

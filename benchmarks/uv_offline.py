@@ -1,4 +1,4 @@
-"""Offline core-pip versus uv benchmarks over compact uv-derived scenarios."""
+"""Offline cpip versus uv benchmarks over compact uv-derived scenarios."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from .uv_scenarios import (
 )
 
 
-TOOLS = ("core-pip", "uv-pip")
+TOOLS = ("cpip", "uv-pip")
 SCENARIO_NAMES = tuple(item.name for item in SCENARIOS) + BACKTRACKING_SCENARIOS
 RESOLVE_MODES = ("cold", "warm", "incremental", "noop")
 INSTALL_MODES = ("cold", "warm")
@@ -25,9 +25,9 @@ def run_internal(command: list[str]) -> None:
     environment = os.environ.copy()
     environment.update(
         {
-            "PIP_DISABLE_PIP_VERSION_CHECK": "1",
-            "PIP_NO_INPUT": "1",
-            "PIP_QUIET": "1",
+            "CPIP_DISABLE_CPIP_VERSION_CHECK": "1",
+            "CPIP_NO_INPUT": "1",
+            "CPIP_QUIET": "1",
         }
     )
     subprocess.run(
@@ -56,7 +56,7 @@ def resolve_command(
     locked_input: Path | None = None,
 ) -> list[str]:
     wheelhouse = str(scenario["wheelhouse"])
-    if tool == "core-pip":
+    if tool == "cpip":
         input_file = str(
             locked_input
             or (scenario["incremental_input"] if incremental else scenario["input"])
@@ -64,7 +64,7 @@ def resolve_command(
         command = [
             sys.executable,
             "-m",
-            "pip",
+            "cpip",
             "lock",
             "-r",
             input_file,
@@ -109,11 +109,11 @@ def install_command_internal(
         "-r",
         str(scenario["input"]),
     ]
-    if tool == "core-pip":
+    if tool == "cpip":
         return [
             sys.executable,
             "-m",
-            "pip",
+            "cpip",
             "install",
             "--ignore-installed",
             "--no-compile",
@@ -153,10 +153,10 @@ class OfflineResolution(OfflineBenchmark):
         work = Path.cwd() / "uv-offline-work" / scenario / tool
         work.mkdir(parents=True, exist_ok=True)
         self.cache = work / "cache"
-        suffix = "toml" if tool == "core-pip" else "txt"
+        suffix = "toml" if tool == "cpip" else "txt"
         self.output = work / f"resolved.{suffix}"
         self.baseline = work / (
-            "pylock.baseline.toml" if tool == "core-pip" else "baseline.txt"
+            "pylock.baseline.toml" if tool == "cpip" else "baseline.txt"
         )
         self.command = resolve_command(
             state, tool, cache=self.cache, output=self.output

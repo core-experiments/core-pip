@@ -7,24 +7,24 @@ from os.path import isdir, isfile, normcase
 import pytest
 
 from .test_install_user import patch_dist_in_site_packages
-from pip_test_support import PipTestEnvironment, TestData, assert_all_changes
-from pip_test_support.venv import VirtualEnvironment
-from pip_test_support.wheel import make_wheel
+from cpip_test_support import CpipTestEnvironment, TestData, assert_all_changes
+from cpip_test_support.venv import VirtualEnvironment
+from cpip_test_support.wheel import make_wheel
 
 
 @pytest.mark.usefixtures("enable_user_site")
 class Tests_UninstallUserSite:
     @pytest.mark.network
-    def test_uninstall_from_usersite(self, script: PipTestEnvironment) -> None:
+    def test_uninstall_from_usersite(self, script: CpipTestEnvironment) -> None:
         """
         Test uninstall from usersite
         """
-        result1 = script.pip("install", "--user", "INITools==0.3")
-        result2 = script.pip("uninstall", "-y", "INITools")
+        result1 = script.cpip("install", "--user", "INITools==0.3")
+        result2 = script.cpip("uninstall", "-y", "INITools")
         assert_all_changes(result1, result2, [script.venv / "build", "cache"])
 
     def test_uninstall_from_usersite_with_dist_in_global_site(
-        self, virtualenv: VirtualEnvironment, script: PipTestEnvironment
+        self, virtualenv: VirtualEnvironment, script: CpipTestEnvironment
     ) -> None:
         """
         Test uninstall from usersite (with same dist in global site)
@@ -43,7 +43,7 @@ class Tests_UninstallUserSite:
 
         patch_dist_in_site_packages(virtualenv)
 
-        script.pip(
+        script.cpip(
             "install",
             "--no-index",
             "--find-links",
@@ -52,7 +52,7 @@ class Tests_UninstallUserSite:
             "pkg==0.1",
         )
 
-        result2 = script.pip(
+        result2 = script.cpip(
             "install",
             "--no-index",
             "--find-links",
@@ -61,7 +61,7 @@ class Tests_UninstallUserSite:
             "--user",
             "pkg==0.1.1",
         )
-        result3 = script.pip("uninstall", "-vy", "pkg")
+        result3 = script.cpip("uninstall", "-vy", "pkg")
 
         # uninstall console is mentioning user scripts, but not global scripts
         assert normcase(script.user_bin_path) in result3.stdout, str(result3)
@@ -75,7 +75,7 @@ class Tests_UninstallUserSite:
         assert isdir(dist_info_folder)
 
     def test_uninstall_editable_from_usersite(
-        self, script: PipTestEnvironment, data: TestData
+        self, script: CpipTestEnvironment, data: TestData
     ) -> None:
         """
         Test uninstall editable local user install
@@ -91,7 +91,7 @@ class Tests_UninstallUserSite:
         result1.did_create(egg_link)
 
         # uninstall
-        result2 = script.pip("uninstall", "-y", "FSPkg")
+        result2 = script.cpip("uninstall", "-y", "FSPkg")
         assert not isfile(script.base_path / egg_link)
 
         assert_all_changes(

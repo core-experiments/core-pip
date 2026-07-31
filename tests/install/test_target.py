@@ -3,7 +3,7 @@ import sysconfig
 from pathlib import Path
 
 import pytest
-from pip.install.target import InstallTarget
+from cpip.install.target import InstallTarget
 
 
 def test_target_mode_uses_one_contained_destination(tmp_path: Path) -> None:

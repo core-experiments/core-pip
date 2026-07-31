@@ -14,14 +14,14 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from _pytest.monkeypatch import MonkeyPatch
-from pip.core.errors import InstallationError
-from pip.install.unpacking import (
+from cpip.core.errors import InstallationError
+from cpip.install.unpacking import (
     ArchiveExtractor,
     is_within_directory,
     untar_file,
     unzip_file,
 )
-from pip_test_support import TestData
+from cpip_test_support import TestData
 
 
 class TestUnpackArchives:
@@ -199,7 +199,7 @@ class TestUnpackArchives:
             untar_file(test_tar, self.tempdir)
 
         # The error message comes from tarfile.data_filter when it is available,
-        # otherwise from pip's own check.
+        # otherwise from cpip's own check.
         if hasattr(tarfile, "data_filter"):
             assert "is outside the destination" in str(e.value)
         else:
@@ -243,8 +243,8 @@ class TestUnpackArchives:
         "input_prefix, unpack_prefix",
         [
             ("", ""),
-            ("dir/", ""),  # pip ignores a common leading directory
-            ("dir/sub/", "sub/"),  # pip ignores *one* common leading directory
+            ("dir/", ""),  # cpip ignores a common leading directory
+            ("dir/sub/", "sub/"),  # cpip ignores *one* common leading directory
         ],
     )
     def test_unpack_tar_links(self, input_prefix: str, unpack_prefix: str) -> None:
@@ -526,7 +526,7 @@ def test_unpack_tar_unicode(tmp_path: Path) -> None:
         # Test target equal to the directory
         (("/srv/env/bin", "/srv/env/bin"), True),
         # Test target within a doubled-slash directory
-        (("//srv/env/bin", "//srv/env/bin/pip"), True),
+        (("//srv/env/bin", "//srv/env/bin/cpip"), True),
         # Test target outside a doubled-slash directory
         (("//srv/env/bin", "//srv/env/outside"), False),
         # Test target on a different drive
@@ -551,10 +551,10 @@ def test_is_within_directory(args: tuple[str, str], expected: bool) -> None:
         (True, True, False, False, True),
     ],
 )
-@patch("pip.install.unpacking.tarfile")
-@patch("pip.install.unpacking.zipfile")
-@patch("pip.install.unpacking.untar_file")
-@patch("pip.install.unpacking.unzip_file")
+@patch("cpip.install.unpacking.tarfile")
+@patch("cpip.install.unpacking.zipfile")
+@patch("cpip.install.unpacking.untar_file")
+@patch("cpip.install.unpacking.unzip_file")
 def test_magic_signature_check_logic(
     mock_unzip: MagicMock,
     mock_untar: MagicMock,
@@ -567,7 +567,7 @@ def test_magic_signature_check_logic(
     exception: bool,
 ) -> None:
     """
-    Test that pip throws an error if file is identified as both zip and tar
+    Test that cpip throws an error if file is identified as both zip and tar
     and all other checks came out undeterministic.
     """
     mock_tarfile.is_tarfile.return_value = is_tar
@@ -597,10 +597,10 @@ def test_magic_signature_check_logic(
         ("ok.tar.gz", None, False, True),
     ],
 )
-@patch("pip.install.unpacking.tarfile")
-@patch("pip.install.unpacking.zipfile")
-@patch("pip.install.unpacking.untar_file")
-@patch("pip.install.unpacking.unzip_file")
+@patch("cpip.install.unpacking.tarfile")
+@patch("cpip.install.unpacking.zipfile")
+@patch("cpip.install.unpacking.untar_file")
+@patch("cpip.install.unpacking.unzip_file")
 def test_check_priority(
     mock_unzip: MagicMock,
     mock_untar: MagicMock,
@@ -641,10 +641,10 @@ def test_check_priority(
         ("pkg.tar.lzma", False),
     ],
 )
-@patch("pip.install.unpacking.tarfile")
-@patch("pip.install.unpacking.zipfile")
-@patch("pip.install.unpacking.untar_file")
-@patch("pip.install.unpacking.unzip_file")
+@patch("cpip.install.unpacking.tarfile")
+@patch("cpip.install.unpacking.zipfile")
+@patch("cpip.install.unpacking.untar_file")
+@patch("cpip.install.unpacking.unzip_file")
 def test_filename_extension_routing(
     mock_unzip: MagicMock,
     mock_untar: MagicMock,
@@ -670,10 +670,10 @@ def test_filename_extension_routing(
         ("application/octet-stream", "pkg.tar.gz", False),
     ],
 )
-@patch("pip.install.unpacking.tarfile")
-@patch("pip.install.unpacking.zipfile")
-@patch("pip.install.unpacking.untar_file")
-@patch("pip.install.unpacking.unzip_file")
+@patch("cpip.install.unpacking.tarfile")
+@patch("cpip.install.unpacking.zipfile")
+@patch("cpip.install.unpacking.untar_file")
+@patch("cpip.install.unpacking.unzip_file")
 def test_content_type_vs_filename_priority(
     mock_unzip: MagicMock,
     mock_untar: MagicMock,
@@ -691,7 +691,7 @@ def test_content_type_vs_filename_priority(
 
 
 @pytest.mark.parametrize("filename, flatten", [("pkg.whl", False), ("pkg.zip", True)])
-@patch("pip.install.unpacking.unzip_file")
+@patch("cpip.install.unpacking.unzip_file")
 def test_flatten_only_for_non_whl(
     mock_unzip: MagicMock, filename: str, flatten: bool
 ) -> None:

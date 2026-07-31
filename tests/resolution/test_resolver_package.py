@@ -7,7 +7,7 @@ import zipfile
 from pathlib import Path
 
 import pytest
-from pip.core.errors import (
+from cpip.core.errors import (
     DirectoryUrlHashUnsupported,
     DistributionNotFound,
     HashMismatch,
@@ -16,26 +16,26 @@ from pip.core.errors import (
     ResolutionError,
     VcsHashUnsupported,
 )
-from pip.core.format_control import FormatControl
-from pip.core.packaging import parse_requirement, Requirement, Version
-from pip.core.wheel import WheelCandidate
-from pip.index.cache import wheel_cache_path
-from pip.index.candidate_materialization import CandidateStream
-from pip.index.provider import CandidateProvider
-from pip.index.source_models import CandidateSummary
-from pip.resolution.req_install import (
+from cpip.core.format_control import FormatControl
+from cpip.core.packaging import parse_requirement, Requirement, Version
+from cpip.core.wheel import WheelCandidate
+from cpip.index.cache import wheel_cache_path
+from cpip.index.candidate_materialization import CandidateStream
+from cpip.index.provider import CandidateProvider
+from cpip.index.source_models import CandidateSummary
+from cpip.resolution.algorithms import is_pypi_hosted_url
+from cpip.resolution.req_install import (
     file_hashes,
     install_req_from_editable,
     install_req_from_line,
 )
-from pip.resolution.requirement_set import RequirementSet
-from pip.resolution.resolver import (
-    is_pypi_hosted_url,
-    PackageDomain,
-    PendingAgenda,
+from cpip.resolution.requirement_set import RequirementSet
+from cpip.resolution.resolver import Resolver
+from cpip.resolution.resolver_internals.state.agenda import PendingAgenda
+from cpip.resolution.resolver_internals.state.domains import PackageDomain
+from cpip.resolution.resolver_internals.state.requests import (
     SearchFrame,
     SearchRequest,
-    Resolver,
 )
 from wheel_helpers import make_sdist, make_wheel
 
@@ -164,7 +164,9 @@ def test_non_http_source_skips_pypi_host_parsing(
     def fail_url_parse(url: str) -> None:
         raise AssertionError(f"parsed non-HTTP package URL: {url}")
 
-    monkeypatch.setattr("pip.resolution.resolver.urllib.parse.urlparse", fail_url_parse)
+    monkeypatch.setattr(
+        "cpip.resolution.resolver.urllib.parse.urlparse", fail_url_parse
+    )
 
     assert not is_pypi_hosted_url("file:///packages/demo-1.0.whl")
 
@@ -181,7 +183,7 @@ def test_resolver_caches_prerelease_policy(
         raise AssertionError(f"recomputed prerelease policy: {requirement}")
 
     monkeypatch.setattr(
-        "pip.resolution.resolver.is_direct_requirement", fail_direct_check
+        "cpip.resolution.resolver.is_direct_requirement", fail_direct_check
     )
 
     assert not resolver.allow_prereleases_internal(parse_requirement("demo-pkg>=1"))
@@ -198,7 +200,7 @@ def test_resolver_indexes_installed_distributions_once(
         return []
 
     monkeypatch.setattr(
-        "pip.resolution.resolver.iter_installed_distributions",
+        "cpip.resolution.resolver_internals.selection.iter_installed_distributions",
         installed_distributions,
     )
     resolver = Resolver(no_index=True)
@@ -291,9 +293,7 @@ def test_resolver_caches_candidate_counts_per_requirement(
     ) -> tuple[object, ...]:
         nonlocal calls
         calls += 1
-        return matching_versions(
-            requirement, allow_prereleases=allow_prereleases
-        )
+        return matching_versions(requirement, allow_prereleases=allow_prereleases)
 
     monkeypatch.setattr(
         resolver.provider, "matching_versions", counted_matching_versions
@@ -633,7 +633,9 @@ def test_resolver_defers_local_wheel_hashing_until_selection(
         hashed_paths.append(path)
         return finalize_hashes(path)
 
-    monkeypatch.setattr("pip.resolution.resolver.file_hashes", counting_hashes)
+    monkeypatch.setattr(
+        "cpip.resolution.resolver_internals.outputs.file_hashes", counting_hashes
+    )
     provider = CandidateProvider.from_options(
         find_links=[str(wheelhouse)], no_index=True
     )
@@ -655,7 +657,9 @@ def test_resolver_can_skip_source_hashing_for_install(
     def fail_hashing(path: Path) -> dict[str, str]:
         raise AssertionError(f"hashed install candidate: {path}")
 
-    monkeypatch.setattr("pip.resolution.resolver.file_hashes", fail_hashing)
+    monkeypatch.setattr(
+        "cpip.resolution.resolver_internals.outputs.file_hashes", fail_hashing
+    )
     provider = CandidateProvider.from_options(
         find_links=[str(wheelhouse)], no_index=True
     )
@@ -680,7 +684,7 @@ def test_resolver_reuses_cataloged_wheel_filename(
         raise AssertionError(f"reparsed cataloged wheel filename: {path}")
 
     monkeypatch.setattr(
-        "pip.core.wheel.parse_wheel_filename",
+        "cpip.core.wheel.parse_wheel_filename",
         fail_filename_parse,
     )
     provider = CandidateProvider.from_options(
@@ -724,10 +728,10 @@ def test_resolver_reuses_link_vcs_classification(
     def fail_vcs_parse(url: str) -> None:
         raise AssertionError(f"reparsed classified wheel URL for VCS: {url}")
 
-    monkeypatch.setattr("pip.index.vcs.vcs_scheme", fail_vcs_parse)
-    monkeypatch.setattr("pip.index.artifacts.vcs_scheme", fail_vcs_parse)
+    monkeypatch.setattr("cpip.index.vcs.vcs_scheme", fail_vcs_parse)
+    monkeypatch.setattr("cpip.index.artifacts.vcs_scheme", fail_vcs_parse)
     monkeypatch.setattr(
-        "pip.index.candidate_materialization.vcs_scheme", fail_vcs_parse
+        "cpip.index.candidate_materialization.vcs_scheme", fail_vcs_parse
     )
     provider = CandidateProvider.from_options(
         find_links=[str(wheelhouse)], no_index=True
@@ -749,7 +753,7 @@ def test_resolver_reuses_link_local_path(
         raise AssertionError(f"reparsed classified local URL: {url}")
 
     monkeypatch.setattr(
-        "pip.index.artifacts.ArtifactLocator.local_path", fail_url_parse
+        "cpip.index.artifacts.ArtifactLocator.local_path", fail_url_parse
     )
     provider = CandidateProvider.from_options(
         find_links=[str(wheelhouse)], no_index=True
@@ -797,7 +801,7 @@ def test_resolver_reads_only_required_core_metadata_headers(
     def fail_parser() -> None:
         raise AssertionError("constructed a general-purpose email parser")
 
-    monkeypatch.setattr("pip.core.wheel.Parser", fail_parser)
+    monkeypatch.setattr("cpip.core.wheel.Parser", fail_parser)
     provider = CandidateProvider.from_options(
         find_links=[str(wheelhouse)], no_index=True
     )
