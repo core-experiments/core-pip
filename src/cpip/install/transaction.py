@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import os
 import shutil
 import tempfile
@@ -79,15 +80,28 @@ class InstallTransaction:
             raise RuntimeError("installation transaction has already finished")
         try:
             self.validate()
+            created_directories: set[Path] = set()
             for item in self.staged_internal:
                 self.backup_if_needed(item.destination)
-                os.makedirs(os.fspath(item.destination.parent), exist_ok=True)
-                shutil.move(os.fspath(item.source), os.fspath(item.destination))
+                destination_parent = item.destination.parent
+                if destination_parent not in created_directories:
+                    os.makedirs(os.fspath(destination_parent), exist_ok=True)
+                    created_directories.add(destination_parent)
+                try:
+                    os.replace(
+                        os.fspath(item.source), os.fspath(item.destination)
+                    )
+                except OSError as exc:
+                    if exc.errno != errno.EXDEV:
+                        raise
+                    shutil.move(
+                        os.fspath(item.source), os.fspath(item.destination)
+                    )
                 if item.mode is not None:
                     os.chmod(item.destination, item.mode)
                 self.created_internal.append(item.destination)
             for path in sorted(self.deletions, key=os.fspath):
-                if os.path.exists(path) or os.path.islink(path):
+                if os.path.lexists(path):
                     self.backup_if_needed(path)
                 self.remove_empty_parents(path.parent)
             if finalize:
@@ -98,7 +112,7 @@ class InstallTransaction:
 
     def rollback(self) -> None:
         for path in reversed(self.created_internal):
-            if os.path.exists(path) or os.path.islink(path):
+            if os.path.lexists(path):
                 if os.path.isdir(path) and not os.path.islink(path):
                     shutil.rmtree(path)
                 else:
@@ -106,7 +120,7 @@ class InstallTransaction:
         for original, backup in reversed(self.backups):
             if os.path.exists(backup):
                 os.makedirs(os.fspath(original.parent), exist_ok=True)
-                if os.path.exists(original) or os.path.islink(original):
+                if os.path.lexists(original):
                     os.unlink(original)
                 shutil.move(os.fspath(backup), os.fspath(original))
         self.finish_successfully()
@@ -117,7 +131,7 @@ class InstallTransaction:
             self.finish_successfully()
 
     def backup_if_needed(self, path: Path) -> None:
-        if not os.path.exists(path) and not os.path.islink(path):
+        if not os.path.lexists(path):
             return
         backup = self.temporary_internal / str(len(self.backups))
         os.makedirs(os.fspath(backup.parent), exist_ok=True)

@@ -621,6 +621,9 @@ def run_install(args: list[str]) -> int:
                                         f"{candidate.version}"
                                     )
                         raise
+        plan_order = {
+            id(candidate): index for index, candidate in enumerate(plan.candidates)
+        }
         ordered_candidates = (
             sorted(
                 plan.candidates,
@@ -630,7 +633,7 @@ def run_install(args: list[str]) -> int:
                         requested_order[candidate.canonical_name],
                     )
                     if candidate.canonical_name in requested_order
-                    else (1, plan.candidates.index(candidate))
+                    else (1, plan_order[id(candidate)])
                 ),
             )
             if options.user
@@ -641,9 +644,6 @@ def run_install(args: list[str]) -> int:
             installed.append(f"{display_name}-{candidate.version}")
             installed_canonical_names.append(candidate.canonical_name)
             newly_installed_names.add(candidate.canonical_name)
-        plan_order = {
-            id(candidate): index for index, candidate in enumerate(plan.candidates)
-        }
         report_candidates = sorted(
             plan.candidates,
             key=lambda candidate: (
@@ -655,6 +655,20 @@ def run_install(args: list[str]) -> int:
                 else (1, plan_order[id(candidate)])
             ),
         )
+        provenance_by_name: dict[str, tuple[str, tuple[str, ...]]] = {}
+        provenance_with_extras: set[str] = set()
+        if not quiet:
+            for parent in plan.candidates:
+                parent_name = requested_names.get(parent.canonical_name, parent.name)
+                parent_extras = tuple(
+                    sorted(requested_extras_by_name.get(parent.canonical_name, ()))
+                )
+                for child_name in plan.graph.get(parent.canonical_name, ()):
+                    if child_name in provenance_with_extras:
+                        continue
+                    provenance_by_name[child_name] = (parent_name, parent_extras)
+                    if parent_extras:
+                        provenance_with_extras.add(child_name)
         for candidate in report_candidates:
             if candidate.source_url in requested_source_urls:
                 requested_roots.add(candidate.canonical_name)
@@ -662,25 +676,15 @@ def run_install(args: list[str]) -> int:
             if candidate.source_url in summary_root_source_urls:
                 summary_root_names.add(candidate.canonical_name)
             if not quiet:
+                provenance_value = provenance_by_name.get(candidate.canonical_name)
                 provenance = None
-                for parent in plan.candidates:
-                    if candidate.canonical_name not in plan.graph.get(
-                        parent.canonical_name, set()
-                    ):
-                        continue
-                    parent_name = requested_names.get(
-                        parent.canonical_name, parent.name
-                    )
-                    parent_extras = sorted(
-                        requested_extras_by_name.get(parent.canonical_name, ())
-                    )
+                if provenance_value is not None:
+                    parent_name, parent_extras = provenance_value
                     provenance = (
                         f"{parent_name}[{','.join(parent_extras)}]"
                         if parent_extras
                         else parent_name
                     )
-                    if parent_extras:
-                        break
                 suffix = f" (from {provenance})" if provenance else ""
                 print(f"Processing {candidate.path}{suffix}")
             source_requirement = source_requirements_by_name.get(

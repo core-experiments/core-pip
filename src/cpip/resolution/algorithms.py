@@ -118,26 +118,44 @@ def topological_weights(
         if node in reachable:
             continue
         reachable.add(node)
-        stack.extend(sorted(graph.get(node, ())))
+        stack.extend(graph.get(node, ()))
 
     relevant = reachable & set(requirement_keys)
     memo: dict[str, int] = {}
+    node_bits = {node: 1 << index for index, node in enumerate(relevant)}
 
-    def weight(node: str, path: set[str]) -> int:
-        if node in memo:
-            return memo[node]
-        if node in path:
-            return 0
-        deps = [dep for dep in graph.get(node, ()) if dep in relevant]
-        if not deps:
-            memo[node] = 1
-            return 1
-        next_path = set(path)
-        next_path.add(node)
-        memo[node] = 1 + max(weight(dep, next_path) for dep in deps)
-        return memo[node]
+    for root in relevant:
+        if root in memo:
+            continue
+        pending: list[tuple[str, bool, int]] = [(root, False, 0)]
+        while pending:
+            node, expanded, path = pending.pop()
+            if node in memo:
+                continue
+            node_bit = node_bits[node]
+            if path & node_bit:
+                continue
+            deps = [dep for dep in graph.get(node, ()) if dep in relevant]
+            if not expanded:
+                next_path = path | node_bit
+                pending.append((node, True, path))
+                pending.extend(
+                    (dep, False, next_path)
+                    for dep in reversed(sorted(deps))
+                    if dep not in memo
+                )
+                continue
+            memo[node] = 1 + max(
+                (
+                    memo.get(dep, 0)
+                    if not path & node_bits[dep]
+                    else 0
+                    for dep in deps
+                ),
+                default=0,
+            )
 
-    return {node: weight(node, set()) for node in relevant}
+    return memo
 
 
 def allowed_hashes_internal(requirement: InstallRequirement) -> dict[str, set[str]]:

@@ -24,6 +24,7 @@ from cpip.core.packaging import (
 )
 from cpip.core.metadata import (
     InstalledDistribution,
+    find_installed,
     iter_installed_distributions,
 )
 from cpip.core.direct_url import DirectUrl
@@ -466,6 +467,13 @@ class InstalledDistributionStore:
         return result
 
     def find(self, name: str) -> InstalledMetadataDistribution | None:
+        if self.paths is not None and self.user_site is None:
+            distribution = find_installed(name, self.paths)
+            return (
+                InstalledMetadataDistribution(distribution, user_site=self.user_site)
+                if distribution is not None
+                else None
+            )
         canonical = canonicalize_name(name)
         distributions = [
             distribution

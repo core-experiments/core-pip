@@ -5,7 +5,7 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility
     from cpip._vendor import tomli as tomllib
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from cpip.core.errors import InstallationError
 from cpip.core.packaging import canonicalize_name
@@ -46,42 +46,53 @@ def resolve_group_file(path: Path, group_name: str) -> list[str]:
 def resolve_group(
     groups: dict[str, Any], group_name: str, *, stack: list[str]
 ) -> list[str]:
-    if group_name in stack:
-        cycle = ", ".join(
-            f"{left} -> {right}" for left, right in zip(stack, stack[1:] + [group_name])
-        )
-        raise InstallationError(
-            f"Cyclic dependency group include while resolving {stack[0]}: {cycle}"
-        )
-
-    actual_group_name = group_name if group_name in groups else None
-    if actual_group_name is None:
-        normalized = canonicalize_name(group_name)
-        for key in groups:
-            if canonicalize_name(key) == normalized:
-                actual_group_name = key
-                break
-    raw_group = groups.get(actual_group_name)
-    if not isinstance(raw_group, list):
-        raise InstallationError(
-            f"Dependency group {group_name!r} was not defined as a list."
-        )
-
     resolved: list[str] = []
-    next_stack = [*stack, actual_group_name or group_name]
-    for item in raw_group:
-        if isinstance(item, str):
-            resolved.append(item)
+    pending: list[tuple[str, Any, list[str]]] = [("group", group_name, stack)]
+    while pending:
+        kind, payload, current_stack = pending.pop()
+        if kind == "value":
+            resolved.append(payload)
             continue
-        if isinstance(item, dict) and set(item) == {"include-group"}:
-            include = item["include-group"]
-            if not isinstance(include, str):
-                raise InstallationError(
-                    f"Dependency group {group_name!r} contains an invalid include."
+        current_name = payload
+        if current_name in current_stack:
+            cycle = ", ".join(
+                f"{left} -> {right}"
+                for left, right in zip(
+                    current_stack, current_stack[1:] + [current_name]
                 )
-            resolved.extend(resolve_group(groups, include, stack=next_stack))
-            continue
-        raise InstallationError(
-            f"Dependency group {group_name!r} contains an invalid item."
-        )
+            )
+            root = current_stack[0] if current_stack else current_name
+            raise InstallationError(
+                f"Cyclic dependency group include while resolving {root}: {cycle}"
+            )
+
+        actual_name = current_name if current_name in groups else None
+        if actual_name is None:
+            normalized = canonicalize_name(current_name)
+            for key in groups:
+                if canonicalize_name(key) == normalized:
+                    actual_name = key
+                    break
+        raw_group = groups.get(actual_name)
+        if not isinstance(raw_group, list):
+            raise InstallationError(
+                f"Dependency group {current_name!r} was not defined as a list."
+            )
+
+        next_stack = [*current_stack, actual_name or current_name]
+        for item in reversed(raw_group):
+            if isinstance(item, str):
+                pending.append(("value", item, next_stack))
+                continue
+            if isinstance(item, dict) and set(item) == {"include-group"}:
+                include = cast(dict[str, Any], item)["include-group"]
+                if not isinstance(include, str):
+                    raise InstallationError(
+                        f"Dependency group {current_name!r} contains an invalid include."
+                    )
+                pending.append(("group", include, next_stack))
+                continue
+            raise InstallationError(
+                f"Dependency group {current_name!r} contains an invalid item."
+            )
     return resolved

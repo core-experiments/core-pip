@@ -252,10 +252,7 @@ class ResolverSearchEngine:
                     graph.setdefault(name, set())
                     if not self.no_deps:
                         extra_pending: list[Requirement] = []
-                        for dep in sorted(
-                            merged_candidate.dependencies,
-                            key=lambda item: item.canonical_name,
-                        ):
+                        for dep in merged_candidate.dependencies:
                             if dep.canonical_name in graph[name]:
                                 continue
                             graph[name].add(dep.canonical_name)
@@ -521,10 +518,7 @@ class ResolverSearchEngine:
             branch_checkpoint = remaining.checkpoint()
             if not self.no_deps:
                 dependency_pending: list[Requirement] = []
-                for dep in sorted(
-                    candidate.dependencies,
-                    key=lambda item: item.canonical_name,
-                ):
+                for dep in candidate.dependencies:
                     if not marker_applies(dep.marker, extras=constrained.extras):
                         continue
                     graph[name].add(dep.canonical_name)

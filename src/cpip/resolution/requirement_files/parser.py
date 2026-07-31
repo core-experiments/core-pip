@@ -10,6 +10,7 @@ import re
 import shlex
 import sys
 import urllib.parse
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -42,6 +43,13 @@ FIND_LINKS_OPTIONS = frozenset(("-f", "--find-links"))
 INDEX_URL_OPTIONS = frozenset(("-i", "--index-url"))
 EDITABLE_OPTIONS = frozenset(("-e", "--editable"))
 BOOLEAN_OPTIONS = frozenset(("--no-index", "--pre", "--require-hashes"))
+BOM_ENCODINGS = (
+    (codecs.BOM_UTF32_BE, "utf-32-be"),
+    (codecs.BOM_UTF32_LE, "utf-32-le"),
+    (codecs.BOM_UTF8, "utf-8-sig"),
+    (codecs.BOM_UTF16_BE, "utf-16-be"),
+    (codecs.BOM_UTF16_LE, "utf-16-le"),
+)
 
 
 class RequirementFilePrefetcher:
@@ -64,6 +72,22 @@ class RequirementFilePrefetcher:
     def close(self) -> None:
         if self.worker is not None:
             self.worker.close()
+
+
+@dataclass
+class _RequirementFileTask:
+    filename: str
+    constraint: bool
+    stack: list[str]
+
+
+@dataclass
+class _RequirementLineTask:
+    filename: str
+    line_number: int
+    line: str
+    constraint: bool
+    stack: list[str]
 
 
 def parse_requirements(
@@ -98,137 +122,131 @@ def parse_requirements_internal(
     stack: list[str],
     prefetcher: RequirementFilePrefetcher,
 ) -> list[ParsedRequirement]:
-    normalized = normalize_reference(filename, None)
-    if normalized in stack:
-        previous = stack[-1] if stack else normalized
-        raise RequirementsFileParseError(
-            f"{normalized} recursively references itself in {previous}"
+    pending: list[_RequirementFileTask | _RequirementLineTask] = [
+        _RequirementFileTask(filename, constraint, stack)
+    ]
+    results: list[ParsedRequirement] = []
+    while pending:
+        task = pending.pop()
+        if isinstance(task, _RequirementLineTask):
+            includes: list[tuple[str, bool]] = []
+            results.extend(
+                parse_line(
+                    task.filename,
+                    task.line_number,
+                    task.line,
+                    session=session,
+                    provider=provider,
+                    options=options,
+                    constraint=task.constraint,
+                    stack=task.stack,
+                    prefetcher=prefetcher,
+                    includes=includes,
+                )
+            )
+            pending.extend(
+                _RequirementFileTask(nested, nested_constraint, task.stack)
+                for nested, nested_constraint in reversed(includes)
+            )
+            continue
+
+        normalized = normalize_reference(task.filename, None)
+        if normalized in task.stack:
+            previous = task.stack[-1] if task.stack else normalized
+            raise RequirementsFileParseError(
+                f"{normalized} recursively references itself in {previous}"
+            )
+        content = _read_requirement_content(normalized, session, prefetcher)
+        if is_pylock_reference(normalized):
+            print(
+                "WARNING: Using pylock.toml as a requirements source is an experimental "
+                "feature.",
+                file=sys.stderr,
+            )
+            results.extend(parse_pylock(normalized, content, provider=provider))
+            continue
+
+        next_stack = [*task.stack, normalized]
+        processed: list[tuple[int, str]] = []
+        continuation: tuple[int, str] | None = None
+        for line_number, raw_line in enumerate(content.splitlines(), start=1):
+            line = raw_line.split(" #", 1)[0].rstrip() if " #" in raw_line else raw_line
+            if line.strip().startswith("#"):
+                line = ""
+            if continuation is not None:
+                processed.append(continuation)
+                continuation = None
+                if not line:
+                    continue
+            if line.endswith("\\"):
+                continuation = (line_number, line[:-1].rstrip())
+            else:
+                processed.append((line_number, line))
+        if continuation is not None:
+            processed.append(continuation)
+        prefetch_remote_includes(processed, normalized, prefetcher, task.stack)
+        pending.extend(
+            _RequirementLineTask(
+                normalized, line_number, line, task.constraint, next_stack
+            )
+            for line_number, line in reversed(processed)
+            if line.strip() and not line.strip().startswith("#")
         )
+    return results
+
+
+def _read_requirement_content(
+    normalized: str,
+    session: NetworkSession,
+    prefetcher: RequirementFilePrefetcher,
+) -> str:
     parsed = urllib.parse.urlparse(normalized)
     if parsed.scheme in REMOTE_SCHEMES:
-        try:
-            from cpip.network.utils import raise_for_status
+        from cpip.network.utils import raise_for_status
 
-            future = prefetcher.take(normalized)
-            response = future.result() if future is not None else session.get(normalized)
-            raise_for_status(response)
-            content = response.text
-        except InstallationError:
-            raise
-    else:
-        path = Path(normalized)
-        if not path.exists():
-            if is_pylock_reference(normalized):
-                raise InstallationError(
-                    f"Error reading pylock file {normalized!r}: file does not exist"
-                )
-            kind = (
-                "constraint file"
-                if normalized.endswith(".txt")
-                else "requirements file"
+        future = prefetcher.take(normalized)
+        response = future.result() if future is not None else session.get(normalized)
+        raise_for_status(response)
+        return response.text
+
+    path = Path(normalized)
+    if not path.exists():
+        if is_pylock_reference(normalized):
+            raise InstallationError(
+                f"Error reading pylock file {normalized!r}: file does not exist"
             )
-            raise InstallationError(f"Could not open {kind}: {normalized}")
-        data = path.read_bytes()
-        content = None
-        for bom, encoding in [
-            (codecs.BOM_UTF32_BE, "utf-32-be"),
-            (codecs.BOM_UTF32_LE, "utf-32-le"),
-            (codecs.BOM_UTF8, "utf-8-sig"),
-            (codecs.BOM_UTF16_BE, "utf-16-be"),
-            (codecs.BOM_UTF16_LE, "utf-16-le"),
-        ]:
-            if bom and data.startswith(bom):
-                content = data.decode(
-                    "utf-16"
-                    if encoding.startswith("utf-16")
-                    else "utf-32"
-                    if encoding.startswith("utf-32")
-                    else encoding
-                )
-                break
-        if content is None:
-            cookie = None
-            for line in data.splitlines()[:2]:
-                match = CODING_RE.match(line)
-                if match is not None:
-                    cookie = match.group(1).decode("ascii", "replace")
-                    break
-            if cookie is not None:
-                content = data.decode(cookie)
-            else:
-                try:
-                    content = data.decode("utf-8")
-                except UnicodeDecodeError:
-                    getencoding = getattr(locale, "getencoding", None)
-                    encoding = (
-                        getencoding()
-                        if callable(getencoding)
-                        else locale.getpreferredencoding(False)
-                    )
-                    logger.warning(
-                        "unable to decode data from %s with default encoding %s, "
-                        "falling back to encoding from locale: %s. "
-                        "If this is intentional you should specify the encoding with a "
-                        "PEP-263 style comment, e.g. '# -*- coding: %s -*-'",
-                        str(path),
-                        "utf-8",
-                        encoding,
-                        encoding,
-                    )
-                    content = data.decode(encoding)
-    if is_pylock_reference(normalized):
-        print(
-            "WARNING: Using pylock.toml as a requirements source is an experimental "
-            "feature.",
-            file=sys.stderr,
+        kind = "constraint file" if normalized.endswith(".txt") else "requirements file"
+        raise InstallationError(f"Could not open {kind}: {normalized}")
+    data = path.read_bytes()
+    for bom, encoding in BOM_ENCODINGS:
+        if bom and data.startswith(bom):
+            return data.decode(
+                "utf-16"
+                if encoding.startswith("utf-16")
+                else "utf-32"
+                if encoding.startswith("utf-32")
+                else encoding
+            )
+    for line in data.splitlines()[:2]:
+        match = CODING_RE.match(line)
+        if match is not None:
+            return data.decode(match.group(1).decode("ascii", "replace"))
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError:
+        getencoding = getattr(locale, "getencoding", None)
+        encoding = (
+            getencoding()
+            if callable(getencoding)
+            else locale.getpreferredencoding(False)
         )
-        return parse_pylock(normalized, content, provider=provider)
-    results: list[ParsedRequirement] = []
-    next_stack = [*stack, normalized]
-    processed: list[tuple[int, str]] = []
-    pending: tuple[int, str] | None = None
-    for line_number, raw_line in enumerate(content.splitlines(), start=1):
-        line = raw_line
-        if " #" in line:
-            line = line.split(" #", 1)[0].rstrip()
-        if line.strip().startswith("#"):
-            line = ""
-        if pending is not None:
-            if line:
-                processed.append(pending)
-                pending = None
-            else:
-                processed.append(pending)
-                pending = None
-                continue
-        if line.endswith("\\"):
-            pending = (line_number, line[:-1].rstrip())
-            continue
-        processed.append((line_number, line))
-    if pending is not None:
-        processed.append(pending)
-    prefetch_remote_includes(processed, normalized, prefetcher, stack)
-    for line_number, line in processed:
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-        if " #" in line:
-            line = line.split(" #", 1)[0].rstrip()
-        if not line:
-            continue
-        parsed = parse_line(
-            normalized,
-            line_number,
-            line,
-            session=session,
-            provider=provider,
-            options=options,
-            constraint=constraint,
-            stack=next_stack,
-            prefetcher=prefetcher,
+        logger.warning(
+            "unable to decode data from %s with default encoding utf-8, "
+            "falling back to locale encoding %s",
+            str(path),
+            encoding,
         )
-        results.extend(parsed)
-    return results
+        return data.decode(encoding)
 
 
 def prefetch_remote_includes(
@@ -259,10 +277,10 @@ def prefetch_remote_includes(
                 value = tokens[index]
             if option in REQUIREMENTS_OPTIONS | CONSTRAINT_OPTIONS:
                 nested = normalize_reference(value, filename, as_path=True)
-                if (
-                    nested not in stack
-                    and urllib.parse.urlparse(nested).scheme in {"http", "https"}
-                ):
+                if nested not in stack and urllib.parse.urlparse(nested).scheme in {
+                    "http",
+                    "https",
+                }:
                     prefetcher.submit(nested)
             index += 1
 
@@ -278,6 +296,7 @@ def parse_line(
     constraint: bool,
     stack: list[str],
     prefetcher: RequirementFilePrefetcher,
+    includes: list[tuple[str, bool]],
 ) -> list[ParsedRequirement]:
     if line.lstrip().startswith("-"):
         try:
@@ -285,23 +304,12 @@ def parse_line(
         except ValueError as exc:
             raise RequirementsFileParseError(str(exc)) from exc
         results: list[ParsedRequirement] = []
+        remaining_line: str | None = None
         index = 0
         while index < len(tokens):
             token = tokens[index]
             if not token.startswith("-"):
-                results.extend(
-                    parse_line(
-                        filename,
-                        line_number,
-                        " ".join(tokens[index:]),
-                        session=session,
-                        provider=provider,
-                        options=options,
-                        constraint=constraint,
-                        stack=stack,
-                        prefetcher=prefetcher,
-                    )
-                )
+                remaining_line = " ".join(tokens[index:])
                 break
             if "=" in token:
                 option, value = token.split("=", 1)
@@ -319,30 +327,10 @@ def parse_line(
                 index = len(tokens) - 1
             if option in REQUIREMENTS_OPTIONS:
                 nested = normalize_reference(value, filename, as_path=True)
-                results.extend(
-                    parse_requirements_internal(
-                        nested,
-                        session,
-                        provider=provider,
-                        options=options,
-                        constraint=False,
-                        stack=stack,
-                        prefetcher=prefetcher,
-                    )
-                )
+                includes.append((nested, False))
             elif option in CONSTRAINT_OPTIONS:
                 nested = normalize_reference(value, filename, as_path=True)
-                results.extend(
-                    parse_requirements_internal(
-                        nested,
-                        session,
-                        provider=provider,
-                        options=options,
-                        constraint=True,
-                        stack=stack,
-                        prefetcher=prefetcher,
-                    )
-                )
+                includes.append((nested, True))
             elif option in FIND_LINKS_OPTIONS:
                 if provider is not None:
                     normalized = normalize_reference(value, filename, as_path=True)
@@ -419,6 +407,12 @@ def parse_line(
                     f"Unsupported requirement file option: {option}"
                 )
             index += 1
+        if remaining_line is not None:
+            results.extend(
+                parse_requirement_line(
+                    filename, line_number, remaining_line, constraint=constraint
+                )
+            )
         return results
     return parse_requirement_line(
         filename,

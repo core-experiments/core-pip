@@ -54,6 +54,23 @@ def test_parse_cyclic_dependency_groups(
     ) in str(exception)
 
 
+def test_parse_deep_dependency_groups_without_recursion(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    count = 1_500
+    groups = ["[dependency-groups]"]
+    groups.extend(
+        f'group{index} = [{{include-group="group{index + 1}"}}]'
+        for index in range(count - 1)
+    )
+    groups.append(f'group{count - 1} = ["leaf"]')
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text("\n".join(groups), encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    assert parse_dependency_groups([("pyproject.toml", "group0")]) == ["leaf"]
+
+
 def test_parse_with_no_dependency_groups_defined(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

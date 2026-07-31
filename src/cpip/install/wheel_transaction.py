@@ -67,6 +67,7 @@ class WheelInstaller:
         self,
         path: str | Path,
         *,
+        candidate: WheelCandidate | None = None,
         requested: bool = False,
         direct_url: DirectUrl | None = None,
         transaction_sink: list[InstallTransaction] | None = None,
@@ -80,6 +81,7 @@ class WheelInstaller:
         return install_wheel_internal(
             path,
             target=self.target,
+            candidate=candidate,
             pycompile=self.pycompile,
             requested=requested,
             force=self.force,
@@ -114,6 +116,7 @@ def install_wheel_internal(
     path: str | Path,
     *,
     target: InstallTarget,
+    candidate: WheelCandidate | None = None,
     pycompile: bool = True,
     requested: bool = False,
     force: bool = False,
@@ -128,7 +131,8 @@ def install_wheel_internal(
     stage_root: Path | None = None,
     transaction: InstallTransaction | None = None,
 ) -> WheelCandidate:
-    candidate = wheel_candidate(path)
+    if candidate is None:
+        candidate = wheel_candidate(path)
     if lookup_existing:
         existing = InstalledDistributionStore(
             paths=[os.fspath(root) for root in target.library_roots]
@@ -155,9 +159,11 @@ def install_wheel_internal(
         record_destination: Path | None = None
         record_source: Path | None = None
         dist_info: str | None = None
+        stage_directories: set[Path] = set()
         resolved_directories = (
             destination_cache if destination_cache is not None else {}
         )
+        resolved_roots: dict[Path, Path] = {}
         record_metadata: dict[Path, tuple[str, str]] = {}
 
         with zipfile.ZipFile(path) as archive:
@@ -172,12 +178,19 @@ def install_wheel_internal(
                 if relative.parts and relative.parts[0].endswith(".dist-info"):
                     dist_info = relative.parts[0]
                 source = stage_root / Path(*relative.parts)
-                source.parent.mkdir(parents=True, exist_ok=True)
+                source_parent = source.parent
+                if source_parent not in stage_directories:
+                    source_parent.mkdir(parents=True, exist_ok=True)
+                    stage_directories.add(source_parent)
                 rewrite_metadata = (
                     relative.name == "METADATA" and candidate.name.isalpha()
                 )
-                if rewrite_metadata or is_script_member(relative):
+                script_member = is_script_member(relative)
+                is_record = relative.name == "RECORD" and bool(relative.parts)
+                if rewrite_metadata or script_member:
                     contents = archive.read(member)
+                elif is_record:
+                    contents = None
                 else:
                     record_metadata[source] = copy_member_with_metadata(
                         archive, member, source
@@ -195,12 +208,15 @@ def install_wheel_internal(
                 if contents is not None:
                     with open(source, "wb") as file:
                         file.write(contents)
-                if is_script_member(relative):
+                if script_member:
                     rewrite_shebang(source, script_executable)
                 elif contents is not None:
                     record_metadata[source] = record_metadata_internal(contents)
                 destination = destination_internal(
-                    target, relative, resolved_directories=resolved_directories
+                    target,
+                    relative,
+                    resolved_directories=resolved_directories,
+                    resolved_roots=resolved_roots,
                 )
                 mode = zip_mode(member)
                 staged.append((source, destination, mode))
@@ -372,6 +388,7 @@ def validate_wheel_batch(
     """Validate a wheel batch before any member of the batch is installed."""
     candidates = tuple(wheel_candidate(path) for path in paths)
     destinations: set[Path] = set()
+    resolved_roots: dict[Path, Path] = {}
     for candidate in candidates:
         path = candidate.path
         with zipfile.ZipFile(path) as archive:
@@ -387,6 +404,7 @@ def validate_wheel_batch(
                     resolved_directories=(
                         destination_cache if destination_cache is not None else {}
                     ),
+                    resolved_roots=resolved_roots,
                 )
                 if destination in destinations:
                     raise InstallationError(
@@ -436,6 +454,7 @@ def install_wheels_transactionally(
                 candidates = tuple(
                     installer.install(
                         path,
+                        candidate=candidate,
                         requested=requested,
                         direct_url=direct_url,
                         existing=existing_distributions.get(candidate.canonical_name),

@@ -3,9 +3,48 @@ from __future__ import annotations
 import io
 import threading
 import time
+from pathlib import Path
+
+import pytest
 
 from cpip.network.http import HttpResponse
+from cpip.resolution.requirement_files.models import RequirementsFileParseError
 from cpip.resolution.requirement_files.parser import parse_requirements
+
+
+def test_deep_requirement_includes_without_recursion(tmp_path: Path) -> None:
+    count = 1_500
+    for index in range(count):
+        path = tmp_path / f"requirements-{index}.txt"
+        content = (
+            f"-r requirements-{index + 1}.txt\n" if index < count - 1 else "demo==1\n"
+        )
+        path.write_text(content, encoding="utf-8")
+
+    results = parse_requirements(str(tmp_path / "requirements-0.txt"), object())
+
+    assert [item.requirement for item in results] == ["demo==1"]
+
+
+def test_cyclic_requirement_includes_have_a_bounded_failure(tmp_path: Path) -> None:
+    first = tmp_path / "first.txt"
+    second = tmp_path / "second.txt"
+    first.write_text("-r second.txt\n", encoding="utf-8")
+    second.write_text("-r first.txt\n", encoding="utf-8")
+
+    with pytest.raises(RequirementsFileParseError, match="recursively references"):
+        parse_requirements(str(first), object())
+
+
+def test_requirement_include_order_is_preserved(tmp_path: Path) -> None:
+    included = tmp_path / "included.txt"
+    root = tmp_path / "requirements.txt"
+    included.write_text("included==1\n", encoding="utf-8")
+    root.write_text("-r included.txt\nroot==1\n", encoding="utf-8")
+
+    results = parse_requirements(str(root), object())
+
+    assert [item.requirement for item in results] == ["included==1", "root==1"]
 
 
 def test_remote_requirement_includes_are_prefetched(tmp_path) -> None:
@@ -31,9 +70,7 @@ def test_remote_requirement_includes_are_prefetched(tmp_path) -> None:
             try:
                 time.sleep(0.05)
                 content = (
-                    b"demo==1\n"
-                    if url.endswith("requirements.txt")
-                    else b"demo<2\n"
+                    b"demo==1\n" if url.endswith("requirements.txt") else b"demo<2\n"
                 )
                 return HttpResponse(
                     status_code=200,

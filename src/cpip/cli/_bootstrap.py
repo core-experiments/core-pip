@@ -2,7 +2,22 @@
 
 from __future__ import annotations
 
-from cpip.cli.commands.names import COMMAND_NAMES
+VISIBLE_COMMAND_NAMES = (
+    "install",
+    "wheel",
+    "index",
+    "download",
+    "uninstall",
+    "list",
+    "freeze",
+    "show",
+    "inspect",
+    "hash",
+    "check",
+    "cache",
+    "lock",
+)
+COMMAND_NAMES = frozenset((*VISIBLE_COMMAND_NAMES, "help"))
 
 VIRTUALENV_OPTIONS = frozenset(("--require-virtualenv", "--require-venv"))
 

@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from cpip.cli.commands.fast_install import run as run_fast_install
+from cpip.cli.commands.fast_install import is_safe_member, run as run_fast_install
 from cpip.resolution.fast_local_wheelhouse import (
     LocalWheelVersion,
     build_catalog_indexes,
@@ -48,6 +48,21 @@ def test_compatible_release_keeps_original_precision() -> None:
 
 def test_quote_path_escapes_only_unsafe_bytes() -> None:
     assert quote_path("/tmp/demo wheel.whl") == "/tmp/demo%20wheel.whl"
+
+
+@pytest.mark.parametrize(
+    "member, safe",
+    [
+        ("package/module.py", True),
+        ("package/../module.py", False),
+        ("../module.py", False),
+        ("package/..", False),
+        (".data/purelib/module.py", False),
+        ("package..name/module.py", True),
+    ],
+)
+def test_fast_install_member_safety(member: str, safe: bool) -> None:
+    assert is_safe_member(member) is safe
 
 
 def write_wheel(
@@ -363,6 +378,33 @@ from cpip.cli.entrypoint import main
 
 assert main([
     "install", "--no-index", "--ignore-installed", "--no-compile",
+    "--target", {str(target)!r}, "--find-links", {str(wheelhouse)!r}, "demo",
+]) == 0
+for module in (
+    "cpip.cli.logging_config",
+    "cpip.cli._main_fallback",
+    "cpip.cli.requirements",
+    "cpip.resolution.resolver",
+):
+    assert module not in sys.modules, module
+"""
+
+    subprocess.run([sys.executable, "-c", script], check=True)
+
+
+def test_entrypoint_keeps_upgrade_on_empty_target_on_fast_path(
+    tmp_path: Path,
+) -> None:
+    wheelhouse = tmp_path / "wheelhouse"
+    wheelhouse.mkdir()
+    write_wheel(wheelhouse / "demo-1.0-py3-none-any.whl", purelib=True)
+    target = tmp_path / "target"
+    script = f"""
+import sys
+from cpip.cli.entrypoint import main
+
+assert main([
+    "install", "--upgrade", "--no-index", "--ignore-installed", "--no-compile",
     "--target", {str(target)!r}, "--find-links", {str(wheelhouse)!r}, "demo",
 ]) == 0
 for module in (

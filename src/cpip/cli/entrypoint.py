@@ -5,8 +5,11 @@ from __future__ import annotations
 import os
 import sys
 
-from cpip.cli._bootstrap import extract_global_options, extract_python_option
-from cpip.cli.commands.names import VISIBLE_COMMAND_NAMES
+from cpip.cli._bootstrap import (
+    VISIBLE_COMMAND_NAMES,
+    extract_global_options,
+    extract_python_option,
+)
 
 VERBOSITY_FLAGS = frozenset(("-vv", "-vvv"))
 VERSION_FLAGS = frozenset(("-V", "--version"))

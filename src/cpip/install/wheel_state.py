@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import compileall
+import csv
 import importlib.util
 import os
 from pathlib import Path
@@ -16,12 +17,17 @@ def compiled_files(
     stage_root: Path,
     staged: Iterable[tuple[Path, Path, int | None]],
 ) -> list[tuple[Path, Path, int | None]]:
+    python_files = [
+        (source, destination)
+        for source, destination, _ in staged
+        if source.suffix == ".py"
+    ]
+    if not python_files:
+        return []
+
+    compileall.compile_dir(os.fspath(stage_root), force=True, quiet=1)
     result = []
-    for source, destination, _ in staged:
-        if source.suffix != ".py":
-            continue
-        if not compileall.compile_file(os.fspath(source), force=True, quiet=True):
-            continue
+    for source, destination in python_files:
         cache = Path(importlib.util.cache_from_source(os.fspath(source)))
         if cache.is_file():
             relative = cache.relative_to(stage_root)
@@ -36,15 +42,20 @@ def existing_paths(
 ) -> tuple[set[Path], set[Path]]:
     if distribution is None:
         return set(), set()
-    entries = distribution.iter_declared_entries()
     if distribution.info_location and distribution.info_location.endswith(".dist-info"):
         try:
-            distribution.read_text("RECORD")
+            entries = [
+                row[0]
+                for row in csv.reader(distribution.read_text("RECORD").splitlines())
+                if row and row[0]
+            ]
         except FileNotFoundError as exc:
             raise InstallationError(
                 f"Cannot replace {distribution.raw_name} {distribution.version}: "
                 "no RECORD file was found"
             ) from exc
+    else:
+        entries = distribution.iter_declared_entries()
     paths = {
         (Path(distribution.location) / entry).resolve(strict=False) for entry in entries
     }

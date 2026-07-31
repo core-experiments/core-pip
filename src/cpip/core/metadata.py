@@ -85,10 +85,9 @@ def user_scripts_path() -> Path:
     return Path(sysconfig.get_path("scripts", f"{os.name}_user"))
 
 
-def iter_installed_distributions(
+def _iter_installed_distributions(
     paths: Iterable[str] | None = None,
-) -> list[InstalledDistribution]:
-    result: list[InstalledDistribution] = []
+) -> Iterable[InstalledDistribution]:
     if paths is None:
         distributions = importlib.metadata.distributions()
     else:
@@ -104,29 +103,32 @@ def iter_installed_distributions(
         location = Path(str(dist.locate_file("")))
         if metadata_location is None or str(location) == "<memory>":
             continue
-        result.append(
-            InstalledDistribution(
-                name=name,
-                # Keep the metadata spelling intact.  Installed distributions
-                # may contain legacy versions that are not PEP 440 versions;
-                # presentation commands must still be able to inspect and
-                # remove them.
-                version=str(version),
-                location=location,
-                metadata_location=Path(metadata_location)
-                if metadata_location
-                else None,
-                raw=dist,
-            )
+        yield InstalledDistribution(
+            name=name,
+            # Keep the metadata spelling intact.  Installed distributions
+            # may contain legacy versions that are not PEP 440 versions;
+            # presentation commands must still be able to inspect and
+            # remove them.
+            version=str(version),
+            location=location,
+            metadata_location=Path(metadata_location)
+            if metadata_location
+            else None,
+            raw=dist,
         )
-    return sorted(result, key=lambda dist: dist.canonical_name)
+
+
+def iter_installed_distributions(
+    paths: Iterable[str] | None = None,
+) -> list[InstalledDistribution]:
+    return sorted(_iter_installed_distributions(paths), key=lambda dist: dist.canonical_name)
 
 
 def find_installed(
     name: str, paths: Iterable[str] | None = None
 ) -> InstalledDistribution | None:
     canonical = canonicalize_name(name)
-    for dist in iter_installed_distributions(paths):
+    for dist in _iter_installed_distributions(paths):
         if dist.canonical_name == canonical:
             return dist
     return None

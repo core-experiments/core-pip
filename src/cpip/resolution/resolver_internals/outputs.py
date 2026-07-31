@@ -31,14 +31,18 @@ def actual_hashes_for_candidate(candidate: WheelCandidate) -> dict[str, str]:
 
 def finalize_source_hashes(candidate: WheelCandidate) -> WheelCandidate:
     if isinstance(candidate, LazyWheelCandidate):
-        if candidate.materializer_internal.dry_run and not candidate.record_internal.link.is_file:
+        if (
+            candidate.materializer_internal.dry_run
+            and not candidate.record_internal.link.is_file
+        ):
             # Keep index-provided hashes, but never download a remote artifact
             # solely to fill an optional dry-run report field.
             return candidate
-        if (
-            candidate.materializer_internal.dry_run
-            and candidate.source_kind in {"sdist", "source-tree", "vcs"}
-        ):
+        if candidate.materializer_internal.dry_run and candidate.source_kind in {
+            "sdist",
+            "source-tree",
+            "vcs",
+        }:
             return candidate
         candidate = candidate.materialize()
     if (
@@ -82,18 +86,27 @@ def installation_order(
     graph: dict[str, set[str]],
 ) -> list[str]:
     ordered: list[str] = []
-    seen: set[str] = set()
-
-    def visit(name: str) -> None:
-        if name in seen:
-            return
-        seen.add(name)
-        for dep in sorted(graph.get(name, ()), reverse=True):
-            if dep in selected:
-                visit(dep)
-        if name in selected:
-            ordered.append(name)
-
+    state: dict[str, int] = {}
     for name in sorted(selected, reverse=True):
-        visit(name)
+        if state.get(name, 0) == 2:
+            continue
+        pending: list[tuple[str, bool]] = [(name, False)]
+        while pending:
+            current, expanded = pending.pop()
+            if expanded:
+                state[current] = 2
+                ordered.append(current)
+                continue
+            if state.get(current, 0) == 2:
+                continue
+            if state.get(current, 0) == 1:
+                continue
+            state[current] = 1
+            pending.append((current, True))
+            dependencies = [
+                dep
+                for dep in sorted(graph.get(current, ()), reverse=True)
+                if dep in selected
+            ]
+            pending.extend((dep, False) for dep in reversed(dependencies))
     return ordered

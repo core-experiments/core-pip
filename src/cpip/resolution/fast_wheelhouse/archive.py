@@ -143,16 +143,24 @@ class WheelArchive:
 
     def read_many(self, names: list[str]) -> list[bytes]:
         """Read members in archive order while returning the requested order."""
-        ordered = sorted(
-            ((self.members[name][4], name) for name in names),
-            key=lambda item: item[0],
+        members = [self.members[name] for name in names]
+        in_archive_order = all(
+            left[4] <= right[4] for left, right in zip(members, members[1:])
         )
-        results: dict[str, bytes] = {}
+        if in_archive_order:
+            ordered_names = names
+            ordered_members = members
+        else:
+            ordered = sorted(zip(members, names), key=lambda item: item[0][4])
+            ordered_members = [member for member, _ in ordered]
+            ordered_names = [name for _, name in ordered]
+        ordered_results: list[bytes] = []
+        unordered_results: dict[str, bytes] = {}
         position = -1
         import zlib
 
-        for local_offset, name in ordered:
-            compression, crc, compressed_size, uncompressed_size, _ = self.members[name]
+        for name, member in zip(ordered_names, ordered_members):
+            compression, crc, compressed_size, uncompressed_size, local_offset = member
             if local_offset != position:
                 self.file.seek(local_offset)
             header = self.file.read(30)
@@ -179,6 +187,13 @@ class WheelArchive:
                 or zlib.crc32(result) & 0xFFFFFFFF != crc
             ):
                 raise WheelhouseUnavailable
-            results[name] = result
+            if in_archive_order:
+                ordered_results.append(result)
+            else:
+                unordered_results[name] = result
             position = local_offset + 30 + name_size + extra_size + compressed_size
-        return [results[name] for name in names]
+        return (
+            ordered_results
+            if in_archive_order
+            else [unordered_results[name] for name in names]
+        )

@@ -46,15 +46,25 @@ def parse_arguments(args: list[str]) -> InstallOptions | None:
     index = 0
     while index < len(args):
         token = args[index]
-        if token in ("--no-index", "--ignore-installed", "--no-compile", "--quiet"):
+        if token in (
+            "--no-index",
+            "--ignore-installed",
+            "--no-compile",
+            "--quiet",
+            "--upgrade",
+        ):
             if token == "--no-index":
                 options.no_index = True
             elif token == "--ignore-installed":
                 options.ignore_installed = True
             elif token == "--no-compile":
                 options.no_compile = True
-            else:
+            elif token == "--quiet":
                 options.quiet = True
+            # An empty target has no installed versions to upgrade.  The local
+            # resolver already selects the newest compatible wheel, so this
+            # flag is safe to accept here.  A non-empty target still falls back
+            # from install_resolved_pure_wheels before changing any files.
             index += 1
             continue
         if token in (
@@ -103,8 +113,14 @@ def parse_arguments(args: list[str]) -> InstallOptions | None:
 def is_safe_member(name: str) -> bool:
     if not name or "\\" in name or name.startswith("/"):
         return False
-    parts = name.split("/")
-    return ".." not in parts and ".data" not in parts[0:1]
+    return not (
+        name == ".."
+        or name.startswith("../")
+        or "/../" in name
+        or name.endswith("/..")
+        or name == ".data"
+        or name.startswith(".data/")
+    )
 
 
 def install_resolved_pure_wheels(
@@ -134,6 +150,8 @@ def install_resolved_pure_wheels(
             ResolvedCandidate,
             WheelArchive,
             list[str],
+            list[str],
+            list[str],
             str,
             bool,
             tuple[str, bytes] | None,
@@ -158,6 +176,8 @@ def install_resolved_pure_wheels(
                     archive = WheelArchive(file)
                     archive_names = archive.namelist()
                 names = []
+                destinations_for_wheel = []
+                directories_for_wheel = []
                 for name in archive_names:
                     if name.endswith("/"):
                         continue
@@ -168,6 +188,8 @@ def install_resolved_pure_wheels(
                         return False
                     destinations.add(destination)
                     names.append(name)
+                    destinations_for_wheel.append(destination)
+                    directories_for_wheel.append(os.path.dirname(destination))
                 if layout is None:
                     wheel_members = [
                         name for name in names if name.endswith(".dist-info/WHEEL")
@@ -193,6 +215,8 @@ def install_resolved_pure_wheels(
                     candidate,
                     archive,
                     names,
+                    destinations_for_wheel,
+                    directories_for_wheel,
                     dist_info,
                     candidate.canonical_name in requested_roots,
                     preloaded_wheel,
@@ -207,22 +231,45 @@ def install_resolved_pure_wheels(
                 _,
                 archive,
                 names,
+                destinations_for_wheel,
+                directories_for_wheel,
                 dist_info,
                 requested,
                 preloaded_wheel,
             ) in prepared:
                 if preloaded_wheel is None:
-                    members = zip(names, archive.read_many(names))
+                    members = zip(
+                        destinations_for_wheel,
+                        directories_for_wheel,
+                        archive.read_many(names),
+                    )
                 else:
                     wheel_name, wheel_contents = preloaded_wheel
                     read_names = [name for name in names if name != wheel_name]
-                    members = zip(read_names, archive.read_many(read_names))
+                    read_destinations = [
+                        destination
+                        for name, destination in zip(names, destinations_for_wheel)
+                        if name != wheel_name
+                    ]
+                    read_directories = [
+                        directory
+                        for name, directory in zip(names, directories_for_wheel)
+                        if name != wheel_name
+                    ]
+                    wheel_destination = destinations_for_wheel[names.index(wheel_name)]
+                    wheel_directory = directories_for_wheel[names.index(wheel_name)]
+                    members = zip(
+                        read_destinations,
+                        read_directories,
+                        archive.read_many(read_names),
+                    )
                     from itertools import chain
 
-                    members = chain(((wheel_name, wheel_contents),), members)
-                for name, contents in members:
-                    destination = os.path.join(target, *name.split("/"))
-                    directory = os.path.dirname(destination)
+                    members = chain(
+                        ((wheel_destination, wheel_directory, wheel_contents),),
+                        members,
+                    )
+                for destination, directory, contents in members:
                     if directory not in created_directories:
                         os.makedirs(directory, exist_ok=True)
                         created_directories.add(directory)
