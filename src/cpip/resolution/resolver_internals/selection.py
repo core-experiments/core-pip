@@ -248,6 +248,8 @@ class ResolverSelectionOperations:
 
     def emit_backtracking_message(self: ResolverContext) -> None:
         self.backtrack_count += 1
+        if self.metrics.enabled:
+            self.metrics.backtracks += 1
         if self.backtrack_count in {1, 8}:
             print("This could take a while.", file=sys.stdout)
         if self.backtrack_count == 13:
@@ -469,6 +471,8 @@ class ResolverSelectionOperations:
             provider_hash_key,
         )
         if key not in self.candidate_cache:
+            if self.metrics.enabled:
+                self.metrics.candidate_cache_misses += 1
             logger.debug(
                 f"candidate cache miss requirement={requirement.raw or requirement.name}"
             )
@@ -586,6 +590,8 @@ class ResolverSelectionOperations:
                 candidates = candidates.prefer(keep, decisive=decisive)
             self.candidate_cache[key] = candidates
         else:
+            if self.metrics.enabled:
+                self.metrics.candidate_cache_hits += 1
             logger.debug(
                 f"candidate cache hit requirement={requirement.raw or requirement.name}"
             )

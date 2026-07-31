@@ -67,7 +67,7 @@ def cache_candidate(
     key: tuple[str, int, int, int], candidate: LocalWheelCandidate
 ) -> None:
     candidate_cache[key] = candidate
-    if len(candidate_cache) > 8192:
+    if len(candidate_cache) > 16384:
         candidate_cache.pop(next(iter(candidate_cache)))
 
 

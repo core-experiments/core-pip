@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import cast
 
 from cpip.resolution.fast_local_wheelhouse import load_candidate, wheel_name
+from cpip.resolution.fast_wheelhouse.cache import candidate_cache
 
 from .uv_scenarios import make_metadata_wheel
 
@@ -78,6 +79,7 @@ class MetadataCacheScaling:
     ) -> None:
         if cache_state == "cold":
             self.cache.clear()
+            candidate_cache.clear()
         elif cache_state == "invalidate":
             stat = self.invalidated.stat()
             os.utime(

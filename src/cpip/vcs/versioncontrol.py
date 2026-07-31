@@ -172,16 +172,29 @@ class VcsSupport:
     schemes = ["ssh", "git", "hg", "bzr", "sftp", "svn"]
 
     def __init__(self) -> None:
+        self._builtin_backends_loaded = False
         # Register more schemes with urlparse for various version control
         # systems
         urllib.parse.uses_netloc.extend(self.schemes)
         super().__init__()
 
+    def _ensure_builtin_backends_loaded(self) -> None:
+        if self._builtin_backends_loaded:
+            return
+        self._builtin_backends_loaded = True
+        try:
+            from . import bazaar, git, mercurial, subversion  # noqa: F401
+        except BaseException:
+            self._builtin_backends_loaded = False
+            raise
+
     def __iter__(self) -> Iterator[str]:
+        self._ensure_builtin_backends_loaded()
         return self.registry_internal.__iter__()
 
     @property
     def backends(self) -> list[VersionControl]:
+        self._ensure_builtin_backends_loaded()
         return list(self.registry_internal.values())
 
     @property
@@ -212,6 +225,7 @@ class VcsSupport:
         Return a VersionControl object if a repository of that type is found
         at the given directory.
         """
+        self._ensure_builtin_backends_loaded()
         vcs_backends = {}
         for vcs_backend in self.registry_internal.values():
             repo_path = vcs_backend.get_repository_root(location)
@@ -234,6 +248,7 @@ class VcsSupport:
         """
         Return a VersionControl object or None.
         """
+        self._ensure_builtin_backends_loaded()
         for vcs_backend in self.registry_internal.values():
             if scheme in vcs_backend.schemes:
                 return vcs_backend
@@ -243,6 +258,7 @@ class VcsSupport:
         """
         Return a VersionControl object or None.
         """
+        self._ensure_builtin_backends_loaded()
         name = name.lower()
         return self.registry_internal.get(name)
 

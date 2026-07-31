@@ -18,7 +18,6 @@ from contextlib import nullcontext
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Iterable
 
-from cpip.core.direct_url import DirectUrl
 from cpip.core.errors import InstallationError
 from cpip.core.packaging import canonicalize_name
 from cpip.core.wheel import WheelCandidate, parse_wheel, wheel_candidate
@@ -32,16 +31,10 @@ from cpip.install.wheel_archive import (
     validate_member,
     zip_mode,
 )
-from cpip.install.wheel_scripts import (
-    entry_point_scripts,
-    rewrite_shebang,
-    script_matches,
-    script_text,
-    write_windows_script,
-)
 from cpip.install.wheel_state import compiled_files, existing_paths
 
 if TYPE_CHECKING:
+    from cpip.core.direct_url import DirectUrl
     from cpip.build.metadata import InstalledMetadataDistribution
 
 DIRECT_CONTENT_LIMIT = 64 * 1024
@@ -103,7 +96,10 @@ def _open_wheel_archive(
     path: str | Path, candidate: WheelCandidate
 ) -> zipfile.ZipFile | _RawWheelArchive:
     """Open a fast raw archive when its members fit the streaming contract."""
-    from cpip.resolution.fast_wheelhouse.archive import WheelArchive, WheelhouseUnavailable
+    from cpip.resolution.fast_wheelhouse.archive import (
+        WheelArchive,
+        WheelhouseUnavailable,
+    )
 
     layout = getattr(candidate, "wheel_layout", None)
     if layout is not None:
@@ -112,8 +108,7 @@ def _open_wheel_archive(
         return zipfile.ZipFile(path)
     members = None
     if members is not None and any(
-        member[0] not in {0, 8}
-        or member[2] > 1024 * 1024
+        member[0] not in {0, 8} or member[2] > 1024 * 1024
         for member in members.values()
     ):
         return zipfile.ZipFile(path)
@@ -265,6 +260,14 @@ def install_wheel_internal(
         print(f"Uninstalling {existing.raw_name}-{existing.raw_version}")
     if direct and transaction is None:
         raise ValueError("direct wheel installation needs a transaction")
+    if not direct:
+        from cpip.install.wheel_scripts import (
+            entry_point_scripts,
+            rewrite_shebang,
+            script_matches,
+            script_text,
+            write_windows_script,
+        )
 
     stage_context = (
         nullcontext(target.purelib)
@@ -313,9 +316,9 @@ def install_wheel_internal(
                     )
             wheel_record_metadata: dict[str, tuple[str, str]] = {}
             try:
-                record_text = archive.read(
-                    f"{validated_dist_info}/RECORD"
-                ).decode("utf-8")
+                record_text = archive.read(f"{validated_dist_info}/RECORD").decode(
+                    "utf-8"
+                )
             except (KeyError, UnicodeDecodeError):
                 pass
             else:
@@ -400,6 +403,10 @@ def install_wheel_internal(
                     with open(source, "wb") as file:
                         file.write(contents)
                 if script_member:
+                    if direct:
+                        raise InstallationError(
+                            "direct wheel installation cannot contain scripts"
+                        )
                     rewrite_shebang(source, script_executable)
                 elif contents is not None:
                     metadata = wheel_record_metadata.get(relative.as_posix())
@@ -473,8 +480,10 @@ def install_wheel_internal(
                 )
             )
 
-        scripts = {} if direct else entry_point_scripts(
-            stage_root / dist_info / "entry_points.txt"
+        scripts = (
+            {}
+            if direct
+            else entry_point_scripts(stage_root / dist_info / "entry_points.txt")
         )
         script_destinations = {
             target.scripts / generated
@@ -580,7 +589,11 @@ def install_wheel_internal(
         if preserve_existing and existing is not None:
             old_paths = set()
         for _, destination, _ in staged:
-            if destination.parent == target.scripts and destination.exists():
+            if (
+                not direct
+                and destination.parent == target.scripts
+                and destination.exists()
+            ):
                 if script_matches(destination, scripts):
                     owned_paths.add(destination)
         new_destinations = {destination for _, destination, _ in staged}
@@ -668,7 +681,9 @@ def _direct_batch_preflight(
         _, raw_members, _ = candidate.wheel_layout
         member_sets.append(raw_members)
         total_size += sum(
-            raw_member[4] for raw_member in raw_members if not raw_member[0].endswith("/")
+            raw_member[4]
+            for raw_member in raw_members
+            if not raw_member[0].endswith("/")
         )
     if total_size <= DIRECT_CONTENT_BATCH_LIMIT:
         return None
@@ -809,17 +824,6 @@ def install_wheels_transactionally(
         script_executable=script_executable,
     )
     destination_cache: dict[tuple[Path, PurePosixPath], Path] = {}
-    if lookup_existing and _target_has_distribution_metadata(target):
-        from cpip.build.metadata import InstalledDistributionStore
-
-        existing_distributions = {
-            distribution.canonical_name: distribution
-            for distribution in InstalledDistributionStore(
-                paths=[os.fspath(root) for root in target.library_roots]
-            ).iter()
-        }
-    else:
-        existing_distributions = {}
     planned_candidates = (
         tuple(candidates)
         if candidates is not None
@@ -827,6 +831,17 @@ def install_wheels_transactionally(
     )
     if len(planned_candidates) != len(requests):
         raise ValueError("candidate count does not match wheel request count")
+    if lookup_existing and _target_has_distribution_metadata(target):
+        from cpip.build.metadata import InstalledDistributionStore
+
+        existing_distributions = {
+            distribution.canonical_name: distribution
+            for distribution in InstalledDistributionStore(
+                paths=[os.fspath(root) for root in target.library_roots]
+            ).iter(names={candidate.canonical_name for candidate in planned_candidates})
+        }
+    else:
+        existing_distributions = {}
     direct_destination_cache = None
     if not pycompile and not force and not existing_distributions:
         direct_destination_cache = _direct_batch_preflight(
@@ -933,9 +948,7 @@ def install_wheels_transactionally(
                                 continue
                             local_transaction.rollback()
                         raise
-                    candidates = tuple(
-                        result for _, _, result in ordered_results
-                    )
+                    candidates = tuple(result for _, _, result in ordered_results)
                 else:
                     candidates = tuple(
                         installer.install(
@@ -951,9 +964,10 @@ def install_wheels_transactionally(
                             stage_root=batch_stage / str(index),
                             transaction=transaction,
                         )
-                        for index, ((path, requested, direct_url), candidate) in enumerate(
-                            zip(requests, planned_candidates)
-                        )
+                        for index, (
+                            (path, requested, direct_url),
+                            candidate,
+                        ) in enumerate(zip(requests, planned_candidates))
                     )
             except Exception:
                 transaction.rollback()

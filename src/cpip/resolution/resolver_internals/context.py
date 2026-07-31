@@ -21,6 +21,48 @@ if TYPE_CHECKING:
     )
 
 
+class ResolverMetrics:
+    """Optional counters for resolver performance investigations.
+
+    The hot-path increment is guarded by ``enabled`` and the object is slotted
+    so normal installs do not allocate per-event objects or dictionaries.
+    """
+
+    __slots__ = (
+        "enabled",
+        "candidate_cache_hits",
+        "candidate_cache_misses",
+        "candidates_considered",
+        "decisions",
+        "propagations",
+        "search_frames",
+        "backtracks",
+        "failed_state_hits",
+        "root_incompatibility_hits",
+        "max_trail_depth",
+    )
+
+    def __init__(self, enabled: bool = False) -> None:
+        self.enabled = enabled
+        self.candidate_cache_hits = 0
+        self.candidate_cache_misses = 0
+        self.candidates_considered = 0
+        self.decisions = 0
+        self.propagations = 0
+        self.search_frames = 0
+        self.backtracks = 0
+        self.failed_state_hits = 0
+        self.root_incompatibility_hits = 0
+        self.max_trail_depth = 0
+
+    def snapshot(self) -> dict[str, int]:
+        return {
+            name: getattr(self, name)
+            for name in self.__slots__
+            if name != "enabled"
+        }
+
+
 class ResolverConfiguration(Protocol):
     """Resolver options and package-source collaborators."""
 
@@ -74,6 +116,7 @@ class ResolverSearchState(Protocol):
     backtrack_count: int
     last_conflict_was_root: bool
     root_incompatibility_hits: int
+    metrics: ResolverMetrics
 
 
 class ResolverConflictState(Protocol):

@@ -397,7 +397,7 @@ import sys
 from cpip.cli.entrypoint import main
 
 assert main([
-    "install", "--quiet", "--no-index", "--ignore-installed", "--no-compile",
+    "install", "--quiet", "--upgrade", "--no-index", "--ignore-installed", "--no-compile",
     "--target", {str(target)!r}, "--find-links", {str(wheelhouse)!r}, "demo",
 ]) == 0
 for module in (
@@ -455,7 +455,7 @@ import sys
 from cpip.cli.entrypoint import main
 
 assert main([
-    "install", "--quiet", "--no-index", "--ignore-installed", "--no-compile",
+    "install", "--quiet", "--upgrade", "--no-index", "--ignore-installed", "--no-compile",
     "--target", {str(target)!r}, "--find-links", {str(wheelhouse)!r}, "demo",
 ]) == 0
 for module in (
@@ -483,7 +483,7 @@ import sys
 from cpip.cli.entrypoint import main
 
 assert main([
-    "install", "--upgrade", "--no-index", "--ignore-installed", "--no-compile",
+    "install", "--no-index", "--ignore-installed", "--no-compile",
     "--target", {str(target)!r}, "--find-links", {str(wheelhouse)!r}, "demo",
 ]) == 0
 for module in (
@@ -572,6 +572,72 @@ for module in (
     "cpip.resolution.resolver",
 ):
     assert module not in sys.modules, module
+"""
+
+    subprocess.run([sys.executable, "-c", script], check=True)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "install",
+        "wheel",
+        "index",
+        "download",
+        "uninstall",
+        "list",
+        "freeze",
+        "show",
+        "inspect",
+        "check",
+        "lock",
+    ],
+)
+def test_command_help_does_not_load_runtime_stack(command: str) -> None:
+    script = f"""
+import sys
+from cpip.cli.entrypoint import main
+
+assert main(["help", {command!r}]) == 0
+for module in (
+    "cpip.build.build",
+    "cpip.build.metadata",
+    "cpip.index.provider",
+    "cpip.network.http",
+    "cpip.resolution.resolver",
+    "cpip.install.wheel_transaction",
+    "cpip.vcs.bazaar",
+    "cpip.vcs.git",
+    "cpip.vcs.mercurial",
+    "cpip.vcs.subversion",
+):
+    assert module not in sys.modules, module
+"""
+
+    subprocess.run([sys.executable, "-c", script], check=True, capture_output=True)
+
+
+def test_versioncontrol_defers_builtin_backend_imports() -> None:
+    script = """
+import sys
+from cpip.vcs.versioncontrol import vcs
+
+for module in (
+    "cpip.vcs.bazaar",
+    "cpip.vcs.git",
+    "cpip.vcs.mercurial",
+    "cpip.vcs.subversion",
+):
+    assert module not in sys.modules, module
+
+assert vcs.get_backend_for_scheme("git+https") is not None
+for module in (
+    "cpip.vcs.bazaar",
+    "cpip.vcs.git",
+    "cpip.vcs.mercurial",
+    "cpip.vcs.subversion",
+):
+    assert module in sys.modules, module
 """
 
     subprocess.run([sys.executable, "-c", script], check=True)

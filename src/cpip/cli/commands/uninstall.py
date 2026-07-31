@@ -6,11 +6,7 @@ import os
 import site
 from pathlib import Path
 
-from cpip.build.metadata import InstalledDistributionStore
-from cpip.cli.context import target_paths
 from cpip.cli.parser import ArgumentParser
-from cpip.core.packaging import parse_requirement
-from cpip.install.requirements import RequirementInstaller
 
 
 def create_parser() -> ArgumentParser:
@@ -25,6 +21,11 @@ def create_parser() -> ArgumentParser:
 
 
 def run_uninstall(args: list[str]) -> int:
+    from cpip.build.metadata import InstalledDistributionStore
+    from cpip.cli.context import target_paths
+    from cpip.core.packaging import parse_requirement
+    from cpip.install.requirements import RequirementInstaller
+
     parser = create_parser()
     options = parser.parse_args(args)
     packages = list(options.packages)

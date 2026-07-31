@@ -45,35 +45,9 @@ uv run --group benchmark asv --config benchmarks/asv.conf.json run \
   --bench 'cache_materialization.*Install.*'
 ```
 
-## Direct cpip versus uv comparisons
-
-For paired measurements over the same workload, use the Hyperfine runner. It
-validates that both tools choose the same deterministic resolution before
-timing them and writes a JSON manifest containing tool, Python, platform, and
-Hyperfine metadata:
-
-```console
-brew install hyperfine
-uv run --group benchmark python -m benchmarks.cross_tool \
-  --scenario trio \
-  --benchmark resolve-cold \
-  --benchmark resolve-warm \
-  --benchmark install-cold \
-  --benchmark install-warm \
-  --benchmark install-compile-cold \
-  --benchmark install-compile-warm \
-  --output-dir benchmarks/results
-```
-
-The runner uses three warmups and ten measured runs by default, with isolated
-cache and output directories for each tool. `resolve-cold` and
-`resolve-warm` measure the same resolver operation with different metadata
-cache state; installation modes recreate the target while either clearing or
-preserving the package cache. The generated `benchmarks/results/` directory is
-local output and is not committed.
-
-The deterministic comparison suite is the primary cross-tool signal. ASV
-remains the source of cpip revision history and in-process microbenchmarks.
+ASV is the canonical benchmark format and source of cpip revision history.
+Each benchmark owns its fixtures and setup through ASV lifecycle hooks, so
+results, environments, and parameterized comparisons are recorded together.
 Live-PyPI benchmarks remain opt-in because network and index conditions are
 useful for realism but unsuitable for a stable comparison gate.
 
@@ -83,6 +57,22 @@ Run the cold conflict-resolution scaling benchmark:
 uv run --group benchmark asv --config benchmarks/asv.conf.json run \
   --bench 'resolver_conflicts.*'
 ```
+
+Run the general-resolver adversarial families:
+
+```console
+uv run --group benchmark asv --config benchmarks/asv.conf.json run \
+  --bench 'resolver_adversarial.*'
+```
+
+These are deterministic metadata-only cases for late candidate conflicts and
+wide shared-dependency graphs. They complement the real-world fast wheelhouse
+benchmarks; they do not measure the specialized local resolver.
+
+For diagnostic counters, set `CPIP_RESOLVER_METRICS=1`. The resolver then
+exposes `metrics_snapshot()` for targeted profiling and benchmark scripts. The
+environment variable is intentionally disabled by default so production
+resolution does not pay counter-update overhead.
 
 Run the real-world fast-resolver cases:
 
@@ -182,21 +172,6 @@ NumPy/Sparse, Sentry, and Starlette/FastAPI. It also installs uv's compiled Trio
 environment with cold and warm caches. Use Python 3.12 for parity with uv's
 benchmark fixture and to avoid source builds caused by unavailable wheels on
 newer Python versions.
-
-Run the startup comparison matrix on one deterministic scenario:
-
-```console
-uv run --group benchmark python -m benchmarks.cross_tool \
-  --scenario trio \
-  --benchmark startup-version \
-  --benchmark startup-version-cold \
-  --benchmark startup-help \
-  --benchmark startup-help-cold \
-  --benchmark startup-fast-install \
-  --benchmark startup-fallback-install \
-  --benchmark startup-compile-install \
-  --output-dir benchmarks/results
-```
 
 The startup install cases warm their local cache before measurement and recreate
 only the target directory between samples. The fallback case omits `--quiet`

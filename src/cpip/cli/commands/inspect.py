@@ -4,12 +4,7 @@ from __future__ import annotations
 
 import json
 
-from cpip.build.metadata import InstalledDistributionStore
 from cpip.cli.parser import ArgumentParser
-from cpip.core.metadata import stdlib_pkgs
-from cpip.core.packaging import default_environment
-from cpip.core.cpip_version import get_cpip_version
-from cpip.core.urls import path_to_url
 
 
 def create_parser() -> ArgumentParser:
@@ -21,6 +16,12 @@ def create_parser() -> ArgumentParser:
 
 
 def run_inspect(args: list[str]) -> int:
+    from cpip.build.metadata import InstalledDistributionStore
+    from cpip.core.cpip_version import get_cpip_version
+    from cpip.core.metadata import stdlib_pkgs
+    from cpip.core.packaging import default_environment
+    from cpip.core.urls import path_to_url
+
     options = create_parser().parse_args(args)
     distributions = InstalledDistributionStore(
         paths=options.path or None,

@@ -6,6 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from cpip.build.metadata import InstalledDistributionStore
 from cpip.core.errors import InstallationError
 from cpip.core.metadata import default_lib_path
 from cpip.core.wheel import wheel_candidate
@@ -77,6 +78,27 @@ def make_wheel_internal(
             archive.writestr(path, data)
         archive.writestr(f"owner_demo-{version}.dist-info/RECORD", "")
     return wheel
+
+
+def test_installed_distribution_store_can_filter_names(tmp_path: Path) -> None:
+    wanted = tmp_path / "wanted-1.0.dist-info"
+    wanted.mkdir()
+    (wanted / "METADATA").write_text(
+        "Metadata-Version: 2.1\nName: wanted\nVersion: 1.0\n"
+    )
+    (wanted / "RECORD").write_text("")
+    unrelated = tmp_path / "unrelated-1.0.dist-info"
+    unrelated.mkdir()
+    (unrelated / "METADATA").write_text(
+        "Metadata-Version: 2.1\nName: unrelated\nVersion: 1.0\n"
+    )
+    (unrelated / "RECORD").write_text("")
+
+    distributions = InstalledDistributionStore(paths=[str(tmp_path)]).iter(
+        names={"Wanted"}
+    )
+
+    assert [distribution.canonical_name for distribution in distributions] == ["wanted"]
 
 
 def test_install_and_uninstall_are_owned_by_cpip_install(tmp_path: Path) -> None:

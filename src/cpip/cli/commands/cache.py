@@ -4,10 +4,7 @@ from __future__ import annotations
 
 import os
 
-from cpip.cli.cache import CacheManager
 from cpip.cli.parser import ArgumentParser
-from cpip.core.appdirs import user_cache_dir
-from cpip.core.errors import CommandError
 
 
 def create_parser() -> ArgumentParser:
@@ -22,6 +19,10 @@ def create_parser() -> ArgumentParser:
 
 
 def run_cache(args: list[str]) -> int:
+    from cpip.cli.cache import CacheManager
+    from cpip.core.appdirs import user_cache_dir
+    from cpip.core.errors import CommandError
+
     parser = create_parser()
     options = parser.parse_args(args)
     if options.command == "dir":

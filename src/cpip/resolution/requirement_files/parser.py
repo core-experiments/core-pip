@@ -10,11 +10,11 @@ import re
 import shlex
 import sys
 import urllib.parse
-from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from cpip.core.errors import InstallationError
+from cpip.core.packaging import parse_requirement
 from cpip.resolution.requirement_files.models import (
     ParsedRequirement,
     RequirementsFileParseError,
@@ -39,6 +39,7 @@ COMMENT_RE = re.compile(r"(^|\s+)#.*$")
 REMOTE_SCHEMES = frozenset(("http", "https", "file"))
 REQUIREMENTS_OPTIONS = frozenset(("-r", "--requirement"))
 CONSTRAINT_OPTIONS = frozenset(("-c", "--constraint"))
+INCLUDE_OPTION_PREFIXES = ("-r", "--requirement", "-c", "--constraint")
 FIND_LINKS_OPTIONS = frozenset(("-f", "--find-links"))
 INDEX_URL_OPTIONS = frozenset(("-i", "--index-url"))
 EDITABLE_OPTIONS = frozenset(("-e", "--editable"))
@@ -74,20 +75,31 @@ class RequirementFilePrefetcher:
             self.worker.close()
 
 
-@dataclass
 class _RequirementFileTask:
-    filename: str
-    constraint: bool
-    stack: list[str]
+    __slots__ = ("filename", "constraint", "stack")
+
+    def __init__(self, filename: str, constraint: bool, stack: list[str]) -> None:
+        self.filename = filename
+        self.constraint = constraint
+        self.stack = stack
 
 
-@dataclass
 class _RequirementLineTask:
-    filename: str
-    line_number: int
-    line: str
-    constraint: bool
-    stack: list[str]
+    __slots__ = ("filename", "line_number", "line", "constraint", "stack")
+
+    def __init__(
+        self,
+        filename: str,
+        line_number: int,
+        line: str,
+        constraint: bool,
+        stack: list[str],
+    ) -> None:
+        self.filename = filename
+        self.line_number = line_number
+        self.line = line
+        self.constraint = constraint
+        self.stack = stack
 
 
 def parse_requirements(
@@ -257,6 +269,8 @@ def prefetch_remote_includes(
 ) -> None:
     """Start direct remote includes before parsing their preceding lines."""
     for _, line in processed:
+        if not line.lstrip().startswith(INCLUDE_OPTION_PREFIXES):
+            continue
         try:
             tokens = shlex.split(line)
         except ValueError:
@@ -484,23 +498,43 @@ def parse_requirement_line(
         requirement_text = " ".join(requirement_tokens)
     requirement_text = expand_env_variables(requirement_text)
     requirement_for_install = requirement_text
-    file_reference = urllib.parse.urlparse(requirement_for_install)
-    if file_reference.scheme == "file" and not file_reference.path.startswith("/"):
-        requirement_for_install = normalize_reference(
-            requirement_for_install, filename, as_path=True
-        )
-    from cpip.resolution.req_install import (
-        install_req_from_editable,
-        install_req_from_line,
-    )
+    if requirement_for_install.startswith("file:"):
+        file_reference = urllib.parse.urlparse(requirement_for_install)
+        if not file_reference.path.startswith("/"):
+            requirement_for_install = normalize_reference(
+                requirement_for_install, filename, as_path=True
+            )
 
     try:
         if editable or option in EDITABLE_OPTIONS:
+            from cpip.resolution.requirements.parsing import install_req_from_editable
+
             install_req_from_editable(requirement_for_install)
+        elif (
+            requirement_for_install
+            and requirement_for_install[0].isalnum()
+            and "://" not in requirement_for_install
+            and "/" not in requirement_for_install
+            and "\\" not in requirement_for_install
+            and not requirement_for_install.lower().endswith(".whl")
+        ):
+            parsed = parse_requirement(requirement_for_install)
+            if parsed.marker:
+                quote: str | None = None
+                for char in parsed.marker:
+                    if char in {"'", '"'}:
+                        quote = None if quote == char else char
+                    elif char == ";" and quote is None:
+                        raise ValueError("multiple environment markers")
         else:
+            from cpip.resolution.requirements.parsing import install_req_from_line
+
             install_req_from_line(requirement_for_install)
     except ValueError as exc:
-        raise InstallationError(f"Invalid requirement: {requirement_text!r}") from exc
+        message = f"Invalid requirement: {requirement_text!r}"
+        if "=" in requirement_text and "==" not in requirement_text:
+            message += ". = is not a valid operator. Did you mean == ?"
+        raise InstallationError(message) from exc
     comes_from = f"{'-c' if constraint else '-r'} {filename} (line {line_number})"
     metadata: dict[str, object] = {}
     if parsed_options:

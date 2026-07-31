@@ -7,18 +7,7 @@ import shutil
 import sys
 from pathlib import Path
 
-from cpip.build.build import build_wheel_from_source
 from cpip.cli.parser import ArgumentParser
-from cpip.cli.requirements import (
-    bundle_install_requirements,
-    collect_requirements,
-    load_source_config,
-)
-from cpip.core.format_control import FormatControl
-from cpip.index.artifacts import ArtifactLocator
-from cpip.index.provider import CandidateProvider
-from cpip.install.editable import prepare_editable_source
-from cpip.resolution.resolver import Resolver
 
 
 def create_parser() -> ArgumentParser:
@@ -49,6 +38,18 @@ def create_parser() -> ArgumentParser:
 
 
 def run_download(args: list[str]) -> int:
+    from cpip.build.build import build_wheel_from_source
+    from cpip.cli.requirements import (
+        bundle_install_requirements,
+        collect_requirements,
+        load_source_config,
+    )
+    from cpip.core.format_control import FormatControl
+    from cpip.index.artifacts import ArtifactLocator
+    from cpip.index.provider import CandidateProvider
+    from cpip.install.editable import prepare_editable_source
+    from cpip.resolution.resolver import Resolver
+
     options = create_parser().parse_args(args)
     if options.proxy is not None:
         # Keep urllib-based helpers and subprocesses on the same proxy as the

@@ -5,11 +5,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from cpip.cli.freeze import freeze
 from cpip.cli.parser import ArgumentParser
-from cpip.core.metadata import stdlib_pkgs
-from cpip.core.packaging import canonicalize_name
-from cpip.core.cpip_version import CPIP_DISTRIBUTION_NAMES
 
 
 def create_parser() -> ArgumentParser:
@@ -24,6 +20,11 @@ def create_parser() -> ArgumentParser:
 
 
 def run_freeze(args: list[str]) -> int:
+    from cpip.cli.freeze import freeze
+    from cpip.core.cpip_version import CPIP_DISTRIBUTION_NAMES
+    from cpip.core.metadata import stdlib_pkgs
+    from cpip.core.packaging import canonicalize_name
+
     options = create_parser().parse_args(args)
     excluded = {canonicalize_name(name) for name in options.exclude}
     if "cpip" in excluded:

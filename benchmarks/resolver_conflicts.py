@@ -12,7 +12,7 @@ from cpip.resolution.resolver import Resolver
 from .cache_materialization import make_wheel_internal
 
 
-SIZES = (20, 40, 80)
+SIZES = (20, 40, 80, 256)
 
 
 def create_conflict_graph(root: Path, size: int) -> Path:

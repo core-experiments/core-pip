@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.metadata
 import os
 import sysconfig
+from collections.abc import Collection
 from email.message import Message
 from pathlib import Path
 from typing import Any, Iterable, cast
@@ -87,7 +88,11 @@ def user_scripts_path() -> Path:
 
 def _iter_installed_distributions(
     paths: Iterable[str] | None = None,
+    names: Collection[str] | None = None,
 ) -> Iterable[InstalledDistribution]:
+    canonical_names = (
+        {canonicalize_name(name) for name in names} if names is not None else None
+    )
     if paths is None:
         distributions = importlib.metadata.distributions()
     else:
@@ -98,6 +103,8 @@ def _iter_installed_distributions(
         name = metadata.get("Name")
         version = dist.version
         if not name or not version:
+            continue
+        if canonical_names is not None and canonicalize_name(name) not in canonical_names:
             continue
         metadata_location = getattr(dist, "_path", None)
         location = Path(str(dist.locate_file("")))
@@ -120,15 +127,20 @@ def _iter_installed_distributions(
 
 def iter_installed_distributions(
     paths: Iterable[str] | None = None,
+    *,
+    names: Collection[str] | None = None,
 ) -> list[InstalledDistribution]:
-    return sorted(_iter_installed_distributions(paths), key=lambda dist: dist.canonical_name)
+    return sorted(
+        _iter_installed_distributions(paths, names),
+        key=lambda dist: dist.canonical_name,
+    )
 
 
 def find_installed(
     name: str, paths: Iterable[str] | None = None
 ) -> InstalledDistribution | None:
     canonical = canonicalize_name(name)
-    for dist in _iter_installed_distributions(paths):
+    for dist in _iter_installed_distributions(paths, {canonical}):
         if dist.canonical_name == canonical:
             return dist
     return None

@@ -219,6 +219,45 @@ class TestUnpackArchives:
         test_tar = self.make_tar_file("test_tar.tar", files)
         untar_file(test_tar, self.tempdir)
 
+    def test_regular_only_tar_fast_path_rejects_parent_escape(
+        self, tmp_path: Path
+    ) -> None:
+        archive = tmp_path / "regular-only.tar"
+        destination = tmp_path / "destination"
+        destination.mkdir()
+        with tarfile.open(archive, "w") as tar:
+            member = tarfile.TarInfo("root/../../outside.txt")
+            member.size = 1
+            tar.addfile(member, io.BytesIO(b"x"))
+
+        with pytest.raises(InstallationError, match="outside the destination"):
+            untar_file(os.fspath(archive), os.fspath(destination))
+
+        assert not (tmp_path / "outside.txt").exists()
+
+    @pytest.mark.skipif(
+        sys.platform == "win32", reason="os.chmod() ignores execute bit on Windows"
+    )
+    def test_regular_only_tar_fast_path_preserves_execution_and_time(
+        self, tmp_path: Path
+    ) -> None:
+        archive = tmp_path / "regular-only.tar"
+        destination = tmp_path / "destination"
+        destination.mkdir()
+        with tarfile.open(archive, "w") as tar:
+            member = tarfile.TarInfo("root/tool")
+            member.mode = 0o700
+            member.mtime = 1_375_420_000
+            member.size = 4
+            tar.addfile(member, io.BytesIO(b"tool"))
+
+        untar_file(os.fspath(archive), os.fspath(destination))
+
+        extracted = destination / "tool"
+        assert extracted.read_bytes() == b"tool"
+        assert stat.S_IMODE(extracted.stat().st_mode) == self.executable_mode
+        assert int(extracted.stat().st_mtime) == member.mtime
+
     @pytest.mark.skipif(
         not hasattr(tarfile, "data_filter"),
         reason="tarfile filters (PEP-721) not available",

@@ -42,6 +42,13 @@ def print_version(version: str | None, location: str | None) -> None:
 
 
 def print_command_help(command: str) -> int | None:
+    from cpip.cli._help import COMMAND_HELP_TEXT
+
+    help_text = COMMAND_HELP_TEXT.get(command)
+    if help_text is not None:
+        sys.stdout.write(help_text)
+        return 0
+
     from cpip.cli.commands.registry import get_command, parser_for_command
 
     if get_command(command) is None:

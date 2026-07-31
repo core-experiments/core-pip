@@ -26,6 +26,7 @@ from cpip.resolution.algorithms import (
 )
 from cpip.resolution.constraints import ConstraintStore
 from cpip.resolution.resolver_internals.conflicts import ResolverConflicts
+from cpip.resolution.resolver_internals.context import ResolverMetrics
 from cpip.resolution.resolver_internals.policy import ResolverChecks
 from cpip.resolution.resolver_internals.search import ResolverSearch
 from cpip.resolution.resolver_internals.state.domains import (
@@ -163,6 +164,14 @@ class Resolver(
         self.incompatibility_watches: dict[int, set[int]] = {}
         self.installed_by_name_internal: dict[str, InstalledDistribution] | None = None
         self.debug_internal = os.environ.get("CPIP_RESOLVER_DEBUG") not in FALSE_VALUES
+        self.metrics = ResolverMetrics(
+            os.environ.get("CPIP_RESOLVER_METRICS") not in FALSE_VALUES
+        )
+
+    def metrics_snapshot(self) -> dict[str, int]:
+        """Return optional resolver counters for benchmarks and diagnostics."""
+
+        return self.metrics.snapshot()
 
     def resolve(
         self,
@@ -240,6 +249,8 @@ class Resolver(
             domain.constrained_internal = None
             domain.constrained_roots_internal = None
         self.backtrack_count = 0
+        if self.metrics.enabled:
+            self.metrics = ResolverMetrics(True)
         if not self.search_internal(
             requirements,
             selected,

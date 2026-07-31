@@ -23,6 +23,13 @@ class HiddenText:
     def __repr__(self) -> str:
         return f"<HiddenText {self.redacted!r}>"
 
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, HiddenText):
+            return NotImplemented
+        return self.secret == other.secret and self.redacted == other.redacted
+
+    __hash__ = None
+
 
 def hide_value(value: str) -> HiddenText:
     return HiddenText(value, "****")

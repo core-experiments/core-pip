@@ -446,9 +446,10 @@ class InstalledDistributionStore:
         editables_only: bool = False,
         include_editables: bool = True,
         skip: Collection[str] | None = None,
+        names: Collection[str] | None = None,
     ) -> list[InstalledMetadataDistribution]:
         result: list[InstalledMetadataDistribution] = []
-        for distribution in iter_installed_distributions(self.paths):
+        for distribution in iter_installed_distributions(self.paths, names=names):
             view = InstalledMetadataDistribution(
                 distribution,
                 user_site=self.user_site,

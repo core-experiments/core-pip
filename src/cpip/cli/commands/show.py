@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import sys
 
-from cpip.build.show import iter_installed_package_info
 from cpip.cli.parser import ArgumentParser
-from cpip.core.packaging import canonicalize_name
 
 
 def create_parser() -> ArgumentParser:
@@ -18,6 +16,9 @@ def create_parser() -> ArgumentParser:
 
 
 def run_show(args: list[str]) -> int:
+    from cpip.build.show import iter_installed_package_info
+    from cpip.core.packaging import canonicalize_name
+
     options = create_parser().parse_args(args)
     if not options.packages:
         print("ERROR: Please provide a package name or names.", file=sys.stderr)

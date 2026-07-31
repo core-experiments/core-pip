@@ -4,18 +4,7 @@ from __future__ import annotations
 
 import sys
 
-from cpip.build.check import (
-    PackageDetails,
-    check_package_set,
-    metadata_errors,
-    parse_installed_dependencies,
-    unsupported_distributions,
-)
-from cpip.build.metadata import InstalledDistributionStore
 from cpip.cli.parser import ArgumentParser
-from cpip.core.packaging import Version, canonicalize_name
-from cpip.core.cpip_version import CPIP_DISTRIBUTION_NAMES
-from cpip.core.target_python import get_supported as get_supported_tags
 
 
 def create_parser() -> ArgumentParser:
@@ -23,6 +12,18 @@ def create_parser() -> ArgumentParser:
 
 
 def run_check(args: list[str]) -> int:
+    from cpip.build.check import (
+        PackageDetails,
+        check_package_set,
+        metadata_errors,
+        parse_installed_dependencies,
+        unsupported_distributions,
+    )
+    from cpip.build.metadata import InstalledDistributionStore
+    from cpip.core.cpip_version import CPIP_DISTRIBUTION_NAMES
+    from cpip.core.packaging import Version, canonicalize_name
+    from cpip.core.target_python import get_supported as get_supported_tags
+
     create_parser().parse_args(args)
     distributions = InstalledDistributionStore().iter(skip=CPIP_DISTRIBUTION_NAMES)
     package_set = {

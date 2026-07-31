@@ -85,8 +85,14 @@ class ResolverSearchEngine:
     def search_frame_inner(
         self: ResolverContext, request: SearchRequest
     ) -> SearchFrame:
+        if self.metrics.enabled:
+            self.metrics.search_frames += 1
         pending = request.pending
         selected = request.selected
+        if self.metrics.enabled:
+            self.metrics.max_trail_depth = max(
+                self.metrics.max_trail_depth, len(selected)
+            )
         selected_extras = request.selected_extras
         satisfied = request.satisfied
         graph = request.graph
@@ -120,6 +126,8 @@ class ResolverSearchEngine:
                 pending, selected, selected_extras, satisfied, graph
             )
             if state in self.failed_search_states:
+                if self.metrics.enabled:
+                    self.metrics.failed_state_hits += 1
                 return False
         resolved = yield from self.search_uncached(
             pending,
@@ -202,6 +210,8 @@ class ResolverSearchEngine:
         if not pending:
             return self.satisfied_dependencies_are_consistent(selected, satisfied)
         entry_id, requirement = self.choose_requirement(pending, selected)
+        if self.metrics.enabled:
+            self.metrics.decisions += 1
         pending.remove(entry_id)
         remaining = pending
         name = requirement.canonical_name
@@ -467,6 +477,8 @@ class ResolverSearchEngine:
         attempted_candidates = 0
         root_rejections = 0
         for candidate in candidates:
+            if self.metrics.enabled:
+                self.metrics.candidates_considered += 1
             if not constrained.is_satisfied_by(
                 candidate.version,
                 allow_prereleases=allow_prereleases,
@@ -482,6 +494,8 @@ class ResolverSearchEngine:
                 )
                 if incompatibility_key in self.root_incompatibilities:
                     self.root_incompatibility_hits += 1
+                    if self.metrics.enabled:
+                        self.metrics.root_incompatibility_hits += 1
                     root_rejections += 1
                     self.emit_backtracking_message()
                     continue
@@ -523,6 +537,8 @@ class ResolverSearchEngine:
                         continue
                     graph[name].add(dep.canonical_name)
                     dependency_pending.append(dep)
+                if self.metrics.enabled:
+                    self.metrics.propagations += len(dependency_pending)
                 remaining.prepend(dependency_pending)
             satisfied_snapshot = dict(satisfied)
             if (

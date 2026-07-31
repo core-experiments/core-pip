@@ -5,19 +5,7 @@ from __future__ import annotations
 import sys
 from typing import Any
 
-from cpip.build.list import (
-    format_list_columns,
-    format_list_freeze,
-    format_list_json,
-    select_installed_distributions,
-)
-from cpip.cli.context import target_paths
 from cpip.cli.parser import ArgumentParser
-from cpip.cli.requirements import load_source_config
-from cpip.core.format_control import FormatControl
-from cpip.core.metadata import stdlib_pkgs, user_lib_path
-from cpip.core.packaging import parse_requirement
-from cpip.index.provider import CandidateProvider
 
 
 def create_parser() -> ArgumentParser:
@@ -54,6 +42,15 @@ def create_parser() -> ArgumentParser:
 
 
 def run_list(args: list[str]) -> int:
+    from cpip.build.list import (
+        format_list_columns,
+        format_list_freeze,
+        format_list_json,
+        select_installed_distributions,
+    )
+    from cpip.cli.context import target_paths
+    from cpip.core.metadata import stdlib_pkgs, user_lib_path
+
     options = create_parser().parse_args(args)
     if options.outdated and options.uptodate:
         print(
@@ -82,6 +79,11 @@ def run_list(args: list[str]) -> int:
 
     latest: dict[str, tuple[Any, str]] = {}
     if options.outdated or options.uptodate:
+        from cpip.cli.requirements import load_source_config
+        from cpip.core.format_control import FormatControl
+        from cpip.core.packaging import parse_requirement
+        from cpip.index.provider import CandidateProvider
+
         config = load_source_config("list")
         provider = CandidateProvider.from_options(
             find_links=options.find_links or config.find_links,

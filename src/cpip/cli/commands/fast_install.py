@@ -387,7 +387,6 @@ def run_local_fallback(args: list[str]) -> int | None:
         or options.target is None
         or not options.find_links
         or not options.requirements
-        or "--upgrade" in args
         or "--no-compile" not in args
         or _target_is_empty(options.target)
     ):

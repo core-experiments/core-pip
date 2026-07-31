@@ -6,16 +6,7 @@ import os
 import shutil
 from pathlib import Path
 
-from cpip.build.build import build_wheel_from_source
-from cpip.cli.dependency_groups import parse_dependency_groups
 from cpip.cli.parser import ArgumentParser
-from cpip.cli.requirements import collect_requirements, load_source_config
-from cpip.core.errors import CommandError
-from cpip.core.format_control import FormatControl
-from cpip.core.wheel import wheel_candidate
-from cpip.index.provider import CandidateProvider
-from cpip.resolution.req_install import install_req_from_line
-from cpip.resolution.resolver import Resolver
 
 
 def create_parser() -> ArgumentParser:
@@ -62,6 +53,16 @@ def create_parser() -> ArgumentParser:
 
 
 def run_wheel(args: list[str]) -> int:
+    from cpip.build.build import build_wheel_from_source
+    from cpip.cli.dependency_groups import parse_dependency_groups
+    from cpip.cli.requirements import collect_requirements, load_source_config
+    from cpip.core.errors import CommandError
+    from cpip.core.format_control import FormatControl
+    from cpip.core.wheel import wheel_candidate
+    from cpip.index.provider import CandidateProvider
+    from cpip.resolution.req_install import install_req_from_line
+    from cpip.resolution.resolver import Resolver
+
     options = create_parser().parse_args([arg for arg in args if arg])
 
     config = load_source_config("wheel")

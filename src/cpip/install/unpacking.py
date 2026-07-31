@@ -220,6 +220,9 @@ def untar_file(filename: str, location: str) -> None:
                         if lnk_lead == name_lead:
                             member.linkname = lnk_rest
 
+            if _untar_regular_members(filename, location, tar, members):
+                return
+
             def cpip_filter(member: tarfile.TarInfo, path: str) -> tarfile.TarInfo:
                 orig_mode = member.mode
                 try:
@@ -263,6 +266,58 @@ def untar_file(filename: str, location: str) -> None:
 
     finally:
         tar.close()
+
+
+def _untar_regular_members(
+    filename: str,
+    location: str,
+    tar: tarfile.TarFile,
+    members: list[tarfile.TarInfo],
+) -> bool:
+    """Extract a regular-only archive without repeated realpath checks."""
+    if any(not (member.isfile() or member.isdir()) for member in members):
+        return False
+    with os.scandir(location) as entries:
+        if next(entries, None) is not None:
+            return False
+
+    absolute_location = os.path.abspath(location)
+    prepared: list[tuple[tarfile.TarInfo, str]] = []
+    for member in members:
+        path = os.path.join(location, member.name)
+        absolute_path = os.path.abspath(path)
+        if not (
+            absolute_path == absolute_location
+            or absolute_path.startswith(absolute_location + os.sep)
+        ):
+            raise InstallationError(
+                f"{member.name!r} is outside the destination in {filename}"
+            )
+        prepared.append((member, path))
+
+    mask = os.umask(0)
+    os.umask(mask)
+    executable_mode = 0o777 & ~mask | 0o111
+    created_directories = {absolute_location}
+    for member, path in prepared:
+        if member.isdir():
+            if path and path not in created_directories:
+                os.makedirs(path, exist_ok=True)
+                created_directories.add(path)
+            continue
+        parent = os.path.dirname(path)
+        if parent not in created_directories:
+            os.makedirs(parent, exist_ok=True)
+            created_directories.add(parent)
+        source = tar.extractfile(member)
+        if source is None:
+            raise InstallationError(f"Unable to extract {member.name!r} from {filename}")
+        with source, open(path, "wb") as destination:
+            shutil.copyfileobj(source, destination)
+        tar.utime(member, path)
+        if member.mode & 0o111:
+            os.chmod(path, executable_mode)
+    return True
 
 
 def is_symlink_target_in_tar(tar: tarfile.TarFile, tarinfo: tarfile.TarInfo) -> bool:

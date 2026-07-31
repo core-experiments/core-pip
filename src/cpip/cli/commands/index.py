@@ -5,10 +5,6 @@ from __future__ import annotations
 import json
 
 from cpip.cli.parser import ArgumentParser
-from cpip.cli.requirements import load_source_config
-from cpip.core.format_control import FormatControl
-from cpip.core.packaging import parse_requirement
-from cpip.index.provider import CandidateProvider
 
 
 def create_parser() -> ArgumentParser:
@@ -28,6 +24,11 @@ def create_parser() -> ArgumentParser:
 
 
 def run_index(args: list[str]) -> int:
+    from cpip.cli.requirements import load_source_config
+    from cpip.core.format_control import FormatControl
+    from cpip.core.packaging import parse_requirement
+    from cpip.index.provider import CandidateProvider
+
     options = create_parser().parse_args(args)
 
     config = load_source_config("index")

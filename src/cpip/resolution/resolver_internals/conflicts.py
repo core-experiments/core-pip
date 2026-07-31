@@ -65,6 +65,32 @@ class ResolverConflicts:
         grouped = self.grouped_candidate_dependencies(candidate, extras)
         for target, dependencies in grouped:
             for constrained_dependency in dependencies:
+                selected_target = selected.get(target)
+                domain = self.domains_internal.get(target)
+                root_conflict = bool(
+                    domain
+                    and domain.constrained_roots(self.apply_constraints)
+                    and self.dependency_domain_conflicts(
+                        constrained_dependency,
+                        domain.constrained_roots(self.apply_constraints),
+                    )
+                )
+                if (
+                    selected_target is not None
+                    and not root_conflict
+                    and not constrained_dependency.is_satisfied_by(
+                        selected_target.version,
+                        allow_prereleases=self.allow_prereleases_internal(
+                            constrained_dependency
+                        ),
+                    )
+                ):
+                    self.learn_candidate_pair_incompatibility(
+                        candidate,
+                        extras,
+                        selected_target,
+                        selected_extras.get(target, frozenset()),
+                    )
                 if (
                     self.candidate_cache_key(constrained_dependency)
                     in self.root_unsatisfiable_domains
@@ -113,6 +139,42 @@ class ResolverConflicts:
                     self.seen_candidate_conflicts.add(incompatibility_key)
                 return True
         return False
+
+    def learn_candidate_pair_incompatibility(
+        self: ResolverContext,
+        candidate: WheelCandidate,
+        extras: frozenset[str],
+        selected_candidate: WheelCandidate,
+        selected_extras: frozenset[str],
+    ) -> None:
+        """Learn the cheapest nogood when a dependency meets a selected value.
+
+        The regular watched-incompatibility path learns from incoming
+        requirements. A direct contradiction with the already selected
+        candidate is stronger and can be represented by two assignment terms,
+        avoiding repeated domain scans on later branches.
+        """
+
+        terms = frozenset(
+            (
+                self.candidate_assignment(candidate, extras),
+                self.candidate_assignment(selected_candidate, selected_extras),
+            )
+        )
+        if len(terms) < 2 or terms in self.learned_incompatibility_terms:
+            return
+        candidate_term = self.candidate_assignment(candidate, extras)
+        other_term = next(term for term in terms if term != candidate_term)
+        watches = candidate_term[0], other_term[0]
+        incompatibility_id = len(self.learned_incompatibilities)
+        self.learned_incompatibilities.append(
+            LearnedIncompatibility(terms, watches)
+        )
+        self.learned_incompatibility_terms.add(terms)
+        for package_id in watches:
+            self.incompatibility_watches.setdefault(package_id, set()).add(
+                incompatibility_id
+            )
 
     def package_id_internal(self: ResolverContext, name: str) -> int:
         package_id = self.package_ids.get(name)

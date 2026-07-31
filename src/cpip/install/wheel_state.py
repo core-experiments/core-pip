@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
-import compileall
 import csv
-import importlib.util
 import os
 from pathlib import Path
-from typing import Iterable
+from typing import TYPE_CHECKING, Iterable
 
-from cpip.build.metadata import InstalledMetadataDistribution
 from cpip.core.errors import InstallationError
+
+if TYPE_CHECKING:
+    from cpip.build.metadata import InstalledMetadataDistribution
 
 
 def compiled_files(
@@ -24,6 +24,9 @@ def compiled_files(
     ]
     if not python_files:
         return []
+
+    import compileall
+    import importlib.util
 
     compileall.compile_dir(os.fspath(stage_root), force=True, quiet=1)
     result = []

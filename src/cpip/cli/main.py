@@ -29,6 +29,13 @@ Commands:
 def _run_bootstrap_command(
     argv: list[str], version: str | None, location: str | None
 ) -> int | None:
+    if len(argv) == 2 and argv[0] == "help":
+        from cpip.cli._help import COMMAND_HELP_TEXT
+
+        help_text = COMMAND_HELP_TEXT.get(argv[1])
+        if help_text is not None:
+            sys.stdout.write(help_text)
+            return 0
     if argv not in ([], ["-h"], ["--help"], ["help"], ["-V"], ["--version"]):
         return None
 

@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from cpip.core.errors import InstallationError
 from cpip.network.http import HttpResponse
 from cpip.resolution.requirement_files.models import RequirementsFileParseError
 from cpip.resolution.requirement_files.parser import parse_requirements
@@ -45,6 +46,33 @@ def test_requirement_include_order_is_preserved(tmp_path: Path) -> None:
     results = parse_requirements(str(root), object())
 
     assert [item.requirement for item in results] == ["included==1", "root==1"]
+
+
+def test_simple_requirement_fast_path_retains_validation(tmp_path: Path) -> None:
+    requirements = tmp_path / "requirements.txt"
+    requirements.write_text(
+        "demo[extra]>=1,<3; python_version >= '3.11'\n",
+        encoding="utf-8",
+    )
+
+    results = parse_requirements(str(requirements), object())
+
+    assert [item.requirement for item in results] == [
+        "demo[extra]>=1,<3; python_version >= '3.11'"
+    ]
+
+
+def test_simple_requirement_fast_path_rejects_multiple_markers(
+    tmp_path: Path,
+) -> None:
+    requirements = tmp_path / "requirements.txt"
+    requirements.write_text(
+        'demo; python_version >= "3"; os_name == "posix"\n',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(InstallationError, match="Invalid requirement"):
+        parse_requirements(str(requirements), object())
 
 
 def test_remote_requirement_includes_are_prefetched(tmp_path) -> None:

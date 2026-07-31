@@ -82,6 +82,19 @@ def test_pending_agenda_rolls_back_nested_mutations() -> None:
     assert set(agenda.by_name) == {"first", "second", "third"}
 
 
+def test_resolver_metrics_are_opt_in(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("CPIP_RESOLVER_METRICS", raising=False)
+    disabled = Resolver(no_index=True)
+    assert not disabled.metrics.enabled
+
+    monkeypatch.setenv("CPIP_RESOLVER_METRICS", "1")
+    enabled = Resolver(no_index=True)
+    assert enabled.metrics.enabled
+    snapshot = enabled.metrics_snapshot()
+    assert snapshot["search_frames"] == 0
+    assert snapshot["candidates_considered"] == 0
+
+
 def test_pending_agenda_maintains_wide_state_key_incrementally() -> None:
     requirements = [parse_requirement(f"package-{index}") for index in range(20)]
     agenda = PendingAgenda(requirements)
@@ -490,6 +503,33 @@ def test_resolver_minimizes_watched_incompatibility_sources() -> None:
     assert len(resolver.learned_incompatibilities[0].terms) == 2
     assert resolver.violates_watched_incompatibility(
         child, frozenset(), {"parent": parent}, {}
+    )
+
+
+def test_resolver_learns_direct_selected_candidate_conflicts() -> None:
+    resolver = Resolver(no_index=True)
+    child = WheelCandidate(
+        name="child",
+        version=Version("1"),
+        path=Path("child-1-py3-none-any.whl"),
+        dependencies=(parse_requirement("shared>=2"),),
+    )
+    selected = WheelCandidate(
+        name="shared",
+        version=Version("1"),
+        path=Path("shared-1-py3-none-any.whl"),
+        dependencies=(),
+    )
+
+    assert resolver.candidate_dependencies_conflict(
+        child,
+        extras=frozenset(),
+        selected={"shared": selected},
+        selected_extras={},
+    ) is False
+    assert len(resolver.learned_incompatibilities) == 1
+    assert resolver.violates_watched_incompatibility(
+        child, frozenset(), {"shared": selected}, {}
     )
 
 
