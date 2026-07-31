@@ -255,6 +255,29 @@ class LiveResolution(LiveBenchmark):
         run_internal(self.command)
 
 
+class CachedRegistryResolution(LiveResolution):
+    """Match uv's dedicated warm Jupyter/Airflow registry benchmarks."""
+
+    params = (("jupyter", "airflow"), TOOLS)
+    param_names = ("scenario", "tool")
+
+    def setup(
+        self,
+        states: dict[str, dict[str, str]],
+        scenario: str,
+        tool: str,
+    ) -> None:
+        super().setup(states, scenario, tool, "warm")
+
+    def time_resolve(
+        self,
+        states: dict[str, dict[str, str]],
+        scenario: str,
+        tool: str,
+    ) -> None:
+        super().time_resolve(states, scenario, tool, "warm")
+
+
 class LiveTrioInstallation(LiveBenchmark):
     params = (TOOLS, ("cold", "warm"))
     param_names = ("tool", "cache_state")

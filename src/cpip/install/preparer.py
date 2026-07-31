@@ -16,7 +16,7 @@ from cpip.build.metadata import (
 )
 from cpip.core.direct_url import ArchiveInfo, DirectUrl, DirInfo, VcsInfo
 from cpip.core.filesystem import display_path
-from cpip.core.packaging import Requirement
+from cpip.core.packaging import Requirement, canonicalize_name
 from cpip.core.urls import path_to_url
 from cpip.core.wheel import Wheel
 from cpip.index.links import Link
@@ -33,8 +33,6 @@ from cpip.install.metadata import (
     MetadataView,
     check_sidecar_matches_wheel,
 )
-
-from packaging.utils import NormalizedName, canonicalize_name
 
 from cpip.install.build_env.base import BuildEnvironmentInstaller, BuildIsolationMode
 from cpip.core.errors import (
@@ -311,7 +309,7 @@ class RequirementPreparer:
             return None
 
         wheel = Wheel(link.filename)
-        name = NormalizedName(wheel.name)
+        name = wheel.name
         logger.info(
             "Obtaining dependency information from %s %s",
             name,

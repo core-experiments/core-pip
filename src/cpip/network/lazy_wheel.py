@@ -13,7 +13,6 @@ from zipfile import BadZipFile, ZipFile
 
 from cpip.build.metadata import MetadataDistribution
 
-from packaging.utils import NormalizedName
 from cpip.network.exceptions import InvalidWheel, NetworkConnectionError
 from cpip.network.http import HttpResponse, NetworkSession
 from cpip.network.utils import HEADERS, raise_for_status, response_chunks
@@ -26,7 +25,7 @@ class HTTPRangeRequestUnsupported(Exception):
 
 
 def dist_from_wheel_url(
-    name: NormalizedName, url: str, session: NetworkSession
+    name: str, url: str, session: NetworkSession
 ) -> MetadataDistribution:
     """Return a distribution object from the given wheel URL.
 

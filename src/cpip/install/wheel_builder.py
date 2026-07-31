@@ -12,12 +12,16 @@ from cpip.build.metadata import MetadataDistribution
 from cpip.core.errors import InvalidWheelFilename, UnsupportedWheel
 from cpip.core.filesystem import ensure_dir
 from cpip.core.hashes import hash_file
-from cpip.core.packaging import InvalidVersion, Version
+from cpip.core.packaging import (
+    InvalidVersion,
+    Version,
+    canonicalize_name,
+    canonicalize_version,
+)
 from cpip.core.wheel import Wheel
 from cpip.index.links import Link
 from cpip.resolution.req_install import InstallRequirement
 
-from packaging.utils import canonicalize_name, canonicalize_version
 from cpip.build.wheels import build_wheel_pep517
 from cpip.build.cache import WheelCache
 from cpip.core.urls import path_to_url

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import os
 import posixpath
+import re
+import sys
 import urllib.parse
 from typing import TYPE_CHECKING
 
@@ -13,13 +15,16 @@ except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility
     from cpip._vendor import tomli as tomllib
 
 from cpip.core.errors import InstallationError
+from cpip.core.packaging import SpecifierSet, Version
 from cpip.core.urls import path_to_url
+from cpip.core.wheel import parse_wheel_filename
 from cpip.resolution.requirement_files.models import ParsedRequirement
 
 if TYPE_CHECKING:
     from cpip.index.provider import CandidateProvider
 
 HTTP_SCHEMES = frozenset(("http", "https"))
+ARCHIVE_SUFFIXES = (".tar.gz", ".tar.bz2", ".tar.xz", ".tar", ".zip")
 
 
 def is_pylock_reference(value: str) -> bool:
@@ -43,81 +48,149 @@ def parse_pylock(
     *,
     provider: CandidateProvider | None,
 ) -> list[ParsedRequirement]:
-    from packaging import pylock
-    from packaging.utils import parse_sdist_filename, parse_wheel_filename
-
     from cpip.core.format_control import FormatControl
 
     try:
-        lock = pylock.Pylock.from_dict(tomllib.loads(content))
+        lock = tomllib.loads(content)
+        if not isinstance(lock, dict) or lock.get("lock-version") != "1.0":
+            raise ValueError("unsupported or missing lock-version")
+        packages = lock["packages"]
+        if not isinstance(packages, list):
+            raise ValueError("packages must be an array")
     except Exception as exc:
         raise InstallationError(f"Invalid pylock file {reference!r}: {exc}") from exc
-    try:
-        selected = list(lock.select())
-    except Exception as exc:
+    lock_requires_python = lock.get("requires-python")
+    if lock_requires_python is not None and not SpecifierSet(
+        str(lock_requires_python)
+    ).contains(Version(".".join(str(part) for part in sys.version_info[:3]))):
         raise InstallationError(
-            f"Cannot select requirements from pylock file {reference!r}: {exc}"
-        ) from exc
+            f"Cannot select requirements from pylock file {reference!r}: "
+            "no distribution supports this Python version"
+        )
     results: list[ParsedRequirement] = []
-    for package, distribution in selected:
-        raw_hashes = getattr(distribution, "hashes", {})
+    for package in packages:
+        if not isinstance(package, dict) or not isinstance(package.get("name"), str):
+            raise InstallationError(f"Cannot select requirements from pylock file {reference!r}")
+        package_name = package["name"]
+        requires_python = package.get("requires-python")
+        if requires_python is not None and not SpecifierSet(str(requires_python)).contains(
+            Version(".".join(str(part) for part in sys.version_info[:3]))
+        ):
+            raise InstallationError(
+                f"Cannot select requirements from pylock file {reference!r}: "
+                "no distribution supports this Python version"
+            )
+        try:
+            distribution, kind = _select_distribution(package, provider)
+        except InstallationError as exc:
+            raise InstallationError(
+                f"Invalid pylock file {reference!r}: {exc}"
+            ) from exc
+        raw_hashes = distribution.get("hashes", {})
+        if not isinstance(raw_hashes, dict):
+            raise InstallationError(f"Invalid hashes for {package_name!r}")
         hashes = {name: [value] for name, value in raw_hashes.items()}
         link: str
         direct = False
-        if isinstance(distribution, pylock.PackageDirectory):
-            link = pylock_location(reference, distribution.path)
+        if kind == "directory":
+            link = pylock_location(reference, distribution.get("path"))
             requirement = link
             direct = True
-        elif isinstance(distribution, pylock.PackageArchive):
-            link = pylock_location(reference, distribution.path or distribution.url)
-            requirement = f"{package.name} @ {link}"
+        elif kind == "archive":
+            link = pylock_location(
+                reference, distribution.get("path") or distribution.get("url")
+            )
+            requirement = f"{package_name} @ {link}"
             direct = True
-        elif isinstance(distribution, pylock.PackageVcs):
-            link = distribution.url or distribution.path or ""
+        elif kind == "vcs":
+            link = distribution.get("url") or distribution.get("path") or ""
             requirement = (
-                f"{package.name} @ {distribution.type}+{link}@{distribution.commit_id}"
+                f"{package_name} @ {distribution['type']}+{link}@{distribution['commit-id']}"
             )
             direct = True
-        elif isinstance(distribution, pylock.PackageWheel):
+        elif kind == "wheel":
             if provider is not None and "binary" not in (
                 provider.format_control or FormatControl()
-            ).get_allowed_formats(package.name):
-                if package.sdist is None:
+            ).get_allowed_formats(package_name):
+                if not package.get("sdist"):
                     raise InstallationError(
-                        f"binaries are not permitted for package {package.name!r} and "
+                        f"binaries are not permitted for package {package_name!r} and "
                         f"there is no source distribution for it in {reference!r}"
                     )
-                distribution = package.sdist
-                link = pylock_location(reference, distribution.path or distribution.url)
-                hashes = {name: [value] for name, value in distribution.hashes.items()}
+                distribution = package["sdist"]
+                link = pylock_location(
+                    reference, distribution.get("path") or distribution.get("url")
+                )
+                raw_hashes = distribution.get("hashes", {})
+                hashes = {name: [value] for name, value in raw_hashes.items()}
             else:
-                link = pylock_location(reference, distribution.path or distribution.url)
-            _, version, _, _ = parse_wheel_filename(
-                distribution.name or posixpath.basename(link)
-            )
-            requirement = f"{package.name}=={version}"
+                link = pylock_location(
+                    reference, distribution.get("path") or distribution.get("url")
+                )
+            parsed = parse_wheel_filename(distribution.get("name") or posixpath.basename(link))
+            if parsed is None:
+                raise InstallationError(f"Invalid wheel filename for {package_name!r}")
+            _, version = parsed
+            requirement = f"{package_name}=={version}"
         else:
             if provider is not None and "source" not in (
                 provider.format_control or FormatControl()
-            ).get_allowed_formats(package.name):
+            ).get_allowed_formats(package_name):
                 raise InstallationError(
-                    f"source distributions are not permitted for package {package.name!r} and "
+                    f"source distributions are not permitted for package {package_name!r} and "
                     f"there is no compatible wheel for it in {reference!r}"
                 )
-            link = pylock_location(reference, distribution.path or distribution.url)
-            _, version = parse_sdist_filename(distribution.name or posixpath.basename(link))
-            requirement = f"{package.name}=={version}"
+            link = pylock_location(
+                reference, distribution.get("path") or distribution.get("url")
+            )
+            version = package.get("version") or _sdist_version(
+                distribution.get("name") or posixpath.basename(link), package_name
+            )
+            requirement = f"{package_name}=={version}"
         results.append(
             ParsedRequirement(
                 requirement=requirement,
                 comes_from=reference,
-                is_editable=isinstance(distribution, pylock.PackageDirectory)
-                and bool(distribution.editable),
+                is_editable=kind == "directory" and bool(distribution.get("editable")),
                 options={"hashes": hashes} if hashes else None,
                 locked_link=link,
                 locked_hashes=hashes,
                 locked_direct=direct,
-                locked_name=package.name,
+                locked_name=package_name,
             )
         )
     return results
+
+
+def _select_distribution(
+    package: dict[str, object], provider: CandidateProvider | None
+) -> tuple[dict[str, object], str]:
+    """Select the first usable PEP 751 distribution without packaging.pylock."""
+    for key, kind in (("directory", "directory"), ("archive", "archive"), ("vcs", "vcs")):
+        distribution = package.get(key)
+        if isinstance(distribution, dict):
+            return distribution, kind
+    wheels = package.get("wheels")
+    if isinstance(wheels, list):
+        for distribution in wheels:
+            if isinstance(distribution, dict):
+                return distribution, "wheel"
+    sdist = package.get("sdist")
+    if isinstance(sdist, dict):
+        return sdist, "sdist"
+    raise InstallationError("Cannot select a distribution from pylock package")
+
+
+def _sdist_version(filename: str, package_name: str) -> str:
+    stem = filename
+    for suffix in ARCHIVE_SUFFIXES:
+        if stem.endswith(suffix):
+            stem = stem[: -len(suffix)]
+            break
+    prefix = package_name.replace("-", "_") + "-"
+    if stem.startswith(prefix):
+        return stem[len(prefix) :]
+    match = re.search(r"-(\d[^-]*)$", stem)
+    if match is None:
+        raise InstallationError(f"Cannot determine version from source archive {filename!r}")
+    return match.group(1)

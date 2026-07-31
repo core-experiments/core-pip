@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import os
 
-from pyproject_hooks import HookMissing
+from cpip.build.pep517_hooks import HookMissing
 from typing import Any
 
 from cpip.core.subprocess import runner_with_message

@@ -6,18 +6,31 @@ import hashlib
 import json
 import logging
 import os
+import sys
 from pathlib import Path
 
 from cpip.core.direct_url import DirectUrl
 from typing import Any
-
-from packaging.tags import interpreter_name, interpreter_version
 
 from cpip.core.temp_dir import TempDirectory, tempdir_kinds
 
 logger = logging.getLogger(__name__)
 
 ORIGIN_JSON_NAME = "origin.json"
+INTERPRETER_SHORT_NAMES = {
+    "cpython": "cp",
+    "pypy": "pp",
+    "ironpython": "ip",
+    "jython": "jy",
+}
+
+
+def interpreter_name() -> str:
+    return INTERPRETER_SHORT_NAMES.get(sys.implementation.name, sys.implementation.name)
+
+
+def interpreter_version() -> str:
+    return f"{sys.version_info.major}{sys.version_info.minor}"
 
 
 def hash_dict(d: dict[str, str]) -> str:
@@ -72,8 +85,6 @@ class WheelCache:
                     e,
                 )
             else:
-                # TODO: use DirectUrl.equivalent when
-                # https://github.com/pypa/pip/pull/10564 is merged.
                 if origin.url != download_info.url:
                     logger.warning(
                         "Origin URL %s in cache entry %s does not match download URL "

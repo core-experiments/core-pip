@@ -43,6 +43,11 @@ def canonicalize_name(name: str) -> str:
     return NORMALIZE_RE.sub("-", name).lower()
 
 
+def canonicalize_version(version: str) -> str:
+    """Return the normalized public form of a PEP 440 version."""
+    return str(Version(version))
+
+
 def safe_extra(extra: str) -> str:
     return canonicalize_name(extra)
 

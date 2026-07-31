@@ -37,7 +37,7 @@ from cpip.core.packaging import (
 from cpip.core.subprocess import runner_with_message
 
 if TYPE_CHECKING:
-    from pyproject_hooks import BuildBackendHookCaller
+    from cpip.build.pep517_hooks import BuildBackendHookCaller
 
 
 class BuildWheelHook(Protocol):
@@ -138,7 +138,7 @@ class BackendRunner:
 
     @contextlib.contextmanager
     def caller(self) -> Iterator[tuple[BuildBackendHookCaller, Path]]:
-        from pyproject_hooks import BuildBackendHookCaller
+        from cpip.build.pep517_hooks import BuildBackendHookCaller
 
         if not self.build_isolation:
             with tempfile.TemporaryDirectory(
@@ -466,7 +466,7 @@ class ProjectBuilder:
         editable: bool = False,
     ) -> str:
         assert self.backend_spec is not None
-        from pyproject_hooks import HookMissing
+        from cpip.build.pep517_hooks import HookMissing
 
         os.makedirs(os.fspath(wheel_directory), exist_ok=True)
         backend_name = self.backend_spec.name

@@ -6,22 +6,12 @@ import shutil
 import zipfile
 from pathlib import Path
 
-from cpip.core.packaging import SpecifierSet
 from cpip.core.wheel import validate_wheel
 from cpip.install.target import InstallTarget
 from cpip.install.unpacking import untar_file, unzip_file
 from cpip.install.wheel_transaction import WheelInstaller
 
 from .uv_scenarios import create_many_files_archives
-
-
-class VersionSpecifierParsing:
-    params = (">=3.8", ">=3.8,<4", ">=2.5, !=3.0.*, !=3.1.*, !=3.2.*, <4")
-    param_names = ("specifiers",)
-    number = 1000
-
-    def time_parse_version_specifiers(self, specifiers: str) -> None:
-        SpecifierSet(specifiers)
 
 
 class ManyFilesArchive:

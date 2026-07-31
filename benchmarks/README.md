@@ -106,6 +106,7 @@ The suite also ports the cpip-relevant benchmarks from uv commit
 `73fa89457b07`:
 
 - PEP 440 specifier parsing for short, bounded, and exclusion-heavy ranges;
+- SHA-256 throughput at 1 KiB, 1 MiB, and 16 MiB payload sizes;
 - extraction, preparation, and installation of archives with 10,000 files;
 - cold, warm, incremental, and no-op resolution of Trio-, Jupyter-, Airflow-,
   and historical-backtracking-shaped dependency graphs;
@@ -202,7 +203,20 @@ while retaining the no-compile workload. `startup-compile-install` uses
 installation and measuring bytecode generation explicitly.
 
 uv's universal resolver, workspace discovery, and tool-management benchmarks
-are intentionally omitted because cpip has no equivalent operation.
+are now represented by `universal_resolution.CrossEnvironmentResolution` and
+`workspace_discovery.WorkspaceDiscovery`. The former resolves a marker-rich
+graph for multiple target Python versions; the latter measures discovery and
+TOML dependency collection over a 127-member workspace-shaped tree. They are
+analogues rather than claims that cpip implements uv's universal lockfile or
+workspace model. The dedicated `uv_live_pypi.CachedRegistryResolution` cases
+match uv's warm cached-registry Jupyter and Airflow workloads.
+
+Run the five uv-parity additions with:
+
+```console
+uv run --group benchmark asv --config benchmarks/asv.conf.json run \
+  --bench '(hash_throughput|pep440_parsing|universal_resolution|workspace_discovery).*'
+```
 
 ASV stores environments, results, and generated HTML under `benchmarks/.asv/`.
 The suite disables ASV's pre-build uninstall command because cpip is also the
