@@ -61,6 +61,7 @@ class CandidateProvider:
         wheel_cache_dir: Path | None = None,
         trusted_hosts: tuple[str, ...] = (),
         build_isolation: bool = True,
+        dry_run: bool = False,
         locked_links: dict[str, Link] | None = None,
         session: Any = None,
         uploaded_prior_to: datetime.datetime | None = None,
@@ -81,6 +82,7 @@ class CandidateProvider:
         self.wheel_cache_dir = wheel_cache_dir
         self.trusted_hosts = trusted_hosts
         self.build_isolation = build_isolation
+        self.dry_run = dry_run
         self.locked_links = locked_links if locked_links is not None else {}
         self.session = session
         self.uploaded_prior_to = uploaded_prior_to
@@ -110,6 +112,7 @@ class CandidateProvider:
         wheel_cache_dir: str | Path | None = None,
         trusted_hosts: list[str] | tuple[str, ...] = (),
         build_isolation: bool = True,
+        dry_run: bool = False,
         locked_links: dict[str, Link] | None = None,
         session: Any = None,
         uploaded_prior_to: datetime.datetime | None = None,
@@ -147,6 +150,7 @@ class CandidateProvider:
             else None,
             trusted_hosts=tuple(trusted_hosts),
             build_isolation=build_isolation,
+            dry_run=dry_run,
             locked_links=dict(locked_links or {}),
             session=session,
             uploaded_prior_to=uploaded_prior_to,
@@ -464,6 +468,7 @@ class CandidateProvider:
                 build_constraints=self.build_constraints,
                 wheel_cache_dir=self.wheel_cache_dir,
                 build_isolation=self.build_isolation,
+                dry_run=self.dry_run,
                 compute_source_hashes=self.compute_source_hashes,
                 session=self.session,
             )

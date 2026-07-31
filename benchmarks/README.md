@@ -216,3 +216,6 @@ The suite disables ASV's pre-build uninstall command because cpip is also the
 installer used to build the revision under test; the subsequent installation
 still uses ASV's forced reinstall. Its build command also uses `--no-deps` so
 ASV's build cache contains exactly the cpip wheel it expects to install.
+The build command runs `benchmarks/asv_build.py`, which adds the checked-out
+revision's `src` directory directly to `sys.path` before invoking cpip. This
+keeps ASV builds independent of shell-specific `PYTHONPATH` handling.

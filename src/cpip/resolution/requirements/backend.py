@@ -49,9 +49,11 @@ class ConfiguredBuildBackend:
             "args": args,
         }
         env = os.environ.copy()
-        pythonpath = [
-            os.fspath((self.source_dir / path).resolve()) for path in self.backend_path
-        ]
+        pythonpath = [os.fspath(self.source_dir)]
+        pythonpath.extend(
+            os.fspath((self.source_dir / path).resolve())
+            for path in self.backend_path
+        )
         existing = env.get("PYTHONPATH")
         if existing:
             pythonpath.extend(existing.split(os.pathsep))

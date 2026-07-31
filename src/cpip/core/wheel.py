@@ -334,7 +334,7 @@ def supported_wheel_tags(target: TargetContext | None = None) -> tuple[WheelTag,
         minor = sys.version_info.minor
         implementation = "cp"
         version_digits = f"{major}{minor}"
-        platform_tags = (sysconfig.get_platform().replace("-", "_").replace(".", "_"),)
+        platform_tags = (current_platform_tag(),)
         abi_tags = ()
     else:
         version = (
@@ -342,9 +342,7 @@ def supported_wheel_tags(target: TargetContext | None = None) -> tuple[WheelTag,
         )
         version_digits = version.replace(".", "")
         implementation = target.implementation or "cp"
-        platform_tags = target.platforms or (
-            sysconfig.get_platform().replace("-", "_").replace(".", "_"),
-        )
+        platform_tags = target.platforms or (current_platform_tag(),)
         abi_tags = target.abis
     impl_tag = f"{implementation}{version_digits}"
     major = version_digits[0]
@@ -357,6 +355,19 @@ def supported_wheel_tags(target: TargetContext | None = None) -> tuple[WheelTag,
         for abi in abis
         for platform in platforms
     )
+
+
+def current_platform_tag() -> str:
+    platform_name = sysconfig.get_platform()
+    if sys.platform == "darwin":
+        import platform
+
+        mac_version = platform.mac_ver()[0].split(".")
+        if len(mac_version) >= 2 and all(part.isdigit() for part in mac_version[:2]):
+            platform_name = (
+                f"macosx_{mac_version[0]}_{mac_version[1]}_{platform.machine()}"
+            )
+    return platform_name.replace("-", "_").replace(".", "_")
 
 
 @lru_cache(maxsize=4096)

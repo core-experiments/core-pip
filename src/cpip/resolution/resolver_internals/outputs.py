@@ -31,6 +31,11 @@ def actual_hashes_for_candidate(candidate: WheelCandidate) -> dict[str, str]:
 
 def finalize_source_hashes(candidate: WheelCandidate) -> WheelCandidate:
     if isinstance(candidate, LazyWheelCandidate):
+        if (
+            candidate.materializer_internal.dry_run
+            and candidate.source_kind in {"sdist", "source-tree", "vcs"}
+        ):
+            return candidate
         candidate = candidate.materialize()
     if (
         candidate.source_hashes

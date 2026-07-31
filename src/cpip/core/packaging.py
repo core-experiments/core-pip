@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 import urllib.parse
 from functools import lru_cache, total_ordering
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -13,18 +13,21 @@ VERSION_RE = re.compile(
     r"""
     ^\s*
     v?
+    (?:(?P<epoch>\d+)!)?
     (?P<release>\d+(?:\.\d+)*)
     (?:
+        [._-]?
         (?P<pre_l>a|b|c|rc|alpha|beta|pre|preview)
-        (?P<pre_n>\d*)?
+        [._-]?
+        (?P<pre_n>\d+)?
     )?
     (?:
-        (?:\.post|post|rev|r)
-        (?P<post_n>\d*)?
+        (?:-(?P<post_n1>\d+))
+        |
+        (?:[._-]?(?P<post_l>post|rev|r)[._-]?(?P<post_n2>\d+)?)
     )?
     (?:
-        (?:\.dev|dev)
-        (?P<dev_n>\d*)?
+        [._-]?dev[._-]?(?P<dev_n>\d+)?
     )?
     (?:\+(?P<local>[a-z0-9]+(?:[-_.][a-z0-9]+)*))?
     \s*$
@@ -77,6 +80,7 @@ class Version:
         raw = value.strip()
         if raw and raw.replace(".", "").isdecimal() and ".." not in raw:
             release = raw.split(".")
+            self.epoch = 0
             self.release = tuple(int(part) for part in release)
             self.pre = None
             self.post = None
@@ -88,6 +92,7 @@ class Version:
         match = VERSION_RE.match(raw)
         if match is None:
             raise InvalidVersion(value)
+        self.epoch = int(match.group("epoch") or 0)
         self.release = tuple(int(part) for part in match.group("release").split("."))
         pre_l = match.group("pre_l")
         pre_n = match.group("pre_n")
@@ -102,9 +107,10 @@ class Version:
             self.pre = ({"a": 0, "b": 1, "rc": 2}[label], int(pre_n or 0))
         else:
             self.pre = None
+        post_n = match.group("post_n1") or match.group("post_n2")
         self.post = (
-            int(match.group("post_n") or 0)
-            if match.group("post_n") is not None
+            int(post_n or 0)
+            if match.group("post_l") is not None or match.group("post_n1") is not None
             else None
         )
         self.dev = (
@@ -129,34 +135,31 @@ class Version:
 
     def key_internal(
         self,
-    ) -> tuple[tuple[int, ...], int, tuple[int, int], int, int, str]:
+    ) -> Any:
         return self.comparison_key
 
     def build_comparison_key(
         self,
-    ) -> tuple[tuple[int, ...], int, tuple[int, int], int, int, str]:
+    ) -> Any:
         release = self.normalized_release()
-        if self.dev is not None:
-            dev_rank = 0
-            dev = self.dev
+        if self.pre is None and self.post is None and self.dev is None:
+            suffix = (3, 0, 0, 0, 1, 0)
+        elif self.pre is None and self.post is None and self.dev is not None:
+            suffix = (-1, 0, 0, 0, 0, self.dev)
         else:
-            dev_rank = 1
-            dev = 0
-        if self.pre is None:
-            pre_rank = 3
-            pre = (0, 0)
-        else:
-            pre_rank = 1
-            pre = self.pre
-        post = -1 if self.post is None else self.post
-        return (
-            release,
-            dev_rank,
-            (pre_rank, pre[0] * 1000000 + pre[1]),
-            post,
-            dev,
-            self.local or "",
-        )
+            pre_rank, pre_number = (3, 0) if self.pre is None else (self.pre[0], self.pre[1])
+            post_rank = 0 if self.post is None else 1
+            post_number = 0 if self.post is None else self.post
+            dev_rank = 1 if self.dev is None else 0
+            suffix = (pre_rank, pre_number, post_rank, post_number, dev_rank, self.dev or 0)
+        key: tuple[object, ...] = (self.epoch, release, suffix)
+        if self.local is not None:
+            local = tuple(
+                (1, int(part)) if part.isdigit() else (0, part)
+                for part in self.local.split(".")
+            )
+            key += (local,)
+        return key
 
     def normalized_release(self) -> tuple[int, ...]:
         release = self.release
@@ -187,7 +190,10 @@ class Version:
         return f"<Version({self.public!r})>"
 
     def format_public(self) -> str:
-        parts = [".".join(str(part) for part in self.release)]
+        parts = []
+        if self.epoch:
+            parts.append(f"{self.epoch}!")
+        parts.append(".".join(str(part) for part in self.release))
         if self.pre is not None:
             label = {0: "a", 1: "b", 2: "rc"}[self.pre[0]]
             parts.append(f"{label}{self.pre[1]}")

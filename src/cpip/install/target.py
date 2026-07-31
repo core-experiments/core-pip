@@ -10,7 +10,6 @@ import os
 from pathlib import Path
 
 from cpip.platform.locations.sysconfig import get_scheme
-from cpip.core.metadata import default_scripts_path
 from cpip.platform.scheme import Scheme
 
 
@@ -61,10 +60,13 @@ class InstallTarget:
                 platlib=os.fspath(target_path),
                 purelib=os.fspath(target_path),
                 headers=os.fspath(target_path),
-                # Preserve cpip's target-mode behavior: package/data files are
-                # relocated, while console scripts use the active interpreter's
-                # scripts directory.
-                scripts=os.fspath(default_scripts_path()),
+                # Keep target installs self-contained.  Sending scripts to the
+                # active interpreter's bin directory makes an isolated target
+                # install mutate the caller's environment and can create
+                # unrelated-file collisions between packages.
+                scripts=os.fspath(
+                    target_path / ("Scripts" if os.name == "nt" else "bin")
+                ),
                 data=os.fspath(target_path),
             )
             if root is not None:

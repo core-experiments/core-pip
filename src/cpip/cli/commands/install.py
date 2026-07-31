@@ -388,6 +388,7 @@ def run_install(args: list[str]) -> int:
         ),
         trusted_hosts=options.trusted_hosts,
         session=bundle.session,
+        dry_run=options.dry_run,
         build_isolation=not options.no_build_isolation,
         locked_links={name: Link(url) for name, url in bundle.locked_links.items()},
         target=target,

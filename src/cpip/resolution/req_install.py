@@ -422,7 +422,9 @@ class InstallRequirement:
         elif setup_py.is_file():
             data = {
                 "build-system": {
-                    "requires": ["setuptools>=40.8.0"],
+                    # setuptools 82 removed pkg_resources, which is still
+                    # imported by many legacy setup.py files.
+                    "requires": ["setuptools>=40.8.0,<82"],
                     "build-backend": "setuptools.build_meta:__legacy__",
                 }
             }
@@ -469,6 +471,23 @@ class InstallRequirement:
                     requirement=item,
                     error="direct references are not allowed",
                 )
+        backend = build_system.get("build-backend", "setuptools.build_meta")
+        if (
+            isinstance(backend, str)
+            and backend.startswith("setuptools.build_meta")
+            and (Path(self.source_dir) / "setup.py").is_file()
+            and not any(
+                canonicalize_name(parse_requirement(item).name) == "setuptools"
+                and not parse_requirement(item).specifier.contains(
+                    Version("81"), allow_prereleases=True
+                )
+                for item in self.pyproject_requires
+            )
+        ):
+            # setuptools 82 removed pkg_resources, which is still imported by
+            # many setup.py files. Keep compatible projects on the last line
+            # that provides that API while preserving explicit >=82 requests.
+            self.pyproject_requires.append("setuptools<82")
         self.requirements_to_check = []
         return data
 

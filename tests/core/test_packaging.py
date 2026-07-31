@@ -68,6 +68,25 @@ def test_version_comparison_ignores_trailing_release_zeros() -> None:
 
 
 @pytest.mark.parametrize(
+    "raw, normalized",
+    [
+        ("3.2.3-2", "3.2.3.post2"),
+        ("1.0.post", "1.0.post0"),
+        ("5.0.0.b1", "5.0.0b1"),
+        ("6.0.0.rc1", "6.0.0rc1"),
+        ("1!2.0.dev1+linux-x86_64", "1!2.0.dev1+linux.x86.64"),
+    ],
+)
+def test_version_accepts_pep440_separator_forms(raw: str, normalized: str) -> None:
+    assert str(Version(raw)) == normalized
+
+
+def test_version_orders_epoch_and_dev_releases() -> None:
+    assert Version("1!1.0") > Version("2.0")
+    assert Version("1.0.dev1") < Version("1.0a1.dev1") < Version("1.0a1")
+
+
+@pytest.mark.parametrize(
     "specifier, expected_lower, expected_upper",
     [
         (">=1,<2", (Version("1"), True), (Version("2"), False)),

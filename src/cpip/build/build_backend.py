@@ -28,7 +28,12 @@ from typing import TYPE_CHECKING, Any, Protocol, cast
 from dataclasses import dataclass
 
 from cpip.core.errors import BuildError
-from cpip.core.packaging import InvalidVersion, Version, canonicalize_name
+from cpip.core.packaging import (
+    InvalidVersion,
+    Version,
+    canonicalize_name,
+    parse_requirement,
+)
 from cpip.core.subprocess import runner_with_message
 
 if TYPE_CHECKING:
@@ -45,6 +50,15 @@ class BuildWheelHook(Protocol):
     ) -> str: ...
 
 
+# ``pkg_resources`` was removed from setuptools 82.  Projects that only have a
+# setup.py are still built through setuptools' legacy backend, and a number of
+# otherwise installable projects import pkg_resources from setup.py.  Keep the
+# legacy fallback on the last setuptools line that provides that API.  This is
+# intentionally limited to legacy projects; modern pyproject builds own their
+# build requirements and should be free to select a newer setuptools release.
+LEGACY_SETUPTOOLS_REQUIREMENT = "setuptools>=40.8.0,<82"
+
+
 @dataclass(frozen=True)
 class BackendSpec:
     """The build backend and requirements declared by a project."""
@@ -59,7 +73,9 @@ class BackendSpec:
         if not pyproject.is_file():
             if (source_dir / "setup.py").is_file():
                 return cls(
-                    "setuptools.build_meta:__legacy__", ("setuptools>=40.8.0",), ()
+                    "setuptools.build_meta:__legacy__",
+                    (LEGACY_SETUPTOOLS_REQUIREMENT,),
+                    (),
                 )
             return None
 
@@ -78,6 +94,21 @@ class BackendSpec:
             isinstance(item, str) for item in requires
         ):
             raise BuildError(f"Invalid build-system.requires in {pyproject}")
+        if (
+            backend.startswith("setuptools.build_meta")
+            and (source_dir / "setup.py").is_file()
+            and not any(
+                canonicalize_name(parse_requirement(item).name) == "setuptools"
+                and not parse_requirement(item).specifier.contains(
+                    Version("81"), allow_prereleases=True
+                )
+                for item in requires
+            )
+        ):
+            # setuptools 82 removed pkg_resources, which is still imported by
+            # many setup.py files. Preserve explicit requirements that exclude
+            # the compatible range, but constrain open-ended requirements.
+            requires.append("setuptools<82")
         backend_path = build_system.get("backend-path", [])
         if not isinstance(backend_path, list) or not all(
             isinstance(item, str) for item in backend_path
@@ -523,6 +554,13 @@ class ProjectBuilder:
 
     def prepare_metadata(self, *, editable: bool = False) -> ProjectMetadata:
         """Read metadata through the project's declared build backend."""
+        # Source distributions commonly carry the exact metadata generated at
+        # upload time. Reuse it during resolution instead of executing a
+        # potentially old or platform-specific setup.py just to discover
+        # dependencies. Wheel builds still invoke the declared backend below.
+        static_metadata = read_legacy_metadata(self.source_dir)
+        if static_metadata is not None and not editable:
+            return static_metadata
         if self.backend_spec is None:
             return ProjectMetadataReader(self.source_dir).read()
         backend_name = self.backend_spec.name
@@ -619,11 +657,7 @@ def load_project_backend(source_dir: Path) -> object | None:
     if backend_name in {"cpip.build.build_backend", "uv_build"}:
         return None
     backend_path = build_system.get("backend-path", [])
-    import_paths = tuple(
-        str((source_dir / path).resolve())
-        for path in backend_path
-        if isinstance(path, str)
-    )
+    import_paths = backend_paths(source_dir, backend_path)
     module_name, _, object_path = backend_name.partition(":")
     with backend_import_path(import_paths):
         importlib.invalidate_caches()
@@ -633,6 +667,10 @@ def load_project_backend(source_dir: Path) -> object | None:
         if attribute:
             backend = getattr(backend, attribute)
     return backend
+
+
+def backend_paths(source_dir: Path, paths: tuple[str, ...]) -> tuple[str, ...]:
+    return tuple(str((source_dir / path).resolve()) for path in paths)
 
 
 @contextlib.contextmanager
@@ -647,11 +685,21 @@ def backend_import_path(paths: tuple[str, ...]) -> Iterator[None]:
 @contextlib.contextmanager
 def backend_environment(source_dir: Path) -> Iterator[None]:
     cwd = Path.cwd()
+    source = os.fspath(source_dir)
+    old_pythonpath = os.environ.get("PYTHONPATH")
+    pythonpath = [source]
+    if old_pythonpath:
+        pythonpath.append(old_pythonpath)
     os.chdir(source_dir)
+    os.environ["PYTHONPATH"] = os.pathsep.join(pythonpath)
     try:
         yield
     finally:
         os.chdir(cwd)
+        if old_pythonpath is None:
+            os.environ.pop("PYTHONPATH", None)
+        else:
+            os.environ["PYTHONPATH"] = old_pythonpath
 
 
 @dataclass(frozen=True)

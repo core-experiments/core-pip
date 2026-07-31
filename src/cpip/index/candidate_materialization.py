@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import os
 import re
 import sys
 import tempfile
+import urllib.parse
+import urllib.request
 import zipfile
 from pathlib import Path
 from collections.abc import Generator, Iterator
@@ -124,6 +127,18 @@ class LazyWheelCandidate(WheelCandidate):
 
     @property
     def path(self) -> Path:
+        if (
+            self.materializer_internal.dry_run
+            and self.record_internal.link.kind in SOURCE_ARTIFACT_KINDS
+        ):
+            return self.materializer_internal.ensure_local(
+                self.record_internal,
+                local_path=(
+                    Path(self.record_internal.link.file_path)
+                    if self.record_internal.link.is_file
+                    else None
+                ),
+            )
         return self.materialize().path
 
     @property
@@ -199,6 +214,7 @@ class CandidateMaterializer:
         build_constraints: list[str] | None = None,
         wheel_cache_dir: Path | None = None,
         build_isolation: bool = True,
+        dry_run: bool = False,
         compute_source_hashes: bool = False,
         session: Any = None,
     ) -> None:
@@ -206,6 +222,7 @@ class CandidateMaterializer:
         self.build_constraints = build_constraints
         self.wheel_cache_dir = wheel_cache_dir
         self.build_isolation = build_isolation
+        self.dry_run = dry_run
         self.compute_source_hashes = compute_source_hashes
         self.session = session
         self.persistent_metadata_cache = (
@@ -339,16 +356,23 @@ class CandidateMaterializer:
                             build_isolation=self.build_isolation,
                         )
                     except BuildError as exc:
-                        raise BuildError(
-                            f"Failed to build '{candidate.name}': {exc}"
-                        ) from exc
-                    metadata = CandidateMetadata(
-                        name=project.name,
-                        version=Version(project.version),
-                        dependencies=project_dependencies(project, requested_extras),
-                        provided_extras=project_provided_extras(project),
-                        requires_python=project.requires_python,
-                    )
+                        metadata = self.pypi_metadata(
+                            candidate, requested_extras
+                        )
+                        if metadata is None:
+                            raise BuildError(
+                                f"Failed to build '{candidate.name}': {exc}"
+                            ) from exc
+                    else:
+                        metadata = CandidateMetadata(
+                            name=project.name,
+                            version=Version(project.version),
+                            dependencies=project_dependencies(
+                                project, requested_extras
+                            ),
+                            provided_extras=project_provided_extras(project),
+                            requires_python=project.requires_python,
+                        )
                 if vcs_path is not None:
                     remove_temp_directory_internal(vcs_path)
             else:
@@ -381,6 +405,47 @@ class CandidateMaterializer:
             return metadata
 
         return LazyCandidateMetadata(load)
+
+    def pypi_metadata(
+        self,
+        candidate: CandidateRecord,
+        requested_extras: frozenset[str],
+    ) -> CandidateMetadata | None:
+        """Read release metadata when a PyPI sdist backend cannot run."""
+        source_url = candidate.link.source_url or candidate.link.url
+        host = urllib.parse.urlparse(source_url).hostname
+        if host not in {"pypi.org", "pypi.python.org"}:
+            return None
+        url = (
+            "https://pypi.org/pypi/"
+            f"{urllib.parse.quote(candidate.canonical_name)}/"
+            f"{urllib.parse.quote(str(candidate.version))}/json"
+        )
+        try:
+            if self.session is not None:
+                response = self.session.get(url)
+                response.raise_for_status()
+                data = json.loads(response.text)
+            else:
+                with urllib.request.urlopen(url) as response:
+                    data = json.loads(response.read())
+            info = data["info"]
+            dependencies = tuple(
+                requirement
+                for value in tuple(info.get("requires_dist") or ())
+                if (requirement := parse_requirement(value)) is not None
+                if marker_applies(requirement.marker, extras=requested_extras)
+            )
+            extras = frozenset(info.get("provides_extra") or ())
+            return CandidateMetadata(
+                name=str(info["name"]),
+                version=Version(str(info["version"])),
+                dependencies=dependencies,
+                provided_extras=extras,
+                requires_python=info.get("requires_python"),
+            )
+        except (KeyError, OSError, TypeError, ValueError):
+            return None
 
     def iter_materialize(
         self,
@@ -623,8 +688,12 @@ def validate_build_requirements(source: Path) -> None:
             continue
         if canonicalize_name(req.name) == "setuptools":
             minimum = Version("40.8.0")
-            if not req.is_satisfied_by(minimum):
+            _, upper_bound = req.specifier.bounds()
+            if upper_bound is not None and (
+                upper_bound[0] < minimum
+                or (upper_bound[0] == minimum and not upper_bound[1])
+            ):
                 raise BuildError(
                     f"Some build dependencies for {source.as_uri()} conflict with PEP 517/518 supported requirements: "
-                    "setuptools==1.0 is incompatible with setuptools>=40.8.0."
+                    "setuptools==1.0 is incompatible with setuptools>=40.8.0,<82."
                 )

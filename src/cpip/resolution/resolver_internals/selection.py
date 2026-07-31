@@ -137,6 +137,11 @@ class ResolverSelectionOperations:
         extras: frozenset[str],
     ) -> WheelCandidate:
         if isinstance(candidate, LazyWheelCandidate):
+            if (
+                candidate.materializer_internal.dry_run
+                and candidate.source_kind in {"sdist", "source-tree", "vcs"}
+            ):
+                return candidate
             candidate = candidate.materialize()
         try:
             enriched = wheel_candidate(candidate.path, set(extras))

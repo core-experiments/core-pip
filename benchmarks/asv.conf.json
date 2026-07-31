@@ -6,7 +6,7 @@
   "branches": ["HEAD"],
   "benchmark_dir": ".",
   "environment_type": "virtualenv",
-  "build_command": "PYTHONPATH={build_dir}/src python -m cpip wheel --no-deps -w {build_cache_dir} {build_dir}",
+  "build_command": "python {build_dir}/benchmarks/asv_build.py wheel --no-deps -w {build_cache_dir} {build_dir}",
   "uninstall_command": [],
   "pythons": ["3.12"],
   "matrix": {
