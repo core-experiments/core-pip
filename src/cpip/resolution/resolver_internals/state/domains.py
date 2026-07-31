@@ -19,6 +19,7 @@ class PackageDomain:
         "root_version_mask",
         "incoming_version_masks",
         "active_version_mask",
+        "constrained_version_mask",
         "decision_count",
     )
 
@@ -35,6 +36,7 @@ class PackageDomain:
         self.root_version_mask: int | None = None
         self.incoming_version_masks: dict[str, int] = {}
         self.active_version_mask: int | None = None
+        self.constrained_version_mask: int | None = None
         self.decision_count: int | None = None
 
     def requirements(self) -> tuple[Requirement, ...]:
@@ -71,6 +73,7 @@ class PackageDomain:
         self.constrained_internal = None
         self.incoming_version_masks.pop(source, None)
         self.active_version_mask = None
+        self.constrained_version_mask = None
         self.decision_count = None
 
     def remove_incoming(self, source: str) -> None:
@@ -79,6 +82,7 @@ class PackageDomain:
         self.constrained_internal = None
         self.incoming_version_masks.pop(source, None)
         self.active_version_mask = None
+        self.constrained_version_mask = None
         self.decision_count = None
 
 
@@ -99,7 +103,14 @@ def requirement_state_key(requirement: Requirement) -> RequirementStateKey:
 
 
 class LearnedIncompatibility:
-    __slots__ = ("terms", "watches", "decision_levels", "activity", "last_used")
+    __slots__ = (
+        "terms",
+        "binary_terms",
+        "watches",
+        "decision_levels",
+        "activity",
+        "last_used",
+    )
 
     def __init__(
         self,
@@ -108,6 +119,7 @@ class LearnedIncompatibility:
         decision_levels: tuple[tuple[Assignment, int], ...] = (),
     ) -> None:
         self.terms = terms
+        self.binary_terms = tuple(terms) if len(terms) == 2 else None
         self.watches = watches
         self.decision_levels = decision_levels
         self.activity = 0

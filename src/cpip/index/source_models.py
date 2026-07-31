@@ -193,9 +193,13 @@ class CandidateRecord:
         return (yanked_rank, self.version, wheel_rank, tag_rank)
 
     def metadata(self) -> CandidateMetadata:
-        if self.metadata_loader is None:
+        loader = self.metadata_loader
+        if loader is None:
             raise RuntimeError("candidate metadata loader is not configured")
-        return self.metadata_loader.load()
+        metadata = loader.value
+        if metadata is None:
+            metadata = loader.load()
+        return metadata
 
 
 class PackageCatalog:

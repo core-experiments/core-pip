@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 import urllib.parse
-from functools import lru_cache, total_ordering
+from functools import lru_cache
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -74,14 +74,24 @@ class InvalidVersion(ValueError):
     pass
 
 
-@total_ordering
 class Version:
+    __slots__ = (
+        "epoch",
+        "release",
+        "pre",
+        "post",
+        "dev",
+        "local",
+        "public",
+        "comparison_key",
+    )
+
     def __init__(self, value: str):
         raw = value.strip()
         if raw and raw.replace(".", "").isdecimal() and ".." not in raw:
             release = raw.split(".")
             self.epoch = 0
-            self.release = tuple(int(part) for part in release)
+            self.release = tuple(map(int, release))
             self.pre = None
             self.post = None
             self.dev = None
@@ -173,7 +183,7 @@ class Version:
                 other = Version(str(other))
             except InvalidVersion:
                 return NotImplemented
-        return self.key_internal() == other.key_internal()
+        return self.comparison_key == other.comparison_key
 
     def __hash__(self) -> int:
         return hash(self.key_internal())
@@ -181,7 +191,22 @@ class Version:
     def __lt__(self, other: object) -> bool:
         if not isinstance(other, Version):
             other = Version(str(other))
-        return self.key_internal() < other.key_internal()
+        return self.comparison_key < other.comparison_key
+
+    def __le__(self, other: object) -> bool:
+        if not isinstance(other, Version):
+            other = Version(str(other))
+        return self.comparison_key <= other.comparison_key
+
+    def __gt__(self, other: object) -> bool:
+        if not isinstance(other, Version):
+            other = Version(str(other))
+        return self.comparison_key > other.comparison_key
+
+    def __ge__(self, other: object) -> bool:
+        if not isinstance(other, Version):
+            other = Version(str(other))
+        return self.comparison_key >= other.comparison_key
 
     def __str__(self) -> str:
         return self.public
@@ -281,6 +306,8 @@ def compatible_upper_bound_internal(version: Version) -> Version:
 
 
 class SpecifierSet:
+    __slots__ = ("raw", "specifiers", "text_internal")
+
     def __init__(self, value: str = ""):
         self.raw = value.strip()
         self.specifiers = tuple(
@@ -299,7 +326,7 @@ class SpecifierSet:
         parsed = version if isinstance(version, Version) else Version(version)
         if parsed.is_prerelease and not allow_prereleases:
             if not any(
-                Version(spec.version).is_prerelease
+                spec.parsed_version.is_prerelease
                 for spec in self.specifiers
                 if spec.operator != "===" and not spec.version.endswith(".*")
             ):

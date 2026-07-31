@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import os
+import posixpath
 import urllib.parse
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 try:
@@ -24,7 +25,7 @@ HTTP_SCHEMES = frozenset(("http", "https"))
 def is_pylock_reference(value: str) -> bool:
     parsed = urllib.parse.urlparse(value)
     path = parsed.path or value
-    return Path(path).name.startswith("pylock") and path.endswith(".toml")
+    return posixpath.basename(path).startswith("pylock") and path.endswith(".toml")
 
 
 def pylock_location(reference: str, path: str | None) -> str:
@@ -33,7 +34,7 @@ def pylock_location(reference: str, path: str | None) -> str:
     parsed = urllib.parse.urlparse(reference)
     if parsed.scheme in HTTP_SCHEMES:
         return urllib.parse.urljoin(reference, path)
-    return path_to_url(str((Path(reference).parent / path).resolve()))
+    return path_to_url(os.path.join(os.path.dirname(os.path.realpath(reference)), path))
 
 
 def parse_pylock(
@@ -92,7 +93,7 @@ def parse_pylock(
             else:
                 link = pylock_location(reference, distribution.path or distribution.url)
             _, version, _, _ = parse_wheel_filename(
-                distribution.name or Path(link).name
+                distribution.name or posixpath.basename(link)
             )
             requirement = f"{package.name}=={version}"
         else:
@@ -104,7 +105,7 @@ def parse_pylock(
                     f"there is no compatible wheel for it in {reference!r}"
                 )
             link = pylock_location(reference, distribution.path or distribution.url)
-            _, version = parse_sdist_filename(distribution.name or Path(link).name)
+            _, version = parse_sdist_filename(distribution.name or posixpath.basename(link))
             requirement = f"{package.name}=={version}"
         results.append(
             ParsedRequirement(

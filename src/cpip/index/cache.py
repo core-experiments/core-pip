@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -16,10 +17,11 @@ def wheel_cache_path(root: Path, url: str) -> Path:
 
 
 def origin_hashes(path: Path) -> dict[str, str] | None:
-    if not path.is_file():
+    if not os.path.isfile(path):
         return None
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        with open(path, encoding="utf-8") as file:
+            data = json.load(file)
     except (OSError, UnicodeError, json.JSONDecodeError):
         logger.warning("Ignoring invalid cache entry origin file %s", path)
         return None

@@ -34,14 +34,14 @@ def filter_unallowed_hashes(
 ) -> list[CandidateT]:
     allowed = allowed_hashes(hashes)
     if hashes is None:
-        return list(candidates)
+        return candidates
     if not allowed:
         logger.debug(
             "Given no hashes to check %d links for project %r: discarding no candidates",
             len(candidates),
             project_name,
         )
-        return list(candidates)
+        return candidates
     matches = 0
     no_digest = 0
     discarded: list[str] = []
@@ -66,7 +66,7 @@ def filter_unallowed_hashes(
             matches,
             no_digest,
         )
-        return list(candidates)
+        return candidates
     if discarded:
         logger.debug(
             "Checked %d links for project %r against %d hashes (%d matches, %d no digest): discarding %d non-matches:\n  %s",

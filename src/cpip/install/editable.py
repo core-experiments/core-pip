@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shutil
+import os
 import sys
 from pathlib import Path
 
@@ -38,9 +39,9 @@ def prepare_editable_source(
     if link.is_vcs:
         checkout_name = canonicalize_name(link.egg_fragment or source_path.name)
         checkout_dir = Path(sys.prefix) / "src" / checkout_name
-        if checkout_dir.exists():
+        if os.path.exists(os.fspath(checkout_dir)):
             shutil.rmtree(checkout_dir)
-        checkout_dir.parent.mkdir(parents=True, exist_ok=True)
+        os.makedirs(os.fspath(checkout_dir.parent), exist_ok=True)
         materialized_source = source_path
         shutil.copytree(materialized_source, checkout_dir, symlinks=True)
         remove_temp_directory(materialized_source)
@@ -52,11 +53,11 @@ def prepare_editable_source(
     if link.subdirectory_fragment:
         source_path = source_path / link.subdirectory_fragment
 
-    if not source_path.is_dir():
+    if not os.path.isdir(os.fspath(source_path)):
         raise CommandError(f"{source_path} is not a valid editable requirement")
     if (
-        not (source_path / "setup.py").is_file()
-        and not (source_path / "pyproject.toml").is_file()
+        not os.path.isfile(os.fspath(source_path / "setup.py"))
+        and not os.path.isfile(os.fspath(source_path / "pyproject.toml"))
     ):
         raise CommandError(
             f"{source_path} does not appear to be a Python project: "
@@ -76,7 +77,7 @@ def prepare_editable_source(
                 ) from exc
             if not build_isolation and (
                 "Cannot import 'setuptools.build_meta'" in str(exc)
-                or (source_path / "pyproject.toml").is_file()
+                or os.path.isfile(os.fspath(source_path / "pyproject.toml"))
             ):
                 metadata = prepare_project_metadata(
                     source_path, editable=True, build_isolation=True

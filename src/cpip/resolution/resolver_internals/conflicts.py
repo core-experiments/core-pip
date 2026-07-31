@@ -67,12 +67,16 @@ class ResolverConflicts:
             for constrained_dependency in dependencies:
                 selected_target = selected.get(target)
                 domain = self.domains_internal.get(target)
+                constrained_roots = (
+                    domain.constrained_roots(self.apply_constraints)
+                    if domain is not None
+                    else ()
+                )
                 root_conflict = bool(
-                    domain
-                    and domain.constrained_roots(self.apply_constraints)
+                    constrained_roots
                     and self.dependency_domain_conflicts(
                         constrained_dependency,
-                        domain.constrained_roots(self.apply_constraints),
+                        constrained_roots,
                     )
                 )
                 if (
@@ -243,6 +247,10 @@ class ResolverConflicts:
     def candidate_assignment(
         self: ResolverContext, candidate: WheelCandidate, extras: frozenset[str]
     ) -> Assignment:
+        cache_key = self.candidate_incompatibility_key(candidate, extras)
+        cached = self.candidate_assignment_cache.get(cache_key)
+        if cached is not None:
+            return cached
         package_id = self.package_id_internal(candidate.canonical_name)
         identity = (
             package_id,
@@ -253,7 +261,9 @@ class ResolverConflicts:
         if candidate_id is None:
             candidate_id = len(self.candidate_ids)
             self.candidate_ids[identity] = candidate_id
-        return package_id, candidate_id, extras
+        assignment = package_id, candidate_id, extras
+        self.candidate_assignment_cache[cache_key] = assignment
+        return assignment
 
     def bump_conflict_activity(self: ResolverContext, *names: str) -> None:
         self.conflict_activity_bumps += 1
@@ -268,14 +278,19 @@ class ResolverConflicts:
         self.learned_incompatibility_terms.add(incompatibility.terms)
         self.last_candidate_conflict = incompatibility
         incompatibility_id = len(self.learned_incompatibilities) - 1
-        for package_id in incompatibility.watches:
-            self.incompatibility_watches.setdefault(package_id, set()).add(
-                incompatibility_id
-            )
-        non_binary_count = sum(
-            len(clause.terms) != 2 for clause in self.learned_incompatibilities
-        )
-        if non_binary_count > self.learned_clause_limit:
+        if len(incompatibility.terms) != 2:
+            self.learned_non_binary_count += 1
+            for package_id in incompatibility.watches:
+                self.incompatibility_watches.setdefault(package_id, set()).add(
+                    incompatibility_id
+                )
+        else:
+            assert incompatibility.binary_terms is not None
+            for term in incompatibility.binary_terms:
+                self.binary_incompatibility_watches.setdefault(term, set()).add(
+                    incompatibility_id
+                )
+        if self.learned_non_binary_count > self.learned_clause_limit:
             self.compact_learned_incompatibilities()
 
     def compact_learned_incompatibilities(self: ResolverContext) -> None:
@@ -290,14 +305,22 @@ class ResolverConflicts:
         kept = protected + remaining[-limit:]
         evicted = len(clauses) - len(kept)
         self.learned_incompatibilities[:] = kept
+        self.learned_non_binary_count = len(kept) - len(protected)
         self.learned_incompatibility_terms.clear()
         self.incompatibility_watches.clear()
+        self.binary_incompatibility_watches.clear()
         for incompatibility_id, clause in enumerate(kept):
             self.learned_incompatibility_terms.add(clause.terms)
-            for package_id in clause.watches:
-                self.incompatibility_watches.setdefault(package_id, set()).add(
-                    incompatibility_id
-                )
+            if clause.binary_terms is not None:
+                for term in clause.binary_terms:
+                    self.binary_incompatibility_watches.setdefault(term, set()).add(
+                        incompatibility_id
+                    )
+            else:
+                for package_id in clause.watches:
+                    self.incompatibility_watches.setdefault(package_id, set()).add(
+                        incompatibility_id
+                    )
         if self.metrics.enabled:
             self.metrics.learned_clause_evictions += evicted
 
@@ -425,6 +448,33 @@ class ResolverConflicts:
         if not self.learned_incompatibilities:
             return False
         candidate_term = self.candidate_assignment(candidate, extras)
+        for incompatibility_id in self.binary_incompatibility_watches.get(
+            candidate_term, ()
+        ):
+            incompatibility = self.learned_incompatibilities[incompatibility_id]
+            incompatibility.activity += 1
+            incompatibility.last_used = self.conflict_activity_bumps
+            assert incompatibility.binary_terms is not None
+            other_term = (
+                incompatibility.binary_terms[0]
+                if incompatibility.binary_terms[1] == candidate_term
+                else incompatibility.binary_terms[1]
+            )
+            selected_candidate = selected.get(
+                self.package_names_internal[other_term[0]]
+            )
+            if selected_candidate is None or self.candidate_assignment(
+                selected_candidate,
+                selected_extras.get(
+                    self.package_names_internal[other_term[0]], frozenset()
+                ),
+            ) != other_term:
+                continue
+            self.bump_conflict_activity(
+                self.package_names_internal[candidate_term[0]],
+                self.package_names_internal[other_term[0]],
+            )
+            return True
         for incompatibility_id in self.incompatibility_watches.get(
             candidate_term[0], ()
         ):
@@ -433,25 +483,6 @@ class ResolverConflicts:
                 continue
             incompatibility.activity += 1
             incompatibility.last_used = self.conflict_activity_bumps
-            if len(incompatibility.terms) == 2:
-                other_term = next(
-                    term for term in incompatibility.terms if term != candidate_term
-                )
-                selected_candidate = selected.get(
-                    self.package_names_internal[other_term[0]]
-                )
-                if selected_candidate is None or self.candidate_assignment(
-                    selected_candidate,
-                    selected_extras.get(
-                        self.package_names_internal[other_term[0]], frozenset()
-                    ),
-                ) != other_term:
-                    continue
-                self.bump_conflict_activity(
-                    self.package_names_internal[candidate_term[0]],
-                    self.package_names_internal[other_term[0]],
-                )
-                return True
             if all(
                 term == candidate_term
                 or (
@@ -502,27 +533,59 @@ class ResolverConflicts:
                     pass
                 else:
                     return not active_mask & (1 << version_index)
-        if dependency_version is not None and any(
-            not requirement.is_satisfied_by(dependency_version)
-            for requirement in active
-        ):
-            return True
-        active_versions = tuple(exact_pinned_version(item) for item in active)
-        if any(
-            version is not None and not dependency.is_satisfied_by(version)
-            for version in active_versions
-        ):
-            return True
-        if dependency_version is not None or any(
-            version is not None for version in active_versions
-        ):
-            return False
+        if dependency_version is not None:
+            for requirement in active:
+                specifiers = requirement.specifier.specifiers
+                if (
+                    len(specifiers) == 1
+                    and specifiers[0].operator == "=="
+                    and not specifiers[0].version.endswith(".*")
+                ):
+                    if specifiers[0].parsed_version != dependency_version:
+                        return True
+                elif not requirement.is_satisfied_by(dependency_version):
+                    return True
+        if self.version_tables.get(dependency.canonical_name) is None:
+            active_versions = tuple(exact_pinned_version(item) for item in active)
+            if any(
+                version is not None and not dependency.is_satisfied_by(version)
+                for version in active_versions
+            ):
+                return True
+            if any(version is not None for version in active_versions):
+                return False
+        if domain is not None and len(active) >= INCREMENTAL_STATE_KEY_THRESHOLD:
+            active_mask = domain.constrained_version_mask
+            if active_mask is None:
+                active_mask = self.requirements_version_mask(active)
+                domain.constrained_version_mask = active_mask
+            versions = self.version_tables.get(dependency.canonical_name)
+            if versions is not None and active_mask is not None:
+                allow_prereleases = self.allow_prereleases_internal(dependency)
+                dependency_mask = self.requirement_version_mask(
+                    dependency,
+                    versions,
+                    allow_prereleases=allow_prereleases,
+                )
+                if not dependency_mask and not allow_prereleases:
+                    dependency_mask = self.requirement_version_mask(
+                        dependency,
+                        versions,
+                        allow_prereleases=True,
+                    )
+                return not active_mask & dependency_mask
         requirements = (dependency, *active)
         if any(requirement.url is not None for requirement in requirements):
             return False
+        version_mask = None
+        if dependency.canonical_name in self.version_tables:
+            version_mask = self.requirements_version_mask(requirements)
+            if version_mask is not None:
+                return version_mask == 0
         if specifier_intersection_is_empty(requirements):
             return True
-        version_mask = self.requirements_version_mask(requirements)
+        if version_mask is None:
+            version_mask = self.requirements_version_mask(requirements)
         if version_mask is not None:
             return version_mask == 0
         domain_key = (
@@ -567,7 +630,7 @@ class ResolverConflicts:
     ) -> int:
         key = (
             requirement.canonical_name,
-            str(requirement.specifier),
+            requirement.specifier.text_internal,
             allow_prereleases,
         )
         cached = self.version_masks.get(key)
@@ -591,7 +654,7 @@ class ResolverConflicts:
             return None
         parts = tuple(
             (
-                str(requirement.specifier),
+                requirement.specifier.text_internal,
                 self.allow_prereleases_internal(requirement),
             )
             for requirement in requirements
@@ -601,7 +664,12 @@ class ResolverConflicts:
         if cached is not None:
             return cached
         mask = (1 << len(versions)) - 1
-        for requirement, (_, allow_prereleases) in zip(requirements, parts):
+        seen_parts: set[tuple[str, bool]] = set()
+        for requirement, part in zip(requirements, parts):
+            if part in seen_parts:
+                continue
+            seen_parts.add(part)
+            _, allow_prereleases = part
             requirement_mask = self.requirement_version_mask(
                 requirement,
                 versions,

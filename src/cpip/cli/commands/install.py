@@ -125,7 +125,7 @@ def _try_local_wheelhouse_plan(
             }
     except (OSError, TypeError, ValueError):
         return None
-    if sum(candidate.path.stat().st_size for candidate in candidates) > 4 * 1024 * 1024:
+    if sum(os.stat(candidate.path).st_size for candidate in candidates) > 4 * 1024 * 1024:
         for index, candidate in enumerate(candidates):
             with zipfile.ZipFile(candidate.path) as archive:
                 dist_info, _ = parse_wheel(

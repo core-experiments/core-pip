@@ -5,10 +5,9 @@ from __future__ import annotations
 import ntpath
 import os
 import urllib.parse
-from pathlib import Path
 
 from cpip.core.errors import InstallationError
-from cpip.core.urls import url_to_path
+from cpip.core.urls import path_to_url, url_to_path
 
 
 def looks_like_path(value: str) -> bool:
@@ -26,27 +25,27 @@ def get_url_from_path(path: str, name: str) -> str | None:
     parsed = urllib.parse.urlparse(path)
     if parsed.scheme == "file":
         local_path = path_from_file_url(parsed)
-        if local_path.is_file():
+        if os.path.isfile(local_path):
             return file_url_with_fragment(local_path, parsed.fragment)
-        if local_path.is_dir():
-            setup_py = local_path / "setup.py"
-            pyproject = local_path / "pyproject.toml"
-            if not setup_py.is_file() and not pyproject.is_file():
+        if os.path.isdir(local_path):
+            setup_py = os.path.join(local_path, "setup.py")
+            pyproject = os.path.join(local_path, "pyproject.toml")
+            if not os.path.isfile(setup_py) and not os.path.isfile(pyproject):
                 raise InstallationError(
                     "Neither 'setup.py' nor 'pyproject.toml' found."
                 )
             return file_url_with_fragment(local_path, parsed.fragment)
         return None
-    if " @ " in path or "@git+" in path or "://" in path and not Path(path).exists():
+    if " @ " in path or "@git+" in path or "://" in path and not os.path.exists(path):
         return None
     if os.path.isfile(path):
-        return Path(path).resolve(strict=False).as_uri()
+        return path_to_url(os.path.realpath(path))
     if os.path.isdir(path):
         setup_py = os.path.join(path, "setup.py")
         pyproject = os.path.join(path, "pyproject.toml")
         if not os.path.isfile(setup_py) and not os.path.isfile(pyproject):
             raise InstallationError("Neither 'setup.py' nor 'pyproject.toml' found.")
-        return Path(path).resolve(strict=False).as_uri()
+        return path_to_url(os.path.realpath(path))
     return None
 
 
@@ -57,13 +56,13 @@ def normalize_file_url_reference(value: str) -> str | None:
     return file_url_with_fragment(path_from_file_url(parsed), parsed.fragment)
 
 
-def path_from_file_url(parsed: urllib.parse.ParseResult) -> Path:
-    path = Path(url_to_path(urllib.parse.urlunparse(parsed)))
-    if not path.is_absolute():
-        path = Path.cwd() / path
-    return path.resolve(strict=False)
+def path_from_file_url(parsed: urllib.parse.ParseResult) -> str:
+    path = url_to_path(urllib.parse.urlunparse(parsed))
+    if not os.path.isabs(path):
+        path = os.path.join(os.getcwd(), path)
+    return os.path.realpath(path)
 
 
-def file_url_with_fragment(path: Path, fragment: str) -> str:
-    url = path.resolve(strict=False).as_uri()
+def file_url_with_fragment(path: str, fragment: str) -> str:
+    url = path_to_url(os.path.realpath(path))
     return f"{url}#{fragment}" if fragment else url

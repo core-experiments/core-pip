@@ -415,11 +415,13 @@ class InstallRequirement:
 
         if self.source_dir is None:
             raise InstallationError("Install requirement has no source directory")
-        pyproject = Path(self.source_dir) / "pyproject.toml"
-        setup_py = Path(self.source_dir) / "setup.py"
-        if pyproject.is_file():
-            data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
-        elif setup_py.is_file():
+        source_dir = os.fspath(self.source_dir)
+        pyproject = os.path.join(source_dir, "pyproject.toml")
+        setup_py = os.path.join(source_dir, "setup.py")
+        if os.path.isfile(pyproject):
+            with open(pyproject, encoding="utf-8") as file:
+                data = tomllib.loads(file.read())
+        elif os.path.isfile(setup_py):
             data = {
                 "build-system": {
                     # setuptools 82 removed pkg_resources, which is still
@@ -441,6 +443,7 @@ class InstallRequirement:
         if not isinstance(requires, list):
             return data
         self.pyproject_requires = [str(item) for item in requires]
+        parsed_requires: list[ParsedRequirement] = []
         package = str(self)
         for item in requires:
             if not isinstance(item, str):
@@ -465,6 +468,7 @@ class InstallRequirement:
                     requirement=item,
                     error=str(exc),
                 ) from exc
+            parsed_requires.append(parsed)
             if parsed.url is not None:
                 raise InvalidPyProjectBuildRequires(
                     package=package,
@@ -475,13 +479,13 @@ class InstallRequirement:
         if (
             isinstance(backend, str)
             and backend.startswith("setuptools.build_meta")
-            and (Path(self.source_dir) / "setup.py").is_file()
+            and os.path.isfile(setup_py)
             and not any(
-                canonicalize_name(parse_requirement(item).name) == "setuptools"
-                and not parse_requirement(item).specifier.contains(
+                canonicalize_name(parsed.name) == "setuptools"
+                and not parsed.specifier.contains(
                     Version("81"), allow_prereleases=True
                 )
-                for item in self.pyproject_requires
+                for parsed in parsed_requires
             )
         ):
             # setuptools 82 removed pkg_resources, which is still imported by

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import urllib.parse
+import posixpath
 from collections import defaultdict
 from collections.abc import Callable, Iterable
-from pathlib import Path
 
 from cpip.core.errors import ResolutionError
 from cpip.core.packaging import (
@@ -84,7 +84,7 @@ class ConstraintStore:
             if requirement.url is not None and not self.direct_urls_equivalent(
                 selected.url, requirement.url
             ):
-                filename = Path(urllib.parse.urlparse(requirement.url).path).name
+                filename = posixpath.basename(urllib.parse.urlparse(requirement.url).path)
                 parsed = parse_wheel_filename(filename)
                 requested_label = (
                     f"{canonicalize_name(parsed[0])} {parsed[1]}"
@@ -97,7 +97,10 @@ class ConstraintStore:
                 )
             merged_specifier = ",".join(
                 part
-                for part in (str(requirement.specifier), str(selected.specifier))
+                for part in (
+                    str(requirement.specifier),
+                    str(selected.specifier),
+                )
                 if part
             )
             result = Requirement(

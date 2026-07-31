@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sys
-from pathlib import Path
+import os
 from typing import TYPE_CHECKING
 
 from cpip.core.errors import (
@@ -47,7 +47,7 @@ class ResolverValidationOperations:
     ) -> bool:
         key = (
             requirement.canonical_name,
-            str(requirement.specifier),
+            requirement.specifier.text_internal,
             requirement.url,
             requirement.raw,
         )
@@ -80,7 +80,7 @@ class ResolverValidationOperations:
     ) -> tuple[str, str, tuple[str, ...], str | None, str]:
         return (
             requirement.canonical_name,
-            str(requirement.specifier),
+            requirement.specifier.text_internal,
             tuple(sorted(requirement.extras)),
             requirement.url,
             requirement.raw,
@@ -107,8 +107,8 @@ class ResolverValidationOperations:
                 "have a way to hash version control repositories"
             )
         if link_url.startswith("file://"):
-            local_path = Path(url_to_path(link_url))
-            if local_path.is_dir():
+            local_path = url_to_path(link_url)
+            if os.path.isdir(local_path):
                 raise DirectoryUrlHashUnsupported(
                     "Can't verify hashes for these file:// requirements because "
                     "they point to directories"
@@ -165,8 +165,8 @@ class ResolverValidationOperations:
                     "have a way to hash version control repositories"
                 )
             if link_url.startswith("file://"):
-                local_path = Path(url_to_path(link_url))
-                if local_path.is_dir():
+                local_path = url_to_path(link_url)
+                if os.path.isdir(local_path):
                     raise DirectoryUrlHashUnsupported(
                         "Can't verify hashes for these file:// requirements because "
                         "they point to directories"

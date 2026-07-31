@@ -12,30 +12,33 @@ from typing import Iterable
 from cpip.core.errors import InstallationError
 
 
+def _read_staged_source(path: str | None) -> bytes:
+    if path is None:
+        raise ValueError("staged source path is missing")
+    with open(path, "rb") as source_file:
+        return source_file.read()
+
+
 class StagedFile:
     __slots__ = (
-        "source",
-        "contents",
-        "destination",
         "source_text",
+        "contents",
         "destination_text",
         "mode",
     )
 
     def __init__(
         self,
-        source: Path | None,
-        destination: Path,
+        source_text: str | None,
+        destination_text: str,
         mode: int | None = None,
         contents: bytes | None = None,
     ) -> None:
-        if source is None and contents is None:
+        if source_text is None and contents is None:
             raise ValueError("staged file needs a source or contents")
-        self.source = source
         self.contents = contents
-        self.destination = destination
-        self.source_text = os.fspath(source) if source is not None else None
-        self.destination_text = os.fspath(destination)
+        self.source_text = source_text
+        self.destination_text = destination_text
         self.mode = mode
 
 
@@ -45,24 +48,27 @@ class InstallTransaction:
     def __init__(self, *, owned_paths: Iterable[str | Path] = ()) -> None:
         self.owned = {normalized_internal(path) for path in owned_paths}
         self.staged_internal: list[StagedFile] = []
-        self.staged_destinations: set[Path] = set()
-        self.deletions: set[Path] = set()
-        self.backups: list[tuple[Path, Path]] = []
-        self.created_internal: list[Path] = []
-        self.destination_presence: dict[Path, bool] = {}
-        self.temporary_internal = Path(tempfile.mkdtemp(prefix="cpip-install-stage-"))
+        self.staged_destinations: set[str] = set()
+        self.deletions: set[str] = set()
+        self.backups: list[tuple[str, str]] = []
+        self.created_internal: list[str] = []
+        self.destination_presence: dict[str, bool] = {}
+        self.temporary_internal = tempfile.mkdtemp(prefix="cpip-install-stage-")
         self.finished = False
 
     def add(
         self, source: str | Path, destination: str | Path, *, mode: int | None = None
     ) -> None:
-        destination_path = Path(destination)
-        if destination_path in self.staged_destinations:
+        source_text = source if isinstance(source, str) else os.fspath(source)
+        destination_text = (
+            destination if isinstance(destination, str) else os.fspath(destination)
+        )
+        if destination_text in self.staged_destinations:
             raise InstallationError(
-                f"duplicate installation destination: {destination_path}"
+                f"duplicate installation destination: {destination_text}"
             )
-        self.staged_internal.append(StagedFile(Path(source), destination_path, mode))
-        self.staged_destinations.add(destination_path)
+        self.staged_internal.append(StagedFile(source_text, destination_text, mode))
+        self.staged_destinations.add(destination_text)
 
     def add_contents(
         self,
@@ -72,18 +78,20 @@ class InstallTransaction:
         mode: int | None = None,
     ) -> None:
         """Stage bytes for one destination without creating a temp source file."""
-        destination_path = Path(destination)
-        if destination_path in self.staged_destinations:
+        destination_text = (
+            destination if isinstance(destination, str) else os.fspath(destination)
+        )
+        if destination_text in self.staged_destinations:
             raise InstallationError(
-                f"duplicate installation destination: {destination_path}"
+                f"duplicate installation destination: {destination_text}"
             )
         self.staged_internal.append(
-            StagedFile(None, destination_path, mode, contents=contents)
+            StagedFile(None, destination_text, mode, contents=contents)
         )
-        self.staged_destinations.add(destination_path)
+        self.staged_destinations.add(destination_text)
 
     def delete(self, path: str | Path) -> None:
-        self.deletions.add(Path(path))
+        self.deletions.add(os.fspath(path))
 
     def adopt(self, other: InstallTransaction) -> None:
         """Merge staged actions from a transaction that has not committed."""
@@ -91,38 +99,40 @@ class InstallTransaction:
         self.created_internal.extend(other.created_internal)
         for item in other.staged_internal:
             if item.contents is None:
-                self.add(item.source, item.destination, mode=item.mode)
+                assert item.source_text is not None
+                self.add(item.source_text, item.destination_text, mode=item.mode)
             else:
-                self.add_contents(item.destination, item.contents, mode=item.mode)
+                self.add_contents(item.destination_text, item.contents, mode=item.mode)
         self.deletions.update(other.deletions)
 
     def record_created(self, destination: str | Path) -> None:
         """Record a path written directly for rollback by the caller."""
-        self.created_internal.append(Path(destination))
+        self.created_internal.append(os.fspath(destination))
 
     def validate(self) -> None:
         for item in self.staged_internal:
-            if item.source is not None and not os.path.isfile(item.source_text):
-                raise InstallationError(f"staged file does not exist: {item.source}")
-            destination_exists = os.path.lexists(item.destination)
-            self.destination_presence[item.destination] = destination_exists
+            if item.source_text is not None and not os.path.isfile(item.source_text):
+                raise InstallationError(f"staged file does not exist: {item.source_text}")
+            destination_text = item.destination_text
+            destination_exists = os.path.lexists(destination_text)
+            self.destination_presence[destination_text] = destination_exists
             if (
                 destination_exists
-                and os.path.exists(item.destination)
-                and normalized_internal(item.destination) not in self.owned
+                and os.path.exists(destination_text)
+                and normalized_internal(item.destination_text) not in self.owned
             ):
-                if os.path.isfile(item.destination):
-                    with open(item.destination, "rb") as destination_file:
+                if os.path.isfile(destination_text):
+                    with open(destination_text, "rb") as destination_file:
                         destination_contents = destination_file.read()
                     source_contents = (
                         item.contents
                         if item.contents is not None
-                        else item.source.read_bytes()
+                        else _read_staged_source(item.source_text)
                     )
                     if destination_contents == source_contents:
                         continue
                 raise InstallationError(
-                    f"Cannot install {item.destination} from {item.source}: "
+                    f"Cannot install {item.destination_text} from {item.source_text}: "
                     "an unrelated file already exists"
                 )
         overlap = self.staged_destinations & self.deletions
@@ -136,19 +146,18 @@ class InstallTransaction:
             raise RuntimeError("installation transaction has already finished")
         try:
             self.validate()
-            created_directories: set[Path] = set()
+            created_directories: set[str] = set()
             backup_if_needed = self.backup_if_needed
             makedirs = os.makedirs
-            fspath = os.fspath
             replace = os.replace
             chmod = os.chmod
             append_created = self.created_internal.append
             for item in self.staged_internal:
-                backup_if_needed(item.destination)
-                destination_parent = item.destination.parent
-                if destination_parent not in created_directories:
-                    makedirs(fspath(destination_parent), exist_ok=True)
-                    created_directories.add(destination_parent)
+                backup_if_needed(item.destination_text)
+                destination_parent_text = os.path.dirname(item.destination_text) or os.curdir
+                if destination_parent_text not in created_directories:
+                    makedirs(destination_parent_text, exist_ok=True)
+                    created_directories.add(destination_parent_text)
                 if item.contents is None:
                     try:
                         replace(item.source_text, item.destination_text)
@@ -159,17 +168,17 @@ class InstallTransaction:
                 else:
                     # Mark the path before writing: a short write must still
                     # be removed by rollback before any backup is restored.
-                    append_created(item.destination)
+                    append_created(item.destination_text)
                     with open(item.destination_text, "wb") as destination_file:
                         destination_file.write(item.contents)
                 if item.mode is not None:
-                    chmod(item.destination, item.mode)
+                    chmod(item.destination_text, item.mode)
                 if item.contents is None:
-                    append_created(item.destination)
-            for path in sorted(self.deletions, key=os.fspath):
+                    append_created(item.destination_text)
+            for path in sorted(self.deletions):
                 if os.path.lexists(path):
                     self.backup_if_needed(path)
-                self.remove_empty_parents(path.parent)
+                self.remove_empty_parents(os.path.dirname(path))
             if finalize:
                 self.finish_successfully()
         except Exception:
@@ -185,10 +194,10 @@ class InstallTransaction:
                     os.unlink(path)
         for original, backup in reversed(self.backups):
             if os.path.exists(backup):
-                os.makedirs(os.fspath(original.parent), exist_ok=True)
+                os.makedirs(os.path.dirname(original) or os.curdir, exist_ok=True)
                 if os.path.lexists(original):
                     os.unlink(original)
-                shutil.move(os.fspath(backup), os.fspath(original))
+                shutil.move(backup, original)
         self.finish_successfully()
 
     def finalize(self) -> None:
@@ -196,28 +205,29 @@ class InstallTransaction:
         if not self.finished:
             self.finish_successfully()
 
-    def backup_if_needed(self, path: Path) -> None:
-        if path in self.destination_presence:
-            if not self.destination_presence[path]:
+    def backup_if_needed(self, path: str | Path) -> None:
+        path_text = path if isinstance(path, str) else os.fspath(path)
+        if path_text in self.destination_presence:
+            if not self.destination_presence[path_text]:
                 return
-        elif not os.path.lexists(path):
+        elif not os.path.lexists(path_text):
             return
-        backup = self.temporary_internal / str(len(self.backups))
-        os.makedirs(os.fspath(backup.parent), exist_ok=True)
-        shutil.move(os.fspath(path), os.fspath(backup))
-        self.backups.append((path, backup))
+        backup = os.path.join(self.temporary_internal, str(len(self.backups)))
+        os.makedirs(os.path.dirname(backup), exist_ok=True)
+        shutil.move(path_text, backup)
+        self.backups.append((path_text, backup))
 
-    def remove_empty_parents(self, directory: Path) -> None:
+    def remove_empty_parents(self, directory: str) -> None:
         current = directory
-        while current != current.parent:
+        while current and current != os.path.dirname(current):
             try:
                 os.rmdir(current)
             except OSError:
                 return
-            current = current.parent
+            current = os.path.dirname(current)
 
     def finish_successfully(self) -> None:
-        shutil.rmtree(os.fspath(self.temporary_internal), ignore_errors=True)
+        shutil.rmtree(self.temporary_internal, ignore_errors=True)
         self.finished = True
 
     def __enter__(self) -> InstallTransaction:

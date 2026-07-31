@@ -69,9 +69,11 @@ class BackendSpec:
 
     @classmethod
     def from_project(cls, source_dir: Path) -> BackendSpec | None:
-        pyproject = source_dir / "pyproject.toml"
-        if not pyproject.is_file():
-            if (source_dir / "setup.py").is_file():
+        source_text = os.fspath(source_dir)
+        pyproject = os.path.join(source_text, "pyproject.toml")
+        setup_py = os.path.join(source_text, "setup.py")
+        if not os.path.isfile(pyproject):
+            if os.path.isfile(setup_py):
                 return cls(
                     "setuptools.build_meta:__legacy__",
                     (LEGACY_SETUPTOOLS_REQUIREMENT,),
@@ -79,7 +81,8 @@ class BackendSpec:
                 )
             return None
 
-        data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+        with open(pyproject, encoding="utf-8") as file:
+            data = tomllib.loads(file.read())
         build_system = data.get("build-system")
         if not isinstance(build_system, dict):
             return None
@@ -96,7 +99,7 @@ class BackendSpec:
             raise BuildError(f"Invalid build-system.requires in {pyproject}")
         if (
             backend.startswith("setuptools.build_meta")
-            and (source_dir / "setup.py").is_file()
+            and os.path.isfile(setup_py)
             and not any(
                 canonicalize_name(parse_requirement(item).name) == "setuptools"
                 and not parse_requirement(item).specifier.contains(
@@ -350,10 +353,20 @@ def build_sdist(
     sdist_path.parent.mkdir(parents=True, exist_ok=True)
     root_name = sdist_name.removesuffix(".tar.gz")
     with tarfile.open(sdist_path, "w:gz") as archive:
-        for child in sorted(source_dir.rglob("*")):
-            if not child.is_file() or ".git" in child.parts:
-                continue
-            archive.add(child, arcname=f"{root_name}/{child.relative_to(source_dir)}")
+        source_dir_text = os.fspath(source_dir)
+        for current, directories, files in os.walk(
+            source_dir_text, topdown=True, followlinks=False
+        ):
+            directories[:] = sorted(
+                name for name in directories if name != ".git"
+            )
+            for name in sorted(files):
+                child = os.path.join(current, name)
+                relative = os.path.relpath(child, source_dir_text)
+                archive.add(
+                    child,
+                    arcname=f"{root_name}/{relative.replace(os.sep, '/')}",
+                )
     return sdist_name
 
 
@@ -417,7 +430,7 @@ class ProjectBuilder:
         if (
             self.backend_spec is not None
             and self.backend_spec.name.startswith("setuptools.build_meta")
-            and (self.source_dir / "setup.py").is_file()
+            and os.path.isfile(os.path.join(os.fspath(self.source_dir), "setup.py"))
         ):
             return self.build_external(
                 wheel_directory, config_settings=config_settings, editable=False
@@ -455,7 +468,7 @@ class ProjectBuilder:
         assert self.backend_spec is not None
         from pyproject_hooks import HookMissing
 
-        wheel_directory.mkdir(parents=True, exist_ok=True)
+        os.makedirs(os.fspath(wheel_directory), exist_ok=True)
         backend_name = self.backend_spec.name
         try:
             with BackendRunner(
@@ -499,7 +512,7 @@ class ProjectBuilder:
 
     def build_fallback_wheel(self, wheel_directory: Path, *, editable: bool) -> str:
         project = ProjectMetadataReader(self.source_dir).read()
-        wheel_directory.mkdir(parents=True, exist_ok=True)
+        os.makedirs(os.fspath(wheel_directory), exist_ok=True)
         distribution = wheel_distribution(project.name)
         wheel_name = f"{distribution}-{project.version}-py3-none-any.whl"
         wheel_path = wheel_directory / wheel_name
@@ -517,7 +530,7 @@ class ProjectBuilder:
             if editable:
                 import_root = (
                     self.source_dir / "src"
-                    if (self.source_dir / "src").is_dir()
+                    if os.path.isdir(os.fspath(self.source_dir / "src"))
                     else self.source_dir
                 )
                 write_file(
@@ -726,7 +739,7 @@ class ProjectMetadataReader:
     def read(self) -> ProjectMetadata:
         source_dir = self.source_dir
         pyproject = source_dir / "pyproject.toml"
-        if pyproject.exists():
+        if os.path.exists(pyproject):
             data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
             project = data.get("project")
             if isinstance(project, dict):
@@ -884,15 +897,20 @@ def setup_cfg_install_requires(
 def infer_metadata_from_package_dir(source_dir: Path) -> ProjectMetadata | None:
     roots = []
     src_root = source_dir / "src"
-    if src_root.is_dir():
+    if os.path.isdir(os.fspath(src_root)):
         roots.append(src_root)
     roots.append(source_dir)
     for root in roots:
-        for package_dir in sorted(root.iterdir()):
-            init_py = package_dir / "__init__.py"
-            if not package_dir.is_dir() or not init_py.is_file():
+        with os.scandir(os.fspath(root)) as entries:
+            package_entries = sorted(entries, key=lambda entry: entry.name)
+        for entry in package_entries:
+            if not entry.is_dir():
                 continue
-            text = init_py.read_text(encoding="utf-8", errors="replace")
+            init_py = os.path.join(entry.path, "__init__.py")
+            if not os.path.isfile(init_py):
+                continue
+            with open(init_py, encoding="utf-8", errors="replace") as file:
+                text = file.read()
             match = re.search(r"__version__\s*=\s*[\"']([^\"']+)[\"']", text)
             if match is None:
                 continue
@@ -901,7 +919,7 @@ def infer_metadata_from_package_dir(source_dir: Path) -> ProjectMetadata | None:
             except InvalidVersion:
                 continue
             return ProjectMetadata(
-                name=package_dir.name,
+                name=entry.name,
                 version=match.group(1),
                 summary=None,
                 requires_python=None,
@@ -913,22 +931,29 @@ def infer_metadata_from_package_dir(source_dir: Path) -> ProjectMetadata | None:
 
 
 def read_legacy_metadata(source_dir: Path) -> ProjectMetadata | None:
-    candidates = list(source_dir.glob("*.egg-info/PKG-INFO"))
-    candidates.extend(
-        [
-            source_dir / "METADATA",
-            source_dir / "PKG-INFO",
-        ]
-    )
-    candidates.extend(source_dir.glob("*.dist-info/METADATA"))
+    source_text = os.fspath(source_dir)
+    with os.scandir(source_text) as entries:
+        egg_info_candidates = []
+        dist_info_candidates = []
+        for entry in entries:
+            if not entry.is_dir():
+                continue
+            if entry.name.endswith(".egg-info"):
+                egg_info_candidates.append(os.path.join(entry.path, "PKG-INFO"))
+            elif entry.name.endswith(".dist-info"):
+                dist_info_candidates.append(os.path.join(entry.path, "METADATA"))
+    candidates = sorted(egg_info_candidates) + [
+        os.path.join(source_text, "METADATA"),
+        os.path.join(source_text, "PKG-INFO"),
+    ] + sorted(dist_info_candidates)
     for candidate in candidates:
-        if not candidate.is_file():
+        if not os.path.isfile(candidate):
             continue
         fields: dict[str, list[str]] = {}
         current_key: str | None = None
-        for line in candidate.read_text(
-            encoding="utf-8", errors="replace"
-        ).splitlines():
+        with open(candidate, encoding="utf-8", errors="replace") as file:
+            lines = file.read().splitlines()
+        for line in lines:
             if not line.strip():
                 current_key = None
                 continue
@@ -952,10 +977,12 @@ def read_legacy_metadata(source_dir: Path) -> ProjectMetadata | None:
         summary = fields.get("Summary", [None])[0]
         requires_python = fields.get("Requires-Python", [None])[0]
         dependencies = fields.get("Requires-Dist", [])
-        if not dependencies and candidate.parent.name.endswith(".egg-info"):
-            requires_path = candidate.parent / "requires.txt"
-            if requires_path.is_file():
-                dependencies = _read_legacy_requirements(requires_path)
+        if not dependencies and os.path.basename(
+            os.path.dirname(candidate)
+        ).endswith(".egg-info"):
+            requires_path = os.path.join(os.path.dirname(candidate), "requires.txt")
+            if os.path.isfile(requires_path):
+                dependencies = _read_legacy_requirements(Path(requires_path))
         return ProjectMetadata(
             name=name,
             version=version,
@@ -974,7 +1001,9 @@ def _read_legacy_requirements(path: Path) -> list[str]:
     """Read setuptools' legacy ``requires.txt`` format."""
     dependencies: list[str] = []
     extra: str | None = None
-    for raw_line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+    with open(os.fspath(path), encoding="utf-8", errors="replace") as file:
+        lines = file.read().splitlines()
+    for raw_line in lines:
         line = raw_line.strip()
         if not line or line.startswith("#"):
             continue
@@ -1005,17 +1034,21 @@ def infer_name_version_from_path(source_dir: Path) -> tuple[str, str] | None:
 
 def iter_project_files(source_dir: Path) -> Iterable[tuple[str, bytes]]:
     src_root = source_dir / "src"
-    if src_root.is_dir():
+    if os.path.isdir(os.fspath(src_root)):
         yield from iter_package_files(src_root)
         return
 
-    for child in sorted(source_dir.iterdir()):
-        if child.name.startswith("."):
+    with os.scandir(os.fspath(source_dir)) as entries:
+        children = sorted(entries, key=lambda entry: entry.name)
+    for entry in children:
+        if entry.name.startswith("."):
             continue
-        if child.is_dir() and (child / "__init__.py").is_file():
-            yield from iter_package_files(child.parent, root=child)
-        elif child.is_file() and child.suffix == ".py" and child.name != "setup.py":
-            yield child.name, child.read_bytes()
+        child_path = Path(entry.path)
+        if entry.is_dir() and os.path.isfile(os.path.join(entry.path, "__init__.py")):
+            yield from iter_package_files(source_dir, root=child_path)
+        elif entry.is_file() and entry.name.endswith(".py") and entry.name != "setup.py":
+            with open(entry.path, "rb") as file:
+                yield entry.name, file.read()
 
 
 def version_module_path(
@@ -1038,32 +1071,53 @@ def version_module_path(
 def iter_package_files(
     base: Path, *, root: Path | None = None
 ) -> Iterable[tuple[str, bytes]]:
+    base_text = os.fspath(base)
     search_root = root or base
+    search_root_text = os.fspath(search_root)
     project_root = base.parent if base.name == "src" else base
-    for path in sorted(search_root.rglob("*")):
-        if not is_package_payload(path, project_root):
-            continue
-        yield path.relative_to(base).as_posix(), path.read_bytes()
+    project_root_text = os.fspath(project_root)
+    for current, directories, files in os.walk(
+        search_root_text, topdown=True, followlinks=False
+    ):
+        directories[:] = sorted(
+            name
+            for name in directories
+            if not name.startswith(".") and name != "__pycache__"
+        )
+        for name in sorted(files):
+            path = os.path.join(current, name)
+            if not _is_package_payload_text(path, project_root_text):
+                continue
+            relative = os.path.relpath(path, base_text)
+            with open(path, "rb") as file:
+                yield relative.replace(os.sep, "/"), file.read()
+
+
+def _is_package_payload_text(path: str, project_root: str) -> bool:
+    if not os.path.isfile(path):
+        return False
+    relative_path = os.path.relpath(path, project_root)
+    relative_parts = relative_path.split(os.sep)
+    if any(part.startswith(".") for part in relative_parts):
+        return False
+    if "__pycache__" in relative_parts or os.path.splitext(path)[1] in {
+        ".pyc",
+        ".pyo",
+    }:
+        return False
+    if not os.path.islink(path):
+        return True
+    try:
+        resolved = os.path.realpath(path)
+        return os.path.exists(resolved) and os.path.commonpath(
+            (resolved, os.path.realpath(project_root))
+        ) == os.path.realpath(project_root)
+    except (OSError, ValueError):
+        return False
 
 
 def is_package_payload(path: Path, project_root: Path) -> bool:
-    if not path.is_file():
-        return False
-    try:
-        relative_path = path.relative_to(project_root)
-    except ValueError:
-        relative_path = Path(path.name)
-    if any(part.startswith(".") for part in relative_path.parts):
-        return False
-    if "__pycache__" in path.parts or path.suffix in {".pyc", ".pyo"}:
-        return False
-    if not path.is_symlink():
-        return True
-    try:
-        path.resolve(strict=True).relative_to(project_root.resolve(strict=True))
-    except (OSError, ValueError):
-        return False
-    return True
+    return _is_package_payload_text(os.fspath(path), os.fspath(project_root))
 
 
 def metadata_text(project: ProjectMetadata) -> str:

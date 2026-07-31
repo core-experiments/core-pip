@@ -188,13 +188,13 @@ def actual_hashes_for_candidate(
         parsed_url = None
     if parsed_url is not None and parsed_url.scheme == "file":
         try:
-            path = Path(url_to_path(candidate.source_url or ""))
-            if path.is_file():
-                return hash_file(path)
+            path_text = url_to_path(candidate.source_url or "")
+            if os.path.isfile(path_text):
+                return hash_file(Path(path_text))
         except OSError:
             return {}
     try:
-        if candidate.path.is_file():
+        if os.path.isfile(candidate.path):
             return hash_file(candidate.path)
     except OSError:
         return {}
@@ -230,11 +230,11 @@ def direct_urls_equivalent(first: str | None, second: str | None) -> bool:
     first_parts = urllib.parse.urlsplit(first)
     second_parts = urllib.parse.urlsplit(second)
 
-    def local_path(parts: urllib.parse.SplitResult, original: str) -> Path | None:
+    def local_path(parts: urllib.parse.SplitResult, original: str) -> str | None:
         if parts.scheme.lower() == "file":
-            return Path(url_to_path(original)).resolve()
+            return os.path.realpath(url_to_path(original))
         if parts.scheme == "":
-            return Path(original).resolve()
+            return os.path.realpath(original)
         return None
 
     first_path = local_path(first_parts, first)

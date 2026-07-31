@@ -11,6 +11,8 @@ from cpip.core.wheel import WheelCandidate
 class CandidateStream(Sequence[WheelCandidate]):
     """A replayable sequence that materializes candidates on demand."""
 
+    __slots__ = ("source_internal", "items_internal", "exhausted", "error_internal")
+
     def __init__(self, source: Iterator[WheelCandidate]) -> None:
         self.source_internal = source
         self.items_internal: list[WheelCandidate] = []
@@ -34,11 +36,13 @@ class CandidateStream(Sequence[WheelCandidate]):
         return True
 
     def __iter__(self) -> Iterator[WheelCandidate]:
-        index = 0
+        if self.exhausted:
+            return iter(self.items_internal)
+        return self._iter_pending()
+
+    def _iter_pending(self) -> Iterator[WheelCandidate]:
         items = self.items_internal
-        while index < len(items):
-            yield items[index]
-            index += 1
+        yield from items
         if self.error_internal is not None:
             raise self.error_internal
         if self.exhausted:
@@ -111,7 +115,9 @@ class CandidateStream(Sequence[WheelCandidate]):
                 buffered.append(candidate)
                 if decisive(candidate):
                     preference_found = True
-                    yield from (item for item in buffered if keep(item))
+                    for item in buffered:
+                        if keep(item):
+                            yield item
                     buffered.clear()
             if not preference_found:
                 yield from buffered

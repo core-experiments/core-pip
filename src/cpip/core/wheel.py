@@ -209,6 +209,8 @@ class WheelFile:
 
 
 class Wheel:
+    __slots__ = ("filename", "name", "version", "build_tag", "file_tags")
+
     def __init__(self, filename: str | Path) -> None:
         self.filename = str(filename)
         wheel = parse_wheel_file(filename)
@@ -431,7 +433,7 @@ def wheel_archive_identity(
             metadata = archive.getinfo(f"{dist_info_dir}/METADATA")
             path_key = str(path) if path.is_absolute() else os.path.abspath(path)
             return path_key, metadata.CRC, metadata.file_size
-        stat = path.stat()
+        stat = os.stat(path)
         path_key = str(path) if path.is_absolute() else os.path.abspath(path)
         return path_key, stat.st_size, stat.st_mtime_ns
     except (KeyError, OSError):
@@ -474,7 +476,7 @@ def wheel_candidate(
     include_layout: bool = True,
     metadata_cache: MetadataCache | None = None,
 ) -> WheelCandidate:
-    wheel_path = Path(path)
+    wheel_path = path if isinstance(path, Path) else Path(path)
     parsed = filename_info or parse_wheel_filename(wheel_path)
     if parsed is None:
         raise InvalidWheelFilename(f"Invalid wheel filename: {wheel_path}")
@@ -648,18 +650,16 @@ def wheel_dist_info_dir(source: zipfile.ZipFile, name: str) -> str:
     # ZipFile already builds this filename index while reading the central
     # directory. Iterating it avoids another ZipInfo lookup for every member,
     # which is significant for wheels containing thousands of files.
-    matches = sorted(
-        {
-            filename.split("/", 1)[0]
-            for filename in source.NameToInfo
-            if filename.endswith(".dist-info/WHEEL") and filename.count("/") == 1
-        }
-    )
-    if not matches:
+    dist_info_dir: str | None = None
+    for filename in source.NameToInfo:
+        if not filename.endswith(".dist-info/WHEEL") or filename.count("/") != 1:
+            continue
+        match = filename.split("/", 1)[0]
+        if dist_info_dir is not None:
+            raise UnsupportedWheel("multiple .dist-info directories found")
+        dist_info_dir = match
+    if dist_info_dir is None:
         raise UnsupportedWheel(".dist-info directory not found")
-    if len(matches) > 1:
-        raise UnsupportedWheel("multiple .dist-info directories found")
-    dist_info_dir = matches[0]
     expected = re.sub(r"[-_.]+", "", canonicalize_name(name)).casefold()
     actual = re.sub(r"[-_.]+", "", dist_info_dir.removesuffix(".dist-info")).casefold()
     if not actual.startswith(expected):

@@ -120,6 +120,7 @@ class Link:
         "parsed_url_internal",
         "url_internal",
         "path_internal",
+        "filename_internal",
         "file_path_internal",
         "hashes_internal",
         "comes_from",
@@ -152,6 +153,7 @@ class Link:
         self.parsed_url_internal = urllib.parse.urlsplit(url)
         self.url_internal = url
         self.path_internal = urllib.parse.unquote(self.parsed_url_internal.path)
+        self.filename_internal: PathComponent | None = None
         if local_path_internal is not None:
             self.file_path_internal = local_path_internal
         else:
@@ -334,7 +336,7 @@ class Link:
         is_source_tree = self.is_vcs
         if self.is_file:
             try:
-                is_source_tree = Path(self.file_path).is_dir()
+                is_source_tree = os.path.isdir(self.file_path)
             except ValueError:
                 pass
         if is_source_tree:
@@ -359,8 +361,13 @@ class Link:
 
     @property
     def filename(self) -> PathComponent:
+        cached = self.filename_internal
+        if cached is not None:
+            return cached
         name = PathComponent.from_name(posixpath.basename(self.path.rstrip("/")))
-        return name or PathComponent.from_name(split_auth_from_netloc(self.netloc)[0])
+        filename = name or PathComponent.from_name(split_auth_from_netloc(self.netloc)[0])
+        self.filename_internal = filename
+        return filename
 
     @property
     def is_wheel(self) -> bool:
@@ -410,7 +417,7 @@ class Link:
 
     @property
     def is_existing_dir(self) -> bool:
-        return self.is_file and Path(self.file_path).is_dir()
+        return self.is_file and os.path.isdir(self.file_path)
 
     def is_hash_allowed(self, hashes: Hashes | None) -> bool:
         if hashes is None:

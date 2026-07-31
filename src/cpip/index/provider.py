@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime
+import os
 import time
 import urllib.parse
 from bisect import bisect_left, bisect_right
@@ -174,7 +175,11 @@ class CandidateProvider:
             if requirement.url is not None:
                 return [Link.from_url(requirement.url, source_url=None)]
             path = Path(requirement.raw)
-            return [Link.from_path(path, source_url=None)] if path.exists() else []
+            return (
+                [Link.from_path(path, source_url=None)]
+                if os.path.exists(os.fspath(path))
+                else []
+            )
         links: list[Link] = []
         cache_key = requirement.canonical_name
         cached = self.link_cache.get(cache_key)
@@ -284,35 +289,6 @@ class CandidateProvider:
                 links = tuple(dict.fromkeys(matching_links))
         if links is None:
             links = self.catalog_links(requirement)
-        if (
-            requirement.url is None
-            and exact_version is not None
-            and catalog is not None
-            and self.uploaded_prior_to is None
-        ):
-            from cpip.index.candidate_evaluators import CandidateEvaluator
-
-            for link in links:
-                parsed = self.parsed_link_cache.get(link)
-                if not isinstance(parsed, InstallationCandidate):
-                    continue
-                if link.kind is ArtifactKind.WHEEL and parsed.tag_rank is None:
-                    rejected.append(
-                        CandidateEvaluator.reject(
-                            link,
-                            RejectionReason.UNSUPPORTED_WHEEL,
-                            "wheel tags are not supported by this interpreter",
-                        )
-                    )
-                    continue
-                accepted.append(parsed.to_record())
-            accepted.sort(
-                key=lambda candidate: candidate.sort_key(
-                    prefer_binary=self.prefer_binary
-                ),
-                reverse=True,
-            )
-            return CandidateSelection(tuple(accepted), tuple(rejected))
         if (
             requirement.url is None
             and links

@@ -10,7 +10,6 @@ import re
 import sys
 import zipfile
 from collections.abc import Collection
-from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
 
@@ -87,19 +86,20 @@ class MetadataDistribution:
         cls,
         directory: str,
     ) -> MetadataDistribution:
-        path = Path(directory)
-        metadata = email.parser.Parser().parsestr(
-            (path / "METADATA").read_text(encoding="utf-8")
-        )
+        metadata_path = os.path.join(directory, "METADATA")
+        with open(metadata_path, encoding="utf-8") as file:
+            metadata = email.parser.Parser().parsestr(file.read())
+        entry_points_path = os.path.join(directory, "entry_points.txt")
+        if os.path.exists(entry_points_path):
+            with open(entry_points_path, encoding="utf-8") as file:
+                entry_points_text = file.read()
+        else:
+            entry_points_text = None
         return cls(
             metadata,
-            location=str(path.parent),
-            info_location=str(path),
-            entry_points_text=(
-                (path / "entry_points.txt").read_text(encoding="utf-8")
-                if (path / "entry_points.txt").exists()
-                else None
-            ),
+            location=os.path.dirname(directory),
+            info_location=directory,
+            entry_points_text=entry_points_text,
         )
 
     @classmethod
@@ -198,8 +198,9 @@ class MetadataDistribution:
         info_location = self.info_location_internal
         if info_location is None or self.location_internal == info_location:
             raise FileNotFoundError(path)
-        target = Path(info_location) / path
-        return target.read_text(encoding="utf-8")
+        target = os.path.join(info_location, path)
+        with open(target, encoding="utf-8") as file:
+            return file.read()
 
 
 class InstalledMetadataDistribution:
@@ -347,15 +348,28 @@ class InstalledMetadataDistribution:
         if direct_url and direct_url.is_local_editable():
             return url_to_path(direct_url.url)
         if self.info_location and self.info_location.endswith(".egg-info"):
-            egg_links = Path(self.info_location).parent.glob("*.egg-link")
-            egg_link = next(egg_links, None)
+            egg_link_root = os.path.dirname(self.info_location)
+            try:
+                with os.scandir(egg_link_root) as entries:
+                    egg_link = next(
+                        (
+                            entry.path
+                            for entry in entries
+                            if entry.name.endswith(".egg-link")
+                        ),
+                        None,
+                    )
+            except OSError:
+                egg_link = None
             if egg_link is not None:
-                lines = egg_link.read_text(encoding="utf-8").splitlines()
+                with open(egg_link, encoding="utf-8") as file:
+                    lines = file.read().splitlines()
                 if lines:
                     return lines[0]
             egg_link = egg_link_path_from_sys_path(self.raw_name)
             if egg_link is not None:
-                lines = Path(egg_link).read_text(encoding="utf-8").splitlines()
+                with open(egg_link, encoding="utf-8") as file:
+                    lines = file.read().splitlines()
                 if lines:
                     return lines[0]
         return None

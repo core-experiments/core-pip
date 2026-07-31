@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -131,7 +132,8 @@ class InstallationCandidate(CandidateRecord):
         from cpip.index.source_models import RejectedCandidate, RejectionReason
 
         local = Path(link.file_path)
-        if not local.exists():
+        source_dir = os.fspath(local)
+        if not os.path.exists(source_dir):
             return RejectedCandidate(
                 link, RejectionReason.MISSING_ARTIFACT, "source tree is not local"
             )
@@ -144,19 +146,20 @@ class InstallationCandidate(CandidateRecord):
             )
         except BuildError:
             if link.source_url is None and not (
-                (local / "pyproject.toml").exists() or (local / "setup.py").exists()
+                os.path.isfile(os.path.join(source_dir, "pyproject.toml"))
+                or os.path.isfile(os.path.join(source_dir, "setup.py"))
             ):
                 return cls(name=local.name or "source", version=Version("0"), link=link)
-            if (local / "pyproject.toml").exists():
+            pyproject = os.path.join(source_dir, "pyproject.toml")
+            if os.path.isfile(pyproject):
                 try:
-                    if "version" in (local / "pyproject.toml").read_text(
-                        encoding="utf-8"
-                    ):
-                        return RejectedCandidate(
-                            link,
-                            RejectionReason.INVALID_VERSION,
-                            "invalid project version",
-                        )
+                    with open(pyproject, encoding="utf-8") as file:
+                        if "version" in file.read():
+                            return RejectedCandidate(
+                                link,
+                                RejectionReason.INVALID_VERSION,
+                                "invalid project version",
+                            )
                 except OSError:
                     pass
             return cls(name=local.name or "source", version=Version("0"), link=link)

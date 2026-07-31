@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pathlib import Path
+import os
 
 from cpip.core.direct_url import ArchiveInfo, DirectUrl, DirInfo, VcsInfo
 from cpip.core.urls import url_to_path
@@ -22,7 +22,7 @@ def direct_url_from_link(
         )
         subdirectory = link.subdirectory_fragment
         commit_id = None
-        if source_dir and Path(source_dir).exists():
+        if source_dir and os.path.exists(source_dir):
             source_backend = vcs.get_backend_for_dir(source_dir)
             assert source_backend
             commit_id = source_backend.get_revision(source_dir)
@@ -39,6 +39,6 @@ def direct_url_from_link(
                 requested_revision=requested_revision,
             ),
         )
-    if link.is_file and Path(url_to_path(link.url)).is_dir():
+    if link.is_file and os.path.isdir(url_to_path(link.url)):
         return DirectUrl(url=link.url, dir_info=DirInfo())
     return DirectUrl(url=link.url, archive_info=ArchiveInfo(hashes=link.hashes or None))

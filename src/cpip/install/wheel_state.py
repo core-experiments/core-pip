@@ -15,12 +15,12 @@ if TYPE_CHECKING:
 
 def compiled_files(
     stage_root: Path,
-    staged: Iterable[tuple[Path, Path, int | None]],
-) -> list[tuple[Path, Path, int | None]]:
+    staged: Iterable[tuple[Path, Path, str, int | None]],
+) -> list[tuple[Path, Path, str, int | None]]:
     python_files = [
         (source, destination)
-        for source, destination, _ in staged
-        if source.suffix == ".py"
+        for source, destination, _, _ in staged
+        if os.path.splitext(os.fspath(source))[1] == ".py"
     ]
     if not python_files:
         return []
@@ -28,14 +28,24 @@ def compiled_files(
     import compileall
     import importlib.util
 
-    compileall.compile_dir(os.fspath(stage_root), force=True, quiet=1)
+    for source, _ in python_files:
+        compileall.compile_file(os.fspath(source), force=True, quiet=1)
     result = []
+    stage_root_text = os.fspath(stage_root)
     for source, destination in python_files:
-        cache = Path(importlib.util.cache_from_source(os.fspath(source)))
-        if cache.is_file():
-            relative = cache.relative_to(stage_root)
+        cache_text = importlib.util.cache_from_source(os.fspath(source))
+        if os.path.isfile(cache_text):
+            relative = os.path.relpath(cache_text, stage_root_text)
+            relative_parts = relative.split(os.sep)
+            cache = Path(cache_text)
+            compiled_destination = destination.parent / Path(*relative_parts[-2:])
             result.append(
-                (cache, destination.parent / Path(*relative.parts[-2:]), None)
+                (
+                    cache,
+                    compiled_destination,
+                    os.fspath(compiled_destination),
+                    None,
+                )
             )
     return result
 
@@ -59,8 +69,9 @@ def existing_paths(
             ) from exc
     else:
         entries = distribution.iter_declared_entries()
+    root = os.fspath(distribution.location)
     paths = {
-        (Path(distribution.location) / entry).resolve(strict=False) for entry in entries
+        Path(os.path.realpath(os.path.join(root, entry))) for entry in entries
     }
     existing = {path for path in paths if os.path.lexists(path)}
     return existing, existing

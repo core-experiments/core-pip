@@ -138,10 +138,13 @@ class ResolverConflictState(Protocol):
     package_ids: dict[str, int]
     package_names_internal: list[str]
     candidate_ids: dict[tuple[int, Version, str], int]
+    candidate_assignment_cache: dict[tuple[int, frozenset[str]], Assignment]
     conflict_activity: list[int]
     learned_incompatibilities: list[LearnedIncompatibility]
     learned_incompatibility_terms: set[frozenset[Assignment]]
     incompatibility_watches: dict[int, set[int]]
+    binary_incompatibility_watches: dict[Assignment, set[int]]
+    learned_non_binary_count: int
     root_incompatibilities: set[tuple[int, frozenset[str]]]
     root_unsatisfiable_domains: set[tuple[object, ...]]
     seen_candidate_conflicts: set[tuple[int, frozenset[str]]]

@@ -10,7 +10,6 @@ import re
 import shlex
 import sys
 import urllib.parse
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from cpip.core.errors import InstallationError
@@ -221,15 +220,16 @@ def _read_requirement_content(
         raise_for_status(response)
         return response.text
 
-    path = Path(normalized)
-    if not path.exists():
+    try:
+        with open(normalized, "rb") as file:
+            data = file.read()
+    except FileNotFoundError:
         if is_pylock_reference(normalized):
             raise InstallationError(
                 f"Error reading pylock file {normalized!r}: file does not exist"
             )
         kind = "constraint file" if normalized.endswith(".txt") else "requirements file"
         raise InstallationError(f"Could not open {kind}: {normalized}")
-    data = path.read_bytes()
     for bom, encoding in BOM_ENCODINGS:
         if bom and data.startswith(bom):
             return data.decode(
@@ -255,7 +255,7 @@ def _read_requirement_content(
         logger.warning(
             "unable to decode data from %s with default encoding utf-8, "
             "falling back to locale encoding %s",
-            str(path),
+            normalized,
             encoding,
         )
         return data.decode(encoding)

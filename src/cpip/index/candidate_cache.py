@@ -22,9 +22,10 @@ def source_hashes_for_link(link: Link) -> dict[str, str]:
     if hashes:
         return hashes
     local = ArtifactLocator().local_path(link.url)
-    if local is not None and local.is_file():
+    if local is not None and os.path.isfile(local):
         try:
-            return {"sha256": hashlib.sha256(local.read_bytes()).hexdigest()}
+            with open(local, "rb") as file:
+                return {"sha256": hashlib.sha256(file.read()).hexdigest()}
         except OSError:
             return {}
     return {}
@@ -48,9 +49,15 @@ def cached_wheel_for_link(
     if wheel_cache_dir is None:
         return None
     entry_dir = wheel_cache_path(wheel_cache_dir, cache_identity(url))
-    if not entry_dir.is_dir():
+    entry_dir_text = os.fspath(entry_dir)
+    if not os.path.isdir(entry_dir_text):
         return None
-    wheels = sorted(entry_dir.glob("*.whl"))
+    with os.scandir(entry_dir_text) as entries:
+        wheels = sorted(
+            Path(entry.path)
+            for entry in entries
+            if entry.name.endswith(".whl") and entry.is_file()
+        )
     if not wheels:
         return None
     return wheels[0], origin_hashes(entry_dir / "origin.json")
@@ -64,10 +71,12 @@ def cache_built_wheel(
     if wheel_cache_dir is None:
         return
     entry_dir = wheel_cache_path(wheel_cache_dir, cache_identity(candidate.link.url))
-    entry_dir.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(wheel, entry_dir / wheel.name)
+    entry_dir_text = os.fspath(entry_dir)
+    os.makedirs(entry_dir_text, exist_ok=True)
+    shutil.copy2(wheel, os.path.join(entry_dir_text, wheel.name))
     origin = {"archive_info": {"hashes": source_hashes_for_link(candidate.link)}}
-    (entry_dir / "origin.json").write_text(json.dumps(origin), encoding="utf-8")
+    with open(os.path.join(entry_dir_text, "origin.json"), "w", encoding="utf-8") as file:
+        json.dump(origin, file)
 
 
 def emit_build_message(message: str) -> None:

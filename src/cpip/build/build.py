@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import atexit
+import os
 import shutil
 import tarfile
 import tempfile
@@ -20,22 +21,22 @@ def build_wheel_from_source(
 ) -> Path:
     source_path = Path(source)
     output_dir = Path(wheel_dir) if wheel_dir is not None else default_wheel_dir()
-    output_dir.mkdir(parents=True, exist_ok=True)
+    os.makedirs(os.fspath(output_dir), exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="pip-build-") as temp_dir:
         project = (
             source_path
-            if source_path.is_dir()
+            if os.path.isdir(os.fspath(source_path))
             else unpack_source(source_path, Path(temp_dir))
         )
-        if source_path.is_dir():
-            (project / "build").mkdir(parents=True, exist_ok=True)
+        if os.path.isdir(os.fspath(source_path)):
+            os.makedirs(os.fspath(project / "build"), exist_ok=True)
         wheel_name = ProjectBuilder(
             project,
             build_constraints=build_constraints,
             build_isolation=build_isolation,
         ).build_wheel(output_dir, config_settings=config_settings)
     wheel_path = output_dir / wheel_name
-    if not wheel_path.is_file():
+    if not os.path.isfile(os.fspath(wheel_path)):
         raise BuildError(f"Build backend did not create expected wheel: {wheel_name}")
     return wheel_path
 
@@ -49,11 +50,11 @@ def build_editable_from_source(
 ) -> Path:
     source_path = Path(source)
     output_dir = Path(wheel_dir) if wheel_dir is not None else default_wheel_dir()
-    output_dir.mkdir(parents=True, exist_ok=True)
+    os.makedirs(os.fspath(output_dir), exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="pip-build-editable-") as temp_dir:
         project = (
             source_path
-            if source_path.is_dir()
+            if os.path.isdir(os.fspath(source_path))
             else unpack_source(source_path, Path(temp_dir))
         )
         builder = ProjectBuilder(
@@ -63,7 +64,7 @@ def build_editable_from_source(
         )
         try:
             editable_metadata = not (
-                (project / "setup.py").is_file()
+                os.path.isfile(os.fspath(project / "setup.py"))
                 and builder.backend_spec is not None
                 and builder.backend_spec.name.startswith("setuptools.build_meta")
             )
@@ -73,9 +74,9 @@ def build_editable_from_source(
             # standard actionable error. Other metadata failures remain fatal.
             if "build_editable" not in str(exc):
                 raise
-            if (source_path / "setup.py").is_file() and (
-                source_path / "pyproject.toml"
-            ).is_file():
+            if os.path.isfile(os.fspath(source_path / "setup.py")) and os.path.isfile(
+                os.fspath(source_path / "pyproject.toml")
+            ):
                 return build_wheel_from_source(
                     source_path,
                     wheel_dir=output_dir,
@@ -88,7 +89,7 @@ def build_editable_from_source(
             ) from exc
         wheel_name = builder.build_editable(output_dir, config_settings=config_settings)
     wheel_path = output_dir / wheel_name
-    if not wheel_path.is_file():
+    if not os.path.isfile(os.fspath(wheel_path)):
         raise BuildError(f"Build backend did not create expected wheel: {wheel_name}")
     return wheel_path
 
@@ -117,11 +118,16 @@ def unpack_source(source: Path, destination: Path) -> Path:
 
 
 def single_project_root(destination: Path) -> Path:
-    children = [child for child in destination.iterdir() if child.name != "__MACOSX"]
-    if len(children) == 1 and children[0].is_dir():
+    with os.scandir(os.fspath(destination)) as entries:
+        children = [
+            Path(entry.path)
+            for entry in entries
+            if entry.name != "__MACOSX"
+        ]
+    if len(children) == 1 and os.path.isdir(os.fspath(children[0])):
         return children[0]
     project = destination / "project"
-    project.mkdir()
+    os.mkdir(os.fspath(project))
     for child in children:
         shutil.move(str(child), project / child.name)
     return project

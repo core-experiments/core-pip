@@ -6,7 +6,6 @@ import ntpath
 import os
 import re
 import urllib.parse
-from pathlib import Path
 from typing import cast
 
 from cpip.core.urls import path_to_url
@@ -56,8 +55,8 @@ def normalize_reference(value: str, base: str | None, *, as_path: bool = False) 
             and not parsed.netloc
             and not parsed.path.startswith("/")
         ):
-            base_path = Path(base).resolve().parent
-            return path_to_url(str(base_path / parsed.path)) + (
+            base_path = os.path.dirname(os.path.realpath(base))
+            return path_to_url(os.path.join(base_path, parsed.path)) + (
                 f"#{parsed.fragment}" if parsed.fragment else ""
             )
         if base_parsed is not None and base_parsed.scheme:
@@ -70,13 +69,13 @@ def normalize_reference(value: str, base: str | None, *, as_path: bool = False) 
         and not value.startswith(".")
     ):
         return value
-    path = Path(value).expanduser()
-    if base and not path.is_absolute():
+    path = os.path.expanduser(value)
+    if base and not os.path.isabs(path):
         if base_parsed is not None and base_parsed.scheme:
             assert base_directory is not None
             return urllib.parse.urljoin(base_directory, value)
-        path = Path(base).resolve().parent / path
-    return os.path.normcase(os.path.abspath(os.path.normpath(os.fspath(path))))
+        path = os.path.join(os.path.dirname(os.path.realpath(base)), path)
+    return os.path.normcase(os.path.abspath(os.path.normpath(path)))
 
 
 def expand_env_variables(value: str) -> str:

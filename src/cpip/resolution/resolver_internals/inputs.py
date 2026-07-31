@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Iterable
 from typing import cast
 
 from cpip.core.hashes import file_hashes
 from cpip.core.packaging import Requirement, SpecifierSet, parse_requirement
-from cpip.core.urls import url_to_path
+from cpip.core.urls import path_to_url, url_to_path
 from cpip.index.links import Link
 from cpip.resolution.req_install import InstallRequirement
 from cpip.resolution.requirement_set import RequirementSet
@@ -67,7 +68,7 @@ def resolve_requirement_set(
                 marker=None,
                 raw=f"{candidate.name}=={candidate.version}",
             ),
-            link=Link(candidate.path.resolve().as_uri()),
+            link=Link(path_to_url(os.path.realpath(os.fspath(candidate.path)))),
         )
         if candidate.source_url is None:
             requirement.download_info = None

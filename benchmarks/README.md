@@ -58,6 +58,11 @@ uv run --group benchmark asv --config benchmarks/asv.conf.json run \
   --bench 'resolver_conflicts.*'
 ```
 
+`resolver_conflicts.WarmConflictResolution` resolves the same local wheelhouse
+once during setup and measures a second resolution with reusable wheel metadata.
+It complements the cold benchmark without conflating unique archive I/O with
+resolver search cost.
+
 Run the general-resolver adversarial families:
 
 ```console
@@ -73,6 +78,9 @@ normal candidate validity and fallback behavior.
 These are deterministic metadata-only cases for late candidate conflicts and
 wide shared-dependency graphs. They complement the real-world fast wheelhouse
 benchmarks; they do not measure the specialized local resolver.
+
+The `uv_microbenchmarks.InstallWheelManyFilesCompiled` case measures the
+explicit bytecode-compilation install path alongside the no-precompile case.
 
 For diagnostic counters, set `CPIP_RESOLVER_METRICS=1`. The resolver then
 exposes `metrics_snapshot()` for targeted profiling and benchmark scripts. The

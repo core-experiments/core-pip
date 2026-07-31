@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import ssl
 import urllib.error
 import urllib.parse
@@ -63,15 +64,18 @@ class IndexPageParser:
     def read(self, url: str) -> IndexContent:
         local = self.artifacts.local_path(url)
         if local is not None:
-            if local.is_dir():
-                json_path = local / "index.json"
-                if json_path.exists():
-                    return IndexContent(
-                        json_path.read_text(encoding="utf-8"),
-                        "application/vnd.pypi.simple.v1+json",
-                    )
-                local = local / "index.html"
-            return IndexContent(local.read_text(encoding="utf-8"), "text/html")
+            local_text = os.fspath(local)
+            if os.path.isdir(local_text):
+                json_path = os.path.join(local_text, "index.json")
+                if os.path.exists(json_path):
+                    with open(json_path, encoding="utf-8") as file:
+                        return IndexContent(
+                            file.read(),
+                            "application/vnd.pypi.simple.v1+json",
+                        )
+                local_text = os.path.join(local_text, "index.html")
+            with open(local_text, encoding="utf-8") as file:
+                return IndexContent(file.read(), "text/html")
 
         headers = {
             "Accept": (

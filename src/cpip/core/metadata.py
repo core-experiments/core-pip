@@ -96,7 +96,7 @@ def _iter_installed_distributions(
     if paths is None:
         distributions = importlib.metadata.distributions()
     else:
-        distribution_paths = [str(Path(path)) for path in paths]
+        distribution_paths = [os.fspath(path) for path in paths]
         distributions = importlib.metadata.distributions(path=distribution_paths)
     for dist in distributions:
         metadata = cast(Any, dist.metadata)

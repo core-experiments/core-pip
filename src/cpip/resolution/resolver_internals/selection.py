@@ -273,6 +273,7 @@ class ResolverSelectionOperations:
             best: tuple[int, Requirement] | None = None
             best_score: tuple[int, int, int] | None = None
             prefetch: list[Requirement] = []
+            unresolved: list[tuple[str, int, Requirement, int, bool]] = []
             for name, entry_ids in pending.by_name.items():
                 if name in selected:
                     continue
@@ -285,45 +286,44 @@ class ResolverSelectionOperations:
                     )
                 )
                 requirement = pending.entries_internal[entry_id].requirement
-                if requirement.url is None and not looks_like_path_requirement(
+                order = pending.entries_internal[entry_id].order
+                is_direct = requirement.url is not None or looks_like_path_requirement(
                     requirement.raw
-                ):
+                )
+                unresolved.append((name, entry_id, requirement, order, is_direct))
+                if not is_direct:
                     prefetch.append(requirement)
             self.provider.prefetch_available_versions(tuple(prefetch))
-            for name, entry_ids in pending.by_name.items():
-                if name in selected:
-                    continue
-                if len(entry_ids) == 1:
-                    entry_id = next(iter(entry_ids))
-                else:
-                    entry_id = min(
-                        entry_ids, key=lambda item: pending.entries_internal[item].order
-                    )
-                requirement = pending.entries_internal[entry_id].requirement
+            for name, entry_id, requirement, order, is_direct in unresolved:
                 if first_unresolved is None:
                     first_unresolved = entry_id, requirement
-                if requirement.url is not None or looks_like_path_requirement(
-                    requirement.raw
-                ):
+                if is_direct:
                     if direct is None or (
-                        pending.entries_internal[entry_id].order
+                        order
                         < pending.entries_internal[direct[0]].order
                     ):
                         direct = entry_id, requirement
                     continue
                 domain = self.domains_internal.get(name)
-                if domain is None or len(domain.constrained_requirements(self.apply_constraints)) <= 1:
+                if domain is None:
                     candidate_count = 10**9
+                elif domain.decision_count is not None:
+                    candidate_count = domain.decision_count
                 else:
+                    constrained = domain.constrained_internal
+                    if constrained is None:
+                        constrained = domain.constrained_requirements(
+                            self.apply_constraints
+                        )
                     candidate_count = (
-                        domain.decision_count
-                        if domain.decision_count is not None
+                        10**9
+                        if len(constrained) <= 1
                         else self.decision_candidate_count(requirement)
                     )
                 score = (
                     candidate_count or 10**9,
                     -self.conflict_activity[self.package_id_internal(name)],
-                    pending.entries_internal[entry_id].order,
+                    order,
                 )
                 if best_score is None or score < best_score:
                     best_score = score
@@ -386,7 +386,7 @@ class ResolverSelectionOperations:
         allow_prereleases = self.allow_prereleases_internal(requirement)
         key = (
             requirement.canonical_name,
-            str(requirement.specifier),
+            requirement.specifier.text_internal,
             tuple(sorted(requirement.extras)),
             requirement.url,
             requirement.marker,

@@ -24,11 +24,13 @@ from cpip.core.wheel import WheelCandidate, parse_wheel, wheel_candidate
 from cpip.install.target import InstallTarget
 from cpip.install.transaction import InstallTransaction, normalized_internal
 from cpip.install.wheel_archive import (
+    DestinationCache,
+    ResolvedRoots,
     copy_member_with_metadata,
-    destination_internal,
-    is_script_member,
+    destination_internal_parts,
+    destination_internal_parts_with_text,
     record_metadata_internal,
-    validate_member,
+    validate_member_parts,
     zip_mode,
 )
 from cpip.install.wheel_state import compiled_files, existing_paths
@@ -39,6 +41,7 @@ if TYPE_CHECKING:
 
 DIRECT_CONTENT_LIMIT = 64 * 1024
 DIRECT_CONTENT_BATCH_LIMIT = 4 * 1024 * 1024
+StagedEntry = tuple[Path, Path, str, int | None]
 
 
 class _RawWheelInfo:
@@ -177,7 +180,7 @@ class WheelInstaller:
         existing: InstalledMetadataDistribution | None = None,
         lookup_existing: bool = True,
         validated_dist_info: str | None = None,
-        destination_cache: dict[tuple[Path, PurePosixPath], Path] | None = None,
+        destination_cache: DestinationCache | None = None,
         stage_root: Path | None = None,
         transaction: InstallTransaction | None = None,
         direct: bool = False,
@@ -207,7 +210,7 @@ class WheelInstaller:
         paths: Iterable[str | Path],
         *,
         validation_cache: dict[str, str] | None = None,
-        destination_cache: dict[tuple[Path, PurePosixPath], Path] | None = None,
+        destination_cache: DestinationCache | None = None,
     ) -> tuple[WheelCandidate, ...]:
         return validate_wheel_batch(
             paths,
@@ -232,7 +235,7 @@ def install_wheel_internal(
     existing: InstalledMetadataDistribution | None = None,
     lookup_existing: bool = True,
     validated_dist_info: str | None = None,
-    destination_cache: dict[tuple[Path, PurePosixPath], Path] | None = None,
+    destination_cache: DestinationCache | None = None,
     stage_root: Path | None = None,
     transaction: InstallTransaction | None = None,
     direct: bool = False,
@@ -280,29 +283,37 @@ def install_wheel_internal(
     )
     with stage_context as temporary:
         stage_root = Path(temporary)
-        staged: list[tuple[Path, Path, int | None]] = []
+        stage_root_text = os.fspath(stage_root)
+        purelib_text = os.fspath(target.purelib)
+        purelib_prefix = purelib_text.rstrip(os.sep) + os.sep
+
+        def record_relative_path(destination_text: str) -> str:
+            if destination_text.startswith(purelib_prefix):
+                return destination_text[len(purelib_prefix) :]
+            return os.path.relpath(destination_text, purelib_text)
+        staged: list[StagedEntry] = []
         record_destination: Path | None = None
         dist_info: str | None = None
-        stage_directories: set[Path] = set()
+        stage_directories: set[str] = set()
         resolved_directories = (
             destination_cache if destination_cache is not None else {}
         )
-        resolved_roots: dict[Path, Path] = {}
-        record_metadata: dict[Path, tuple[str, str]] = {}
-        direct_contents: dict[Path, bytes] = {}
-        direct_metadata: dict[Path, tuple[str, str]] = {}
+        resolved_roots: ResolvedRoots = {}
+        record_metadata: dict[str, tuple[str, str]] = {}
+        direct_contents: dict[str, bytes] = {}
+        direct_metadata: dict[str, tuple[str, str]] = {}
         direct_content_size = 0
 
         def write_direct(
             destination: Path, contents: bytes, mode: int | None = None
         ) -> None:
             assert transaction is not None
-            destination.parent.mkdir(parents=True, exist_ok=True)
+            os.makedirs(os.fspath(destination.parent), exist_ok=True)
             transaction.record_created(destination)
-            with open(destination, "wb") as file:
+            with open(os.fspath(destination), "wb") as file:
                 file.write(contents)
             if mode is not None:
-                os.chmod(destination, mode)
+                os.chmod(os.fspath(destination), mode)
 
         with _open_wheel_archive(path, candidate) as archive:
             if validated_dist_info is None:
@@ -332,15 +343,17 @@ def install_wheel_internal(
             for member in archive.infolist():
                 if member.is_dir():
                     continue
-                relative = validate_member(member.filename)
-                if relative.parts and relative.parts[0].endswith(".dist-info"):
-                    dist_info = relative.parts[0]
-                source = stage_root / Path(*relative.parts)
+                relative_parts = validate_member_parts(member.filename)
+                relative_name = relative_parts[-1] if relative_parts else ""
+                if relative_parts and relative_parts[0].endswith(".dist-info"):
+                    dist_info = relative_parts[0]
+                source = Path(os.path.join(stage_root_text, *relative_parts))
+                source_text = os.fspath(source)
                 rewrite_metadata = (
-                    relative.name == "METADATA" and candidate.name.isalpha()
+                    relative_name == "METADATA" and candidate.name.isalpha()
                 )
-                script_member = is_script_member(relative)
-                is_record = relative.name == "RECORD" and bool(relative.parts)
+                script_member = len(relative_parts) >= 2 and relative_parts[-2] == "scripts"
+                is_record = relative_name == "RECORD" and bool(relative_parts)
                 direct_content = (
                     not rewrite_metadata
                     and not script_member
@@ -348,20 +361,22 @@ def install_wheel_internal(
                     and member.file_size <= DIRECT_CONTENT_LIMIT
                     and direct_content_size + member.file_size
                     <= DIRECT_CONTENT_BATCH_LIMIT
-                    and (not pycompile or relative.suffix != ".py")
-                    and relative.name != "entry_points.txt"
+                    and (not pycompile or os.path.splitext(relative_name)[1] != ".py")
+                    and relative_name != "entry_points.txt"
                 )
-                destination = destination_internal(
+                destination, destination_text = destination_internal_parts_with_text(
                     target,
-                    relative,
+                    relative_parts,
+                    member.filename,
                     resolved_directories=resolved_directories,
                     resolved_roots=resolved_roots,
                 )
                 if not direct and not direct_content:
                     source_parent = source.parent
-                    if source_parent not in stage_directories:
-                        source_parent.mkdir(parents=True, exist_ok=True)
-                        stage_directories.add(source_parent)
+                    source_parent_text = os.fspath(source_parent)
+                    if source_parent_text not in stage_directories:
+                        os.makedirs(source_parent_text, exist_ok=True)
+                        stage_directories.add(source_parent_text)
                 if rewrite_metadata or script_member:
                     contents = archive.read(member)
                 elif is_record:
@@ -370,12 +385,12 @@ def install_wheel_internal(
                     contents = archive.read(member)
                     direct_content_size += len(contents)
                 else:
-                    metadata = wheel_record_metadata.get(relative.as_posix())
+                    metadata = wheel_record_metadata.get("/".join(relative_parts))
                     if metadata is not None and metadata[1] != str(member.file_size):
                         metadata = None
                     if direct:
                         assert transaction is not None
-                        destination.parent.mkdir(parents=True, exist_ok=True)
+                        os.makedirs(os.fspath(destination.parent), exist_ok=True)
                         transaction.record_created(destination)
                     metadata = copy_member_with_metadata(
                         archive,
@@ -384,9 +399,9 @@ def install_wheel_internal(
                         metadata=metadata,
                     )
                     if direct:
-                        direct_metadata[destination] = metadata
+                        direct_metadata[destination_text] = metadata
                     else:
-                        record_metadata[source] = metadata
+                        record_metadata[source_text] = metadata
                     contents = None
                 if rewrite_metadata:
                     assert contents is not None
@@ -400,7 +415,7 @@ def install_wheel_internal(
                 if direct and contents is not None and not direct_content:
                     write_direct(destination, contents, zip_mode(member))
                 if contents is not None and not direct_content and not direct:
-                    with open(source, "wb") as file:
+                    with open(os.fspath(source), "wb") as file:
                         file.write(contents)
                 if script_member:
                     if direct:
@@ -409,39 +424,40 @@ def install_wheel_internal(
                         )
                     rewrite_shebang(source, script_executable)
                 elif contents is not None:
-                    metadata = wheel_record_metadata.get(relative.as_posix())
+                    metadata = wheel_record_metadata.get("/".join(relative_parts))
                     if metadata is None or metadata[1] != str(len(contents)):
                         metadata = record_metadata_internal(contents)
                     if direct_content:
                         if direct:
                             write_direct(destination, contents, zip_mode(member))
                         else:
-                            direct_contents[destination] = contents
-                        direct_metadata[destination] = metadata
+                            direct_contents[destination_text] = contents
+                        direct_metadata[destination_text] = metadata
                     else:
                         if direct:
-                            direct_metadata[destination] = metadata
+                            direct_metadata[destination_text] = metadata
                         else:
-                            record_metadata[source] = metadata
+                            record_metadata[source_text] = metadata
                 mode = zip_mode(member)
-                staged.append((source, destination, mode))
-                if relative.name == "RECORD" and relative.parts:
+                staged.append((source, destination, destination_text, mode))
+                if relative_name == "RECORD" and relative_parts:
                     record_destination = destination
 
         if dist_info is None or record_destination is None:
             raise InstallationError(f"Wheel {path} has no valid dist-info metadata")
+        record_destination_text = os.fspath(record_destination)
 
         managed_metadata = {
-            target.purelib / dist_info / "INSTALLER",
-            target.purelib / dist_info / "REQUESTED",
-            target.purelib / dist_info / "direct_url.json",
+            os.path.join(purelib_text, dist_info, "INSTALLER"),
+            os.path.join(purelib_text, dist_info, "REQUESTED"),
+            os.path.join(purelib_text, dist_info, "direct_url.json"),
         }
         staged = [
             item
             for item in staged
-            if item[1] not in managed_metadata or item[1] == record_destination
+            if item[2] not in managed_metadata or item[2] == record_destination_text
         ]
-        staged_destinations = {destination for _, destination, _ in staged}
+        staged_destinations = {destination_text for _, _, destination_text, _ in staged}
         for destination in tuple(direct_contents):
             if destination not in staged_destinations:
                 direct_contents.pop(destination, None)
@@ -454,9 +470,18 @@ def install_wheel_internal(
         if direct:
             write_direct(installer_destination, installer_contents)
         else:
-            direct_contents[installer_destination] = installer_contents
-        direct_metadata[installer_destination] = record_metadata_internal(b"cpip\n")
-        staged.append((installer_source, installer_destination, None))
+            direct_contents[os.fspath(installer_destination)] = installer_contents
+        direct_metadata[os.fspath(installer_destination)] = record_metadata_internal(
+            b"cpip\n"
+        )
+        staged.append(
+            (
+                installer_source,
+                installer_destination,
+                os.fspath(installer_destination),
+                None,
+            )
+        )
 
         requested_destination = target.purelib / dist_info / "REQUESTED"
         if requested:
@@ -464,9 +489,18 @@ def install_wheel_internal(
             if direct:
                 write_direct(requested_destination, b"")
             else:
-                direct_contents[requested_destination] = b""
-            direct_metadata[requested_destination] = record_metadata_internal(b"")
-            staged.append((requested_source, requested_destination, None))
+                direct_contents[os.fspath(requested_destination)] = b""
+            direct_metadata[os.fspath(requested_destination)] = record_metadata_internal(
+                b""
+            )
+            staged.append(
+                (
+                    requested_source,
+                    requested_destination,
+                    os.fspath(requested_destination),
+                    None,
+                )
+            )
 
         if direct_url is not None:
             direct_url_source = dist_info_stage / "direct_url.json"
@@ -476,6 +510,7 @@ def install_wheel_internal(
                 (
                     direct_url_source,
                     target.purelib / dist_info / "direct_url.json",
+                    os.fspath(target.purelib / dist_info / "direct_url.json"),
                     None,
                 )
             )
@@ -485,16 +520,17 @@ def install_wheel_internal(
             if direct
             else entry_point_scripts(stage_root / dist_info / "entry_points.txt")
         )
-        script_destinations = {
-            target.scripts / generated
-            for name in scripts
-            for generated in (name, f"{name}-script.py", f"{name}.exe")
-        }
-        staged = [item for item in staged if item[1] not in script_destinations]
+        if scripts:
+            script_destinations = {
+                target.scripts / generated
+                for name in scripts
+                for generated in (name, f"{name}-script.py", f"{name}.exe")
+            }
+            staged = [item for item in staged if item[1] not in script_destinations]
         script_stage = stage_root / ".cpip-scripts"
         script_maker_type = None
         if scripts:
-            script_stage.mkdir(parents=True, exist_ok=True)
+            os.makedirs(os.fspath(script_stage), exist_ok=True)
             try:
                 from distlib.scripts import ScriptMaker
             except ImportError:
@@ -502,7 +538,7 @@ def install_wheel_internal(
             else:
                 script_maker_type = ScriptMaker
         for name, (target_ref, gui) in scripts.items():
-            if Path(name).name != name or name in {".", ".."}:
+            if os.path.basename(name) != name or name in {".", ".."}:
                 raise InstallationError(
                     f"console script {name!r} is outside the scripts directory"
                 )
@@ -516,7 +552,7 @@ def install_wheel_internal(
                     )
                 else:
                     source = script_stage / name
-                    with open(source, "w", encoding="utf-8") as file:
+                    with open(os.fspath(source), "w", encoding="utf-8") as file:
                         file.write(script_text(target_ref, script_executable))
                     os.chmod(
                         source,
@@ -536,7 +572,7 @@ def install_wheel_internal(
                     # Keep the script-text form for callers that inspect the
                     # generated script path. Windows execution uses the EXE.
                     source = script_stage / name
-                    with open(source, "w", encoding="utf-8") as file:
+                    with open(os.fspath(source), "w", encoding="utf-8") as file:
                         file.write(script_text(target_ref, script_executable))
                     os.chmod(
                         source,
@@ -547,30 +583,34 @@ def install_wheel_internal(
                     )
 
         if scripts:
-            for source in script_stage.iterdir():
+            with os.scandir(os.fspath(script_stage)) as entries:
+                script_sources = tuple(entries)
+            for entry in script_sources:
+                source = script_stage / entry.name
+                destination = target.scripts / source.name
                 staged.append(
-                    (source, target.scripts / source.name, os.stat(source).st_mode)
+                    (source, destination, os.fspath(destination), os.stat(source).st_mode)
                 )
 
         if pycompile:
             staged.extend(compiled_files(stage_root, staged))
 
         record_rows = []
-        for source, destination, _ in staged:
-            if destination == record_destination:
+        for source, destination, destination_text, _ in staged:
+            if destination_text == record_destination_text:
                 record_rows.append(
-                    (os.path.relpath(destination, target.purelib), "", "")
+                    (record_relative_path(destination_text), "", "")
                 )
                 continue
-            metadata = direct_metadata.get(destination)
+            metadata = direct_metadata.get(destination_text)
             if metadata is None:
-                metadata = record_metadata.get(source)
+                metadata = record_metadata.get(os.fspath(source))
             if metadata is None:
                 with open(source, "rb") as file:
                     metadata = record_metadata_internal(file.read())
             record_rows.append(
                 (
-                    os.path.relpath(destination, target.purelib),
+                    record_relative_path(destination_text),
                     metadata[0],
                     metadata[1],
                 )
@@ -582,34 +622,42 @@ def install_wheel_internal(
         if direct:
             write_direct(record_destination, record_contents)
         else:
-            direct_contents[record_destination] = record_contents
-        direct_metadata[record_destination] = record_metadata_internal(record_contents)
+            direct_contents[os.fspath(record_destination)] = record_contents
+        direct_metadata[os.fspath(record_destination)] = record_metadata_internal(
+            record_contents
+        )
 
         owned_paths, old_paths = existing_paths(existing)
         if preserve_existing and existing is not None:
             old_paths = set()
-        for _, destination, _ in staged:
+        old_path_texts = {os.fspath(path) for path in old_paths}
+        scripts_text = os.fspath(target.scripts)
+        for _, destination, destination_text, _ in staged:
             if (
                 not direct
-                and destination.parent == target.scripts
-                and destination.exists()
+                and os.path.dirname(destination_text) == scripts_text
+                and os.path.exists(destination_text)
             ):
                 if script_matches(destination, scripts):
                     owned_paths.add(destination)
-        new_destinations = {destination for _, destination, _ in staged}
+        new_destinations = {destination_text for _, _, destination_text, _ in staged}
         active_transaction = transaction or InstallTransaction(owned_paths=owned_paths)
         if direct and active_transaction is not transaction:
             raise ValueError("direct wheel installation needs the shared transaction")
         if transaction is not None:
             transaction.owned.update(normalized_internal(path) for path in owned_paths)
         if not direct:
-            for source, destination, mode in staged:
-                contents = direct_contents.get(destination)
+            for source, destination, destination_text, mode in staged:
+                contents = direct_contents.get(destination_text)
                 if contents is not None:
-                    active_transaction.add_contents(destination, contents, mode=mode)
+                    active_transaction.add_contents(
+                        destination_text, contents, mode=mode
+                    )
                 else:
-                    active_transaction.add(source, destination, mode=mode)
-            for old_path in old_paths - new_destinations:
+                    active_transaction.add(
+                        os.fspath(source), destination_text, mode=mode
+                    )
+            for old_path in old_path_texts - new_destinations:
                 active_transaction.delete(old_path)
             if transaction is None:
                 active_transaction.commit(finalize=transaction_sink is None)
@@ -629,12 +677,12 @@ def validate_wheel_batch(
     *,
     target: InstallTarget,
     validation_cache: dict[str, str] | None = None,
-    destination_cache: dict[tuple[Path, PurePosixPath], Path] | None = None,
+    destination_cache: DestinationCache | None = None,
 ) -> tuple[WheelCandidate, ...]:
     """Validate a wheel batch before any member of the batch is installed."""
     candidates = tuple(wheel_candidate(path) for path in paths)
-    destinations: set[Path] = set()
-    resolved_roots: dict[Path, Path] = {}
+    destinations: set[str] = set()
+    resolved_roots: ResolvedRoots = {}
     resolved_directories = destination_cache if destination_cache is not None else {}
     for candidate in candidates:
         path = candidate.path
@@ -647,19 +695,22 @@ def validate_wheel_batch(
             for member in archive.infolist():
                 if member.is_dir():
                     continue
-                destination = destination_internal(
+                relative_parts = validate_member_parts(member.filename)
+                destination = destination_internal_parts(
                     target,
-                    validate_member(member.filename),
+                    relative_parts,
+                    member.filename,
                     resolved_directories=resolved_directories,
                     resolved_roots=resolved_roots,
                 )
-                if destination in destinations:
+                destination_text = os.fspath(destination)
+                if destination_text in destinations:
                     raise InstallationError(
                         f"Cannot install {canonicalize_name(candidate.name)}: "
                         "multiple wheels target "
                         f"the same path: {destination}"
                     )
-                destinations.add(destination)
+                destinations.add(destination_text)
     return candidates
 
 
@@ -668,11 +719,11 @@ def _direct_batch_preflight(
     candidates: tuple[WheelCandidate, ...],
     *,
     target: InstallTarget,
-) -> dict[tuple[Path, PurePosixPath], Path] | None:
+) -> DestinationCache | None:
     """Check whether a batch can write final paths without staging files."""
-    destinations: set[Path] = set()
-    resolved_directories: dict[tuple[Path, PurePosixPath], Path] = {}
-    resolved_roots: dict[Path, Path] = {}
+    destinations: set[str] = set()
+    resolved_directories: DestinationCache = {}
+    resolved_roots: ResolvedRoots = {}
     member_sets: list[tuple[object, ...]] = []
     total_size = 0
     for request, candidate in zip(requests, candidates):
@@ -693,24 +744,27 @@ def _direct_batch_preflight(
             if name.endswith("/"):
                 continue
             try:
-                relative = validate_member(name)
+                relative_parts = validate_member_parts(name)
             except InstallationError:
                 return None
             if (
-                relative.name in {"INSTALLER", "REQUESTED", "direct_url.json"}
-                or relative.name == "entry_points.txt"
-                or is_script_member(relative)
+                (relative_parts[-1] if relative_parts else "")
+                in {"INSTALLER", "REQUESTED", "direct_url.json"}
+                or (relative_parts[-1] if relative_parts else "") == "entry_points.txt"
+                or (len(relative_parts) >= 2 and relative_parts[-2] == "scripts")
             ):
                 return None
-            destination = destination_internal(
+            destination = destination_internal_parts(
                 target,
-                relative,
+                relative_parts,
+                name,
                 resolved_directories=resolved_directories,
                 resolved_roots=resolved_roots,
             )
-            if destination in destinations or os.path.lexists(destination):
+            destination_text = os.fspath(destination)
+            if destination_text in destinations or os.path.lexists(destination_text):
                 return None
-            destinations.add(destination)
+            destinations.add(destination_text)
     return resolved_directories
 
 
@@ -721,7 +775,7 @@ def _install_wheels_directly(
     target: InstallTarget,
     pycompile: bool,
     installer: WheelInstaller,
-    destination_cache: dict[tuple[Path, PurePosixPath], Path],
+    destination_cache: DestinationCache,
 ) -> tuple[WheelCandidate, ...]:
     """Install a preflighted fresh batch directly with transactional rollback."""
     with InstallTransaction() as transaction:
@@ -823,7 +877,7 @@ def install_wheels_transactionally(
         preserve_existing=preserve_existing,
         script_executable=script_executable,
     )
-    destination_cache: dict[tuple[Path, PurePosixPath], Path] = {}
+    destination_cache: DestinationCache = {}
     planned_candidates = (
         tuple(candidates)
         if candidates is not None
@@ -871,7 +925,7 @@ def install_wheels_transactionally(
 
                 class ThreadSafePathCache:
                     def __init__(self) -> None:
-                        self.values: dict[tuple[Path, PurePosixPath], Path] = {}
+                        self.values: DestinationCache = {}
                         self.lock = Lock()
 
                     def get(
@@ -1008,7 +1062,8 @@ def uninstall_distribution(
     else:
         entries = None
 
-    root = Path(distribution.location).resolve(strict=False)
+    root = os.path.realpath(os.fspath(distribution.location))
+    root_path = Path(root)
     recorded_paths: set[Path] = set()
     if entries is not None:
         for row in csv.reader(entries.splitlines()):
@@ -1017,27 +1072,30 @@ def uninstall_distribution(
             relative = PurePosixPath(row[0])
             if relative.is_absolute():
                 continue
-            path = root / Path(*relative.parts)
-            resolved = path.resolve(strict=False)
+            path_text = os.path.join(root, *relative.parts)
+            resolved_text = os.path.realpath(path_text)
             # RECORD uses POSIX separators, but an absolute Windows path can
             # be smuggled in as a backslash-containing "relative" entry.
             # Never let a manifest remove files outside the install root.
             if os.name == "nt" and Path(row[0]).is_absolute():
                 continue
-            if ".." in relative.parts and resolved.parent.name not in {
+            if ".." in relative.parts and os.path.basename(
+                os.path.dirname(resolved_text)
+            ) not in {
                 "bin",
                 "Scripts",
             }:
                 continue
             if ".." in relative.parts:
-                path = resolved
+                path_text = resolved_text
+            path = Path(path_text)
             recorded_paths.add(path)
-            if path.suffix == ".py":
+            if os.path.splitext(path_text)[1] == ".py":
                 recorded_paths.update(
                     {
-                        Path(importlib.util.cache_from_source(os.fspath(path))),
-                        path.with_suffix(".pyc"),
-                        path.with_suffix(".pyo"),
+                        Path(importlib.util.cache_from_source(path_text)),
+                        Path(f"{path_text}c"),
+                        Path(f"{path_text[:-3]}.pyo"),
                     }
                 )
     elif distribution.info_location and distribution.info_location.endswith(
@@ -1050,9 +1108,11 @@ def uninstall_distribution(
             relative = PurePosixPath(entry)
             if relative.is_absolute():
                 continue
-            path = (egg_link_root / Path(*relative.parts)).resolve(strict=False)
+            path = Path(
+                os.path.realpath(os.path.join(os.fspath(egg_link_root), *relative.parts))
+            )
             try:
-                path.relative_to(root)
+                path.relative_to(root_path)
             except ValueError:
                 if path.parent.name not in {"bin", "Scripts"}:
                     continue
@@ -1065,7 +1125,9 @@ def uninstall_distribution(
             for name in top_level.splitlines():
                 name = name.strip()
                 if name and name.isidentifier():
-                    recorded_paths.update({root / name, root / f"{name}.py"})
+                    recorded_paths.update(
+                        {root_path / name, root_path / f"{name}.py"}
+                    )
         egg_links = list(egg_link_root.glob("*.egg-link"))
         egg_links.extend(
             egg_link

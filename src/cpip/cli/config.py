@@ -56,9 +56,11 @@ class ConfigurationStore:
                 continue
             self.env_internal[key[4:].lower().replace("_", "-")] = value
         for location in config_locations():
-            if location.path.is_file():
+            if os.path.isfile(os.fspath(location.path)):
                 try:
-                    self.parser_internal.read(location.path, encoding="utf-8")
+                    self.parser_internal.read(
+                        os.fspath(location.path), encoding="utf-8"
+                    )
                 except configparser.Error as exc:
                     raise ConfigurationError(str(exc)) from exc
 
@@ -137,8 +139,9 @@ class ConfigurationStore:
 
     def read_single(self, path: Path) -> RawConfigParser_internal:
         parser = new_parser()
-        if path.is_file():
-            parser.read(path, encoding="utf-8")
+        path_text = os.fspath(path)
+        if os.path.isfile(path_text):
+            parser.read(path_text, encoding="utf-8")
         return parser
 
 
@@ -153,7 +156,7 @@ def config_locations() -> list[ConfigLocation]:
     locations.append(ConfigLocation("user", user_config_path()))
     prefix = os.environ.get("VIRTUAL_ENV") or sys.prefix
     executable_prefix = Path(sys.executable).parent.parent
-    if (executable_prefix / "pyvenv.cfg").is_file():
+    if os.path.isfile(os.fspath(executable_prefix / "pyvenv.cfg")):
         # Relocated virtualenv launchers can retain the template's
         # ``sys.prefix``.  The executable's environment is the one whose
         # site-level cpip.conf should apply.
@@ -194,8 +197,8 @@ def option_spellings(option: str) -> tuple[str, ...]:
 
 
 def write_parser(path: Path, parser: RawConfigParser_internal) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as file:
+    os.makedirs(os.fspath(path.parent), exist_ok=True)
+    with open(os.fspath(path), "w", encoding="utf-8") as file:
         parser.write(file)
 
 

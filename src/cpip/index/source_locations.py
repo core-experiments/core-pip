@@ -5,6 +5,7 @@ from __future__ import annotations
 import ntpath
 import os
 import urllib.parse
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -76,15 +77,16 @@ class FindLinksSource:
         ).links_from_url(normalized)
 
     def links_from_local_path(self, path: Path) -> list[Link]:
-        if path.is_file():
-            if path.suffix.lower() in HTML_SUFFIXES:
+        path_text = os.fspath(path)
+        if os.path.isfile(path_text):
+            if os.path.splitext(path_text)[1].lower() in HTML_SUFFIXES:
                 from cpip.index.page_parsing import IndexPageParser
 
                 return IndexPageParser(
                     trusted_hosts=self.trusted_hosts, session=self.session
                 ).links_from_url(path.as_uri())
             return [Link.from_path(path, source_url=None)]
-        if not path.is_dir():
+        if not os.path.isdir(path_text):
             return []
         return [
             Link.from_path(item, source_url=str(path), is_dir=False)
@@ -121,6 +123,7 @@ class SimpleIndexSource:
         )
 
 
+@lru_cache(maxsize=4096)
 def looks_like_path_requirement(value: str) -> bool:
     return (
         value.startswith((".", "/", "~"))

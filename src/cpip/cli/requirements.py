@@ -147,7 +147,8 @@ def requirements_from_script(path: Path) -> list[str]:
         from cpip._vendor import tomli as tomllib
 
     try:
-        source = path.read_text(encoding="utf-8")
+        with open(os.fspath(path), encoding="utf-8") as file:
+            source = file.read()
     except OSError as exc:
         raise InstallationError(f"Could not read script {path}: {exc}") from exc
 
@@ -436,24 +437,26 @@ def bundle_install_requirements(
     for requirement in bundle.requirements:
         item = install_req_from_line(requirement)
         raw_path = requirement.split("[", 1)[0]
-        if item.req is not None and Path(raw_path).is_dir():
-            source_path = Path(raw_path).resolve()
+        if item.req is not None and os.path.isdir(raw_path):
+            source_path = os.path.realpath(raw_path)
             try:
-                metadata = prepare_project_metadata(source_path, build_isolation=False)
+                metadata = prepare_project_metadata(
+                    Path(source_path), build_isolation=False
+                )
                 source_name = canonicalize_name(metadata.name)
                 source_version = str(metadata.version)
             except Exception:
                 source_name = item.req.canonical_name
                 source_version = "unknown"
             previous = direct_sources.get(source_name)
-            if previous is not None and Path(previous[0]).resolve() != source_path:
+            if previous is not None and os.path.realpath(previous[0]) != source_path:
                 print(f"The user requested {source_name} {previous[1]}")
                 print(f"The user requested {source_name} {source_version}")
                 raise InstallationError(
                     f"Cannot install {source_name} because these package versions "
                     "have conflicting dependencies."
                 )
-            direct_sources[source_name] = (str(source_path), source_version)
+            direct_sources[source_name] = (source_path, source_version)
         direct_constraints = (
             [
                 constraint
@@ -542,16 +545,16 @@ def bundle_install_requirements(
             item.link = Link(bundle.locked_links[item.req.canonical_name])
             item.local_file_path = item.link.file_path if item.link.is_file else None
         if item.req is not None and item.local_file_path is not None:
-            source_path = Path(item.local_file_path)
+            source_path = os.path.realpath(item.local_file_path)
             previous = direct_sources.get(item.req.canonical_name)
             if (
                 previous is not None
-                and Path(previous[0]).resolve() != source_path.resolve()
+                and os.path.realpath(previous[0]) != source_path
             ):
                 raise InstallationError(
                     f"Cannot install {item.req.name} because these package versions "
                     "have conflicting dependencies."
                 )
-            direct_sources[item.req.canonical_name] = (str(source_path), "")
+            direct_sources[item.req.canonical_name] = (source_path, "")
         requirements.append(item)
     return requirements

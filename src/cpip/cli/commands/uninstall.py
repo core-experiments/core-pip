@@ -30,7 +30,9 @@ def run_uninstall(args: list[str]) -> int:
     options = parser.parse_args(args)
     packages = list(options.packages)
     for filename in options.requirement_files:
-        for line in Path(filename).read_text(encoding="utf-8").splitlines():
+        with open(filename, encoding="utf-8") as file:
+            lines = file.read().splitlines()
+        for line in lines:
             requirement = line.partition("#")[0].strip()
             if not requirement:
                 continue

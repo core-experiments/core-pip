@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import os
 import urllib.parse
-from pathlib import Path
 
 from cpip.core.errors import InstallationError, InvalidWheelFilename
+from cpip.core.urls import path_to_url
 from cpip.index.links import Link
 from cpip.core.packaging import Requirement as ParsedRequirement, parse_requirement
 from cpip.resolution.req_install import InstallRequirement
@@ -102,14 +102,14 @@ def install_req_from_line(
             raise InstallationError(
                 f"Invalid requirement: {text!r}. It looks like a path."
             )
-        if Path(path_text).is_file() and path_text.endswith(".txt"):
+        if os.path.isfile(path_text) and path_text.endswith(".txt"):
             raise InstallationError(
                 f"Invalid requirement: {text!r}. It looks like a path. The path does exist. "
                 "The argument appears to be a requirements file. If that is the case, use the '-r' flag to install"
             )
         parsed = parse_requirement(url)
-        if Path(path_text).suffix.lower() == ".whl":
-            wheel_parts = Path(path_text).name[:-4].split("-")
+        if os.path.splitext(path_text)[1].lower() == ".whl":
+            wheel_parts = os.path.basename(path_text)[:-4].split("-")
             if len(wheel_parts) >= 2:
                 wheel_requirement = parse_requirement(
                     f"{wheel_parts[0]}=={wheel_parts[1]}"
@@ -285,7 +285,7 @@ def parse_editable(value: str) -> tuple[str | None, str, set[str]]:
             return None, normalized, extras
         return (
             None,
-            Path(os.path.abspath(path_part)).resolve(strict=False).as_uri(),
+            path_to_url(os.path.realpath(os.path.abspath(path_part))),
             extras,
         )
     return None, stripped, extras

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import urllib.parse
 from collections.abc import Sequence
+from functools import lru_cache
 from typing import TypeVar
 
 from cpip.core.errors import InvalidWheelFilename
@@ -32,6 +32,17 @@ CandidateT = TypeVar("CandidateT", bound=CandidateRecord)
 
 
 class CandidateEvaluator:
+    __slots__ = (
+        "project_name_internal",
+        "supported_tags_internal",
+        "supported_tag_ranks",
+        "specifier_internal",
+        "release_control_internal",
+        "prefer_binary_internal",
+        "hashes_internal",
+        "allowed_hashes_internal",
+    )
+
     def __init__(
         self,
         project_name: str,
@@ -49,6 +60,7 @@ class CandidateEvaluator:
         self.release_control_internal = release_control
         self.prefer_binary_internal = prefer_binary
         self.hashes_internal = hashes
+        self.allowed_hashes_internal = allowed_hashes(hashes)
 
     @classmethod
     def create(
@@ -88,25 +100,46 @@ class CandidateEvaluator:
     ) -> list[CandidateT]:
         allow_prereleases = self.allow_prereleases_internal()
         if allow_prereleases is None:
-            allow_prereleases = not any(
-                not candidate.version.is_prerelease
-                and self.specifier_internal.contains(candidate.version)
-                for candidate in candidates
-            )
-            allow_prereleases = allow_prereleases or any(
+            specifier_allows_prereleases = any(
                 spec.operator != "==="
                 and not spec.version.endswith(".*")
-                and Version(spec.version).is_prerelease
+                and spec.parsed_version.is_prerelease
                 for spec in self.specifier_internal.specifiers
             )
-        applicable = [
-            candidate
-            for candidate in candidates
-            if not (candidate.version.is_prerelease and allow_prereleases is False)
-            if self.specifier_internal.contains(
-                candidate.version, allow_prereleases=allow_prereleases
-            )
-        ]
+            if specifier_allows_prereleases:
+                applicable = [
+                    candidate
+                    for candidate in candidates
+                    if self.specifier_internal.contains(
+                        candidate.version, allow_prereleases=True
+                    )
+                ]
+            else:
+                stable = [
+                    candidate
+                    for candidate in candidates
+                    if not candidate.version.is_prerelease
+                    and self.specifier_internal.contains(candidate.version)
+                ]
+                if stable:
+                    applicable = stable
+                else:
+                    applicable = [
+                        candidate
+                        for candidate in candidates
+                        if self.specifier_internal.contains(
+                            candidate.version, allow_prereleases=True
+                        )
+                    ]
+        else:
+            applicable = [
+                candidate
+                for candidate in candidates
+                if not (candidate.version.is_prerelease and not allow_prereleases)
+                and self.specifier_internal.contains(
+                    candidate.version, allow_prereleases=allow_prereleases
+                )
+            ]
         return filter_unallowed_hashes(
             applicable,
             hashes=self.hashes_internal,
@@ -247,6 +280,7 @@ class CandidateEvaluator:
         )
 
     @staticmethod
+    @lru_cache(maxsize=128)
     def requires_python_matches(requires_python: str) -> bool:
         import platform
 
@@ -288,7 +322,7 @@ class CandidateEvaluator:
         digest = None
         if candidate.link.hashes is not None:
             digest = candidate.link.hashes.get("sha256")
-        allowed = allowed_hashes(self.hashes_internal)
+        allowed = self.allowed_hashes_internal
         hash_rank = int(bool(allowed and digest in allowed))
         yanked_rank = -1 if candidate.link.is_yanked else 0
         wheel_rank = 0
@@ -307,7 +341,9 @@ class CandidateEvaluator:
             if best_rank is not None:
                 tag_rank = -best_rank
             build_tag = legacy_build_tag(candidate.wheel.build_tag)
-        elif candidate.link.filename.endswith(".whl"):
+        elif candidate.link.kind is ArtifactKind.WHEEL or candidate.link.filename.endswith(
+            ".whl"
+        ):
             try:
                 wheel = Wheel(candidate.link.filename)
                 wheel_rank = 1
@@ -323,7 +359,7 @@ class CandidateEvaluator:
                 build_tag = wheel.build_tag
             except InvalidWheelFilename:
                 pass
-        if urllib.parse.urlparse(candidate.link.url).fragment.startswith("egg="):
+        if candidate.link.egg_fragment is not None:
             egg_fragment_rank = 0
         binary_preference = wheel_rank if self.prefer_binary_internal else 0
         return (

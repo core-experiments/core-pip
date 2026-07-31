@@ -205,8 +205,9 @@ class LazyWheelCandidate(WheelCandidate):
             if self.record_internal.link.is_vcs:
                 remove_temp_directory_internal(local)
                 return None
-            if local.is_file():
-                return {"sha256": hashlib.sha256(local.read_bytes()).hexdigest()}
+            if os.path.isfile(local):
+                with open(local, "rb") as file:
+                    return {"sha256": hashlib.sha256(file.read()).hexdigest()}
             return None
         return None
 
@@ -450,7 +451,7 @@ class CandidateMaterializer:
                 ):
                     path = path / candidate.link.subdirectory_fragment
                 with tempfile.TemporaryDirectory(prefix="cpip-metadata-") as temp_dir:
-                    if path.is_file():
+                    if os.path.isfile(path):
                         from cpip.build.build import unpack_source
 
                         path = unpack_source(path, Path(temp_dir))
@@ -483,7 +484,7 @@ class CandidateMaterializer:
                     remove_temp_directory_internal(vcs_path)
             else:
                 with (
-                    path.open("rb", buffering=32768) as stream,
+                    open(path, "rb", buffering=32768) as stream,
                     zipfile.ZipFile(stream) as archive,
                 ):
                     try:
@@ -648,11 +649,10 @@ class CandidateMaterializer:
                 self.compute_source_hashes
                 and not source_hashes
                 and local_path is not None
-                and local_path.is_file()
+                and os.path.isfile(local_path)
             ):
-                source_hashes["sha256"] = hashlib.sha256(
-                    local_path.read_bytes()
-                ).hexdigest()
+                with open(local_path, "rb") as file:
+                    source_hashes["sha256"] = hashlib.sha256(file.read()).hexdigest()
             materialized_vcs_path = path if candidate.link.is_vcs else None
             if (
                 candidate.link.kind is ArtifactKind.SOURCE_TREE
@@ -721,7 +721,7 @@ class CandidateMaterializer:
             try:
                 if candidate.link.kind is ArtifactKind.WHEEL:
                     try:
-                        stat = path.stat()
+                        stat = os.stat(path)
                     except OSError:
                         stat = None
                     cache_key = (
@@ -733,7 +733,7 @@ class CandidateMaterializer:
                     built = self.wheel_candidates.get(cache_key)
                     if built is None:
                         with (
-                            path.open("rb", buffering=32768) as stream,
+                            open(path, "rb", buffering=32768) as stream,
                             zipfile.ZipFile(stream) as archive,
                         ):
                             dist_info_dir, wheel_metadata_text = (
@@ -830,8 +830,8 @@ class CandidateMaterializer:
 
 
 def validate_build_requirements(source: Path) -> None:
-    pyproject = source / "pyproject.toml"
-    if not pyproject.is_file():
+    pyproject = os.path.join(os.fspath(source), "pyproject.toml")
+    if not os.path.isfile(pyproject):
         return
     try:
         import tomllib
@@ -839,7 +839,8 @@ def validate_build_requirements(source: Path) -> None:
         from cpip._vendor import tomli as tomllib
 
     try:
-        data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+        with open(pyproject, encoding="utf-8") as file:
+            data = tomllib.loads(file.read())
     except tomllib.TOMLDecodeError as exc:
         raise BuildError(
             f"Invalid PEP 518 build requirements in {pyproject}: {exc}"

@@ -92,7 +92,7 @@ def run_download(args: list[str]) -> int:
         ignore_installed=True,
     ).resolve(bundle_install_requirements(bundle))
     destination = Path(options.dest)
-    destination.mkdir(parents=True, exist_ok=True)
+    os.makedirs(os.fspath(destination), exist_ok=True)
     names: list[str] = []
     for editable in bundle.editables:
         source_path, _, _ = prepare_editable_source(editable, prepare_metadata=False)

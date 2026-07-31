@@ -424,7 +424,7 @@ def run_local_fallback(args: list[str]) -> int | None:
     except (OSError, TypeError, ValueError):
         return None
 
-    if sum(candidate.path.stat().st_size for candidate in candidates) > 4 * 1024 * 1024:
+    if sum(os.stat(candidate.path).st_size for candidate in candidates) > 4 * 1024 * 1024:
         import zipfile
 
         for index, candidate in enumerate(candidates):

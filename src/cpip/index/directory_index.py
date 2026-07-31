@@ -13,9 +13,9 @@ from cpip.index.links import SOURCE_ARCHIVE_SUFFIXES
 
 
 def local_source_files(path: Path) -> tuple[Path, ...]:
-    if not path.is_dir():
+    if not os.path.isdir(os.fspath(path)):
         return ()
-    with os.scandir(path) as entries:
+    with os.scandir(os.fspath(path)) as entries:
         return tuple(Path(entry.path) for entry in entries if entry.is_file())
 
 
@@ -29,24 +29,33 @@ class DirectoryIndex:
         self.scanned = False
 
     def scan(self) -> None:
-        for entry in local_source_files(Path(self.path_internal)):
-            url = path_to_url(str(entry))
-            if is_html_file(url):
-                self.page_candidates_internal.append(url)
-                continue
-            wheel = parse_wheel_filename_fast(entry.name)
-            if wheel is None and entry.name.endswith(".whl"):
-                from cpip.core.wheel import parse_wheel_filename
-
-                wheel = parse_wheel_filename(entry.name)
-            if wheel is not None:
-                project_name = wheel[0]
-            else:
-                parsed = project_version_from_filename(entry.name)
-                if parsed is None:
+        try:
+            entries = os.scandir(self.path_internal)
+        except OSError:
+            self.scanned = True
+            return
+        with entries:
+            for entry in entries:
+                if not entry.is_file():
                     continue
-                project_name = canonicalize_name(parsed[0])
-            self.project_name_to_urls_internal[project_name].append(url)
+                url = path_to_url(entry.path)
+                filename = entry.name
+                if is_html_file(url):
+                    self.page_candidates_internal.append(url)
+                    continue
+                wheel = parse_wheel_filename_fast(filename)
+                if wheel is None and filename.endswith(".whl"):
+                    from cpip.core.wheel import parse_wheel_filename
+
+                    wheel = parse_wheel_filename(filename)
+                if wheel is not None:
+                    project_name = wheel[0]
+                else:
+                    parsed = project_version_from_filename(filename)
+                    if parsed is None:
+                        continue
+                    project_name = canonicalize_name(parsed[0])
+                self.project_name_to_urls_internal[project_name].append(url)
         self.scanned = True
 
     @property

@@ -119,6 +119,31 @@ class ColdRangeConflictResolution(ColdConflictResolution):
         }
 
 
+class WarmConflictResolution(ColdConflictResolution):
+    """Measure repeated resolution after populating the wheel metadata cache."""
+
+    def setup(
+        self, wheelhouses: dict[int, str], versions: int
+    ) -> None:
+        cache = Path(wheelhouses[versions]).parent / "cache"
+        cache.mkdir(exist_ok=True)
+        self.provider = CandidateProvider.from_options(
+            find_links=[wheelhouses[versions]],
+            no_index=True,
+            wheel_cache_dir=cache,
+        )
+        Resolver(provider=self.provider, ignore_installed=True).resolve(["A"])
+
+    def time_resolve(self, wheelhouses: dict[int, str], versions: int) -> None:
+        del wheelhouses
+        plan = Resolver(provider=self.provider, ignore_installed=True).resolve(["A"])
+        assert {candidate.canonical_name for candidate in plan.candidates} == {
+            "a",
+            "b",
+            "c",
+        }
+
+
 class ColdProjectChainResolution(ColdConflictResolution):
     @staticmethod
     def setup_cache() -> dict[int, str]:

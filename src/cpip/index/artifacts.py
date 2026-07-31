@@ -6,6 +6,8 @@ import urllib.parse
 import urllib.request
 import hashlib
 import logging
+import os
+import posixpath
 from pathlib import Path
 from typing import Any
 
@@ -79,7 +81,7 @@ class ArtifactLocator:
             / hashlib.sha256(url_or_path.encode()).hexdigest()
             / filename
         )
-        target.parent.mkdir(parents=True, exist_ok=True)
+        os.makedirs(os.fspath(target.parent), exist_ok=True)
         parsed = urllib.parse.urlparse(url_or_path)
         url = parsed._replace(fragment="").geturl()
         if self.session is None:
@@ -116,8 +118,8 @@ class ArtifactLocator:
     def filename(self, link: str) -> str:
         parsed = urllib.parse.urlparse(link)
         path = urllib.parse.unquote(parsed.path)
-        filename = Path(path.rstrip("/")).name
+        filename = posixpath.basename(path.rstrip("/"))
         if filename not in {"", ".", ".."}:
             return filename
         fallback = parsed.netloc or path
-        return Path(fallback.replace("\\", "/").rstrip("/")).name or fallback
+        return posixpath.basename(fallback.replace("\\", "/").rstrip("/")) or fallback

@@ -161,6 +161,9 @@ class Resolver(
         self.package_ids: dict[str, int] = {}
         self.package_names_internal: list[str] = []
         self.candidate_ids: dict[tuple[int, Version, str], int] = {}
+        self.candidate_assignment_cache: dict[
+            tuple[int, frozenset[str]], Assignment
+        ] = {}
         self.conflict_activity: list[int] = []
         self.conflict_activity_bumps = 0
         self.learned_clause_limit = 4096
@@ -168,6 +171,8 @@ class Resolver(
         self.learned_incompatibilities: list[LearnedIncompatibility] = []
         self.learned_incompatibility_terms: set[frozenset[Assignment]] = set()
         self.incompatibility_watches: dict[int, set[int]] = {}
+        self.binary_incompatibility_watches: dict[Assignment, set[int]] = {}
+        self.learned_non_binary_count = 0
         self.installed_by_name_internal: dict[str, InstalledDistribution] | None = None
         self.debug_internal = os.environ.get("CPIP_RESOLVER_DEBUG") not in FALSE_VALUES
         self.metrics = ResolverMetrics(
@@ -245,11 +250,14 @@ class Resolver(
         self.package_ids.clear()
         self.package_names_internal.clear()
         self.candidate_ids.clear()
+        self.candidate_assignment_cache.clear()
         self.conflict_activity.clear()
         self.conflict_activity_bumps = 0
         self.learned_incompatibilities.clear()
         self.learned_incompatibility_terms.clear()
         self.incompatibility_watches.clear()
+        self.binary_incompatibility_watches.clear()
+        self.learned_non_binary_count = 0
         for requirement in requirements:
             domain = self.domains_internal.setdefault(
                 requirement.canonical_name, PackageDomain()

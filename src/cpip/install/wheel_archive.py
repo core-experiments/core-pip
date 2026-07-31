@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import os
 import stat
 import zipfile
 from pathlib import Path, PurePosixPath
@@ -11,30 +12,79 @@ from pathlib import Path, PurePosixPath
 from cpip.core.errors import InstallationError
 from cpip.install.target import InstallTarget
 
+DestinationCache = dict[tuple[str, str], str]
+ResolvedRoots = dict[str, str]
+EMPTY_RECORD_METADATA = (
+    "sha256=47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU",
+    "0",
+)
 
-def validate_member(name: str) -> PurePosixPath:
+
+def validate_member_parts(name: str) -> tuple[str, ...]:
     if "\\" in name:
         raise InstallationError(f"wheel member uses an invalid separator: {name!r}")
-    relative = PurePosixPath(name)
-    if relative.is_absolute() or ".." in relative.parts:
+    if name.startswith("/"):
         raise InstallationError(
             f"wheel member is outside the install destination: {name!r}"
         )
-    return relative
+    parts = tuple(part for part in name.split("/") if part and part != ".")
+    if ".." in parts:
+        raise InstallationError(
+            f"wheel member is outside the install destination: {name!r}"
+        )
+    return parts
+
+
+def validate_member(name: str) -> PurePosixPath:
+    return PurePosixPath(*validate_member_parts(name))
 
 
 def destination_internal(
     target: InstallTarget,
     relative: PurePosixPath,
     *,
-    resolved_directories: dict[tuple[Path, PurePosixPath], Path] | None = None,
-    resolved_roots: dict[Path, Path] | None = None,
+    resolved_directories: DestinationCache | None = None,
+    resolved_roots: ResolvedRoots | None = None,
 ) -> Path:
-    parts = relative.parts
+    return destination_internal_parts(
+        target,
+        relative.parts,
+        relative,
+        resolved_directories=resolved_directories,
+        resolved_roots=resolved_roots,
+    )
+
+
+def destination_internal_parts(
+    target: InstallTarget,
+    parts: tuple[str, ...],
+    display_relative: PurePosixPath | str,
+    *,
+    resolved_directories: DestinationCache | None = None,
+    resolved_roots: ResolvedRoots | None = None,
+) -> Path:
+    return destination_internal_parts_with_text(
+        target,
+        parts,
+        display_relative,
+        resolved_directories=resolved_directories,
+        resolved_roots=resolved_roots,
+    )[0]
+
+
+def destination_internal_parts_with_text(
+    target: InstallTarget,
+    parts: tuple[str, ...],
+    display_relative: PurePosixPath | str,
+    *,
+    resolved_directories: DestinationCache | None = None,
+    resolved_roots: ResolvedRoots | None = None,
+) -> tuple[Path, str]:
     if not parts or not parts[0].endswith(".data"):
-        return safe_destination(
+        return _safe_destination_parts_with_text(
             target.purelib,
-            relative,
+            parts,
+            display_relative,
             resolved_directories=resolved_directories,
             resolved_roots=resolved_roots,
         )
@@ -45,13 +95,14 @@ def destination_internal(
         "data",
         "headers",
     }:
-        raise InstallationError(f"invalid wheel data path: {relative}")
+        raise InstallationError(f"invalid wheel data path: {display_relative}")
     base = getattr(target, parts[1])
-    return safe_destination(
-                    base,
-                    PurePosixPath(*parts[2:]),
-                    resolved_directories=resolved_directories,
-                    resolved_roots=resolved_roots,
+    return _safe_destination_parts_with_text(
+        base,
+        parts[2:],
+        display_relative,
+        resolved_directories=resolved_directories,
+        resolved_roots=resolved_roots,
     )
 
 
@@ -59,11 +110,47 @@ def safe_destination(
     root: Path,
     relative: PurePosixPath,
     *,
-    resolved_directories: dict[tuple[Path, PurePosixPath], Path] | None = None,
-    resolved_roots: dict[Path, Path] | None = None,
+    resolved_directories: DestinationCache | None = None,
+    resolved_roots: ResolvedRoots | None = None,
 ) -> Path:
-    parent = relative.parent
-    cache_key = (root, parent)
+    return _safe_destination_parts_with_text(
+        root,
+        relative.parts,
+        relative,
+        resolved_directories=resolved_directories,
+        resolved_roots=resolved_roots,
+    )[0]
+
+
+def _safe_destination_parts(
+    root: Path,
+    parts: tuple[str, ...],
+    display_relative: PurePosixPath,
+    *,
+    resolved_directories: DestinationCache | None = None,
+    resolved_roots: ResolvedRoots | None = None,
+) -> Path:
+    return _safe_destination_parts_with_text(
+        root,
+        parts,
+        display_relative,
+        resolved_directories=resolved_directories,
+        resolved_roots=resolved_roots,
+    )[0]
+
+
+def _safe_destination_parts_with_text(
+    root: Path,
+    parts: tuple[str, ...],
+    display_relative: PurePosixPath | str,
+    *,
+    resolved_directories: DestinationCache | None = None,
+    resolved_roots: ResolvedRoots | None = None,
+) -> tuple[Path, str]:
+    root_text = os.fspath(root)
+    parent_parts = parts[:-1]
+    parent_text = os.path.join(*parent_parts) if parent_parts else ""
+    cache_key = (root_text, parent_text)
     resolved_parent = (
         resolved_directories.get(cache_key)
         if resolved_directories is not None
@@ -71,22 +158,28 @@ def safe_destination(
     )
     if resolved_parent is None:
         resolved_root = (
-            resolved_roots.get(root) if resolved_roots is not None else None
+            resolved_roots.get(root_text) if resolved_roots is not None else None
         )
         if resolved_root is None:
-            resolved_root = root.resolve(strict=False)
+            resolved_root = os.path.realpath(root_text)
             if resolved_roots is not None:
-                resolved_roots[root] = resolved_root
-        resolved_parent = (root / Path(*parent.parts)).resolve(strict=False)
+                resolved_roots[root_text] = resolved_root
+        resolved_parent_text = os.path.realpath(
+            os.path.join(root_text, *parent_parts)
+        )
         try:
-            resolved_parent.relative_to(resolved_root)
-        except ValueError as exc:
+            if os.path.commonpath((resolved_parent_text, resolved_root)) != resolved_root:
+                raise ValueError
+        except (OSError, ValueError) as exc:
             raise InstallationError(
-                f"wheel member escapes installation root: {relative}"
+                f"wheel member escapes installation root: {display_relative}"
             ) from exc
         if resolved_directories is not None:
-            resolved_directories[cache_key] = resolved_parent
-    return resolved_parent / relative.name
+            resolved_directories[cache_key] = resolved_parent_text
+        resolved_parent = resolved_parent_text
+    name = parts[-1] if parts else ""
+    destination_text = os.path.join(resolved_parent, name)
+    return Path(destination_text), destination_text
 
 
 def zip_mode(info: zipfile.ZipInfo) -> int | None:
@@ -95,6 +188,8 @@ def zip_mode(info: zipfile.ZipInfo) -> int | None:
 
 
 def record_metadata_internal(contents: bytes) -> tuple[str, str]:
+    if not contents:
+        return EMPTY_RECORD_METADATA
     digest = base64.urlsafe_b64encode(hashlib.sha256(contents).digest())
     return f"sha256={digest.rstrip(b'=').decode('ascii')}", str(len(contents))
 

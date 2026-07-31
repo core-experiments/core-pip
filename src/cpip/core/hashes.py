@@ -15,7 +15,7 @@ Hash = Any
 
 def file_hashes(path: str | Path) -> dict[str, str]:
     digest = hashlib.sha256()
-    with Path(path).open("rb") as stream:
+    with open(path, "rb") as stream:
         size = os.fstat(stream.fileno()).st_size
         buffer = bytearray(max(1, min(size, 1024 * 1024)))
         view = memoryview(buffer)

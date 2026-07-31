@@ -20,9 +20,26 @@ class CacheManager:
         self.wheel_dir = self.cache_dir / "wheels"
 
     def wheel_files(self) -> builtins.list[Path]:
-        if not self.wheel_dir.is_dir():
+        wheel_dir = os.fspath(self.wheel_dir)
+        if not os.path.isdir(wheel_dir):
             return []
-        return sorted(path for path in self.wheel_dir.rglob("*.whl") if path.is_file())
+        return sorted(
+            Path(os.path.join(current, name))
+            for current, _, files in os.walk(wheel_dir, followlinks=False)
+            for name in files
+            if name.endswith(".whl")
+        )
+
+    @staticmethod
+    def _files_under(root: Path) -> builtins.list[str]:
+        root_text = os.fspath(root)
+        if not os.path.isdir(root_text):
+            return []
+        return [
+            os.path.join(current, name)
+            for current, _, files in os.walk(root_text, followlinks=False)
+            for name in files
+        ]
 
     def list(self, pattern: str | None, *, absolute: bool) -> builtins.list[str]:
         wheels = self.wheel_files()
@@ -44,13 +61,11 @@ class CacheManager:
             files = [
                 path
                 for root in (self.http_dir, self.wheel_dir, self.cache_dir / "http")
-                if root.is_dir()
-                for path in root.rglob("*")
-                if path.is_file()
+                for path in self._files_under(root)
             ]
         else:
             files = [
-                path
+                os.fspath(path)
                 for path in self.wheel_files()
                 if pattern is not None
                 and fnmatch.fnmatch(
@@ -74,26 +89,32 @@ class CacheManager:
         bytes_removed = 0
         for path in files:
             try:
-                bytes_removed += path.stat().st_size
+                bytes_removed += os.stat(path).st_size
             except OSError:
                 pass
             if verbose:
                 print(f"Removed {path}")
-            path.unlink(missing_ok=True)
+            try:
+                os.unlink(path)
+            except FileNotFoundError:
+                pass
 
         selfcheck = self.cache_dir / "selfcheck.json"
-        if purge and selfcheck.is_file():
-            selfcheck.unlink()
+        if purge and os.path.isfile(os.fspath(selfcheck)):
+            os.unlink(os.fspath(selfcheck))
             print("Removed legacy selfcheck.json file")
 
         directories_removed = 0
-        for directory in sorted(
-            (path for path in self.cache_dir.rglob("*") if path.is_dir()),
-            key=lambda path: len(path.parts),
-            reverse=True,
-        ):
+        directories = [
+            os.path.join(current, name)
+            for current, directory_names, _ in os.walk(
+                os.fspath(self.cache_dir), topdown=False, followlinks=False
+            )
+            for name in directory_names
+        ]
+        for directory in directories:
             try:
-                directory.rmdir()
+                os.rmdir(directory)
             except OSError:
                 continue
             directories_removed += 1

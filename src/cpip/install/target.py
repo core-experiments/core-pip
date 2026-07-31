@@ -94,13 +94,15 @@ class InstallTarget:
     def destination(self, relative: str, *, base: str = "purelib") -> Path:
         """Return a validated destination for a wheel-relative path."""
         root = getattr(self, base)
-        destination = (root / relative).resolve(strict=False)
-        root = root.resolve(strict=False)
+        root_text = os.fspath(root)
+        destination_text = os.path.realpath(os.path.join(root_text, relative))
+        resolved_root = os.path.realpath(root_text)
         try:
-            destination.relative_to(root)
-        except ValueError as exc:
+            if os.path.commonpath((destination_text, resolved_root)) != resolved_root:
+                raise ValueError
+        except (OSError, ValueError) as exc:
             raise ValueError(f"path escapes installation target: {relative!r}") from exc
-        return destination
+        return Path(destination_text)
 
 
 def apply_root(scheme: Scheme, root: Path) -> Scheme:

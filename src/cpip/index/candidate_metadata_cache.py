@@ -22,11 +22,12 @@ CacheValue = tuple[str, str, tuple[str, ...], tuple[str, ...], str | None]
 class CandidateMetadataCache:
     """Process-local metadata cache backed by an atomic marshal snapshot."""
 
-    __slots__ = ("entries", "path", "dirty")
+    __slots__ = ("decoded", "entries", "path", "dirty")
 
     def __init__(self, cache_dir: str | os.PathLike[str]) -> None:
         self.path = Path(cache_dir) / NAME
         self.entries: dict[CacheKey, CacheValue] = {}
+        self.decoded: dict[CacheKey, CandidateMetadata] = {}
         self.dirty = False
         self.load()
         atexit.register(self.flush)
@@ -72,6 +73,9 @@ class CandidateMetadataCache:
         )
 
     def get(self, key: tuple[str, str, tuple[str, ...], str]) -> CandidateMetadata | None:
+        decoded = self.decoded.get(key)
+        if decoded is not None:
+            return decoded
         value = self.entries.get(key)
         if value is None:
             return None
@@ -82,13 +86,15 @@ class CandidateMetadataCache:
         )
         if len(dependencies) != len(value[2]):
             return None
-        return CandidateMetadata(
+        metadata = CandidateMetadata(
             name=value[0],
             version=Version(value[1]),
             dependencies=dependencies,
             provided_extras=frozenset(value[3]),
             requires_python=value[4],
         )
+        self.decoded[key] = metadata
+        return metadata
 
     def put(
         self,
@@ -96,7 +102,9 @@ class CandidateMetadataCache:
         metadata: CandidateMetadata,
     ) -> None:
         if key not in self.entries and len(self.entries) >= MAX_ENTRIES:
-            self.entries.pop(next(iter(self.entries)))
+            evicted = next(iter(self.entries))
+            self.entries.pop(evicted)
+            self.decoded.pop(evicted, None)
         self.entries[key] = (
             metadata.name,
             str(metadata.version),
@@ -104,6 +112,7 @@ class CandidateMetadataCache:
             tuple(sorted(metadata.provided_extras)),
             metadata.requires_python,
         )
+        self.decoded[key] = metadata
         self.dirty = True
 
     def flush(self) -> None:

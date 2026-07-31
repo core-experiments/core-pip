@@ -77,3 +77,13 @@ class InstallWheelManyFiles(ManyFilesArchive):
 
     def time_install_wheel_many_files(self, state: dict[str, str]) -> None:
         self.installer.install(state["wheel"])
+
+
+class InstallWheelManyFilesCompiled(InstallWheelManyFiles):
+    """Measure the explicit bytecode-compilation installation path."""
+
+    def setup(self, state: dict[str, str]) -> None:
+        self.destination = Path.cwd() / "uv-many-files-install-compiled"
+        shutil.rmtree(self.destination, ignore_errors=True)
+        target = InstallTarget.from_options("manyfiles", target=str(self.destination))
+        self.installer = WheelInstaller(target, pycompile=True)

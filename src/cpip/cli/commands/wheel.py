@@ -137,11 +137,11 @@ def run_wheel(args: list[str]) -> int:
         constraints=bundle.constraints,
     ).resolve(requirements)
     wheel_dir = Path(options.wheel_dir)
-    wheel_dir.mkdir(parents=True, exist_ok=True)
+    os.makedirs(os.fspath(wheel_dir), exist_ok=True)
     built_names: list[str] = []
     for candidate in plan.candidates:
         source = candidate.path
-        if source.suffix != ".whl":
+        if os.path.splitext(os.fspath(source))[1] != ".whl":
             source = build_wheel_from_source(
                 source,
                 wheel_dir=wheel_dir,
@@ -151,7 +151,9 @@ def run_wheel(args: list[str]) -> int:
             )
         else:
             destination = wheel_dir / source.name
-            if source.resolve() != destination.resolve():
+            if os.path.realpath(os.fspath(source)) != os.path.realpath(
+                os.fspath(destination)
+            ):
                 shutil.copy2(source, destination)
             source = destination
         built_names.append(wheel_candidate(source).name)

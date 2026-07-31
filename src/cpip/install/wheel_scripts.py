@@ -11,21 +11,25 @@ from pathlib import Path
 
 
 def rewrite_shebang(path: Path, executable: str | None) -> None:
-    contents = path.read_bytes()
+    with open(path, "rb") as file:
+        contents = file.read()
     if contents.startswith(b"#!python\n"):
-        path.write_bytes(
-            f"#!{executable or sys.executable}\n".encode()
-            + contents[len(b"#!python\n") :]
-        )
+        with open(path, "wb") as file:
+            file.write(
+                f"#!{executable or sys.executable}\n".encode()
+                + contents[len(b"#!python\n") :]
+            )
 
 
 def entry_point_scripts(path: Path) -> dict[str, tuple[str, bool]]:
-    if not path.is_file():
+    if not os.path.isfile(path):
         return {}
     active = False
     result: dict[str, tuple[str, bool]] = {}
     gui = False
-    for raw_line in path.read_text(encoding="utf-8").splitlines():
+    with open(path, encoding="utf-8") as file:
+        lines = file.read().splitlines()
+    for raw_line in lines:
         line = raw_line.strip()
         if line.startswith("[") and line.endswith("]"):
             section = line[1:-1].strip()
@@ -74,10 +78,13 @@ def script_matches(path: Path, scripts: dict[str, tuple[str, bool]]) -> bool:
     entry = attribute or "main"
     try:
         if is_executable:
-            with zipfile.ZipFile(io.BytesIO(path.read_bytes())) as archive:
+            with open(path, "rb") as file:
+                contents = file.read()
+            with zipfile.ZipFile(io.BytesIO(contents)) as archive:
                 text = archive.read("__main__.py").decode("utf-8")
         else:
-            text = path.read_text(encoding="utf-8")
+            with open(path, encoding="utf-8") as file:
+                text = file.read()
     except (OSError, KeyError, UnicodeDecodeError, zipfile.BadZipFile):
         return False
     return f"from {module} import {entry}" in text
