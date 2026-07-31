@@ -44,6 +44,7 @@ def run_install(args: list[str]) -> int:
         DistributionNotFound,
         InstallationError,
     )
+    from cpip.core.appdirs import user_cache_dir
     from cpip.core.format_control import FormatControl
     from cpip.core.packaging import (
         canonicalize_name,
@@ -249,6 +250,13 @@ def run_install(args: list[str]) -> int:
         no_input=options.no_input,
         keyring_provider=options.keyring_provider,
         proxy=options.proxy,
+        cache_dir=(
+            None
+            if options.no_cache_dir
+            else options.cache_dir
+            or os.environ.get("CPIP_CACHE_DIR")
+            or user_cache_dir("cpip")
+        ),
     )
     if bundle.find_links:
         os.environ["CPIP_FIND_LINKS"] = " ".join(bundle.find_links)
@@ -369,8 +377,6 @@ def run_install(args: list[str]) -> int:
             source_requirements_by_url[constraint_requirement.req.url] = (
                 constraint_requirement
             )
-    from cpip.core.appdirs import user_cache_dir
-
     provider = CandidateProvider.from_options(
         find_links=bundle.find_links,
         index_url=bundle.index_url,
@@ -903,7 +909,15 @@ def run_install(args: list[str]) -> int:
     if options.report:
         from cpip.install.report import write_install_report
 
-        write_install_report(Path(options.report), report_items)
+        write_install_report(
+            Path(options.report),
+            report_items,
+            network_stats=(
+                bundle.session.network_stats.as_dict()
+                if bundle.session is not None and bundle.session.network_stats is not None
+                else None
+            ),
+        )
     if (
         installed
         and not options.dry_run

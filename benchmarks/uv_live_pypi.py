@@ -105,6 +105,7 @@ def run_internal(command: list[str]) -> None:
             "CPIP_DISABLE_CPIP_VERSION_CHECK": "1",
             "CPIP_NO_INPUT": "1",
             "CPIP_QUIET": "1",
+            "CPIP_BENCH_NETWORK_STATS": "1",
         }
     )
     try:

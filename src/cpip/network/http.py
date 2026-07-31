@@ -5,10 +5,13 @@ from __future__ import annotations
 import base64
 import email.message
 import email.utils
+import gzip
 import io
 import json
 import logging
+import os
 import ssl
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -27,6 +30,7 @@ from cpip.network.cache import SafeFileCache
 
 logger = logging.getLogger(__name__)
 RETRY_STATUS_CODES = frozenset((500, 502, 503, 520, 527))
+MAX_IDLE_CONNECTIONS_PER_ORIGIN = 8
 
 
 class HttpRequest:
@@ -109,6 +113,119 @@ class HttpResponse:
             close()
 
 
+class PersistentConnectionPool:
+    """A bounded pool of reusable connections for one HTTP origin."""
+
+    def __init__(self, create_connection: Any, max_connections: int) -> None:
+        self.create_connection = create_connection
+        self.max_connections = max_connections
+        self.condition = threading.Condition()
+        self.idle: list[Any] = []
+        self.created = 0
+
+    def acquire(self) -> Any:
+        with self.condition:
+            while not self.idle and self.created >= self.max_connections:
+                self.condition.wait()
+            if self.idle:
+                return self.idle.pop()
+            self.created += 1
+        try:
+            return self.create_connection()
+        except BaseException:
+            with self.condition:
+                self.created -= 1
+                self.condition.notify()
+            raise
+
+    def release(self, connection: Any) -> None:
+        with self.condition:
+            self.idle.append(connection)
+            self.condition.notify()
+
+    def discard(self, connection: Any) -> None:
+        del connection
+        with self.condition:
+            self.created -= 1
+            self.condition.notify()
+
+    def close(self) -> None:
+        with self.condition:
+            idle = self.idle
+            self.idle = []
+            self.created -= len(idle)
+        for connection in idle:
+            connection.close()
+
+
+class InFlightRequest:
+    """State shared by callers waiting for one network request."""
+
+    def __init__(self) -> None:
+        self.event = threading.Event()
+        self.response: tuple[int, str, str, Mapping[str, str] | email.message.Message, bytes] | None = None
+        self.error: BaseException | None = None
+
+
+class NetworkStats:
+    """Optional counters for diagnosing network behavior."""
+
+    __slots__ = (
+        "cache_hits",
+        "coalesced_waiters",
+        "network_requests",
+        "catalog_requests",
+        "metadata_requests",
+        "pypi_json_requests",
+        "artifact_requests",
+        "other_requests",
+    )
+
+    def __init__(self) -> None:
+        self.cache_hits = 0
+        self.coalesced_waiters = 0
+        self.network_requests = 0
+        self.catalog_requests = 0
+        self.metadata_requests = 0
+        self.pypi_json_requests = 0
+        self.artifact_requests = 0
+        self.other_requests = 0
+
+    def as_dict(self) -> dict[str, int]:
+        return {
+            "cache_hits": self.cache_hits,
+            "coalesced_waiters": self.coalesced_waiters,
+            "network_requests": self.network_requests,
+            "catalog_requests": self.catalog_requests,
+            "metadata_requests": self.metadata_requests,
+            "pypi_json_requests": self.pypi_json_requests,
+            "artifact_requests": self.artifact_requests,
+            "other_requests": self.other_requests,
+        }
+
+
+def request_kind(url: str) -> str:
+    path = urllib.parse.urlsplit(url).path.lower()
+    if "/simple/" in path and path.endswith("/"):
+        return "catalog"
+    if path.endswith(".metadata"):
+        return "metadata"
+    if "/pypi/" in path and path.endswith("/json"):
+        return "pypi_json"
+    if path.endswith((".whl", ".tar.gz", ".zip", ".tar.bz2", ".tar.xz")):
+        return "artifact"
+    return "other"
+
+
+def decode_response_body(body: bytes, headers: Any) -> bytes:
+    if str(headers.get("Content-Encoding", "")).lower() != "gzip":
+        return body
+    body = gzip.decompress(body)
+    del headers["Content-Encoding"]
+    headers["Content-Length"] = str(len(body))
+    return body
+
+
 def timeout_value(
     timeout: float | tuple[float | None, float | None] | None,
 ) -> float | None:
@@ -133,7 +250,7 @@ class NetworkSession:
     ) -> None:
         self.headers: dict[str, str] = {
             "User-Agent": self.user_agent(),
-            "Accept-Encoding": "identity",
+            "Accept-Encoding": "gzip",
         }
         self.proxies: dict[str, str] | None = None
         self.cpip_proxy: str | None = None
@@ -149,6 +266,15 @@ class NetworkSession:
         self.auth: Any = MultiDomainBasicAuth(index_urls=index_urls)
         self.cache = SafeFileCache(cache) if isinstance(cache, str) else cache
         self.trusted_hosts = {host.lower().split(":", 1)[0] for host in trusted_hosts}
+        self.connection_pools: dict[tuple[Any, ...], PersistentConnectionPool] = {}
+        self.connection_pools_lock = threading.Lock()
+        self.inflight_requests: dict[tuple[Any, ...], InFlightRequest] = {}
+        self.inflight_requests_lock = threading.Lock()
+        self.network_stats = (
+            NetworkStats()
+            if os.environ.get("CPIP_BENCH_NETWORK_STATS") == "1"
+            else None
+        )
 
     @staticmethod
     def user_agent() -> str:
@@ -192,6 +318,8 @@ class NetworkSession:
     ) -> HttpResponse:
         request_headers = dict(self.headers)
         request_headers.update(headers or {})
+        if stream:
+            request_headers["Accept-Encoding"] = "identity"
         request_url = url
         username: str | None = None
         password: str | None = None
@@ -202,14 +330,24 @@ class NetworkSession:
             request_headers["Authorization"] = f"Basic {token}"
 
         request = HttpRequest(method, request_url, request_headers, data)
+        cached_metadata = None
         if method == "GET" and not stream and "Range" not in request_headers:
             cached = self.cached_response(request)
             if cached is not None:
+                if self.network_stats is not None:
+                    self.network_stats.cache_hits += 1
                 return cached
+            cached_metadata = self.stale_cache_metadata(request)
+            if cached_metadata is not None:
+                for name in ("etag", "last-modified"):
+                    value = cached_metadata.get(name)
+                    if value:
+                        request_headers[name.title()] = str(value)
+                request.headers = request_headers
         attempts = self.retries + 1
         for attempt in range(attempts):
             try:
-                response = self.open_internal(request, timeout=timeout)
+                response = self.open_coalesced(request, timeout=timeout, stream=stream)
             except TimeoutError as exc:
                 if attempt + 1 == attempts:
                     raise ConnectionTimeoutError(
@@ -243,10 +381,80 @@ class NetworkSession:
                 retry = self.retry_auth(response, request, headers or {}, data, timeout)
                 if retry is not None:
                     return retry
+            if response.status_code == 304 and cached_metadata is not None:
+                response.close()
+                return self.revalidated_response(request, cached_metadata)
             if method == "GET" and not stream and response.status_code == 200:
                 self.cache_response(response)
             return response
         raise AssertionError("unreachable")
+
+    def open_coalesced(
+        self, request: HttpRequest, timeout: Any, *, stream: bool = False
+    ) -> HttpResponse:
+        if request.method != "GET" or stream or "Range" in request.headers:
+            return self.open_internal(request, timeout, stream=stream)
+
+        key = (
+            request.method,
+            request.url,
+            tuple(sorted((name.lower(), value) for name, value in request.headers.items())),
+        )
+        with self.inflight_requests_lock:
+            flight = self.inflight_requests.get(key)
+            if flight is None:
+                flight = InFlightRequest()
+                self.inflight_requests[key] = flight
+                owner = True
+            else:
+                owner = False
+
+        if not owner:
+            if self.network_stats is not None:
+                self.network_stats.coalesced_waiters += 1
+            flight.event.wait()
+            if flight.error is not None:
+                raise flight.error
+            if flight.response is None:
+                raise NetworkConnectionError(
+                    f"coalesced request completed without a response: {request.url}"
+                )
+            status, reason, url, headers, body = flight.response
+            return HttpResponse(
+                status_code=status,
+                reason=reason,
+                url=url,
+                headers=headers,
+                raw=io.BytesIO(body),
+                request=request,
+            )
+
+        try:
+            if self.network_stats is not None:
+                self.network_stats.network_requests += 1
+                kind = request_kind(request.url)
+                setattr(
+                    self.network_stats,
+                    f"{kind}_requests",
+                    getattr(self.network_stats, f"{kind}_requests") + 1,
+                )
+            response = self.open_internal(request, timeout, stream=stream)
+            body = response.content
+            flight.response = (
+                response.status_code,
+                response.reason,
+                response.url,
+                response.headers,
+                body,
+            )
+            return response
+        except BaseException as exc:
+            flight.error = exc
+            raise
+        finally:
+            with self.inflight_requests_lock:
+                self.inflight_requests.pop(key, None)
+            flight.event.set()
 
     def cached_response(self, request: HttpRequest) -> HttpResponse | None:
         if self.cache is None:
@@ -268,7 +476,6 @@ class NetworkSession:
             return None
         if expires_at is not None and float(expires_at) <= time.time():
             body.close()
-            self.cache.delete(request.url)
             return None
         response_headers = email.message.Message()
         for name, value in headers.items():
@@ -283,6 +490,73 @@ class NetworkSession:
             from_cache=True,
         )
 
+    def stale_cache_metadata(self, request: HttpRequest) -> dict[str, Any] | None:
+        if self.cache is None:
+            return None
+        metadata = self.cache.get(request.url)
+        if metadata is None:
+            return None
+        try:
+            values = json.loads(metadata.decode("utf-8"))
+            if not isinstance(values, dict):
+                return None
+            expires_at = values.get("expires_at")
+            if expires_at is None or float(expires_at) > time.time():
+                return None
+            return values
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return None
+
+    def revalidated_response(
+        self, request: HttpRequest, metadata: dict[str, Any]
+    ) -> HttpResponse:
+        headers = metadata.get("headers", {})
+        if not isinstance(headers, dict):
+            headers = {}
+        expires_at = self.cache_expiry(headers)
+        if expires_at is None:
+            expires_at = time.time()
+        updated = dict(metadata)
+        updated["expires_at"] = expires_at
+        self.cache.set(request.url, json.dumps(updated).encode("utf-8"))
+        body = self.cache.get_body(request.url)
+        if body is None:
+            raise NetworkConnectionError(
+                f"Cached response body missing for url: {request.url}"
+            )
+        response_headers = email.message.Message()
+        for name, value in headers.items():
+            response_headers[name] = str(value)
+        return HttpResponse(
+            status_code=int(metadata.get("status", 200)),
+            reason=str(metadata.get("reason", "OK")),
+            url=request.url,
+            headers=response_headers,
+            raw=body,
+            request=request,
+            from_cache=True,
+        )
+
+    @staticmethod
+    def cache_expiry(
+        headers: Mapping[str, str] | email.message.Message,
+    ) -> float | None:
+        cache_control = headers.get("Cache-Control", "")
+        for directive in cache_control.split(","):
+            directive = directive.strip().lower()
+            if directive.startswith("max-age="):
+                try:
+                    return time.time() + max(0, int(directive[8:]))
+                except ValueError:
+                    break
+        expires = headers.get("Expires")
+        if expires:
+            try:
+                return email.utils.parsedate_to_datetime(expires).timestamp()
+            except (TypeError, ValueError, OverflowError):
+                pass
+        return None
+
     def cache_response(self, response: HttpResponse) -> None:
         if self.cache is None:
             return
@@ -293,23 +567,7 @@ class NetworkSession:
         if "no-store" in directives:
             return
         body = response.content
-        expires_at: float | None = None
-        for directive in directives:
-            if directive.startswith("max-age="):
-                try:
-                    expires_at = time.time() + max(0, int(directive[8:]))
-                except ValueError:
-                    pass
-                break
-        if expires_at is None:
-            expires = response.headers.get("Expires")
-            if expires:
-                try:
-                    parsed_expires = email.utils.parsedate_to_datetime(expires)
-                except (TypeError, ValueError, OverflowError):
-                    parsed_expires = None
-                if parsed_expires is not None:
-                    expires_at = parsed_expires.timestamp()
+        expires_at = self.cache_expiry(response.headers)
         self.cache.set(
             response.url,
             json.dumps(
@@ -319,6 +577,8 @@ class NetworkSession:
                     "url": response.url,
                     "headers": dict(response.headers.items()),
                     "expires_at": expires_at,
+                    "etag": response.headers.get("ETag"),
+                    "last_modified": response.headers.get("Last-Modified"),
                 }
             ).encode("utf-8"),
         )
@@ -326,7 +586,96 @@ class NetworkSession:
         response.raw = io.BytesIO(body)
         response.content_internal = body
 
-    def open_internal(self, request: HttpRequest, timeout: Any) -> HttpResponse:
+    def open_internal(
+        self, request: HttpRequest, timeout: Any, *, stream: bool = False
+    ) -> HttpResponse:
+        parsed = urllib.parse.urlsplit(request.url)
+        if (
+            not stream
+            and parsed.scheme in {"http", "https"}
+            and self.proxies is None
+        ):
+            return self.open_persistent(request, parsed, timeout)
+        return self.open_with_urllib(request, timeout, stream=stream)
+
+    def open_persistent(
+        self,
+        request: HttpRequest,
+        parsed: urllib.parse.SplitResult,
+        timeout: Any,
+    ) -> HttpResponse:
+        import http.client
+
+        hostname = parsed.hostname
+        if hostname is None:
+            return self.open_with_urllib(request, timeout)
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        key = (parsed.scheme, hostname, port, str(self.verify), self.cert)
+
+        def create_connection() -> Any:
+            if parsed.scheme == "https":
+                if hostname.lower() in self.trusted_hosts or self.verify is False:
+                    context = ssl._create_unverified_context()
+                else:
+                    context = ssl.create_default_context(
+                        cafile=self.verify if isinstance(self.verify, str) else None
+                    )
+                    if self.cert:
+                        context.load_cert_chain(self.cert)
+                return http.client.HTTPSConnection(
+                    hostname, port, context=context, timeout=timeout_value(timeout or self.timeout)
+                )
+            return http.client.HTTPConnection(
+                hostname, port, timeout=timeout_value(timeout or self.timeout)
+            )
+
+        with self.connection_pools_lock:
+            pool = self.connection_pools.get(key)
+            if pool is None:
+                pool = PersistentConnectionPool(
+                    create_connection, MAX_IDLE_CONNECTIONS_PER_ORIGIN
+                )
+                self.connection_pools[key] = pool
+        connection = pool.acquire()
+        connection.timeout = timeout_value(timeout or self.timeout)
+        target = parsed.path or "/"
+        if parsed.query:
+            target = f"{target}?{parsed.query}"
+        try:
+            connection.request(
+                request.method,
+                target,
+                body=request.body,
+                headers=request.headers,
+            )
+            raw = connection.getresponse()
+            body = raw.read()
+            body = decode_response_body(body, raw.msg)
+            if raw.status in range(300, 400):
+                connection.close()
+                pool.discard(connection)
+                return self.open_with_urllib(request, timeout)
+            if raw.will_close:
+                connection.close()
+                pool.discard(connection)
+            else:
+                pool.release(connection)
+            return HttpResponse(
+                status_code=raw.status,
+                reason=raw.reason,
+                url=request.url,
+                headers=raw.msg,
+                raw=io.BytesIO(body),
+                request=request,
+            )
+        except (http.client.HTTPException, OSError) as exc:
+            connection.close()
+            pool.discard(connection)
+            raise urllib.error.URLError(exc) from exc
+
+    def open_with_urllib(
+        self, request: HttpRequest, timeout: Any, *, stream: bool = False
+    ) -> HttpResponse:
         parsed = urllib.parse.urlsplit(request.url)
         context = None
         if parsed.hostname and parsed.hostname.lower() in self.trusted_hosts:
@@ -370,12 +719,13 @@ class NetworkSession:
                 request=request,
             )
         headers = raw.headers
+        body = raw if stream else io.BytesIO(decode_response_body(raw.read(), headers))
         return HttpResponse(
             status_code=getattr(raw, "status", getattr(raw, "code", 200)),
             reason=getattr(raw, "reason", "OK"),
             url=raw.geturl(),
             headers=headers,
-            raw=raw,
+            raw=body,
             request=request,
         )
 

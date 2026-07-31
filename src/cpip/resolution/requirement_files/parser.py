@@ -26,6 +26,7 @@ from cpip.resolution.requirement_files.options import (
     strip_matching_quotes,
 )
 from cpip.resolution.requirement_files.pylock import is_pylock_reference, parse_pylock
+from cpip.index.prefetch import Prefetcher
 
 if TYPE_CHECKING:
     from cpip.index.provider import CandidateProvider
@@ -43,6 +44,28 @@ EDITABLE_OPTIONS = frozenset(("-e", "--editable"))
 BOOLEAN_OPTIONS = frozenset(("--no-index", "--pre", "--require-hashes"))
 
 
+class RequirementFilePrefetcher:
+    """Lazily schedule remote requirement-file reads."""
+
+    def __init__(self, session: NetworkSession) -> None:
+        self.session = session
+        self.worker: Prefetcher[Any, str] | None = None
+
+    def submit(self, url: str) -> None:
+        if self.worker is None:
+            self.worker = Prefetcher(self.session.get, max_workers=8)
+        self.worker.submit(url, url)
+
+    def take(self, url: str) -> Any:
+        if self.worker is None:
+            return None
+        return self.worker.take(url)
+
+    def close(self) -> None:
+        if self.worker is not None:
+            self.worker.close()
+
+
 def parse_requirements(
     filename: str,
     session: NetworkSession,
@@ -50,14 +73,19 @@ def parse_requirements(
     options: Any = None,
     constraint: bool = False,
 ) -> list[ParsedRequirement]:
-    return parse_requirements_internal(
-        filename,
-        session,
-        provider=provider,
-        options=options,
-        constraint=constraint,
-        stack=[],
-    )
+    prefetcher = RequirementFilePrefetcher(session)
+    try:
+        return parse_requirements_internal(
+            filename,
+            session,
+            provider=provider,
+            options=options,
+            constraint=constraint,
+            stack=[],
+            prefetcher=prefetcher,
+        )
+    finally:
+        prefetcher.close()
 
 
 def parse_requirements_internal(
@@ -68,6 +96,7 @@ def parse_requirements_internal(
     options: Any,
     constraint: bool,
     stack: list[str],
+    prefetcher: RequirementFilePrefetcher,
 ) -> list[ParsedRequirement]:
     normalized = normalize_reference(filename, None)
     if normalized in stack:
@@ -80,7 +109,8 @@ def parse_requirements_internal(
         try:
             from cpip.network.utils import raise_for_status
 
-            response = session.get(normalized)
+            future = prefetcher.take(normalized)
+            response = future.result() if future is not None else session.get(normalized)
             raise_for_status(response)
             content = response.text
         except InstallationError:
@@ -177,6 +207,7 @@ def parse_requirements_internal(
         processed.append((line_number, line))
     if pending is not None:
         processed.append(pending)
+    prefetch_remote_includes(processed, normalized, prefetcher, stack)
     for line_number, line in processed:
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
@@ -194,9 +225,46 @@ def parse_requirements_internal(
             options=options,
             constraint=constraint,
             stack=next_stack,
+            prefetcher=prefetcher,
         )
         results.extend(parsed)
     return results
+
+
+def prefetch_remote_includes(
+    processed: list[tuple[int, str]],
+    filename: str,
+    prefetcher: RequirementFilePrefetcher,
+    stack: list[str],
+) -> None:
+    """Start direct remote includes before parsing their preceding lines."""
+    for _, line in processed:
+        try:
+            tokens = shlex.split(line)
+        except ValueError:
+            continue
+        index = 0
+        while index < len(tokens):
+            token = tokens[index]
+            if "=" in token:
+                option, value = token.split("=", 1)
+            else:
+                option = token
+                if option not in REQUIREMENTS_OPTIONS | CONSTRAINT_OPTIONS:
+                    index += 1
+                    continue
+                if index + 1 >= len(tokens):
+                    break
+                index += 1
+                value = tokens[index]
+            if option in REQUIREMENTS_OPTIONS | CONSTRAINT_OPTIONS:
+                nested = normalize_reference(value, filename, as_path=True)
+                if (
+                    nested not in stack
+                    and urllib.parse.urlparse(nested).scheme in {"http", "https"}
+                ):
+                    prefetcher.submit(nested)
+            index += 1
 
 
 def parse_line(
@@ -209,6 +277,7 @@ def parse_line(
     options: Any,
     constraint: bool,
     stack: list[str],
+    prefetcher: RequirementFilePrefetcher,
 ) -> list[ParsedRequirement]:
     if line.lstrip().startswith("-"):
         try:
@@ -230,6 +299,7 @@ def parse_line(
                         options=options,
                         constraint=constraint,
                         stack=stack,
+                        prefetcher=prefetcher,
                     )
                 )
                 break
@@ -257,6 +327,7 @@ def parse_line(
                         options=options,
                         constraint=False,
                         stack=stack,
+                        prefetcher=prefetcher,
                     )
                 )
             elif option in CONSTRAINT_OPTIONS:
@@ -269,6 +340,7 @@ def parse_line(
                         options=options,
                         constraint=True,
                         stack=stack,
+                        prefetcher=prefetcher,
                     )
                 )
             elif option in FIND_LINKS_OPTIONS:

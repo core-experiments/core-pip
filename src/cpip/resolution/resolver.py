@@ -168,6 +168,15 @@ class Resolver(
         self,
         requirements_input: RequirementSet | Iterable[InstallRequirement] | list[str],
     ) -> InstallPlan:
+        try:
+            return self.resolve_internal(requirements_input)
+        finally:
+            self.provider.close()
+
+    def resolve_internal(
+        self,
+        requirements_input: RequirementSet | Iterable[InstallRequirement] | list[str],
+    ) -> InstallPlan:
         requirements = self.coerce_requirements(requirements_input)
         self.root_requirements = list(requirements)
         self.root_requirement_names = {

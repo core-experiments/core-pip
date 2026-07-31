@@ -39,6 +39,8 @@ from cpip.index.source_models import (
     SOURCE_ARTIFACT_KINDS,
 )
 from cpip.index.metadata_cache import get_wheel_metadata_cache
+from cpip.index.candidate_metadata_cache import get_candidate_metadata_cache
+from cpip.index.prefetch import Prefetcher
 
 logger = logging.getLogger(__name__)
 
@@ -131,6 +133,8 @@ class LazyWheelCandidate(WheelCandidate):
             self.materializer_internal.dry_run
             and self.record_internal.link.kind in SOURCE_ARTIFACT_KINDS
         ):
+            if not self.record_internal.link.is_file:
+                return Path(self.record_internal.link.filename)
             return self.materializer_internal.ensure_local(
                 self.record_internal,
                 local_path=(
@@ -166,6 +170,8 @@ class LazyWheelCandidate(WheelCandidate):
         if hashes:
             return dict(hashes)
         if self.record_internal.link.kind in SOURCE_ARTIFACT_KINDS:
+            if self.materializer_internal.dry_run and not self.record_internal.link.is_file:
+                return None
             local = self.materializer_internal.ensure_local(
                 self.record_internal,
                 local_path=(
@@ -230,13 +236,30 @@ class CandidateMaterializer:
             if wheel_cache_dir is not None
             else None
         )
+        self.persistent_candidate_metadata_cache = (
+            get_candidate_metadata_cache(wheel_cache_dir)
+            if wheel_cache_dir is not None
+            else None
+        )
         self.artifacts = None
         self.invalid_links: set[str] = set()
         self.wheel_candidates: dict[
             tuple[str, int, int, frozenset[str]], WheelCandidate
         ] = {}
         self.metadata_cache: dict[tuple[str, frozenset[str]], CandidateMetadata] = {}
+        self.release_metadata_cache: dict[
+            tuple[str, str],
+            tuple[
+                str,
+                Version,
+                tuple[Requirement, ...],
+                frozenset[str],
+                str | None,
+            ]
+            | None,
+        ] = {}
         self.local_artifacts: dict[str, Path] = {}
+        self.metadata_prefetcher: Prefetcher[Any, str] | None = None
 
     def ensure_local(
         self,
@@ -276,6 +299,7 @@ class CandidateMaterializer:
             )
             for candidate in accepted
         )
+        self.prefetch_metadata(records[:2])
 
         def generate() -> Iterator[WheelCandidate]:
             invalid_versions: set[tuple[str, Version]] = set()
@@ -320,6 +344,30 @@ class CandidateMaterializer:
 
         return CandidateStream(generate())
 
+    def prefetch_metadata(self, records: tuple[CandidateRecord, ...]) -> None:
+        if not self.dry_run or self.session is None:
+            return
+        for candidate in records:
+            if candidate.link.kind is not ArtifactKind.WHEEL:
+                continue
+            metadata_link = candidate.link.metadata_link()
+            if metadata_link is None:
+                continue
+            if self.metadata_prefetcher is None:
+                self.metadata_prefetcher = Prefetcher(self.session.get, max_workers=8)
+            self.metadata_prefetcher.submit(metadata_link.url, metadata_link.url)
+
+    def take_prefetched_metadata(self, url: str) -> Any:
+        if self.metadata_prefetcher is None:
+            return None
+        future = self.metadata_prefetcher.take(url)
+        return future.result() if future is not None else None
+
+    def close(self) -> None:
+        if self.metadata_prefetcher is not None:
+            self.metadata_prefetcher.close()
+            self.metadata_prefetcher = None
+
     def metadata_loader(
         self, candidate: CandidateRecord, requirement: Requirement
     ) -> LazyCandidateMetadata:
@@ -330,6 +378,43 @@ class CandidateMaterializer:
             cached = self.metadata_cache.get(key)
             if cached is not None:
                 return cached
+            persistent_key = (
+                candidate.link.url,
+                str(candidate.version),
+                tuple(sorted(requested_extras)),
+            )
+            if self.persistent_candidate_metadata_cache is not None:
+                cached = self.persistent_candidate_metadata_cache.get(persistent_key)
+                if cached is not None:
+                    self.metadata_cache[key] = cached
+                    return cached
+            if candidate.link.kind in SOURCE_ARTIFACT_KINDS and self.dry_run:
+                metadata = self.pypi_metadata(candidate, requested_extras)
+                if metadata is not None:
+                    self.metadata_cache[key] = metadata
+                    if self.persistent_candidate_metadata_cache is not None:
+                        self.persistent_candidate_metadata_cache.put(
+                            persistent_key, metadata
+                        )
+                    return metadata
+            if candidate.link.kind is ArtifactKind.WHEEL and self.dry_run:
+                metadata_link = candidate.link.metadata_link()
+                metadata = self.remote_wheel_metadata(
+                    candidate,
+                    requested_extras,
+                    response=(
+                        self.take_prefetched_metadata(metadata_link.url)
+                        if metadata_link is not None
+                        else None
+                    ),
+                )
+                if metadata is not None:
+                    self.metadata_cache[key] = metadata
+                    if self.persistent_candidate_metadata_cache is not None:
+                        self.persistent_candidate_metadata_cache.put(
+                            persistent_key, metadata
+                        )
+                    return metadata
             local_path = (
                 Path(candidate.link.file_path) if candidate.link.is_file else None
             )
@@ -402,9 +487,49 @@ class CandidateMaterializer:
                     requires_python=built.requires_python,
                 )
             self.metadata_cache[key] = metadata
+            if self.persistent_candidate_metadata_cache is not None:
+                self.persistent_candidate_metadata_cache.put(persistent_key, metadata)
             return metadata
 
         return LazyCandidateMetadata(load)
+
+    def remote_wheel_metadata(
+        self,
+        candidate: CandidateRecord,
+        requested_extras: frozenset[str],
+        response: Any = None,
+    ) -> CandidateMetadata | None:
+        if self.session is None:
+            return None
+        metadata_link = candidate.link.metadata_link()
+        if metadata_link is None:
+            return None
+        try:
+            if response is None:
+                response = self.session.get(metadata_link.url)
+            response.raise_for_status()
+            from cpip.index.wheel_metadata import parse_metadata_headers
+
+            headers = parse_metadata_headers(response.text)
+            name = headers.get("name", (None,))[0]
+            version = headers.get("version", (None,))[0]
+            if name is None or version is None:
+                return None
+            dependencies = tuple(
+                requirement
+                for value in headers.get("requires-dist", ())
+                if (requirement := parse_requirement(value)) is not None
+                if marker_applies(requirement.marker, extras=requested_extras)
+            )
+            return CandidateMetadata(
+                name=name,
+                version=Version(version),
+                dependencies=dependencies,
+                provided_extras=frozenset(headers.get("provides-extra", ())),
+                requires_python=(headers.get("requires-python") or [None])[0],
+            )
+        except (KeyError, OSError, TypeError, ValueError):
+            return None
 
     def pypi_metadata(
         self,
@@ -416,6 +541,23 @@ class CandidateMaterializer:
         host = urllib.parse.urlparse(source_url).hostname
         if host not in {"pypi.org", "pypi.python.org"}:
             return None
+        release_key = (candidate.canonical_name, str(candidate.version))
+        if release_key in self.release_metadata_cache:
+            release = self.release_metadata_cache[release_key]
+            if release is None:
+                return None
+            name, version, all_dependencies, extras, requires_python = release
+            return CandidateMetadata(
+                name=name,
+                version=version,
+                dependencies=tuple(
+                    requirement
+                    for requirement in all_dependencies
+                    if marker_applies(requirement.marker, extras=requested_extras)
+                ),
+                provided_extras=extras,
+                requires_python=requires_python,
+            )
         url = (
             "https://pypi.org/pypi/"
             f"{urllib.parse.quote(candidate.canonical_name)}/"
@@ -434,17 +576,30 @@ class CandidateMaterializer:
                 requirement
                 for value in tuple(info.get("requires_dist") or ())
                 if (requirement := parse_requirement(value)) is not None
-                if marker_applies(requirement.marker, extras=requested_extras)
             )
             extras = frozenset(info.get("provides_extra") or ())
+            release = (
+                str(info["name"]),
+                Version(str(info["version"])),
+                dependencies,
+                extras,
+                info.get("requires_python"),
+            )
+            self.release_metadata_cache[release_key] = release
+            name, version, all_dependencies, extras, requires_python = release
             return CandidateMetadata(
-                name=str(info["name"]),
-                version=Version(str(info["version"])),
-                dependencies=dependencies,
+                name=name,
+                version=version,
+                dependencies=tuple(
+                    requirement
+                    for requirement in all_dependencies
+                    if marker_applies(requirement.marker, extras=requested_extras)
+                ),
                 provided_extras=extras,
-                requires_python=info.get("requires_python"),
+                requires_python=requires_python,
             )
         except (KeyError, OSError, TypeError, ValueError):
+            self.release_metadata_cache[release_key] = None
             return None
 
     def iter_materialize(

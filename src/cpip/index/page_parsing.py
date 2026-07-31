@@ -11,6 +11,7 @@ from html.parser import HTMLParser
 from typing import Any, Callable
 
 from cpip.index.artifacts import ArtifactLocator
+from cpip.index.catalog_cache import load_links, save_links
 from cpip.index.datetime import parse_iso_datetime
 from cpip.index.hashes import SUPPORTED_RECORD_HASHES
 from cpip.index.links import Link
@@ -20,11 +21,12 @@ LinkFactory = Callable[..., Link]
 
 
 class IndexContent:
-    __slots__ = ("body", "content_type")
+    __slots__ = ("body", "content_type", "from_cache")
 
-    def __init__(self, body: str, content_type: str) -> None:
+    def __init__(self, body: str, content_type: str, from_cache: bool = False) -> None:
         self.body = body
         self.content_type = content_type
+        self.from_cache = from_cache
 
 
 class IndexPageParser:
@@ -46,9 +48,17 @@ class IndexPageParser:
             content = self.read(url)
         except (OSError, urllib.error.URLError):
             return []
+        if content.from_cache:
+            cached = load_links(getattr(self.session, "cache", None), url)
+            if cached is not None:
+                return cached
         if content.content_type.endswith("+json") or "json" in content.content_type:
-            return self.links_from_json(content.body, url)
-        return self.links_from_html(content.body, url)
+            links = self.links_from_json(content.body, url)
+        else:
+            links = self.links_from_html(content.body, url)
+        if self.session is not None:
+            save_links(getattr(self.session, "cache", None), url, links)
+        return links
 
     def read(self, url: str) -> IndexContent:
         local = self.artifacts.local_path(url)
@@ -75,6 +85,7 @@ class IndexPageParser:
             return IndexContent(
                 response.text,
                 response.headers.get("Content-Type", "text/html").split(";", 1)[0],
+                response.from_cache,
             )
         request = urllib.request.Request(url, headers=headers)
         parsed = urllib.parse.urlsplit(url)

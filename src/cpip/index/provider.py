@@ -5,6 +5,7 @@ import urllib.parse
 from bisect import bisect_left, bisect_right
 from types import MappingProxyType
 from pathlib import Path
+from threading import RLock
 from typing import TYPE_CHECKING, Any
 
 from cpip.core.errors import InstallationError
@@ -14,6 +15,7 @@ from cpip.core.release_control import ReleaseControl
 from cpip.index.candidates import InstallationCandidate
 from cpip.index.config import DEFAULT_INDEX_URL
 from cpip.index.links import Link
+from cpip.index.prefetch import Prefetcher
 from cpip.index.source_locations import (
     FindLinksSource,
     SimpleIndexSource,
@@ -94,6 +96,8 @@ class CandidateProvider:
         self.parsed_link_cache = {}
         self.matching_versions_cache = {}
         self.package_catalog_cache = {}
+        self.cache_lock = RLock()
+        self.prefetcher = None
         self.materializer_internal = None
 
     @classmethod
@@ -483,9 +487,27 @@ class CandidateProvider:
             allow_binary,
             allow_source,
         )
-        catalog = self.package_catalog_cache.get(cache_key)
+        with self.cache_lock:
+            catalog = self.package_catalog_cache.get(cache_key)
         if catalog is not None:
             return catalog.summaries
+        future = self.prefetcher.take(cache_key) if self.prefetcher is not None else None
+        if future is not None:
+            return future.result()
+        return self.load_available_versions(requirement, cache_key)
+
+    def load_available_versions(
+        self,
+        requirement: Requirement,
+        cache_key: tuple[str, bool, bool] | None = None,
+    ) -> tuple[CandidateSummary, ...]:
+        allow_binary, allow_source = self.allowed_formats_internal(requirement)
+        if cache_key is None:
+            cache_key = (
+                requirement.canonical_name,
+                allow_binary,
+                allow_source,
+            )
         versions: dict[tuple[str, bool], CandidateSummary] = {}
         links_by_version: dict[Version, list[Link]] = {}
         for link in self.catalog_links(requirement):
@@ -505,13 +527,15 @@ class CandidateProvider:
                         continue
                 except ValueError:
                     continue
-            parsed = self.parsed_link_cache.get(link)
+            with self.cache_lock:
+                parsed = self.parsed_link_cache.get(link)
             if parsed is None:
                 try:
                     parsed = InstallationCandidate.from_link(link, target=self.target)
                 except ValueError:
                     continue
-                self.parsed_link_cache[link] = parsed
+                with self.cache_lock:
+                    self.parsed_link_cache[link] = parsed
             if not isinstance(parsed, InstallationCandidate):
                 continue
             if not is_unnamed_direct_requirement_internal(requirement) and (
@@ -531,7 +555,7 @@ class CandidateProvider:
         summaries_by_version: dict[Version, list[CandidateSummary]] = {}
         for summary in result:
             summaries_by_version.setdefault(summary.version, []).append(summary)
-        self.package_catalog_cache[cache_key] = PackageCatalog(
+        catalog = PackageCatalog(
             links=tuple(link for links in links_by_version.values() for link in links),
             summaries=result,
             summary_versions=tuple(summary.version for summary in result),
@@ -545,7 +569,48 @@ class CandidateProvider:
                 {version: tuple(links) for version, links in links_by_version.items()}
             ),
         )
+        with self.cache_lock:
+            self.package_catalog_cache[cache_key] = catalog
         return result
+
+    def load_prefetched_versions(
+        self,
+        value: tuple[Requirement, tuple[str, bool, bool]],
+    ) -> tuple[CandidateSummary, ...]:
+        requirement, cache_key = value
+        return self.load_available_versions(requirement, cache_key)
+
+    def prefetch_available_versions(
+        self, requirements: tuple[Requirement, ...]
+    ) -> None:
+        """Fetch independent project catalogs in bounded background workers."""
+        if len(requirements) < 2 or self.session is None:
+            return
+
+        unique: dict[tuple[str, bool, bool], Requirement] = {}
+        for requirement in requirements:
+            if requirement.url is not None:
+                continue
+            allow_binary, allow_source = self.allowed_formats_internal(requirement)
+            key = (requirement.canonical_name, allow_binary, allow_source)
+            with self.cache_lock:
+                cached = key in self.package_catalog_cache
+            if not cached:
+                unique[key] = requirement
+        if not unique:
+            return
+        if self.prefetcher is None:
+            self.prefetcher = Prefetcher(self.load_prefetched_versions, max_workers=8)
+        for key, requirement in unique.items():
+            if not self.prefetcher.pending(key):
+                self.prefetcher.submit(key, (requirement, key))
+
+    def close(self) -> None:
+        if self.prefetcher is not None:
+            self.prefetcher.close()
+            self.prefetcher = None
+        if self.materializer_internal is not None:
+            self.materializer_internal.close()
 
     def available_versions_for(
         self, requirement: Requirement, version: Version

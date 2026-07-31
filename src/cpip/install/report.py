@@ -50,7 +50,11 @@ class ReportItem:
         self.editable = editable
 
 
-def write_install_report(path: Path, items: list[ReportItem]) -> None:
+def write_install_report(
+    path: Path,
+    items: list[ReportItem],
+    network_stats: dict[str, int] | None = None,
+) -> None:
     install_entries: list[dict[str, object]] = []
     seen: set[tuple[str, str, bool]] = set()
     for item in sorted(items, key=lambda item: not item.requested):
@@ -102,7 +106,10 @@ def write_install_report(path: Path, items: list[ReportItem]) -> None:
         if item.requested_extras:
             entry["requested_extras"] = list(item.requested_extras)
         install_entries.append(entry)
-    report = json.dumps({"version": "1", "install": install_entries})
+    report_values: dict[str, object] = {"version": "1", "install": install_entries}
+    if network_stats is not None:
+        report_values["cpip_network"] = network_stats
+    report = json.dumps(report_values)
     if os.fspath(path) == "-":
         print(report)
     else:

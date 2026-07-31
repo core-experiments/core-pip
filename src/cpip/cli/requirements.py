@@ -224,6 +224,7 @@ def collect_requirements(
     no_input: bool = False,
     keyring_provider: str = "auto",
     proxy: str | None = None,
+    cache_dir: str | None = None,
 ) -> RequirementsBundle:
     from cpip.index.provider import CandidateProvider
     from cpip.network.http import NetworkSession
@@ -270,7 +271,8 @@ def collect_requirements(
 
     option_state = argparse.Namespace(require_hashes=require_hashes)
     session = NetworkSession(
-        index_urls=[url for url in (bundle_index_url, *bundle_extra_index_urls) if url]
+        index_urls=[url for url in (bundle_index_url, *bundle_extra_index_urls) if url],
+        cache=(os.path.join(cache_dir, "http-v1") if cache_dir else None),
     )
     session.auth.prompting = not no_input
     session.auth.keyring_provider = keyring_provider

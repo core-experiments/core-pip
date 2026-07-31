@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import io
 import os
 from pathlib import Path
 
@@ -16,8 +17,15 @@ from cpip.index.directory_index import local_source_files
 from cpip.index.links import Link
 from cpip.index.provider import CandidateProvider
 from cpip.index.source_locations import FindLinksSource
-from cpip.index.source_models import ArtifactKind, MetadataFile, RejectionReason
+from cpip.index.source_models import (
+    ArtifactKind,
+    CandidateMetadata,
+    CandidateRecord,
+    MetadataFile,
+    RejectionReason,
+)
 from cpip.index.vcs import is_immutable_vcs_link, vcs_reference
+from cpip.network.http import HttpResponse
 from wheel_helpers import make_sdist, make_wheel
 
 
@@ -272,6 +280,127 @@ def test_candidate_materializer_reuses_stable_wheel_metadata(
     assert materialized == [wheel_path, wheel_path]
     assert provider.materializer_internal is not None
     assert len(provider.materializer_internal.wheel_candidates) == 1
+
+
+def test_dry_run_uses_pypi_metadata_before_building_sdist(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    candidate = CandidateRecord(
+        name="demo",
+        version=Version("1.0"),
+        link=Link.from_url(
+            "https://files.pythonhosted.org/packages/demo-1.0.tar.gz",
+            source_url="https://pypi.org/simple/demo/",
+        ),
+    )
+    materializer = CandidateMaterializer(dry_run=True)
+    expected = CandidateMetadata(
+        name="demo",
+        version=Version("1.0"),
+        dependencies=(),
+        provided_extras=frozenset(),
+        requires_python=">=3.9",
+    )
+    monkeypatch.setattr(materializer, "pypi_metadata", lambda *args: expected)
+
+    def fail_build(*args: object, **kwargs: object) -> None:
+        pytest.fail("dry-run should not invoke the source build backend")
+
+    monkeypatch.setattr(
+        "cpip.index.candidates.prepare_project_metadata", fail_build
+    )
+
+    metadata = materializer.metadata_loader(
+        candidate, parse_requirement("demo")
+    ).load()
+
+    assert metadata is expected
+
+
+def test_pypi_release_metadata_is_shared_by_artifacts() -> None:
+    first = CandidateRecord(
+        name="demo",
+        version=Version("1.0"),
+        link=Link.from_url(
+            "https://files.pythonhosted.org/packages/demo-1.0.tar.gz",
+            source_url="https://pypi.org/simple/demo/",
+        ),
+    )
+    second = CandidateRecord(
+        name="demo",
+        version=Version("1.0"),
+        link=Link.from_url(
+            "https://files.pythonhosted.org/packages/demo-1.0.zip",
+            source_url="https://pypi.org/simple/demo/",
+        ),
+    )
+
+    class Session:
+        calls = 0
+
+        def get(self, url: str) -> HttpResponse:
+            self.calls += 1
+            assert url == "https://pypi.org/pypi/demo/1.0/json"
+            return HttpResponse(
+                status_code=200,
+                reason="OK",
+                url=url,
+                headers={"Content-Type": "application/json"},
+                raw=io.BytesIO(
+                    b'{"info": {"name": "demo", "version": "1.0", '
+                    b'"requires_dist": ["base", "extra; extra == \'feature\'"]}}'
+                ),
+            )
+
+    session = Session()
+    materializer = CandidateMaterializer(dry_run=True, session=session)
+    first_metadata = materializer.pypi_metadata(first, frozenset())
+    second_metadata = materializer.pypi_metadata(second, frozenset({"feature"}))
+
+    assert session.calls == 1
+    assert [item.name for item in first_metadata.dependencies] == ["base"]
+    assert [item.name for item in second_metadata.dependencies] == ["base", "extra"]
+
+
+def test_dry_run_reads_detached_wheel_metadata_without_download(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    candidate = CandidateRecord(
+        name="demo",
+        version=Version("1.0"),
+        link=Link.from_url(
+            "https://files.pythonhosted.org/packages/demo-1.0-py3-none-any.whl",
+            source_url="https://pypi.org/simple/demo/",
+            metadata_file=MetadataFile(None),
+        ),
+    )
+
+    class Session:
+        def get(self, url: str) -> HttpResponse:
+            assert url.endswith("demo-1.0-py3-none-any.whl.metadata")
+            return HttpResponse(
+                status_code=200,
+                reason="OK",
+                url=url,
+                headers={"Content-Type": "text/plain"},
+                raw=io.BytesIO(
+                    b"Name: demo\nVersion: 1.0\nRequires-Dist: requests>=2\n"
+                ),
+            )
+
+    materializer = CandidateMaterializer(dry_run=True, session=Session())
+    monkeypatch.setattr(
+        materializer,
+        "ensure_local",
+        lambda *args, **kwargs: pytest.fail("wheel should not be downloaded"),
+    )
+
+    metadata = materializer.metadata_loader(
+        candidate, parse_requirement("demo")
+    ).load()
+
+    assert metadata.version == Version("1.0")
+    assert metadata.dependencies[0].raw == "requests>=2"
 
 
 def test_candidate_provider_parses_index_artifacts_once(

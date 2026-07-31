@@ -270,6 +270,24 @@ class ResolverSelectionOperations:
             direct: tuple[int, Requirement] | None = None
             best: tuple[int, Requirement] | None = None
             best_score: tuple[int, int, int] | None = None
+            prefetch: list[Requirement] = []
+            for name, entry_ids in pending.by_name.items():
+                if name in selected:
+                    continue
+                entry_id = (
+                    next(iter(entry_ids))
+                    if len(entry_ids) == 1
+                    else min(
+                        entry_ids,
+                        key=lambda item: pending.entries_internal[item].order,
+                    )
+                )
+                requirement = pending.entries_internal[entry_id].requirement
+                if requirement.url is None and not looks_like_path_requirement(
+                    requirement.raw
+                ):
+                    prefetch.append(requirement)
+            self.provider.prefetch_available_versions(tuple(prefetch))
             for name, entry_ids in pending.by_name.items():
                 if name in selected:
                     continue
@@ -292,11 +310,14 @@ class ResolverSelectionOperations:
                         direct = entry_id, requirement
                     continue
                 domain = self.domains_internal.get(name)
-                candidate_count = (
-                    domain.decision_count
-                    if domain is not None and domain.decision_count is not None
-                    else self.decision_candidate_count(requirement)
-                )
+                if domain is None or len(domain.constrained_requirements(self.apply_constraints)) <= 1:
+                    candidate_count = 10**9
+                else:
+                    candidate_count = (
+                        domain.decision_count
+                        if domain.decision_count is not None
+                        else self.decision_candidate_count(requirement)
+                    )
                 score = (
                     candidate_count or 10**9,
                     -self.conflict_activity[self.package_id_internal(name)],
