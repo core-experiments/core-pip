@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from cpip.resolution.fast_wheelhouse.archive import WheelhouseUnavailable
 from cpip.resolution.fast_wheelhouse.catalog import (
@@ -86,7 +86,6 @@ def search_candidates(
     load = load_candidate
     dependencies = dependencies_for_extras
     preflight = preflight_exact_dependencies
-    missing = object()
 
     def rollback(checkpoint: int, domain_checkpoint: int) -> None:
         while len(domain_trail) > domain_checkpoint:
@@ -157,10 +156,9 @@ def search_candidates(
         requirement = frame.requirement
         assert name is not None and requirement is not None
         path, version = frame.values[index]
-        candidate = loaded.get(path, missing)
-        if candidate is missing:
+        if path not in loaded:
             try:
-                candidate = load(
+                loaded[path] = load(
                     path,
                     metadata_cache,
                     (name, version),
@@ -168,10 +166,8 @@ def search_candidates(
                     path_is_absolute=True,
                 )
             except WheelhouseUnavailable:
-                candidate = None
-            loaded[path] = candidate
-        else:
-            candidate = cast(LocalWheelCandidate | None, candidate)
+                loaded[path] = None
+        candidate = loaded[path]
         if candidate is None:
             continue
         if candidate.requires_python:

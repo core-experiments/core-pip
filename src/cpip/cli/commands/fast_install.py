@@ -155,6 +155,7 @@ def install_resolved_pure_wheels(
             str,
             bool,
             tuple[str, bytes] | None,
+            int,
         ]
     ] = []
     destinations: set[str] = set()
@@ -183,7 +184,7 @@ def install_resolved_pure_wheels(
                         continue
                     if not is_safe_member(name) or name.endswith("/entry_points.txt"):
                         return False
-                    destination = os.path.join(target, *name.split("/"))
+                    destination = os.path.join(target, name.replace("/", os.sep))
                     if destination in destinations:
                         return False
                     destinations.add(destination)
@@ -208,8 +209,10 @@ def install_resolved_pure_wheels(
             if layout is None:
                 dist_info = wheel_members[0].rsplit("/", 1)[0]
                 preloaded_wheel = (wheel_members[0], wheel_contents)
+                wheel_index = names.index(wheel_members[0])
             else:
                 preloaded_wheel = None
+                wheel_index = -1
             prepared.append(
                 (
                     candidate,
@@ -220,6 +223,7 @@ def install_resolved_pure_wheels(
                     dist_info,
                     candidate.canonical_name in requested_roots,
                     preloaded_wheel,
+                    wheel_index,
                 )
             )
 
@@ -236,6 +240,7 @@ def install_resolved_pure_wheels(
                 dist_info,
                 requested,
                 preloaded_wheel,
+                wheel_index,
             ) in prepared:
                 if preloaded_wheel is None:
                     members = zip(
@@ -245,19 +250,17 @@ def install_resolved_pure_wheels(
                     )
                 else:
                     wheel_name, wheel_contents = preloaded_wheel
-                    read_names = [name for name in names if name != wheel_name]
-                    read_destinations = [
-                        destination
-                        for name, destination in zip(names, destinations_for_wheel)
-                        if name != wheel_name
-                    ]
-                    read_directories = [
-                        directory
-                        for name, directory in zip(names, directories_for_wheel)
-                        if name != wheel_name
-                    ]
-                    wheel_destination = destinations_for_wheel[names.index(wheel_name)]
-                    wheel_directory = directories_for_wheel[names.index(wheel_name)]
+                    read_names = names[:wheel_index] + names[wheel_index + 1 :]
+                    read_destinations = (
+                        destinations_for_wheel[:wheel_index]
+                        + destinations_for_wheel[wheel_index + 1 :]
+                    )
+                    read_directories = (
+                        directories_for_wheel[:wheel_index]
+                        + directories_for_wheel[wheel_index + 1 :]
+                    )
+                    wheel_destination = destinations_for_wheel[wheel_index]
+                    wheel_directory = directories_for_wheel[wheel_index]
                     members = zip(
                         read_destinations,
                         read_directories,

@@ -123,18 +123,24 @@ def unzip_file(filename: str, location: str, flatten: bool = True) -> None:
     no-ops per the python docs.
     """
     ensure_dir(location)
+    absolute_location = os.path.abspath(location)
     zipfp = open(filename, "rb")
     try:
         zip = zipfile.ZipFile(zipfp, allowZip64=True)
-        leading = has_leading_dir(zip.namelist()) and flatten
-        for info in zip.infolist():
+        infos = zip.infolist()
+        leading = flatten and has_leading_dir(info.filename for info in infos)
+        for info in infos:
             name = info.filename
             fn = name
             if leading:
                 fn = split_leading_dir(name)[1]
             fn = os.path.join(location, fn)
             dir = os.path.dirname(fn)
-            if not is_within_directory(location, fn):
+            absolute_fn = os.path.abspath(fn)
+            if not (
+                absolute_fn == absolute_location
+                or absolute_fn.startswith(absolute_location + os.sep)
+            ):
                 message = (
                     "The zip file ({}) has a file ({}) trying to install "
                     "outside target directory ({})"
@@ -147,7 +153,7 @@ def unzip_file(filename: str, location: str, flatten: bool = True) -> None:
                 ensure_dir(dir)
                 # Don't use read() to avoid allocating an arbitrarily large
                 # chunk of memory for the file's content
-                fp = zip.open(name)
+                fp = zip.open(info)
                 try:
                     with open(fn, "wb") as destfp:
                         shutil.copyfileobj(fp, destfp)
@@ -187,7 +193,8 @@ def untar_file(filename: str, location: str) -> None:
 
     tar = tarfile.open(filename, mode, encoding="utf-8")
     try:
-        leading = has_leading_dir([member.name for member in tar.getmembers()])
+        members = tar.getmembers()
+        leading = has_leading_dir(member.name for member in members)
 
         # PEP 706 added `tarfile.data_filter`, and made some other changes to
         # Python's tarfile module (see below). The features were backported to
@@ -195,7 +202,7 @@ def untar_file(filename: str, location: str) -> None:
         try:
             data_filter = tarfile.data_filter
         except AttributeError:
-            untar_without_filter(filename, location, tar, leading)
+            untar_without_filter(filename, location, tar, leading, members)
         else:
             mask = os.umask(0)
             os.umask(mask)
@@ -205,7 +212,7 @@ def untar_file(filename: str, location: str) -> None:
                 # Strip the leading directory from all files in the archive,
                 # including hardlink targets (which are relative to the
                 # unpack location).
-                for member in tar.getmembers():
+                for member in members:
                     name_lead, name_rest = split_leading_dir(member.name)
                     member.name = name_rest
                     if member.islnk():
@@ -277,12 +284,13 @@ def untar_without_filter(
     location: str,
     tar: tarfile.TarFile,
     leading: bool,
+    members: list[tarfile.TarInfo],
 ) -> None:
     """Fallback for Python without tarfile.data_filter"""
     # NOTE: This function can be removed once cpip requires CPython ≥ 3.12.​
     # PEP 706 added tarfile.data_filter, made tarfile extraction operations more secure.
     # This feature is fully supported from CPython 3.12 onward.
-    for member in tar.getmembers():
+    for member in members:
         fn = member.name
         if leading:
             fn = split_leading_dir(fn)[1]

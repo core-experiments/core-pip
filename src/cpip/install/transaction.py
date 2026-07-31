@@ -13,13 +13,15 @@ from cpip.core.errors import InstallationError
 
 
 class StagedFile:
-    __slots__ = ("source", "destination", "mode")
+    __slots__ = ("source", "destination", "source_text", "destination_text", "mode")
 
     def __init__(
         self, source: Path, destination: Path, mode: int | None = None
     ) -> None:
         self.source = source
         self.destination = destination
+        self.source_text = os.fspath(source)
+        self.destination_text = os.fspath(destination)
         self.mode = mode
 
 
@@ -53,7 +55,7 @@ class InstallTransaction:
 
     def validate(self) -> None:
         for item in self.staged_internal:
-            if not os.path.isfile(item.source):
+            if not os.path.isfile(item.source_text):
                 raise InstallationError(f"staged file does not exist: {item.source}")
             destination_exists = os.path.lexists(item.destination)
             self.destination_presence[item.destination] = destination_exists
@@ -65,7 +67,7 @@ class InstallTransaction:
                 if os.path.isfile(item.destination):
                     with open(item.destination, "rb") as destination_file:
                         destination_contents = destination_file.read()
-                    with open(item.source, "rb") as source_file:
+                    with open(item.source_text, "rb") as source_file:
                         source_contents = source_file.read()
                     if destination_contents == source_contents:
                         continue
@@ -85,25 +87,27 @@ class InstallTransaction:
         try:
             self.validate()
             created_directories: set[Path] = set()
+            backup_if_needed = self.backup_if_needed
+            makedirs = os.makedirs
+            fspath = os.fspath
+            replace = os.replace
+            chmod = os.chmod
+            append_created = self.created_internal.append
             for item in self.staged_internal:
-                self.backup_if_needed(item.destination)
+                backup_if_needed(item.destination)
                 destination_parent = item.destination.parent
                 if destination_parent not in created_directories:
-                    os.makedirs(os.fspath(destination_parent), exist_ok=True)
+                    makedirs(fspath(destination_parent), exist_ok=True)
                     created_directories.add(destination_parent)
                 try:
-                    os.replace(
-                        os.fspath(item.source), os.fspath(item.destination)
-                    )
+                    replace(item.source_text, item.destination_text)
                 except OSError as exc:
                     if exc.errno != errno.EXDEV:
                         raise
-                    shutil.move(
-                        os.fspath(item.source), os.fspath(item.destination)
-                    )
+                    shutil.move(item.source_text, item.destination_text)
                 if item.mode is not None:
-                    os.chmod(item.destination, item.mode)
-                self.created_internal.append(item.destination)
+                    chmod(item.destination, item.mode)
+                append_created(item.destination)
             for path in sorted(self.deletions, key=os.fspath):
                 if os.path.lexists(path):
                     self.backup_if_needed(path)

@@ -169,7 +169,8 @@ def install_wheel_internal(
         with zipfile.ZipFile(path) as archive:
             if validated_dist_info is None:
                 validated_dist_info, _ = parse_wheel(
-                    archive, Path(path).name[:-4].split("-", 1)[0]
+                    archive,
+                    os.path.basename(os.fspath(path))[:-4].split("-", 1)[0],
                 )
             for member in archive.infolist():
                 if member.is_dir():
@@ -399,7 +400,9 @@ def validate_wheel_batch(
     for candidate in candidates:
         path = candidate.path
         with zipfile.ZipFile(path) as archive:
-            dist_info, _ = parse_wheel(archive, Path(path).name[:-4].split("-", 1)[0])
+            dist_info, _ = parse_wheel(
+                archive, os.path.basename(os.fspath(path))[:-4].split("-", 1)[0]
+            )
             if validation_cache is not None:
                 validation_cache[os.fspath(path)] = dist_info
             for member in archive.infolist():
