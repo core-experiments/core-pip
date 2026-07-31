@@ -59,7 +59,7 @@ def existing_paths(
     paths = {
         (Path(distribution.location) / entry).resolve(strict=False) for entry in entries
     }
-    existing = {path for path in paths if path.exists() or path.is_symlink()}
+    existing = {path for path in paths if os.path.lexists(path)}
     return existing, existing
 
 

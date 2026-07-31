@@ -169,13 +169,14 @@ def untar_file(filename: str, location: str) -> None:
     no-ops per the python docs.
     """
     ensure_dir(location)
-    if filename.lower().endswith(".gz") or filename.lower().endswith(".tgz"):
+    filename_lower = filename.lower()
+    if filename_lower.endswith(".gz") or filename_lower.endswith(".tgz"):
         mode = "r:gz"
-    elif filename.lower().endswith(BZ2_EXTENSIONS):
+    elif filename_lower.endswith(BZ2_EXTENSIONS):
         mode = "r:bz2"
-    elif filename.lower().endswith(XZ_EXTENSIONS):
+    elif filename_lower.endswith(XZ_EXTENSIONS):
         mode = "r:xz"
-    elif filename.lower().endswith(".tar"):
+    elif filename_lower.endswith(".tar"):
         mode = "r"
     else:
         logger.warning(
@@ -385,12 +386,11 @@ class ArchiveExtractor:
             untar_file(self.filename, self.location)
             return
 
-        if self.filename.lower().endswith(ZIP_EXTENSIONS):
+        filename_lower = self.filename.lower()
+        if filename_lower.endswith(ZIP_EXTENSIONS):
             unzip_file(self.filename, self.location, flatten=zip_flatten)
             return
-        if self.filename.lower().endswith(
-            TAR_EXTENSIONS + BZ2_EXTENSIONS + XZ_EXTENSIONS
-        ):
+        if filename_lower.endswith(TAR_EXTENSIONS + BZ2_EXTENSIONS + XZ_EXTENSIONS):
             untar_file(self.filename, self.location)
             return
 

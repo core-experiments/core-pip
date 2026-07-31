@@ -33,6 +33,7 @@ class InstallTransaction:
         self.deletions: set[Path] = set()
         self.backups: list[tuple[Path, Path]] = []
         self.created_internal: list[Path] = []
+        self.destination_presence: dict[Path, bool] = {}
         self.temporary_internal = Path(tempfile.mkdtemp(prefix="cpip-install-stage-"))
         self.finished = False
 
@@ -54,8 +55,11 @@ class InstallTransaction:
         for item in self.staged_internal:
             if not os.path.isfile(item.source):
                 raise InstallationError(f"staged file does not exist: {item.source}")
+            destination_exists = os.path.lexists(item.destination)
+            self.destination_presence[item.destination] = destination_exists
             if (
-                os.path.exists(item.destination)
+                destination_exists
+                and os.path.exists(item.destination)
                 and normalized_internal(item.destination) not in self.owned
             ):
                 if os.path.isfile(item.destination):
@@ -131,7 +135,10 @@ class InstallTransaction:
             self.finish_successfully()
 
     def backup_if_needed(self, path: Path) -> None:
-        if not os.path.lexists(path):
+        if path in self.destination_presence:
+            if not self.destination_presence[path]:
+                return
+        elif not os.path.lexists(path):
             return
         backup = self.temporary_internal / str(len(self.backups))
         os.makedirs(os.fspath(backup.parent), exist_ok=True)

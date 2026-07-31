@@ -86,6 +86,12 @@ class LocalWheelSpecifier:
         self._wildcard_prefix = tuple(wildcard_prefix)
 
     def contains(self, version: LocalWheelVersion) -> bool:
+        if (
+            len(self.values) == 1
+            and self.values[0][0] == "=="
+            and isinstance(self.values[0][1], LocalWheelVersion)
+        ):
+            return version._normalized == self.values[0][1]._normalized
         for index, (operator, expected) in enumerate(self.values):
             if isinstance(expected, str):
                 prefix = self._wildcard_prefix[index]
@@ -140,11 +146,15 @@ class LocalWheelRequirement:
         specifier: LocalWheelSpecifier,
         extras: frozenset[str],
         marker: tuple[str, str] | None = None,
+        *,
+        _normalized_extras: bool = False,
     ) -> None:
         self.name = name
         self.specifier = specifier
         self.extras = (
-            frozenset(item.replace("_", "-").lower() for item in extras)
+            extras
+            if _normalized_extras
+            else frozenset(item.replace("_", "-").lower() for item in extras)
             if extras
             else EMPTY_EXTRAS
         )
@@ -154,10 +164,12 @@ class LocalWheelRequirement:
             self._marker_value = ""
             self._marker_expected = EMPTY_EXTRAS
         else:
-            _, value = marker
+            operator, value = marker
             self._marker_value = value.replace("_", "-").lower()
-            self._marker_expected = frozenset(
-                item.replace("_", "-").lower() for item in value.split(",")
+            self._marker_expected = (
+                frozenset(item.replace("_", "-").lower() for item in value.split(","))
+                if operator in {"in", "not in"}
+                else EMPTY_EXTRAS
             )
 
     def is_satisfied_by(self, version: LocalWheelVersion) -> bool:
@@ -245,7 +257,11 @@ def dependencies_for_extras(
         dependency
         if dependency.marker is None
         else LocalWheelRequirement(
-            dependency.name, dependency.specifier, dependency.extras, None
+            dependency.name,
+            dependency.specifier,
+            dependency.extras,
+            None,
+            _normalized_extras=True,
         )
         for dependency in candidate.dependencies
         if dependency.marker is None or dependency.marker_applies(extras)

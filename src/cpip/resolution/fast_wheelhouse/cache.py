@@ -8,9 +8,6 @@ from cpip.resolution.fast_wheelhouse.models import (
     LocalWheelVersion,
 )
 
-_URL_SAFE = frozenset(
-    b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~/:"
-)
 MetadataHeaders = dict[str, list[str]]
 CachedValue = tuple[str, str, bool]
 CachedDependency = tuple[

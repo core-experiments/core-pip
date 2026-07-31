@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 import pytest
@@ -31,6 +32,20 @@ def test_transaction_rejects_unowned_collision(tmp_path: Path) -> None:
         transaction.commit()
 
     assert destination.read_text(encoding="utf-8") == "unrelated"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="requires POSIX symlinks")
+def test_transaction_replaces_broken_symlink(tmp_path: Path) -> None:
+    destination = tmp_path / "demo.py"
+    destination.symlink_to(tmp_path / "missing.py")
+    source = tmp_path / "stage.py"
+    source.write_text("new", encoding="utf-8")
+
+    transaction = InstallTransaction()
+    transaction.add(source, destination)
+    transaction.commit()
+
+    assert destination.read_text(encoding="utf-8") == "new"
 
 
 def test_transaction_rejects_duplicate_destination(tmp_path: Path) -> None:

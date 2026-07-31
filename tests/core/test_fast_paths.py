@@ -16,6 +16,7 @@ from cpip.resolution.fast_local_wheelhouse import (
     parse_requirement,
     resolve,
 )
+from cpip.resolution.fast_wheelhouse.metadata import read_wheel_metadata
 
 
 def test_local_wheel_version_caches_comparison_key() -> None:
@@ -48,6 +49,19 @@ def test_compatible_release_keeps_original_precision() -> None:
 
 def test_quote_path_escapes_only_unsafe_bytes() -> None:
     assert quote_path("/tmp/demo wheel.whl") == "/tmp/demo%20wheel.whl"
+
+
+def test_metadata_falls_back_when_filename_dist_info_differs(tmp_path: Path) -> None:
+    wheel = tmp_path / "renamed-1.0-py3-none-any.whl"
+    with zipfile.ZipFile(wheel, "w") as archive:
+        archive.writestr(
+            "actual-1.0.dist-info/METADATA",
+            "Metadata-Version: 2.1\nName: actual\nVersion: 1.0\n",
+        )
+
+    metadata = read_wheel_metadata(str(wheel))
+
+    assert metadata["name"] == ["actual"]
 
 
 @pytest.mark.parametrize(

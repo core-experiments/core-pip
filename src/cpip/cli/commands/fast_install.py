@@ -241,7 +241,7 @@ def install_resolved_pure_wheels(
                     members = zip(
                         destinations_for_wheel,
                         directories_for_wheel,
-                        archive.read_many(names),
+                        archive.read_many(names, ordered_input=True),
                     )
                 else:
                     wheel_name, wheel_contents = preloaded_wheel
@@ -261,7 +261,7 @@ def install_resolved_pure_wheels(
                     members = zip(
                         read_destinations,
                         read_directories,
-                        archive.read_many(read_names),
+                        archive.read_many(read_names, ordered_input=True),
                     )
                     from itertools import chain
 

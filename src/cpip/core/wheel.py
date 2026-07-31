@@ -8,6 +8,7 @@ import sysconfig
 import zipfile
 from functools import cache, lru_cache
 from pathlib import Path
+from collections.abc import Collection
 from typing import TYPE_CHECKING, Protocol
 
 from .errors import InstallationError, InvalidWheelFilename, UnsupportedWheel
@@ -27,6 +28,18 @@ from .wheel_metadata import (
 if TYPE_CHECKING:
     from email.message import Message
     from email.parser import Parser as EmailParser
+
+MACOS_COMPATIBLE_ARCHES = {
+    "x86_64": frozenset(("x86_64", "intel", "universal")),
+    "i386": frozenset(("i386", "intel", "universal")),
+    "intel": frozenset(("intel", "universal")),
+    "arm64": frozenset(("arm64", "universal2")),
+    "aarch64": frozenset(("aarch64", "universal2")),
+    "ppc": frozenset(("ppc", "universal")),
+    "ppc64": frozenset(("ppc64", "universal")),
+    "universal": frozenset(("universal",)),
+    "universal2": frozenset(("universal2",)),
+}
 
 
 class MetadataCache(Protocol):
@@ -111,12 +124,29 @@ class WheelCandidate:
 
 
 class WheelTag:
-    __slots__ = ("interpreter", "abi", "platform")
+    __slots__ = (
+        "interpreter",
+        "abi",
+        "platform",
+        "_interpreter_lower",
+        "_abi_lower",
+        "_platform_lower",
+        "_platform_parts",
+    )
 
     def __init__(self, interpreter: str, abi: str, platform: str) -> None:
         self.interpreter = interpreter
         self.abi = abi
         self.platform = platform
+        self._interpreter_lower = interpreter.lower()
+        self._abi_lower = abi.lower()
+        self._platform_lower = platform.lower()
+        if self._platform_lower.startswith(("macosx_", "android_")):
+            self._platform_parts = tuple(self._platform_lower.split("_", 3))
+        elif self._platform_lower.startswith("ios_"):
+            self._platform_parts = tuple(self._platform_lower.split("_", 4))
+        else:
+            self._platform_parts = None
 
     interpreter: str
     abi: str
@@ -285,7 +315,7 @@ wheel_dependency_cache: dict[
 
 
 def parse_wheel_file(path: str | Path) -> WheelFile | None:
-    name = Path(path).name
+    name = os.path.basename(os.fspath(path))
     if not name.endswith(".whl"):
         return None
     stem = name[:-4]
@@ -386,15 +416,11 @@ def wheel_tag_rank(
     tags: tuple[WheelTag, ...], supported_tags: tuple[WheelTag, ...] | None = None
 ) -> int | None:
     supported = supported_wheel_tags() if supported_tags is None else supported_tags
-    ranks = [
-        index
-        for index, supported_tag in enumerate(supported)
-        for tag in tags
-        if tag_matches(supported_tag, tag)
-    ]
-    if not ranks:
-        return None
-    return min(ranks)
+    for index, supported_tag in enumerate(supported):
+        for tag in tags:
+            if tag_matches(supported_tag, tag):
+                return index
+    return None
 
 
 def wheel_archive_identity(
@@ -439,7 +465,7 @@ def project_wheel_dependencies(
 
 def wheel_candidate(
     path: str | Path,
-    extras: set[str] | None = None,
+    extras: Collection[str] | None = None,
     *,
     archive: zipfile.ZipFile | None = None,
     filename_info: tuple[str, str | Version] | None = None,
@@ -504,9 +530,9 @@ def wheel_candidate(
                 parse_requirement(value) for value in get_all_headers("Requires-Dist")
             ),
             provided_extras=frozenset(
-                value.strip()
+                stripped
                 for value in get_all_headers("Provides-Extra")
-                if value.strip()
+                if (stripped := value.strip())
             ),
             requires_python=get_header("Requires-Python"),
         )
@@ -587,6 +613,7 @@ def read_wheel_metadata_internal(
         expected_name = parsed[0] if parsed is not None else None
     if expected_name is not None:
         expected = canonicalize_name(expected_name).replace("-", "_")
+        expected_casefold = expected.casefold()
         matching = [
             name
             for name in metadata_names
@@ -594,7 +621,7 @@ def read_wheel_metadata_internal(
             and name.rsplit("/", 1)[0]
             .split(".", 1)[0]
             .casefold()
-            .startswith(expected.casefold())
+            .startswith(expected_casefold)
         ]
         if matching:
             metadata_names = matching
@@ -743,16 +770,22 @@ def legacy_build_tag(value: str | None) -> tuple[int, str] | tuple[()]:
 
 
 def tag_matches(supported: WheelTag, candidate: WheelTag) -> bool:
+    supported_interpreter = supported._interpreter_lower
+    candidate_interpreter = candidate._interpreter_lower
+    supported_abi = supported._abi_lower
+    candidate_abi = candidate._abi_lower
     return (
         interpreter_matches(
-            supported.interpreter.lower(),
-            candidate.interpreter.lower(),
-            candidate.abi.lower(),
+            supported_interpreter,
+            candidate_interpreter,
+            candidate_abi,
         )
-        and supported.abi.lower() == candidate.abi.lower()
+        and supported_abi == candidate_abi
         and platform_matches(
-            supported.platform.lower(),
-            candidate.platform.lower(),
+            supported._platform_lower,
+            candidate._platform_lower,
+            runtime_parts=supported._platform_parts,
+            wheel_parts=candidate._platform_parts,
         )
     )
 
@@ -770,46 +803,64 @@ def interpreter_matches(runtime: str, wheel: str, abi: str) -> bool:
     return False
 
 
-def platform_matches(runtime: str, wheel: str) -> bool:
+def platform_matches(
+    runtime: str,
+    wheel: str,
+    *,
+    runtime_parts: tuple[str, ...] | None = None,
+    wheel_parts: tuple[str, ...] | None = None,
+) -> bool:
     if runtime == wheel:
         return True
     if runtime == "any" or wheel == "any":
         return runtime == wheel
     if runtime.startswith("macosx_") and wheel.startswith("macosx_"):
+        if runtime_parts is not None and wheel_parts is not None:
+            return _macos_platform_matches_parts(runtime_parts, wheel_parts)
         return macos_platform_matches(runtime, wheel)
     if runtime.startswith("ios_") and wheel.startswith("ios_"):
+        if runtime_parts is not None and wheel_parts is not None:
+            return _ios_platform_matches_parts(runtime_parts, wheel_parts)
         return ios_platform_matches(runtime, wheel)
     if runtime.startswith("android_") and wheel.startswith("android_"):
+        if runtime_parts is not None and wheel_parts is not None:
+            return _android_platform_matches_parts(runtime_parts, wheel_parts)
         return android_platform_matches(runtime, wheel)
     return False
 
 
 def macos_platform_matches(runtime: str, wheel: str) -> bool:
-    runtime_parts = runtime.split("_", 3)
-    wheel_parts = wheel.split("_", 3)
+    return _macos_platform_matches_parts(
+        tuple(runtime.split("_", 3)), tuple(wheel.split("_", 3))
+    )
+
+
+def _macos_platform_matches_parts(
+    runtime_parts: tuple[str, ...], wheel_parts: tuple[str, ...]
+) -> bool:
     if len(runtime_parts) != 4 or len(wheel_parts) != 4:
         return False
     _, runtime_major, runtime_minor, runtime_arch = runtime_parts
     _, wheel_major, wheel_minor, wheel_arch = wheel_parts
     if (int(wheel_major), int(wheel_minor)) > (int(runtime_major), int(runtime_minor)):
         return False
-    compatible_arches = {
-        "x86_64": {"x86_64", "intel", "universal"},
-        "i386": {"i386", "intel", "universal"},
-        "intel": {"intel", "universal"},
-        "arm64": {"arm64", "universal2"},
-        "aarch64": {"aarch64", "universal2"},
-        "ppc": {"ppc", "universal"},
-        "ppc64": {"ppc64", "universal"},
-        "universal": {"universal"},
-        "universal2": {"universal2"},
-    }
-    return wheel_arch in compatible_arches.get(runtime_arch, {runtime_arch})
+    compatible_arches = MACOS_COMPATIBLE_ARCHES.get(runtime_arch)
+    return (
+        wheel_arch == runtime_arch
+        if compatible_arches is None
+        else wheel_arch in compatible_arches
+    )
 
 
 def ios_platform_matches(runtime: str, wheel: str) -> bool:
-    runtime_parts = runtime.split("_", 4)
-    wheel_parts = wheel.split("_", 4)
+    return _ios_platform_matches_parts(
+        tuple(runtime.split("_", 4)), tuple(wheel.split("_", 4))
+    )
+
+
+def _ios_platform_matches_parts(
+    runtime_parts: tuple[str, ...], wheel_parts: tuple[str, ...]
+) -> bool:
     if len(runtime_parts) != 5 or len(wheel_parts) != 5:
         return False
     _, runtime_major, runtime_minor, runtime_arch, runtime_env = runtime_parts
@@ -823,8 +874,14 @@ def ios_platform_matches(runtime: str, wheel: str) -> bool:
 
 
 def android_platform_matches(runtime: str, wheel: str) -> bool:
-    runtime_parts = runtime.split("_", 3)
-    wheel_parts = wheel.split("_", 3)
+    return _android_platform_matches_parts(
+        tuple(runtime.split("_", 3)), tuple(wheel.split("_", 3))
+    )
+
+
+def _android_platform_matches_parts(
+    runtime_parts: tuple[str, ...], wheel_parts: tuple[str, ...]
+) -> bool:
     if len(runtime_parts) != 4 or len(wheel_parts) != 4:
         return False
     _, runtime_api, runtime_arch_a, runtime_arch_b = runtime_parts

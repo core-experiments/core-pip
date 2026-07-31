@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import struct
+import zlib
 
 END_OF_CENTRAL_DIRECTORY = struct.Struct("<4s4H2LH")
 CENTRAL_DIRECTORY_HEADER = struct.Struct("<4s6H3L5H2L")
@@ -44,7 +45,6 @@ class WheelArchive:
             raise WheelhouseUnavailable
         self.file.seek(directory_offset)
         target_bytes = target.encode("utf-8") if target is not None else None
-        undecoded: list[tuple[bytes, int, tuple[int, int, int, int, int]]] = []
         for _ in range(entries):
             header = self.file.read(46)
             if len(header) != 46 or header[:4] != b"PK\x01\x02":
@@ -89,20 +89,12 @@ class WheelArchive:
                 self.members[target] = member
                 return
             if target_bytes is not None:
-                undecoded.append((name_bytes, flags, member))
                 continue
             try:
                 name = name_bytes.decode("utf-8" if flags & 0x800 else "cp437")
             except UnicodeDecodeError as exc:
                 raise WheelhouseUnavailable from exc
             self.members[name] = member
-        for name_bytes, flags, member in undecoded:
-            try:
-                name = name_bytes.decode("utf-8" if flags & 0x800 else "cp437")
-            except UnicodeDecodeError as exc:
-                raise WheelhouseUnavailable from exc
-            self.members[name] = member
-
     def namelist(self) -> list[str]:
         return list(self.members)
 
@@ -126,8 +118,6 @@ class WheelArchive:
         data = self.file.read(compressed_size)
         if len(data) != compressed_size:
             raise WheelhouseUnavailable
-        import zlib
-
         if compression == 0:
             result = data
         elif compression == 8:
@@ -141,10 +131,12 @@ class WheelArchive:
             raise WheelhouseUnavailable
         return result
 
-    def read_many(self, names: list[str]) -> list[bytes]:
-        """Read members in archive order while returning the requested order."""
+    def read_many(
+        self, names: list[str], *, ordered_input: bool = False
+    ) -> list[bytes]:
+        """Read members while returning the requested order."""
         members = [self.members[name] for name in names]
-        in_archive_order = all(
+        in_archive_order = ordered_input or all(
             left[4] <= right[4] for left, right in zip(members, members[1:])
         )
         if in_archive_order:
@@ -155,10 +147,10 @@ class WheelArchive:
             ordered_members = [member for member, _ in ordered]
             ordered_names = [name for _, name in ordered]
         ordered_results: list[bytes] = []
-        unordered_results: dict[str, bytes] = {}
+        unordered_results: dict[str, bytes] | None = (
+            None if in_archive_order else {}
+        )
         position = -1
-        import zlib
-
         for name, member in zip(ordered_names, ordered_members):
             compression, crc, compressed_size, uncompressed_size, local_offset = member
             if local_offset != position:
@@ -190,10 +182,10 @@ class WheelArchive:
             if in_archive_order:
                 ordered_results.append(result)
             else:
+                assert unordered_results is not None
                 unordered_results[name] = result
             position = local_offset + 30 + name_size + extra_size + compressed_size
-        return (
-            ordered_results
-            if in_archive_order
-            else [unordered_results[name] for name in names]
-        )
+        if in_archive_order:
+            return ordered_results
+        assert unordered_results is not None
+        return [unordered_results[name] for name in names]

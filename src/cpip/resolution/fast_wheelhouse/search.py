@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from cpip.resolution.fast_wheelhouse.archive import WheelhouseUnavailable
 from cpip.resolution.fast_wheelhouse.catalog import (
@@ -86,6 +86,7 @@ def search_candidates(
     load = load_candidate
     dependencies = dependencies_for_extras
     preflight = preflight_exact_dependencies
+    missing = object()
 
     def rollback(checkpoint: int, domain_checkpoint: int) -> None:
         while len(domain_trail) > domain_checkpoint:
@@ -124,10 +125,10 @@ def search_candidates(
             domain_trail.append((name, previous_domain))
             existing = selected.get(name)
             if existing is not None:
-                if not all(
-                    constraint.is_satisfied_by(existing.version)
-                    for constraint in package_constraints
-                ):
+                # The selected candidate satisfied every constraint already
+                # in the trail when it was chosen. Only this newly appended
+                # requirement can invalidate it.
+                if not requirement.is_satisfied_by(existing.version):
                     rollback(frame.checkpoint, frame.domain_checkpoint)
                     frames.pop()
                     if frame.selected_name is not None:
@@ -156,9 +157,10 @@ def search_candidates(
         requirement = frame.requirement
         assert name is not None and requirement is not None
         path, version = frame.values[index]
-        if path not in loaded:
+        candidate = loaded.get(path, missing)
+        if candidate is missing:
             try:
-                loaded[path] = load(
+                candidate = load(
                     path,
                     metadata_cache,
                     (name, version),
@@ -166,8 +168,10 @@ def search_candidates(
                     path_is_absolute=True,
                 )
             except WheelhouseUnavailable:
-                loaded[path] = None
-        candidate = loaded[path]
+                candidate = None
+            loaded[path] = candidate
+        else:
+            candidate = cast(LocalWheelCandidate | None, candidate)
         if candidate is None:
             continue
         if candidate.requires_python:

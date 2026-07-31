@@ -39,7 +39,7 @@ def parse_metadata_headers(contents: str) -> MetadataHeaders:
     for line in contents.splitlines():
         if not line:
             break
-        if line[:1].isspace():
+        if line[0].isspace():
             fast_headers = None
             break
         name, separator, value = line.partition(":")
@@ -48,6 +48,8 @@ def parse_metadata_headers(contents: str) -> MetadataHeaders:
             break
         normalized_name = FAST_METADATA_NAMES.get(name)
         if normalized_name is None:
+            if not name or name[0] not in "NnVvRrPp":
+                continue
             if name.casefold() in RESOLUTION_METADATA_HEADERS:
                 fast_headers = None
                 break
@@ -65,7 +67,7 @@ def parse_metadata_headers(contents: str) -> MetadataHeaders:
     current_values: list[str] | None = None
     saw_header = False
     for line in contents[:header_end].splitlines():
-        if line[:1].isspace():
+        if line and line[0].isspace():
             if current_values is None:
                 if not saw_header:
                     break

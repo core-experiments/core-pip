@@ -273,14 +273,20 @@ def install_wheel_internal(
         staged = [item for item in staged if item[1] not in script_destinations]
         script_stage = stage_root / ".cpip-scripts"
         script_stage.mkdir(parents=True, exist_ok=True)
+        script_maker_type = None
+        if scripts:
+            try:
+                from distlib.scripts import ScriptMaker
+            except ImportError:
+                pass
+            else:
+                script_maker_type = ScriptMaker
         for name, (target_ref, gui) in scripts.items():
             if Path(name).name != name or name in {".", ".."}:
                 raise InstallationError(
                     f"console script {name!r} is outside the scripts directory"
                 )
-            try:
-                from distlib.scripts import ScriptMaker
-            except ImportError:
+            if script_maker_type is None:
                 if os.name == "nt":
                     source = script_stage / f"{name}.exe"
                     write_windows_script(
@@ -300,7 +306,7 @@ def install_wheel_internal(
                         | stat.S_IXOTH,
                     )
             else:
-                maker = ScriptMaker(None, os.fspath(script_stage))
+                maker = script_maker_type(None, os.fspath(script_stage))
                 maker.clobber = True
                 maker.variants = {""}
                 if script_executable is not None:
@@ -389,6 +395,7 @@ def validate_wheel_batch(
     candidates = tuple(wheel_candidate(path) for path in paths)
     destinations: set[Path] = set()
     resolved_roots: dict[Path, Path] = {}
+    resolved_directories = destination_cache if destination_cache is not None else {}
     for candidate in candidates:
         path = candidate.path
         with zipfile.ZipFile(path) as archive:
@@ -401,9 +408,7 @@ def validate_wheel_batch(
                 destination = destination_internal(
                     target,
                     validate_member(member.filename),
-                    resolved_directories=(
-                        destination_cache if destination_cache is not None else {}
-                    ),
+                    resolved_directories=resolved_directories,
                     resolved_roots=resolved_roots,
                 )
                 if destination in destinations:
@@ -572,7 +577,7 @@ def uninstall_distribution(
             if egg_link.stem.casefold() == distribution.raw_name.casefold():
                 recorded_paths.add(egg_link)
 
-    existing = {path for path in recorded_paths if path.exists() or path.is_symlink()}
+    existing = {path for path in recorded_paths if os.path.lexists(path)}
     if not existing:
         return False
     transaction = InstallTransaction()

@@ -454,7 +454,7 @@ def scan_catalog(find_links: list[str]) -> CatalogRecords | None:
         try:
             with os.scandir(directory) as entries:
                 for entry in entries:
-                    if not entry.is_file() or not entry.name.endswith(".whl"):
+                    if not entry.name.endswith(".whl") or not entry.is_file():
                         continue
                     path = entry.path
                     parsed = parse_wheel_filename(entry.name)
@@ -490,14 +490,17 @@ def build_catalog_indexes(records: CatalogRecords) -> CatalogIndexes:
     for name, values_for_name in records.items():
         versions = exact_index.setdefault(name, {})
         masks = exact_masks.setdefault(name, {})
-        for item in values_for_name:
-            versions.setdefault(item[1]._normalized, []).append(item)
-        ordered = [(item[1]._normalized, item) for item in values_for_name]
-        for index, (normalized_key, item) in enumerate(ordered):
+        keys: list[tuple[int, ...]] = []
+        values: list[tuple[str, LocalWheelVersion]] = []
+        for index, item in enumerate(values_for_name):
+            normalized_key = item[1]._normalized
+            versions.setdefault(normalized_key, []).append(item)
             masks[normalized_key] = masks.get(normalized_key, 0) | (1 << index)
+            keys.append(normalized_key)
+            values.append(item)
         range_index[name] = (
-            tuple(key for key, _ in ordered),
-            tuple(item for _, item in ordered),
+            tuple(keys),
+            tuple(values),
         )
     indexes = (exact_index, exact_masks, range_index)
     catalog_indexes_cache[cache_key] = (records, indexes)

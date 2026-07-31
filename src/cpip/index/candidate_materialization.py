@@ -468,13 +468,14 @@ class CandidateMaterializer:
                 ):
                     try:
                         dist_info_dir = validate_wheel(
-                            archive, Path(path).name[:-4].split("-", 1)[0]
+                            archive,
+                            os.path.basename(os.fspath(path))[:-4].split("-", 1)[0],
                         )
                     except UnsupportedWheel as exc:
                         raise InstallationError(str(exc)) from exc
                     built = wheel_candidate(
                         path,
-                        set(requested_extras),
+                        requested_extras,
                         archive=archive,
                         filename_info=(candidate.name, candidate.version),
                         dist_info_dir=dist_info_dir,
@@ -612,8 +613,8 @@ class CandidateMaterializer:
 
         candidates: list[WheelCandidate] = []
         seen: set[tuple[str, str, str]] = set()
+        requested_extras = frozenset(requirement.extras)
         for candidate in accepted:
-            requested_extras = frozenset(requirement.extras)
             from_cache = False
             cache_hashes: dict[str, str] | None = None
             local_path = (
@@ -655,7 +656,7 @@ class CandidateMaterializer:
                 if cached is not None:
                     path, cache_hashes = cached
                     from_cache = True
-                    cached_name = Path(path).name.split("-", 1)[0]
+                    cached_name = os.path.basename(os.fspath(path)).split("-", 1)[0]
                     logger.debug(
                         "use cached built wheel for %s from %s",
                         display_name,
@@ -714,11 +715,12 @@ class CandidateMaterializer:
                             zipfile.ZipFile(stream) as archive,
                         ):
                             dist_info_dir = validate_wheel(
-                                archive, Path(path).name[:-4].split("-", 1)[0]
+                                archive,
+                                os.path.basename(os.fspath(path))[:-4].split("-", 1)[0],
                             )
                             built = wheel_candidate(
                                 path,
-                                set(requested_extras),
+                                requested_extras,
                                 archive=archive,
                                 filename_info=(candidate.name, candidate.version),
                                 dist_info_dir=dist_info_dir,
@@ -726,7 +728,7 @@ class CandidateMaterializer:
                         if stat is not None:
                             self.wheel_candidates[cache_key] = built
                 else:
-                    built = wheel_candidate(path, set(requested_extras))
+                    built = wheel_candidate(path, requested_extras)
             except UnsupportedWheel as exc:
                 if ".dist-info directory" not in str(exc):
                     self.invalid_links.add(candidate.link.url)

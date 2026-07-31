@@ -5,8 +5,10 @@ from __future__ import annotations
 import os
 import struct
 import sys
+import zlib
 from functools import lru_cache
 from typing import TYPE_CHECKING
+from urllib.parse import quote
 
 from cpip.core.wheel_metadata import (
     metadata_paths,
@@ -24,7 +26,6 @@ from cpip.resolution.fast_wheelhouse.cache import (
     CachedCandidateParts,
     CachedMetadata,
     MetadataCache,
-    _URL_SAFE,
     cache_candidate,
     cache_metadata,
     candidate_cache,
@@ -43,6 +44,10 @@ if TYPE_CHECKING:
     from cpip.index.metadata_cache import WheelMetadataCache
 
 SMALL_WHEEL_SIZE = 64 * 1024
+SPECIFIER_OPERATORS = ("===", "==", "!=", "~=", "<=", ">=", "<", ">")
+MARKER_OPERATORS = ("not in", "==", "!=", "in")
+_CURRENT_PYTHON_MAJOR_TAG = f"py{sys.version_info.major}"
+_CURRENT_PYTHON_FULL_TAG = f"py{sys.version_info.major}{sys.version_info.minor}"
 
 
 def cached_candidate_parts(cached: CachedMetadata) -> CachedCandidateParts | None:
@@ -64,6 +69,7 @@ def cached_candidate_parts(cached: CachedMetadata) -> CachedCandidateParts | Non
                 LocalWheelSpecifier(tuple(specifier_values)),
                 frozenset(extras),
                 marker,
+                _normalized_extras=True,
             )
         )
     return (
@@ -109,14 +115,18 @@ def candidate_from_cache(
 @lru_cache(maxsize=2048)
 def parse_version(value: str) -> LocalWheelVersion | None:
     text = value.strip()
+    display_text = text
     if text.startswith("v"):
         text = text[1:]
     if text.endswith(".*"):
         text = text[:-2]
     parts = text.split(".")
-    if not text or any(not part.isdigit() for part in parts):
+    if not text:
         return None
-    return LocalWheelVersion(tuple(map(int, parts)), value.strip())
+    for part in parts:
+        if not part.isdigit():
+            return None
+    return LocalWheelVersion(tuple(map(int, parts)), display_text)
 
 
 @lru_cache(maxsize=4096)
@@ -126,9 +136,12 @@ def parse_requirement(value: str) -> LocalWheelRequirement | None:
         separator = text.find("==")
         if separator > 0 and "=" not in text[separator + 2 :]:
             name = text[:separator].rstrip()
-            if name and all(
-                character.isalnum() or character in "._-" for character in name
-            ):
+            valid_name = bool(name)
+            for character in name:
+                if not (character.isalnum() or character in "._-"):
+                    valid_name = False
+                    break
+            if valid_name:
                 raw_version = text[separator + 2 :].strip()
             else:
                 raw_version = ""
@@ -143,9 +156,9 @@ def parse_requirement(value: str) -> LocalWheelRequirement | None:
                         name=name,
                         specifier=LocalWheelSpecifier((("==", parsed),)),
                         extras=frozenset(),
+                        _normalized_extras=True,
                     )
-    text, separator, marker = value.partition(";")
-    text = text.strip()
+    text, separator, marker = text.partition(";")
     end = 0
     while end < len(text) and (text[end].isalnum() or text[end] in "._-"):
         end += 1
@@ -187,19 +200,17 @@ def parse_requirement(value: str) -> LocalWheelRequirement | None:
                     name=name,
                     specifier=LocalWheelSpecifier((("==", parsed),)),
                     extras=frozenset(),
+                    _normalized_extras=True,
                 )
     values: list[tuple[str, LocalWheelVersion | str]] = []
     if rest:
         for part in rest.split(","):
             part = part.strip()
-            operator = next(
-                (
-                    candidate
-                    for candidate in ("===", "==", "!=", "~=", "<=", ">=", "<", ">")
-                    if part.startswith(candidate)
-                ),
-                None,
-            )
+            operator = None
+            for candidate in SPECIFIER_OPERATORS:
+                if part.startswith(candidate):
+                    operator = candidate
+                    break
             if operator is None:
                 return None
             raw_version = part[len(operator) :].strip()
@@ -216,17 +227,15 @@ def parse_requirement(value: str) -> LocalWheelRequirement | None:
     parsed_marker: tuple[str, str] | None = None
     if separator:
         marker_text = marker.strip()
-        operator = next(
-            (
-                candidate
-                for candidate in ("not in", "==", "!=", "in")
-                if candidate in marker_text.lower()
-            ),
-            None,
-        )
+        marker_lower = marker_text.lower()
+        operator = None
+        for candidate in MARKER_OPERATORS:
+            if candidate in marker_lower:
+                operator = candidate
+                break
         if operator is None:
             return None
-        left, value = marker_text.lower().split(operator, 1)
+        left, value = marker_lower.split(operator, 1)
         value = value.strip()
         if (
             left.strip() != "extra"
@@ -241,6 +250,7 @@ def parse_requirement(value: str) -> LocalWheelRequirement | None:
         specifier=LocalWheelSpecifier(tuple(values)),
         extras=extras,
         marker=parsed_marker,
+        _normalized_extras=True,
     )
 
 
@@ -266,12 +276,16 @@ def parse_wheel_filename(filename: str) -> tuple[str, LocalWheelVersion] | None:
     )
     if not name or abi != "none" or platform != "any":
         return None
-    tags = python_tags.split(".")
     if (
-        f"py{sys.version_info.major}" not in tags
-        and f"py{sys.version_info.major}{sys.version_info.minor}" not in tags
+        python_tags != _CURRENT_PYTHON_MAJOR_TAG
+        and python_tags != _CURRENT_PYTHON_FULL_TAG
     ):
-        return None
+        tags = python_tags.split(".")
+        if (
+            _CURRENT_PYTHON_MAJOR_TAG not in tags
+            and _CURRENT_PYTHON_FULL_TAG not in tags
+        ):
+            return None
     parsed = parse_version(version)
     return (canonicalize_name(name), parsed) if parsed else None
 
@@ -308,6 +322,8 @@ def read_wheel_metadata(
                 if metadata is None:
                     raise WheelhouseUnavailable
                 return metadata
+            if target is not None:
+                archive = WheelArchive(file)
             paths = metadata_paths(archive.namelist())
             if len(paths) != 1:
                 raise WheelhouseUnavailable
@@ -343,15 +359,17 @@ def read_small_wheel_metadata(
     ):
         return None
     target_bytes = target.encode("utf-8")
+    target_size = len(target_bytes)
     offset = directory_offset
     member: tuple[int, int, int, int, int] | None = None
     directory_end = directory_offset + directory_size
+    unpack_central_directory = CENTRAL_DIRECTORY_HEADER.unpack_from
     try:
         for _ in range(entries):
             if offset + 46 > directory_end:
                 return None
             (
-                _,
+                signature,
                 _,
                 _,
                 flags,
@@ -368,9 +386,9 @@ def read_small_wheel_metadata(
                 _,
                 _,
                 local_offset,
-            ) = CENTRAL_DIRECTORY_HEADER.unpack_from(contents, offset)
+            ) = unpack_central_directory(contents, offset)
             if (
-                contents[offset : offset + 4] != b"PK\x01\x02"
+                signature != b"PK\x01\x02"
                 or flags & 1
                 or compressed_size == 0xFFFFFFFF
                 or uncompressed_size == 0xFFFFFFFF
@@ -382,7 +400,9 @@ def read_small_wheel_metadata(
             entry_end = name_end + extra_size + comment_size
             if entry_end > directory_end:
                 return None
-            if contents[offset:name_end] == target_bytes:
+            if name_size == target_size and contents.startswith(
+                target_bytes, offset, name_end
+            ):
                 member = (
                     compression,
                     crc,
@@ -397,8 +417,6 @@ def read_small_wheel_metadata(
     if member is None:
         return None
     compression, crc, compressed_size, uncompressed_size, local_offset = member
-    import zlib
-
     try:
         if local_offset + 30 > len(contents):
             return None
@@ -536,7 +554,4 @@ def load_candidate(
 def quote_path(path: str) -> str:
     if os.name == "nt":
         path = "/" + path.replace("\\", "/").lstrip("/")
-    return "".join(
-        chr(byte) if byte in _URL_SAFE else f"%{byte:02X}"
-        for byte in path.encode("utf-8")
-    )
+    return quote(path, safe="/")

@@ -64,7 +64,8 @@ def write_windows_script(path: Path, script: str, *, gui: bool) -> None:
 
 
 def script_matches(path: Path, scripts: dict[str, tuple[str, bool]]) -> bool:
-    name = path.stem if path.suffix.lower() == ".exe" else path.name
+    is_executable = path.suffix.lower() == ".exe"
+    name = path.stem if is_executable else path.name
     script = scripts.get(name)
     if script is None:
         return False
@@ -72,7 +73,7 @@ def script_matches(path: Path, scripts: dict[str, tuple[str, bool]]) -> bool:
     module, _, attribute = target_ref.partition(":")
     entry = attribute or "main"
     try:
-        if path.suffix.lower() == ".exe":
+        if is_executable:
             with zipfile.ZipFile(io.BytesIO(path.read_bytes())) as archive:
                 text = archive.read("__main__.py").decode("utf-8")
         else:
