@@ -4,6 +4,12 @@ import os
 import sys
 from typing import TYPE_CHECKING, Any
 
+from cpip.cli.commands.install_plan import (
+    try_local_wheelhouse_plan as _try_local_wheelhouse_plan,
+)
+from cpip.cli.commands.install_reporting import warn_about_install_conflicts
+from cpip.cli.commands.install_resolution import create_candidate_provider
+
 INDEX_URL_OPTIONS = frozenset(("-i", "--index-url"))
 FORMAT_OPTIONS = frozenset(("--no-binary", "--only-binary"))
 RELEASE_OPTIONS = frozenset(("--all-releases", "--only-final"))
@@ -12,136 +18,6 @@ if TYPE_CHECKING:
     import argparse
 
     from cpip.resolution.req_install import InstallRequirement
-
-
-def _try_local_wheelhouse_plan(
-    options: Any,
-    bundle: Any,
-    requirements: list[Any],
-    *,
-    cache_dir: str | None,
-) -> Any | None:
-    """Reuse the local resolver for the narrow pure-wheel install shape."""
-    if (
-        not bundle.no_index
-        or not bundle.find_links
-        or bundle.extra_index_urls
-        or bundle.constraints
-        or bundle.require_hashes
-        or bundle.format_control.no_binary
-        or bundle.format_control.only_binary
-        or bundle.release_control.all_releases
-        or bundle.release_control.only_final
-        or bundle.editables
-        or options.groups
-        or options.constraint_files
-        or options.no_deps
-        or options.upgrade
-        or options.pre
-        or options.all_releases
-        or options.only_final
-        or options.no_binary
-        or options.only_binary
-        or options.platform
-        or options.implementation
-        or options.abi
-        or options.dry_run
-        or options.report
-        or options.require_hashes
-        or options.ignore_requires_python
-        or options.user
-        or options.root
-        or options.prefix
-        or options.target is None
-        or not options.ignore_installed
-        or not options.no_compile
-    ):
-        return None
-    from cpip.index.source_locations import resolve_source_location
-
-    if any(resolve_source_location(value)[1] is None for value in bundle.find_links):
-        return None
-    values: list[str] = []
-    for requirement in requirements:
-        if (
-            requirement.req is None
-            or requirement.req.url is not None
-            or requirement.link is not None
-            or requirement.hash_options
-            or requirement.config_settings
-        ):
-            return None
-        values.append(requirement.req.raw)
-    from cpip.core.packaging import Requirement, SpecifierSet, Version
-    from cpip.core.wheel import WheelCandidate, parse_wheel, wheel_candidate
-    from cpip.resolution.fast_local_wheelhouse import resolve
-    from cpip.resolution.resolver_internals.state.plans import InstallPlan
-    from pathlib import Path
-    import zipfile
-
-    local_plan = resolve(bundle.find_links, values, cache_dir=cache_dir)
-    if local_plan is None:
-        return None
-    candidates = []
-    graph: dict[str, set[str]] = {}
-    try:
-        for local_candidate in local_plan.candidates:
-            dependencies = []
-            for dependency in local_candidate.dependencies:
-                specifier = ",".join(
-                    operator + str(getattr(expected, "text", expected))
-                    for operator, expected in dependency.specifier.values
-                )
-                extras = (
-                    f"[{','.join(sorted(dependency.extras))}]"
-                    if dependency.extras
-                    else ""
-                )
-                marker = ""
-                if dependency.marker is not None:
-                    operator, value = dependency.marker
-                    marker = f"; extra {operator} '{value}'"
-                raw = f"{dependency.name}{extras}{specifier}{marker}"
-                parsed = Requirement(
-                    name=dependency.name,
-                    specifier=SpecifierSet(specifier),
-                    extras=frozenset(dependency.extras),
-                    marker=marker.removeprefix("; ") or None,
-                    raw=raw,
-                )
-                dependencies.append(parsed)
-            candidate = WheelCandidate(
-                name=local_candidate.name,
-                version=Version(str(local_candidate.version)),
-                path=Path(local_candidate.path),
-                dependencies=tuple(dependencies),
-                provided_extras=local_candidate.provided_extras,
-                requires_python=local_candidate.requires_python,
-                source_kind="wheel",
-            )
-            candidates.append(candidate)
-            graph[candidate.canonical_name] = {
-                dependency.canonical_name for dependency in candidate.dependencies
-            }
-    except (OSError, TypeError, ValueError):
-        return None
-    if (
-        sum(os.stat(candidate.path).st_size for candidate in candidates)
-        > 4 * 1024 * 1024
-    ):
-        for index, candidate in enumerate(candidates):
-            with zipfile.ZipFile(candidate.path) as archive:
-                dist_info, _ = parse_wheel(
-                    archive,
-                    candidate.path.name[:-4].split("-", 1)[0],
-                )
-                layout = wheel_candidate(
-                    candidate.path,
-                    archive=archive,
-                    dist_info_dir=dist_info,
-                ).wheel_layout
-            candidates[index] = candidate.copy_with(wheel_layout=layout)
-    return InstallPlan(candidates, graph=graph)
 
 
 def run_install(args: list[str]) -> int:
@@ -155,7 +31,6 @@ def run_install(args: list[str]) -> int:
     parser = create_parser()
     options = parser.parse_args(normalized_args)
 
-    import datetime
     import logging
     from pathlib import Path
 
@@ -179,7 +54,6 @@ def run_install(args: list[str]) -> int:
         parse_requirement,
     )
     from cpip.core.wheel import TargetContext, wheel_candidate
-    from cpip.index.links import Link
     from cpip.install.target import InstallTarget
     from cpip.install.wheel_transaction import install_wheels_transactionally
     from cpip.resolution.req_install import install_req_from_line
@@ -485,75 +359,22 @@ def run_install(args: list[str]) -> int:
             source_requirements_by_url[constraint_requirement.req.url] = (
                 constraint_requirement
             )
-    provider = None
 
     def get_provider() -> Any:
-        nonlocal provider
-        if provider is not None:
-            return provider
-        from cpip.index.provider import CandidateProvider
-
-        provider = CandidateProvider.from_options(
-            find_links=bundle.find_links,
-            index_url=bundle.index_url,
-            extra_index_urls=bundle.extra_index_urls,
-            no_index=bundle.no_index,
-            format_control=bundle.format_control,
-            build_options=build_options,
-            build_constraints=options.build_constraint_files,
-            wheel_cache_dir=(
+        return create_candidate_provider(
+            options,
+            bundle,
+            requirements,
+            build_options,
+            target,
+            cache_dir=(
                 None
                 if options.no_cache_dir
                 else options.cache_dir
                 or os.environ.get("CPIP_CACHE_DIR")
                 or user_cache_dir("cpip")
             ),
-            trusted_hosts=options.trusted_hosts,
-            session=bundle.session,
-            dry_run=options.dry_run,
-            build_isolation=not options.no_build_isolation,
-            locked_links={name: Link(url) for name, url in bundle.locked_links.items()},
-            target=target,
-            uploaded_prior_to=(
-                datetime.datetime.fromisoformat(
-                    options.uploaded_prior_to.replace("Z", "+00:00")
-                )
-                if options.uploaded_prior_to
-                else None
-            ),
         )
-        provider.release_control = bundle.release_control
-        from cpip.cli.commands.install_helpers import intersect_hashes
-        from cpip.core.hashes import Hashes
-
-        provider.hashes_by_name = {}
-        for item in requirements:
-            if item.req is None or not item.hash_options:
-                continue
-            hashes = item.hashes()
-            previous = provider.hashes_by_name.get(item.req.canonical_name)
-            provider.hashes_by_name[item.req.canonical_name] = (
-                hashes if previous is None else intersect_hashes(previous, hashes)
-            )
-        for raw, hashes in bundle.constraint_hashes.items():
-            name = parse_requirement(raw).canonical_name
-            current = provider.hashes_by_name.get(name)
-            if current is None:
-                provider.hashes_by_name[name] = Hashes(hashes)
-            else:
-                provider.hashes_by_name[name] = intersect_hashes(
-                    current, Hashes(hashes)
-                )
-
-        for raw, hashes in bundle.requirement_hashes.items():
-            name = parse_requirement(raw).canonical_name
-            current = provider.hashes_by_name.get(name)
-            provider.hashes_by_name[name] = (
-                Hashes(hashes)
-                if current is None
-                else intersect_hashes(current, Hashes(hashes))
-            )
-        return provider
 
     if options.verbose and bundle.no_index:
         print("Ignoring indexes:")
@@ -1063,66 +884,6 @@ def run_install(args: list[str]) -> int:
         ]
         print(f"Successfully installed {' '.join(installed)}")
     return 0
-
-
-def warn_about_install_conflicts(changed_names: set[str]) -> None:
-    """Warn about broken requirements affected by the current install."""
-    from cpip.build.check import (
-        PackageDetails,
-        check_package_set,
-        parse_installed_dependencies,
-    )
-    from cpip.build.metadata import InstalledDistributionStore
-    from cpip.core.packaging import Version, canonicalize_name
-    from cpip.core.cpip_version import CPIP_DISTRIBUTION_NAMES
-
-    distributions = InstalledDistributionStore().iter(skip=CPIP_DISTRIBUTION_NAMES)
-    distributions_by_name = {dist.canonical_name: dist for dist in distributions}
-    dependencies_by_name = {}
-    dependents_by_name: dict[str, set[str]] = {}
-    for dist in distributions:
-        dependencies = parse_installed_dependencies(dist)
-        dependencies_by_name[dist.canonical_name] = dependencies
-        for requirement in dependencies:
-            dependents_by_name.setdefault(
-                canonicalize_name(requirement.name), set()
-            ).add(dist.canonical_name)
-    package_set = {
-        dist.canonical_name: PackageDetails.from_dependencies(
-            Version(dist.raw_version),
-            dependencies_by_name[dist.canonical_name],
-        )
-        for dist in distributions
-    }
-    affected = set(changed_names)
-    pending = list(changed_names)
-    while pending:
-        dependency = pending.pop()
-        for dependent in dependents_by_name.get(dependency, ()):
-            if dependent not in affected:
-                affected.add(dependent)
-                pending.append(dependent)
-    missing, conflicting = check_package_set(package_set)
-    for name, requirements in sorted(missing.items()):
-        if name not in affected:
-            continue
-        distribution = distributions_by_name[name]
-        for _, requirement in requirements:
-            print(
-                f"{distribution.canonical_name} {distribution.version} requires "
-                f"{requirement.name}, which is not installed.",
-                file=sys.stderr,
-            )
-    for name, requirements in sorted(conflicting.items()):
-        if name not in affected:
-            continue
-        distribution = distributions_by_name[name]
-        for dependency_name, version, requirement in requirements:
-            print(
-                f"{distribution.canonical_name} {distribution.version} requires "
-                f"{requirement}, but you have {dependency_name} {version} which is incompatible.",
-                file=sys.stderr,
-            )
 
 
 def create_parser() -> argparse.ArgumentParser:
