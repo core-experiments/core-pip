@@ -78,29 +78,46 @@ class ResolverSearchEngine:
         source_requirements: dict[str, InstallRequirement],
         source_requirements_by_url: dict[str, InstallRequirement],
     ) -> bool:
-        frames = [
-            self.search_frame_internal(
-                SearchRequest(
-                    PendingAgenda(pending),
-                    selected,
-                    selected_extras,
-                    satisfied,
-                    graph,
-                    source_requirements,
-                    source_requirements_by_url,
-                )
-            )
-        ]
+        # Keep the historical monkeypatch seam used by resolver tests and
+        # integrations.  The production implementation can skip the wrapper
+        # generator, while an overridden frame factory retains the old
+        # behavior expected by callers that instrument the search driver.
+        frame_factory = self.search_frame_inner
+        wrapped_factory = self.search_frame_internal
+        if (
+            getattr(wrapped_factory, "__func__", None)
+            is not ResolverSearchEngine.search_frame_internal
+        ):
+            frame_factory = wrapped_factory
+        initial_request = SearchRequest(
+            PendingAgenda(pending),
+            selected,
+            selected_extras,
+            satisfied,
+            graph,
+            source_requirements,
+            source_requirements_by_url,
+        )
+        frames = [frame_factory(initial_request)]
+        requests = [initial_request]
         result: bool | SearchFailure | None = None
         while frames:
             frame = frames[-1]
+            request = requests[-1]
             try:
                 request = frame.send(result) if result is not None else next(frame)
             except StopIteration as completed:
                 frames.pop()
+                requests.pop()
                 result = completed.value
+                if not result:
+                    request.pending.rollback(request.checkpoint)
                 continue
-            frames.append(self.search_frame_internal(request))
+            except BaseException:
+                request.pending.rollback(request.checkpoint)
+                raise
+            frames.append(frame_factory(request))
+            requests.append(request)
             result = None
         return bool(result)
 

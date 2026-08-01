@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from bisect import bisect_left, insort
 from collections.abc import Iterable, Iterator
 
 from cpip.core.packaging import Requirement
@@ -70,7 +69,9 @@ class PendingAgenda:
         "head_internal",
         "key_cache",
         "length_internal",
-        "state_keys",
+        "state_key_cache",
+        "state_key_counts",
+        "state_key_dirty",
         "tail_internal",
         "undo",
     )
@@ -84,7 +85,13 @@ class PendingAgenda:
         self.undo: list[AgendaMutation] = []
         self.by_name: dict[str, set[int]] = {}
         self.key_cache: dict[int, RequirementStateKey] = {}
-        self.state_keys: list[RequirementStateKey] = []
+        # State keys are only materialized when a failed search state is
+        # recorded.  Keeping multiplicities instead of a continuously sorted
+        # list makes agenda mutation O(1) and avoids list shifts on every
+        # dependency propagation.
+        self.state_key_counts: dict[RequirementStateKey, int] = {}
+        self.state_key_cache: tuple[RequirementStateKey, ...] = ()
+        self.state_key_dirty = True
         self.append_initial(requirements)
 
     def key_internal(self, requirement: Requirement) -> RequirementStateKey:
@@ -95,16 +102,29 @@ class PendingAgenda:
         return key
 
     def state_key(self) -> tuple[RequirementStateKey, ...]:
-        return tuple(self.state_keys)
+        if not self.state_key_dirty:
+            return self.state_key_cache
+        self.state_key_cache = tuple(
+            key
+            for key, count in sorted(self.state_key_counts.items())
+            for _ in range(count)
+        )
+        self.state_key_dirty = False
+        return self.state_key_cache
 
     def remove_state_key(self, requirement: Requirement) -> None:
         key = self.key_internal(requirement)
-        index = bisect_left(self.state_keys, key)
-        assert self.state_keys[index] == key
-        self.state_keys.pop(index)
+        count = self.state_key_counts[key]
+        if count == 1:
+            self.state_key_counts.pop(key)
+        else:
+            self.state_key_counts[key] = count - 1
+        self.state_key_dirty = True
 
     def add_state_key(self, requirement: Requirement) -> None:
-        insort(self.state_keys, self.key_internal(requirement))
+        key = self.key_internal(requirement)
+        self.state_key_counts[key] = self.state_key_counts.get(key, 0) + 1
+        self.state_key_dirty = True
 
     def append_initial(self, requirements: Iterable[Requirement]) -> None:
         for order, requirement in enumerate(requirements):
