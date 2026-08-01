@@ -597,7 +597,7 @@ class ResolverSearchEngine:
                 if self.metrics.enabled:
                     self.metrics.propagations += len(dependency_pending)
                 remaining.prepend(dependency_pending)
-            satisfied_snapshot = dict(satisfied)
+            satisfied_snapshot = dict(satisfied) if satisfied else None
             child_result = yield SearchRequest(
                 remaining,
                 selected,
@@ -636,8 +636,9 @@ class ResolverSearchEngine:
             self.assignment_levels.pop(candidate_assignment, None)
             self.remove_candidate_dependencies(name, candidate)
             selected_extras.pop(name, None)
-            satisfied.clear()
-            satisfied.update(satisfied_snapshot)
+            if satisfied_snapshot is not None:
+                satisfied.clear()
+                satisfied.update(satisfied_snapshot)
             self.conflicts.append(
                 f"learned incompatibility: {candidate.name}=={candidate.version} "
                 f"does not satisfy the active dependency set"

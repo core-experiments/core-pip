@@ -96,6 +96,7 @@ class ResolverSearchState(Protocol):
     ]
     domain_viability_cache: dict[tuple[str, tuple[str, ...]], bool]
     version_tables: dict[str, tuple[Version, ...]]
+    version_indexes: dict[str, dict[Version, int]]
     version_masks: dict[tuple[str, str, bool], int]
     active_version_masks: dict[tuple[str, tuple[tuple[str, bool], ...]], int]
     allowed_versions_cache: dict[tuple[str, int], frozenset[Version]]

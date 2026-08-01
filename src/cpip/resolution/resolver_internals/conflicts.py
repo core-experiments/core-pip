@@ -64,6 +64,14 @@ class ResolverConflicts:
         self.last_conflict_was_root = False
         grouped = self.grouped_candidate_dependencies(candidate, extras)
         for target, dependencies in grouped:
+            if len(dependencies) > 1:
+                for index, dependency in enumerate(dependencies):
+                    if self.dependency_domain_conflicts(
+                        dependency,
+                        dependencies[:index] + dependencies[index + 1 :],
+                    ):
+                        self.bump_conflict_activity(candidate.canonical_name, target)
+                        return True
             for constrained_dependency in dependencies:
                 selected_target = selected.get(target)
                 domain = self.domains_internal.get(target)
@@ -531,9 +539,10 @@ class ResolverConflicts:
             versions = self.version_table(dependency)
             active_mask = self.domain_version_mask(domain)
             if versions is not None and active_mask is not None:
-                try:
-                    version_index = versions.index(dependency_version)
-                except ValueError:
+                version_index = self.version_indexes.get(
+                    dependency.canonical_name, {}
+                ).get(dependency_version)
+                if version_index is None:
                     pass
                 else:
                     return not active_mask & (1 << version_index)
@@ -623,6 +632,9 @@ class ResolverConflicts:
         summaries = self.provider.available_versions(requirement)
         versions = tuple(dict.fromkeys(summary.version for summary in summaries))
         self.version_tables[name] = versions
+        self.version_indexes[name] = {
+            version: index for index, version in enumerate(versions)
+        }
         return versions
 
     def requirement_version_mask(

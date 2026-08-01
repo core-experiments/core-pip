@@ -100,6 +100,7 @@ class CandidateProvider:
         self.find_links_cache = None
         self.find_links_by_name_cache = None
         self.parsed_link_cache = {}
+        self.candidate_selection_cache = {}
         self.matching_versions_cache = {}
         self.package_catalog_cache = {}
         self.cache_lock = RLock()
@@ -261,6 +262,21 @@ class CandidateProvider:
         accepted: list[CandidateRecord] = []
         rejected: list[RejectedCandidate] = []
         allow_binary, allow_source = self.allowed_formats_internal(requirement)
+        selection_key = (
+            requirement.canonical_name,
+            requirement.specifier.text_internal,
+            tuple(sorted(requirement.extras)),
+            requirement.url,
+            requirement.marker,
+            requirement.raw,
+            allow_binary,
+            allow_source,
+            self.allow_yanked,
+            self.prefer_binary,
+        )
+        cached_selection = self.candidate_selection_cache.get(selection_key)
+        if cached_selection is not None:
+            return cached_selection
         catalog_key = (
             requirement.canonical_name,
             allow_binary,
@@ -331,7 +347,9 @@ class CandidateProvider:
                 ),
                 reverse=True,
             )
-            return CandidateSelection(tuple(accepted), tuple(rejected))
+            selection = CandidateSelection(tuple(accepted), tuple(rejected))
+            self.candidate_selection_cache[selection_key] = selection
+            return selection
         from cpip.index.candidate_evaluators import CandidateEvaluator
 
         for link in links:
@@ -403,7 +421,9 @@ class CandidateProvider:
             key=lambda candidate: candidate.sort_key(prefer_binary=self.prefer_binary),
             reverse=True,
         )
-        return CandidateSelection(tuple(accepted), tuple(rejected))
+        selection = CandidateSelection(tuple(accepted), tuple(rejected))
+        self.candidate_selection_cache[selection_key] = selection
+        return selection
 
     def find_candidates(
         self,

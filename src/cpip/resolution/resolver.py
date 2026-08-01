@@ -124,6 +124,7 @@ class Resolver(
         ] = {}
         self.domain_viability_cache: dict[tuple[str, tuple[str, ...]], bool] = {}
         self.version_tables: dict[str, tuple[Version, ...]] = {}
+        self.version_indexes: dict[str, dict[Version, int]] = {}
         self.version_masks: dict[tuple[str, str, bool], int] = {}
         self.active_version_masks: dict[
             tuple[str, tuple[tuple[str, bool], ...]], int
@@ -233,6 +234,7 @@ class Resolver(
         self.candidate_count_cache.clear()
         self.domain_viability_cache.clear()
         self.version_tables.clear()
+        self.version_indexes.clear()
         self.version_masks.clear()
         self.active_version_masks.clear()
         self.allowed_versions_cache.clear()
