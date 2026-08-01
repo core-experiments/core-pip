@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 
 from cpip.core.direct_url import DirectUrl
+from cpip.core.python import CURRENT_PYTHON_VERSION_DIGITS
 from typing import Any
 
 from cpip.core.temp_dir import TempDirectory, tempdir_kinds
@@ -27,10 +28,6 @@ INTERPRETER_SHORT_NAMES = {
 
 def interpreter_name() -> str:
     return INTERPRETER_SHORT_NAMES.get(sys.implementation.name, sys.implementation.name)
-
-
-def interpreter_version() -> str:
-    return f"{sys.version_info.major}{sys.version_info.minor}"
 
 
 def hash_dict(d: dict[str, str]) -> str:
@@ -58,7 +55,7 @@ class WheelCache:
         if link.subdirectory_fragment:
             key_parts["subdirectory"] = link.subdirectory_fragment
         key_parts["interpreter_name"] = interpreter_name()
-        key_parts["interpreter_version"] = interpreter_version()
+        key_parts["interpreter_version"] = CURRENT_PYTHON_VERSION_DIGITS
         hashed = hash_dict(key_parts)
         return [hashed[:2], hashed[2:4], hashed[4:6], hashed[6:]]
 

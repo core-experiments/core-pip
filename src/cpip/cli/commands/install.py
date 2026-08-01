@@ -9,6 +9,7 @@ from cpip.cli.commands.install_plan import (
 )
 from cpip.cli.commands.install_reporting import warn_about_install_conflicts
 from cpip.cli.commands.install_resolution import create_candidate_provider
+from cpip.core.python import CURRENT_PYTHON_VERSION_DIGITS, CURRENT_PYTHON_VERSION_FULL
 
 INDEX_URL_OPTIONS = frozenset(("-i", "--index-url"))
 FORMAT_OPTIONS = frozenset(("--no-binary", "--only-binary"))
@@ -276,7 +277,7 @@ def run_install(args: list[str]) -> int:
         canonical_name = canonicalize_name(name)
         requested_roots.add(canonical_name)
         requested_names.setdefault(canonical_name, name)
-    python_version = ".".join(str(part) for part in sys.version_info[:3])
+    python_version = CURRENT_PYTHON_VERSION_FULL
     if options.python_version:
         value = str(options.python_version)
         if "." in value:
@@ -292,7 +293,7 @@ def run_install(args: list[str]) -> int:
         python_version=(
             str(options.python_version)
             if options.python_version
-            else f"{sys.version_info.major}{sys.version_info.minor}"
+            else CURRENT_PYTHON_VERSION_DIGITS
         ),
         abis=tuple(options.abi),
     )

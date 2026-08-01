@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import functools
 import os
-import sys
 import sysconfig
 
 from cpip.core.appdirs import user_cache_dir
 from cpip.core.errors import InstallationError
+from cpip.core.python import CURRENT_PYTHON_VERSION
 
 
 # Application Directories
@@ -18,7 +18,7 @@ def get_major_minor_version() -> str:
     Return the major-minor version of the current Python as a string, e.g.
     "3.7" or "3.10".
     """
-    return "{}.{}".format(*sys.version_info)
+    return CURRENT_PYTHON_VERSION
 
 
 def change_root(new_root: str, pathname: str) -> str:

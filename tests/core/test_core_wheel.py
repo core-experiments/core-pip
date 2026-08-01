@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 from cpip.core.errors import InstallationError
+from cpip.core.python import CURRENT_PYTHON_VERSION_DIGITS
 from cpip.core.wheel import (
     TargetContext,
     WheelTag,
@@ -143,9 +144,10 @@ def test_parse_wheel_filename_rejects_invalid_oracle(filename: str) -> None:
 def test_current_macos_accepts_newer_arm64_wheel() -> None:
     if sys.platform != "darwin" or platform.machine() != "arm64":
         pytest.skip("macOS arm64 wheel compatibility test")
-    version = f"{sys.version_info.major}{sys.version_info.minor}"
     wheel = parse_wheel_file(
-        f"demo-1.0-cp{version}-cp{version}-macosx_12_0_arm64.whl"
+        "demo-1.0-cp"
+        f"{CURRENT_PYTHON_VERSION_DIGITS}-cp{CURRENT_PYTHON_VERSION_DIGITS}"
+        "-macosx_12_0_arm64.whl"
     )
     assert wheel is not None
     assert wheel_tag_rank(wheel.tags) is not None

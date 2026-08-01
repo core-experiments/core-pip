@@ -10,6 +10,7 @@ from cpip.cli._bootstrap import (
     extract_global_options,
     extract_python_option,
 )
+from cpip.core.python import CURRENT_PYTHON_VERSION
 
 VERBOSITY_FLAGS = frozenset(("-vv", "-vvv"))
 VERSION_FLAGS = frozenset(("-V", "--version"))
@@ -37,7 +38,7 @@ def print_version(version: str | None, location: str | None) -> None:
         raise RuntimeError("cpip package location is unavailable")
     print(
         f"cpip {version} from {os.path.realpath(location)} "
-        f"(python {sys.version_info.major}.{sys.version_info.minor})"
+        f"(python {CURRENT_PYTHON_VERSION})"
     )
 
 

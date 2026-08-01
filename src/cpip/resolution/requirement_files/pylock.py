@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 import posixpath
 import re
-import sys
 import urllib.parse
 from typing import TYPE_CHECKING, cast
 
@@ -16,6 +15,7 @@ except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility
 
 from cpip.core.errors import InstallationError
 from cpip.core.packaging import SpecifierSet, Version
+from cpip.core.python import CURRENT_PYTHON_VERSION_FULL
 from cpip.core.urls import path_to_url
 from cpip.core.wheel import parse_wheel_filename
 from cpip.resolution.requirement_files.models import ParsedRequirement
@@ -62,7 +62,7 @@ def parse_pylock(
     lock_requires_python = lock.get("requires-python")
     if lock_requires_python is not None and not SpecifierSet(
         str(lock_requires_python)
-    ).contains(Version(".".join(str(part) for part in sys.version_info[:3]))):
+    ).contains(Version(CURRENT_PYTHON_VERSION_FULL)):
         raise InstallationError(
             f"Cannot select requirements from pylock file {reference!r}: "
             "no distribution supports this Python version"
@@ -78,7 +78,7 @@ def parse_pylock(
         requires_python = package.get("requires-python")
         if requires_python is not None and not SpecifierSet(
             str(requires_python)
-        ).contains(Version(".".join(str(part) for part in sys.version_info[:3]))):
+        ).contains(Version(CURRENT_PYTHON_VERSION_FULL)):
             raise InstallationError(
                 f"Cannot select requirements from pylock file {reference!r}: "
                 "no distribution supports this Python version"

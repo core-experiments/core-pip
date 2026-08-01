@@ -6,6 +6,7 @@ import sys
 
 from cpip.cli.commands.registry import COMMAND_SPECS, get_command, parser_for_command
 from cpip.core.cpip_version import get_cpip_distribution, get_cpip_version
+from cpip.core.python import CURRENT_PYTHON_VERSION
 
 
 def print_version(location: str | None = None) -> None:
@@ -15,7 +16,7 @@ def print_version(location: str | None = None) -> None:
         location = str(get_cpip_distribution().locate_file("cpip"))
     print(
         f"cpip {get_cpip_version()} from {Path(location).resolve()} "
-        f"(python {sys.version_info.major}.{sys.version_info.minor})"
+        f"(python {CURRENT_PYTHON_VERSION})"
     )
 
 

@@ -12,6 +12,7 @@ from collections.abc import Collection
 from typing import TYPE_CHECKING, Protocol
 
 from .errors import InstallationError, InvalidWheelFilename, UnsupportedWheel
+from .python import CURRENT_PYTHON_VERSION_DIGITS
 from .packaging import (
     InvalidVersion,
     Requirement,
@@ -373,15 +374,13 @@ def parse_wheel_filename(path: str | Path) -> tuple[str, str] | None:
 @cache
 def supported_wheel_tags(target: TargetContext | None = None) -> tuple[WheelTag, ...]:
     if target is None:
-        major = sys.version_info.major
-        minor = sys.version_info.minor
         implementation = "cp"
-        version_digits = f"{major}{minor}"
+        version_digits = CURRENT_PYTHON_VERSION_DIGITS
         platform_tags = (current_platform_tag(),)
         abi_tags = ()
     else:
         version = (
-            target.python_version or f"{sys.version_info.major}{sys.version_info.minor}"
+            target.python_version or CURRENT_PYTHON_VERSION_DIGITS
         )
         version_digits = version.replace(".", "")
         implementation = target.implementation or "cp"

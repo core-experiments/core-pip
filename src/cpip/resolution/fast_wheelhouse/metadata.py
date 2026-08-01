@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import struct
-import sys
 import zlib
 from functools import lru_cache
 from typing import TYPE_CHECKING
@@ -15,6 +14,7 @@ from cpip.core.wheel_metadata import (
     parse_metadata_headers,
     parse_metadata_member,
 )
+from cpip.core.python import CURRENT_PYTHON_FULL_TAG, CURRENT_PYTHON_MAJOR_TAG
 from cpip.resolution.fast_wheelhouse.archive import (
     CENTRAL_DIRECTORY_HEADER,
     END_OF_CENTRAL_DIRECTORY,
@@ -46,10 +46,6 @@ if TYPE_CHECKING:
 SMALL_WHEEL_SIZE = 64 * 1024
 SPECIFIER_OPERATORS = ("===", "==", "!=", "~=", "<=", ">=", "<", ">")
 MARKER_OPERATORS = ("not in", "==", "!=", "in")
-_CURRENT_PYTHON_MAJOR_TAG = f"py{sys.version_info.major}"
-_CURRENT_PYTHON_FULL_TAG = f"py{sys.version_info.major}{sys.version_info.minor}"
-
-
 def cached_candidate_parts(cached: CachedMetadata) -> CachedCandidateParts | None:
     name, version_text, cached_dependencies, provided_extras, requires_python = cached
     version = parse_version(version_text)
@@ -277,13 +273,13 @@ def parse_wheel_filename(filename: str) -> tuple[str, LocalWheelVersion] | None:
     if not name or abi != "none" or platform != "any":
         return None
     if (
-        python_tags != _CURRENT_PYTHON_MAJOR_TAG
-        and python_tags != _CURRENT_PYTHON_FULL_TAG
+        python_tags != CURRENT_PYTHON_MAJOR_TAG
+        and python_tags != CURRENT_PYTHON_FULL_TAG
     ):
         tags = python_tags.split(".")
         if (
-            _CURRENT_PYTHON_MAJOR_TAG not in tags
-            and _CURRENT_PYTHON_FULL_TAG not in tags
+            CURRENT_PYTHON_MAJOR_TAG not in tags
+            and CURRENT_PYTHON_FULL_TAG not in tags
         ):
             return None
     parsed = parse_version(version)

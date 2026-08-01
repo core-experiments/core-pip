@@ -16,6 +16,7 @@ from cpip.core.packaging import (
     Version,
     parse_requirement,
 )
+from cpip.core.python import CURRENT_PYTHON_VERSION_FULL
 from cpip.index.provider import CandidateProvider
 from cpip.resolution.algorithms import (
     direct_urls_equivalent,
@@ -114,7 +115,7 @@ class Resolver(
         self.upgrade_strategy = upgrade_strategy
         self.ignore_requires_python = ignore_requires_python
         self.python_version = python_version or ".".join(
-            str(part) for part in sys.version_info[:3]
+            CURRENT_PYTHON_VERSION_FULL
         )
         self.root_requirements: list[Requirement] = []
         self.root_requirement_names: set[str] = set()

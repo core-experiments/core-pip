@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import os
-import sys
 from typing import TYPE_CHECKING
 
+from cpip.core.python import CURRENT_PYTHON_VERSION_FULL, CURRENT_PYTHON_VERSION_INFO
 from cpip.resolution.fast_wheelhouse.catalog import (
     build_catalog_indexes,
     load_catalog,
@@ -55,8 +55,8 @@ def resolve(
     matching_domains: DomainCache = {}
     preflight_cache: PreflightCache = {}
     current_python = LocalWheelVersion(
-        tuple(sys.version_info[:3]),
-        ".".join(str(part) for part in sys.version_info[:3]),
+        tuple(CURRENT_PYTHON_VERSION_INFO[:3]),
+        CURRENT_PYTHON_VERSION_FULL,
     )
     cache_path, metadata_cache = load_metadata_cache(cache_dir)
     persistent_cache: WheelMetadataCache | None = None

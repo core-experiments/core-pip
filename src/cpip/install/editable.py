@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 from cpip.core.direct_url import DirectUrl, DirInfo
 from cpip.core.errors import BuildError, CommandError
 from cpip.core.packaging import SpecifierSet, canonicalize_name
+from cpip.core.python import CURRENT_PYTHON_VERSION_FULL
 from cpip.core.temp_dir import remove_temp_directory
 from cpip.index.artifacts import ArtifactLocator
 from cpip.resolution.direct_url_helpers import direct_url_from_link
@@ -112,7 +113,7 @@ def prepare_editable_source(
             f"Fix your #egg={egg} fragments."
         )
     if metadata is not None and metadata.requires_python is not None:
-        python_version = ".".join(str(part) for part in sys.version_info[:3])
+        python_version = CURRENT_PYTHON_VERSION_FULL
         if not SpecifierSet(metadata.requires_python).contains(python_version):
             raise CommandError(
                 f"Package '{metadata.name}' requires a different Python: "
