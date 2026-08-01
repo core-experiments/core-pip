@@ -200,7 +200,8 @@ def test_index_topology_ranking(benchmark: BenchmarkFixture) -> None:
     def rank_sources() -> str:
         best_default = default.compute_best_candidate(candidates).best_candidate
         best_binary = binary.compute_best_candidate(candidates).best_candidate
-        assert best_default is not None and best_binary is not None
+        assert best_default is not None
+        assert best_binary is not None
         return f"{best_default.version}:{best_binary.version}"
 
     assert benchmark(rank_sources) == "2.0.0:2.0.0"

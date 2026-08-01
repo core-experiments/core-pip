@@ -16,7 +16,7 @@ from cpip.install.uninstall import DistributionUninstaller
 from cpip.install.wheel_transaction import WheelInstaller
 from cpip.index.provider import CandidateProvider
 from cpip.resolution.req_file import parse_requirements
-from cpip.core.errors import BuildError, ResolutionError
+from cpip.core.errors import BuildError
 from cpip.index.candidates import prepare_project_metadata
 from cpip.index.candidate_materialization import CandidateMaterializer
 from cpip.index.candidate_materialization import validate_build_requirements
