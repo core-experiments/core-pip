@@ -22,7 +22,7 @@ from enum import Enum
 from hashlib import sha256
 from pathlib import Path
 from textwrap import dedent
-from typing import TYPE_CHECKING, Any, AnyStr, ClassVar
+from typing import Any, AnyStr, ClassVar
 from unittest.mock import patch
 from zipfile import ZipFile
 
@@ -59,9 +59,6 @@ from installer.destinations import SchemeDictionaryDestination
 from installer.sources import WheelFile
 
 from cpip.core.temp_dir import global_tempdir_manager
-
-if TYPE_CHECKING:
-    from typing_extensions import Self
 
 # For the cpip zipapp, Python modules are replaced with their .pyc equivalent to
 # speed up startup, but some modules must remain as .py files for cpip to function.
@@ -1170,7 +1167,11 @@ def html_index_with_onetime_server(
     """
 
     class InDirectoryServer(http.server.ThreadingHTTPServer):
-        def finish_request(self: Self, request: Any, client_address: Any) -> None:
+        def finish_request(
+            self: http.server.ThreadingHTTPServer,
+            request: Any,
+            client_address: Any,
+        ) -> None:
             self.RequestHandlerClass(
                 request,
                 client_address,

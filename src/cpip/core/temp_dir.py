@@ -12,8 +12,6 @@ from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from typing import Any, TypeVar
 
-from typing_extensions import Self
-
 from cpip.core.misc import enum
 
 logger = logging.getLogger(__name__)
@@ -120,7 +118,7 @@ class TempDirectory:
     def __repr__(self) -> str:
         return f"<{self.__class__.__name__} {self.path!r}>"
 
-    def __enter__(self) -> Self:
+    def __enter__(self: T_internal) -> T_internal:
         return self
 
     def __exit__(self, exc: Any, value: Any, tb: Any) -> None:
