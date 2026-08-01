@@ -60,9 +60,8 @@ def local_source_snapshot(
     discovered: list[LocalSourceEntry] = []
     with entries:
         for entry in entries:
-            if (
-                normalized_suffixes is not None
-                and not entry.name.lower().endswith(normalized_suffixes)
+            if normalized_suffixes is not None and not entry.name.lower().endswith(
+                normalized_suffixes
             ):
                 continue
             try:
@@ -71,7 +70,9 @@ def local_source_snapshot(
                 continue
             if not stat.S_ISREG(info.st_mode):
                 continue
-            identity = f"stat:{info.st_dev}:{info.st_ino}:{info.st_size}:{info.st_mtime_ns}"
+            identity = (
+                f"stat:{info.st_dev}:{info.st_ino}:{info.st_size}:{info.st_mtime_ns}"
+            )
             discovered.append(
                 LocalSourceEntry(
                     entry.path,
@@ -84,11 +85,7 @@ def local_source_snapshot(
 
 def local_source_files(path: str) -> tuple[str, ...]:
     snapshot = local_source_snapshot(path)
-    return (
-        ()
-        if snapshot is None
-        else tuple(entry.path for entry in snapshot.entries)
-    )
+    return () if snapshot is None else tuple(entry.path for entry in snapshot.entries)
 
 
 class DirectoryIndex:

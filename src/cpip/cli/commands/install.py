@@ -63,8 +63,7 @@ def run_install(args: list[str]) -> int:
     if options.no_input:
         os.environ["GIT_TERMINAL_PROMPT"] = "0"
     if any(
-        os.path.basename(value) == "requirements.txt"
-        for value in options.requirements
+        os.path.basename(value) == "requirements.txt" for value in options.requirements
     ):
         print(
             "Hint: It looks like you are trying to install a requirements file. "

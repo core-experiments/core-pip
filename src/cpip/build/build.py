@@ -21,9 +21,7 @@ def build_wheel_from_source(
 ) -> str:
     source_text = os.fspath(source)
     output_text = (
-        os.fspath(wheel_dir)
-        if wheel_dir is not None
-        else default_wheel_dir_internal()
+        os.fspath(wheel_dir) if wheel_dir is not None else default_wheel_dir_internal()
     )
     os.makedirs(output_text, exist_ok=True)
     source_is_dir = os.path.isdir(source_text)
@@ -55,9 +53,7 @@ def build_editable_from_source(
 ) -> str:
     source_text = os.fspath(source)
     output_text = (
-        os.fspath(wheel_dir)
-        if wheel_dir is not None
-        else default_wheel_dir_internal()
+        os.fspath(wheel_dir) if wheel_dir is not None else default_wheel_dir_internal()
     )
     os.makedirs(output_text, exist_ok=True)
     source_is_dir = os.path.isdir(source_text)
@@ -97,7 +93,9 @@ def build_editable_from_source(
             raise BuildError(
                 f"Build backend for {source_text} is missing the 'build_editable' hook",
             ) from exc
-        wheel_name = builder.build_editable(output_text, config_settings=config_settings)
+        wheel_name = builder.build_editable(
+            output_text, config_settings=config_settings
+        )
     wheel_path = os.path.join(output_text, wheel_name)
     if not os.path.isfile(wheel_path):
         raise BuildError(f"Build backend did not create expected wheel: {wheel_name}")

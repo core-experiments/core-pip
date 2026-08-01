@@ -38,10 +38,7 @@ def install_req_from_line(
         extras = frozenset(
             item.strip() for item in extras_text.split(",") if item.strip()
         )
-        if extras and (
-            looks_like_path(maybe_path)
-            or os.path.exists(maybe_path)
-        ):
+        if extras and (looks_like_path(maybe_path) or os.path.exists(maybe_path)):
             path_text = maybe_path
             path_extras = extras
     if "@" in text and "://" in text:
@@ -103,8 +100,12 @@ def install_req_from_line(
             raise InstallationError(
                 f"Invalid requirement: {text!r}. It looks like a path.",
             )
-        if path_mode is not None and stat.S_ISREG(path_mode) and path_text.endswith(
-            ".txt",
+        if (
+            path_mode is not None
+            and stat.S_ISREG(path_mode)
+            and path_text.endswith(
+                ".txt",
+            )
         ):
             raise InstallationError(
                 f"Invalid requirement: {text!r}. It looks like a path. The path does exist. "
@@ -278,10 +279,7 @@ def parse_editable(value: str) -> tuple[str | None, str, set[str]]:
     if "[" in stripped and stripped.endswith("]"):
         path_part, extras_text = stripped[:-1].split("[", 1)
         extras = {item.strip() for item in extras_text.split(",") if item.strip()}
-    if (
-        looks_like_path(path_part)
-        or os.path.exists(path_part)
-    ):
+    if looks_like_path(path_part) or os.path.exists(path_part):
         normalized = normalize_file_url_reference(path_part)
         if normalized is not None:
             return None, normalized, extras

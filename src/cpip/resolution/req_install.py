@@ -335,8 +335,7 @@ class InstallRequirement:
         try:
             with os.scandir(os.fspath(self.source_dir)) as entries:
                 has_project_file = any(
-                    entry.name in {"pyproject.toml", "setup.py"}
-                    and entry.is_file()
+                    entry.name in {"pyproject.toml", "setup.py"} and entry.is_file()
                     for entry in entries
                 )
         except OSError:

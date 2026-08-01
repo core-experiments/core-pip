@@ -417,9 +417,7 @@ def install_wheel_internal(
                 write_direct(requested_destination, b"")
             else:
                 direct_contents[requested_destination] = b""
-            direct_metadata[requested_destination] = (
-                record_metadata_internal(b"")
-            )
+            direct_metadata[requested_destination] = record_metadata_internal(b"")
             staged.append(
                 (
                     requested_source,
@@ -574,8 +572,7 @@ def install_wheel_internal(
         scripts_text = os.fspath(target.scripts)
         for _, destination, destination_text, _ in staged:
             if (
-                not direct
-                and os.path.dirname(destination_text) == scripts_text
+                not direct and os.path.dirname(destination_text) == scripts_text
             ) and script_matches(destination, scripts):
                 owned_paths.add(destination_text)
         new_destinations = {destination_text for _, _, destination_text, _ in staged}

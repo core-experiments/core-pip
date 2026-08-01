@@ -312,7 +312,11 @@ class CandidateMaterializer:
             if cached is not None:
                 return cached
         if candidate.link.is_file:
-            path = os.fspath(local_path) if local_path is not None else self.local_path_for(candidate)
+            path = (
+                os.fspath(local_path)
+                if local_path is not None
+                else self.local_path_for(candidate)
+            )
             assert path is not None
             self.local_artifacts[candidate.link.url] = path
             return path

@@ -194,9 +194,7 @@ class BackendRunner:
                     [
                         os.path.join(
                             env_path,
-                            "bin/python"
-                            if os.name != "nt"
-                            else "Scripts/python.exe",
+                            "bin/python" if os.name != "nt" else "Scripts/python.exe",
                         ),
                         "-m",
                         "ensurepip",
@@ -563,9 +561,7 @@ class ProjectBuilder:
                 source_text = os.fspath(self.source_dir)
                 src_root_text = os.path.join(source_text, "src")
                 import_root = (
-                    src_root_text
-                    if os.path.isdir(src_root_text)
-                    else source_text
+                    src_root_text if os.path.isdir(src_root_text) else source_text
                 )
                 write_file(
                     archive,
@@ -776,10 +772,7 @@ def backend_paths(
     paths: tuple[str, ...],
 ) -> tuple[str, ...]:
     source_text = os.fspath(source_dir)
-    return tuple(
-        os.path.realpath(os.path.join(source_text, path))
-        for path in paths
-    )
+    return tuple(os.path.realpath(os.path.join(source_text, path)) for path in paths)
 
 
 @contextlib.contextmanager
@@ -1247,9 +1240,13 @@ def _is_package_payload_text(
         resolved = os.path.realpath(path)
         if project_root_real is None:
             project_root_real = os.path.realpath(project_root)
-        return os.path.exists(resolved) and os.path.commonpath(
-            (resolved, project_root_real),
-        ) == project_root_real
+        return (
+            os.path.exists(resolved)
+            and os.path.commonpath(
+                (resolved, project_root_real),
+            )
+            == project_root_real
+        )
     except (OSError, ValueError):
         return False
 

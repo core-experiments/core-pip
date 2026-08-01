@@ -56,8 +56,7 @@ class CacheManager:
         if not wheels:
             return []
         return [
-            f" - {os.path.basename(path)} ({os.path.dirname(path)})"
-            for path in wheels
+            f" - {os.path.basename(path)} ({os.path.dirname(path)})" for path in wheels
         ]
 
     def remove(

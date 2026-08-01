@@ -133,8 +133,10 @@ def apply_root(scheme: Scheme, root: str) -> Scheme:
         # Checking the anchor handles both POSIX roots and drive-relative
         # Windows paths consistently.
         drive, tail = os.path.splitdrive(value)
-        if drive or tail.startswith(os.sep) or (
-            os.altsep is not None and tail.startswith(os.altsep)
+        if (
+            drive
+            or tail.startswith(os.sep)
+            or (os.altsep is not None and tail.startswith(os.altsep))
         ):
             value = tail.lstrip("/\\")
         return os.path.join(os.fspath(root), value)

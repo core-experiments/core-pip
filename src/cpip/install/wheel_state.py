@@ -114,7 +114,10 @@ class InstalledTargetInventory:
             paths=[os.fspath(root) for root in target.library_roots],
         ).iter(names=names)
         return cls(
-            {distribution.canonical_name: distribution for distribution in distributions},
+            {
+                distribution.canonical_name: distribution
+                for distribution in distributions
+            },
         )
 
     def find(self, name: str) -> InstalledMetadataDistribution | None:

@@ -446,9 +446,7 @@ def wheel_archive_identity(
             )
             return path_key, metadata.CRC, metadata.file_size
         stat = os.stat(path_text)
-        path_key = (
-            path_text if os.path.isabs(path_text) else os.path.abspath(path_text)
-        )
+        path_key = path_text if os.path.isabs(path_text) else os.path.abspath(path_text)
         return path_key, stat.st_size, stat.st_mtime_ns
     except (KeyError, OSError):
         return None

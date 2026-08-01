@@ -122,7 +122,9 @@ def run_download(args: list[str]) -> int:
             if candidate.canonical_name == "setuptools":
                 source = candidate.path
         source_text = os.fspath(source)
-        shutil.copy2(source_text, os.path.join(destination, os.path.basename(source_text)))
+        shutil.copy2(
+            source_text, os.path.join(destination, os.path.basename(source_text))
+        )
         names.append(candidate.name)
     if names:
         message = f"Successfully downloaded {' '.join(sorted(names))}"
