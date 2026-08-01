@@ -491,8 +491,11 @@ def eligible(
         # amortize the setup cost.
         return False
     # Eagerly materializing a finite domain only pays off when there is enough
-    # branching to amortize the catalog setup.  Small graphs stay on the lazy
-    # generic resolver, which is faster for one-shot linear propagation.
+    # branching to amortize the catalog setup.  A single root cannot branch,
+    # so keep one-root scans on the lazy generic resolver; this is especially
+    # important for large catalogs with Requires-Python rejections.
+    if len(requirements) == 1:
+        return False
     if len(requirements) < 32:
         largest_root_catalog = max(
             (
