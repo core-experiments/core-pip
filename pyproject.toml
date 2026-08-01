@@ -48,7 +48,10 @@ requires = [
 build-backend = "uv_build"
 
 [dependency-groups]
-benchmark = ["asv>=0.6.5"]
+benchmark = [
+    "asv>=0.6.5",
+    "pytest-codspeed>=5.0.3",
+]
 typing = ["ruff", "ty"]
 test = [
     "cryptography",
