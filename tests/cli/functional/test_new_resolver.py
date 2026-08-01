@@ -7,9 +7,9 @@ from typing import TYPE_CHECKING, Protocol
 
 import pytest
 
-from conftest import ScriptFactory
 from cpip_test_support import (
     CpipTestEnvironment,
+    ScriptFactory,
     create_basic_sdist_for_package,
     create_basic_wheel_for_package,
     create_test_package_with_setup,

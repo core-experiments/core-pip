@@ -7,8 +7,7 @@ import proxy
 import pytest
 from proxy.http.proxy import HttpProxyBasePlugin
 
-from conftest import CertFactory
-from cpip_test_support import CpipTestEnvironment, TestData
+from cpip_test_support import CertFactory, CpipTestEnvironment, TestData
 from cpip_test_support.server import (
     authorization_response,
     make_mock_server,
