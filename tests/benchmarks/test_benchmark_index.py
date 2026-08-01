@@ -6,6 +6,9 @@ ranks all of its links, so these paths scale with the size of the index.
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 from benchmark_support import (
     reset_caches,
     simple_index_html,
@@ -24,6 +27,7 @@ from cpip.index.candidate_evaluators import CandidateEvaluator
 from cpip.index.candidates import BestCandidateResult, InstallationCandidate
 from cpip.index.links import Link
 from cpip.index.page_parsing import IndexPageParser
+from cpip.index.provider import CandidateProvider
 PAGE_URL = "https://example.invalid/simple/package/"
 WHEEL_FILENAMES = wheel_filenames()
 CANDIDATE_URLS = [
@@ -200,6 +204,137 @@ def test_index_topology_ranking(benchmark: BenchmarkFixture) -> None:
         return f"{best_default.version}:{best_binary.version}"
 
     assert benchmark(rank_sources) == "2.0.0:2.0.0"
+
+
+def test_index_fallback_and_duplicate_topology(
+    benchmark: BenchmarkFixture, tmp_path: Path
+) -> None:
+    primary = tmp_path / "primary"
+    fallback = tmp_path / "fallback"
+    for root in (primary, fallback):
+        package = root / "topology"
+        package.mkdir(parents=True)
+        (package / "index.json").write_text(
+            json.dumps(
+                {
+                    "files": [
+                        {
+                            "filename": "topology-1.0.0-py3-none-any.whl",
+                            "url": "https://example.invalid/topology-1.0.0.whl",
+                        },
+                        {
+                            "filename": "topology-2.0.0-py3-none-any.whl",
+                            "url": "https://example.invalid/topology-2.0.0.whl",
+                        },
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+    requirement = parse_requirement("topology")
+
+    def collect_fallback() -> int:
+        provider = CandidateProvider.from_options(
+            find_links=[str(primary)],
+            index_url=str(fallback),
+            no_index=False,
+        )
+        links = provider.collect_links(requirement)
+        provider.close()
+        return len(links)
+
+    assert benchmark(collect_fallback) == 2
+
+
+def test_universal_target_matrix(benchmark: BenchmarkFixture) -> None:
+    requirement = parse_requirement("package")
+    links = [
+        Link.from_url(
+            f"https://example.invalid/packages/{filename}",
+            source_url=PAGE_URL,
+            requires_python=">=3.9",
+        )
+        for filename in WHEEL_FILENAMES
+    ]
+    targets = tuple(
+        TargetContext(platforms=(platform,), python_version=f"3.{version}")
+        for platform in (
+            "manylinux_2_17_x86_64",
+            "win_amd64",
+            "macosx_11_0_arm64",
+            "musllinux_1_2_aarch64",
+        )
+        for version in (9, 10, 11, 12, 13)
+    )
+
+    def evaluate_matrix() -> int:
+        reset_caches()
+        return sum(
+            isinstance(
+                CandidateEvaluator.evaluate_link(
+                    link,
+                    requirement,
+                    allow_yanked=False,
+                    allow_binary=True,
+                    allow_source=True,
+                    target=target,
+                ),
+                InstallationCandidate,
+            )
+            for target in targets
+            for link in links
+        )
+
+    assert benchmark(evaluate_matrix) > 100
+
+
+def test_prerelease_and_yanked_policy(benchmark: BenchmarkFixture) -> None:
+    requirement = parse_requirement("package>=1")
+    links = [
+        Link.from_url(
+            "https://example.invalid/packages/package-2.0.0rc1-py3-none-any.whl",
+            source_url=PAGE_URL,
+            yanked_reason="broken release",
+        ),
+        Link.from_url(
+            "https://example.invalid/packages/package-1.9.0-py3-none-any.whl",
+            source_url=PAGE_URL,
+        ),
+    ]
+
+    def evaluate_policies() -> int:
+        reset_caches()
+        strict = sum(
+            isinstance(
+                CandidateEvaluator.evaluate_link(
+                    link,
+                    requirement,
+                    allow_yanked=False,
+                    allow_binary=True,
+                    allow_source=True,
+                    target=None,
+                ),
+                InstallationCandidate,
+            )
+            for link in links
+        )
+        permissive = sum(
+            isinstance(
+                CandidateEvaluator.evaluate_link(
+                    link,
+                    parse_requirement("package==2.0.0rc1"),
+                    allow_yanked=True,
+                    allow_binary=True,
+                    allow_source=True,
+                    target=None,
+                ),
+                InstallationCandidate,
+            )
+            for link in links
+        )
+        return strict + permissive
+
+    assert benchmark(evaluate_policies) == 2
 
 
 def test_build_links(benchmark: BenchmarkFixture) -> None:

@@ -8,6 +8,7 @@ touch the network.
 from __future__ import annotations
 
 from pathlib import Path
+import os
 
 from benchmark_support import reset_caches
 from pytest_codspeed import BenchmarkFixture
@@ -98,6 +99,24 @@ def test_top88_requirements_stress(
         return resolve(stress_wheelhouse, requirements)
 
     assert benchmark(resolve_stress) == 176
+
+
+def test_resolver_metrics(benchmark: BenchmarkFixture, graph_wheelhouse: Path) -> None:
+    os.environ["CPIP_RESOLVER_METRICS"] = "1"
+
+    def resolve_with_metrics() -> int:
+        reset_caches()
+        resolver = Resolver(
+            provider=CandidateProvider.from_options(
+                find_links=[str(graph_wheelhouse)], no_index=True
+            ),
+            ignore_installed=True,
+        )
+        resolver.resolve(["application"])
+        metrics = resolver.metrics_snapshot()
+        return metrics["candidates_considered"] + metrics["propagations"]
+
+    assert benchmark(resolve_with_metrics) > 10
 
 
 def test_candidate_scan_scaling(

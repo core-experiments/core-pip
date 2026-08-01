@@ -14,6 +14,38 @@ from cpip.core.packaging import canonicalize_name, parse_requirement
 SHA256_PLACEHOLDER = "a" * 64
 METADATA_PLACEHOLDER = "b" * 64
 
+# Frozen requirement excerpts model the large, repeatedly reported resolver
+# workloads without making the default benchmark suite depend on PyPI uptime.
+REAL_WORLD_CORPORA = {
+    "airflow": (
+        "apache-airflow[postgres,redis]>=2.8,<3",
+        "apache-airflow-providers-google>=10",
+        "pendulum>=2.1,<4",
+    ),
+    "scientific": (
+        "numpy>=1.23,<3",
+        "numba>=0.58",
+        "scipy>=1.10",
+        "pandas>=2",
+    ),
+    "web": (
+        "starlette>=0.27",
+        "fastapi>=0.100",
+        "httpx[http2]>=0.24",
+    ),
+    "data": (
+        "boto3>=1.28",
+        "botocore>=1.31",
+        "urllib3>=1.26,<3",
+        "selenium>=4",
+    ),
+    "docs": (
+        "sphinx>=7",
+        "sphinxcontrib-httpdomain>=1.8",
+        "docutils>=0.18,<0.22",
+    ),
+}
+
 
 def make_wheel(
     wheelhouse: Path,

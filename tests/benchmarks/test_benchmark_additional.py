@@ -6,7 +6,7 @@ import hashlib
 import itertools
 from pathlib import Path
 
-from benchmark_support import make_wheel, reset_caches
+from benchmark_support import REAL_WORLD_CORPORA, make_wheel, reset_caches
 from pytest_codspeed import BenchmarkFixture
 from cpip.core.packaging import SpecifierSet, parse_requirement
 from cpip.core.wheel import read_wheel_metadata
@@ -19,9 +19,12 @@ from cpip.resolution.req_file import parse_requirements
 from cpip.core.errors import BuildError, ResolutionError
 from cpip.index.candidates import prepare_project_metadata
 from cpip.index.candidate_materialization import CandidateMaterializer
+from cpip.index.candidate_materialization import validate_build_requirements
 from cpip.index.candidates import InstallationCandidate
 from cpip.index.links import Link
 from cpip.resolution.resolver import Resolver
+from cpip.build.build_backend import ProjectBuilder
+from cpip.build.metadata import InstalledDistributionStore
 
 
 def test_hash_throughput(benchmark: BenchmarkFixture) -> None:
@@ -123,6 +126,33 @@ def test_sdist_metadata_build_isolated(
         return prepare_project_metadata(isolated_source_tree).version
 
     assert benchmark(prepare_metadata) == "1.0.0"
+
+
+def test_editable_build(benchmark: BenchmarkFixture, source_tree: Path, tmp_path: Path) -> None:
+    wheel_directory = tmp_path / "editable-wheel"
+    wheel_directory.mkdir()
+
+    def build_editable() -> str:
+        return ProjectBuilder(source_tree).build_editable(wheel_directory)
+
+    assert benchmark(build_editable).endswith(".whl")
+
+
+def test_build_isolation_requirements_validation(
+    benchmark: BenchmarkFixture, tmp_path: Path
+) -> None:
+    project = tmp_path / "build-requirements"
+    project.mkdir()
+    (project / "pyproject.toml").write_text(
+        "[build-system]\nrequires = [\"setuptools>=65\", \"wheel>=0.40\", "
+        "\"packaging>=23\"]\nbuild-backend = \"setuptools.build_meta\"\n",
+        encoding="utf-8",
+    )
+
+    def validate() -> None:
+        validate_build_requirements(project)
+
+    benchmark(validate)
 
 
 def test_sdist_metadata_build_failure(
@@ -248,3 +278,65 @@ def test_direct_url_and_constraint_parsing(benchmark: BenchmarkFixture) -> None:
         return sum(len(parse_requirement(value).name) for value in values * 100)
 
     assert benchmark(parse_mixed) > 0
+
+
+def test_frozen_real_world_corpus_parsing(benchmark: BenchmarkFixture) -> None:
+    values = tuple(value for corpus in REAL_WORLD_CORPORA.values() for value in corpus)
+
+    def parse_corpus() -> int:
+        reset_caches()
+        return sum(len(parse_requirement(value).name) for value in values)
+
+    assert benchmark(parse_corpus) > 100
+
+
+def test_installed_state_scan(benchmark: BenchmarkFixture, tmp_path: Path) -> None:
+    wheelhouse = tmp_path / "installed-wheelhouse"
+    wheelhouse.mkdir()
+    target_path = tmp_path / "installed-target"
+    target = InstallTarget.from_options("installed-0", target=str(target_path))
+    installer = WheelInstaller(target, pycompile=False)
+    wheels = [
+        make_wheel(wheelhouse, f"installed-{index}", "1.0.0", payload_files=2)
+        for index in range(48)
+    ]
+    for wheel in wheels:
+        installer.install(wheel)
+
+    def scan_installed() -> int:
+        return len(InstalledDistributionStore(paths=[str(target_path)]).iter())
+
+    assert benchmark(scan_installed) == 48
+
+
+def test_cold_and_warm_resolution_cache(
+    benchmark: BenchmarkFixture, graph_wheelhouse: Path
+) -> None:
+    def cold_resolution() -> int:
+        reset_caches()
+        resolver = Resolver(
+            provider=CandidateProvider.from_options(
+                find_links=[str(graph_wheelhouse)], no_index=True
+            ),
+            ignore_installed=True,
+        )
+        return len(resolver.resolve(["application"]).candidates)
+
+    assert benchmark(cold_resolution) > 10
+
+
+def test_warm_resolution_cache(
+    benchmark: BenchmarkFixture, graph_wheelhouse: Path
+) -> None:
+    resolver = Resolver(
+        provider=CandidateProvider.from_options(
+            find_links=[str(graph_wheelhouse)], no_index=True
+        ),
+        ignore_installed=True,
+    )
+    resolver.resolve(["application"])
+
+    def warm_resolution() -> int:
+        return len(resolver.resolve(["application"]).candidates)
+
+    assert benchmark(warm_resolution) > 10
