@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import re
 import sys
+from collections.abc import Iterable
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -26,6 +28,16 @@ class HelpFormatter(argparse.HelpFormatter):
         if metavar:
             option_strings[-1] += f" {metavar}"
         return ", ".join(option_strings)
+
+    def _format_usage(
+        self,
+        usage: str | None,
+        actions: Iterable[argparse.Action],
+        groups: Iterable[argparse._MutuallyExclusiveGroup],
+        prefix: str | None,
+    ) -> str:
+        rendered = super()._format_usage(usage, actions, groups, prefix)
+        return re.sub(r"(?m)(^.*\]) -d\n(\s+)DEST", r"\1\n\2-d DEST", rendered)
 
 
 class ArgumentParser(argparse.ArgumentParser):

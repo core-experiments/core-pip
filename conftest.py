@@ -567,9 +567,16 @@ def setuptools_install(
 
 
 @pytest.fixture(scope="session")
-def coverage_install() -> Path:
+def coverage_install(tmpdir_factory: pytest.TempPathFactory) -> Path:
     """Expose the test runner's platform-compatible coverage installation."""
-    return Path(str(importlib.metadata.distribution("coverage").locate_file("")))
+    distribution = importlib.metadata.distribution("coverage")
+    install_dir = tmpdir_factory.mktemp("coverage") / "install"
+    for file in distribution.files or ():
+        source = Path(str(distribution.locate_file(file)))
+        destination = install_dir / str(file)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, destination)
+    return install_dir
 
 
 @pytest.fixture(scope="session")
