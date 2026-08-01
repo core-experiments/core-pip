@@ -6,12 +6,11 @@ import os
 import shutil
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 
 CUTOFF = "2024-08-08"
-TOOLS = ("cpip", "uv-pip")
+TOOLS = ("core-pip", "uv-pip")
 RESOLVE_MODES = ("cold", "warm", "incremental", "noop")
 LIVE_CASES = {
     "jupyter": ("jupyter==1.0.0",),
@@ -36,8 +35,8 @@ LIVE_CASES = {
         "pyOpenSSL",
     ),
     "apache-beam-dill": ("dill<0.3.9,>=0.2.2", "apache-beam<=2.49.0"),
-    "numpy-numba": ("numpy>=2.0,<2.1", "numba<=0.60,>0.1"),
-    "numpy-sparse": ("numpy>=1.24,<2.0", "scipy<1.14", "sparse<0.15.4"),
+    "numpy-numba": ("numpy>=2.1,<2.2", "numba<=0.60,>0.1"),
+    "numpy-sparse": ("numpy>=1.24,<2.1.2", "sparse<0.15.4"),
     "sentry": (
         "python-rapidjson<=1.20,>=1.4",
         "sentry-kafka-schemas<=0.1.113,>=0.1.50",
@@ -87,8 +86,8 @@ TRIO_COMPILED = (
 
 
 def require_live_benchmarks() -> None:
-    if os.environ.get("CPIP_BENCH_LIVE") != "1":
-        raise NotImplementedError("set CPIP_BENCH_LIVE=1 to run live-PyPI cases")
+    if os.environ.get("PIP_BENCH_LIVE") != "1":
+        raise NotImplementedError("set PIP_BENCH_LIVE=1 to run live-PyPI cases")
 
 
 def uv() -> str:
@@ -102,30 +101,18 @@ def run_internal(command: list[str]) -> None:
     environment = os.environ.copy()
     environment.update(
         {
-            "CPIP_DISABLE_CPIP_VERSION_CHECK": "1",
-            "CPIP_NO_INPUT": "1",
-            "CPIP_QUIET": "1",
-            "CPIP_BENCH_NETWORK_STATS": "1",
+            "PIP_DISABLE_PIP_VERSION_CHECK": "1",
+            "PIP_NO_INPUT": "1",
+            "PIP_QUIET": "1",
         }
     )
-    try:
-        subprocess.run(
-            command,
-            check=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            env=environment,
-        )
-    except subprocess.CalledProcessError as error:
-        details = (error.stderr or error.stdout or "").strip()
-        if len(details) > 8_000:
-            details = details[-8_000:]
-        command_text = " ".join(command)
-        raise RuntimeError(
-            f"live benchmark command failed ({error.returncode}): {command_text}\n"
-            f"{details}"
-        ) from error
+    subprocess.run(
+        command,
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        env=environment,
+    )
 
 
 def create_inputs(root: Path) -> dict[str, dict[str, str]]:
@@ -154,11 +141,11 @@ def resolve_command(
     state: dict[str, str], tool: str, cache: Path, output: Path, *, incremental: bool
 ) -> list[str]:
     input_file = state["incremental"] if incremental else state["input"]
-    if tool == "cpip":
+    if tool == "core-pip":
         return [
             sys.executable,
             "-m",
-            "cpip",
+            "pip",
             "install",
             "--dry-run",
             "--ignore-installed",
@@ -197,10 +184,11 @@ class LiveBenchmark:
     @staticmethod
     def setup_cache() -> dict[str, dict[str, str]]:
         require_live_benchmarks()
-        root = Path(tempfile.mkdtemp(prefix="cpip-live-pypi-"))
-        states = create_inputs(root)
-        states["__root__"] = {"path": os.fspath(root)}
-        return states
+        root = Path.cwd() / "uv-live-pypi"
+        if root.exists():
+            shutil.rmtree(root)
+        root.mkdir()
+        return create_inputs(root)
 
 
 class LiveResolution(LiveBenchmark):
@@ -214,11 +202,10 @@ class LiveResolution(LiveBenchmark):
         tool: str,
         cache_state: str,
     ) -> None:
-        root = Path(states["__root__"]["path"])
-        work = root / "resolve" / scenario / tool
+        work = Path.cwd() / "uv-live-work" / scenario / tool
         work.mkdir(parents=True, exist_ok=True)
         cache = work / "cache"
-        output = work / ("report.json" if tool == "cpip" else "requirements.txt")
+        output = work / ("report.json" if tool == "core-pip" else "requirements.txt")
         incremental = cache_state == "incremental"
         command = resolve_command(
             states[scenario], tool, cache, output, incremental=incremental
@@ -255,29 +242,6 @@ class LiveResolution(LiveBenchmark):
         run_internal(self.command)
 
 
-class CachedRegistryResolution(LiveResolution):
-    """Match uv's dedicated warm Jupyter/Airflow registry benchmarks."""
-
-    params = (("jupyter", "airflow"), TOOLS)
-    param_names = ("scenario", "tool")
-
-    def setup(
-        self,
-        states: dict[str, dict[str, str]],
-        scenario: str,
-        tool: str,
-    ) -> None:
-        super().setup(states, scenario, tool, "warm")
-
-    def time_resolve(
-        self,
-        states: dict[str, dict[str, str]],
-        scenario: str,
-        tool: str,
-    ) -> None:
-        super().time_resolve(states, scenario, tool, "warm")
-
-
 class LiveTrioInstallation(LiveBenchmark):
     params = (TOOLS, ("cold", "warm"))
     param_names = ("tool", "cache_state")
@@ -288,8 +252,7 @@ class LiveTrioInstallation(LiveBenchmark):
         tool: str,
         cache_state: str,
     ) -> None:
-        root = Path(states["__root__"]["path"])
-        work = root / "install" / tool
+        work = Path.cwd() / "uv-live-install" / tool
         work.mkdir(parents=True, exist_ok=True)
         cache = work / "cache"
         target = work / "target"
@@ -301,11 +264,11 @@ class LiveTrioInstallation(LiveBenchmark):
             "-r",
             states["trio"]["compiled"],
         ]
-        if tool == "cpip":
+        if tool == "core-pip":
             command = [
                 sys.executable,
                 "-m",
-                "cpip",
+                "pip",
                 "install",
                 "--ignore-installed",
                 "--uploaded-prior-to",

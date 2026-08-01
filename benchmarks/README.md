@@ -1,9 +1,20 @@
-# cpip benchmarks
+# pip benchmarks
 
-This directory contains the ASV benchmark suite for cpip. The cache benchmarks
+[![CodSpeed](https://img.shields.io/endpoint?url=https://codspeed.io/badge.json)](https://app.codspeed.io/core-experiments/core-pip?utm_source=badge)
+
+pip has two benchmark suites:
+
+- the ASV suite in this directory, which measures end-to-end installation and
+  resolution workloads, including comparisons against `uv`;
+- the CodSpeed suite in `tests/benchmarks/`, which measures CPU-bound library
+  code on every pull request. See [CodSpeed benchmarks](#codspeed-benchmarks).
+
+## ASV benchmarks
+
+This directory contains the ASV benchmark suite for pip. The cache benchmarks
 follow uv's definitions:
 
-- **cold**: recreate the output environment and delete cpip's cache before every
+- **cold**: recreate the output environment and delete pip's cache before every
   measured sample;
 - **warm**: recreate the output environment but preserve a cache populated
   before measurement.
@@ -11,11 +22,11 @@ follow uv's definitions:
 Both variants use a generated local wheelhouse. This isolates resolver,
 candidate materialization, wheel-build cache, and installation work from public
 index and network variance. It does not attempt to flush the operating system's
-filesystem cache. Installation is measured with both the cpip revision under
+filesystem cache. Installation is measured with both the pip revision under
 test and the uv version pinned in `asv.conf.json`. Resolver-only timing remains
-cpip-specific because `uv pip` has no operation equivalent to cpip's
+pip-specific because `uv pip` has no operation equivalent to pip's
 `--dry-run --report`. The uv command enables bytecode compilation to match
-cpip's installation work.
+pip's installation work.
 
 Run the benchmarks from the repository root:
 
@@ -38,18 +49,12 @@ uv run --group benchmark asv --config benchmarks/asv.conf.json run \
   --bench 'cache_materialization.*'
 ```
 
-Run only the direct cpip versus uv installation comparison:
+Run only the direct pip versus uv installation comparison:
 
 ```console
 uv run --group benchmark asv --config benchmarks/asv.conf.json run \
   --bench 'cache_materialization.*Install.*'
 ```
-
-ASV is the canonical benchmark format and source of cpip revision history.
-Each benchmark owns its fixtures and setup through ASV lifecycle hooks, so
-results, environments, and parameterized comparisons are recorded together.
-Live-PyPI benchmarks remain opt-in because network and index conditions are
-useful for realism but unsuitable for a stable comparison gate.
 
 Run the cold conflict-resolution scaling benchmark:
 
@@ -58,59 +63,16 @@ uv run --group benchmark asv --config benchmarks/asv.conf.json run \
   --bench 'resolver_conflicts.*'
 ```
 
-`resolver_conflicts.WarmConflictResolution` resolves the same local wheelhouse
-once during setup and measures a second resolution with reusable wheel metadata.
-It complements the cold benchmark without conflating unique archive I/O with
-resolver search cost.
-
-Run the general-resolver adversarial families:
-
-```console
-uv run --group benchmark asv --config benchmarks/asv.conf.json run \
-  --bench 'resolver_adversarial.*'
-```
-
-The `SeededResolution` cases resolve the same graph once during setup and then
-measure both a repeated no-op resolution and a resolution with one additional
-root constraint using the previous candidates as warm seeds. They preserve
-normal candidate validity and fallback behavior.
-
-These are deterministic metadata-only cases for late candidate conflicts and
-wide shared-dependency graphs. They complement the real-world fast wheelhouse
-benchmarks; they do not measure the specialized local resolver.
-
-The `uv_microbenchmarks.InstallWheelManyFilesCompiled` case measures the
-explicit bytecode-compilation install path alongside the no-precompile case.
-
-For diagnostic counters, set `CPIP_RESOLVER_METRICS=1`. The resolver then
-exposes `metrics_snapshot()` for targeted profiling and benchmark scripts. The
-environment variable is intentionally disabled by default so production
-resolution does not pay counter-update overhead.
-
-Run the real-world fast-resolver cases:
-
-```console
-uv run --group benchmark asv --config benchmarks/asv.conf.json run \
-  --bench 'real_world_resolver.*'
-```
-
-These cases isolate eight failure modes: catalogs with many versions,
-backtracking to an older compatible branch, unsatisfiable graphs, simple and
-nested conflicting extras, `Requires-Python` rejection, large catalogs with
-irrelevant projects, and no-match searches. Each case has 32, 128, and 512
-versions and measures both cold and warm metadata/catalog caches.
-
 ## uv-derived workloads
 
-The suite also ports the cpip-relevant benchmarks from uv commit
+The suite also ports the pip-relevant benchmarks from uv commit
 `73fa89457b07`:
 
 - PEP 440 specifier parsing for short, bounded, and exclusion-heavy ranges;
-- SHA-256 throughput at 1 KiB, 1 MiB, and 16 MiB payload sizes;
 - extraction, preparation, and installation of archives with 10,000 files;
 - cold, warm, incremental, and no-op resolution of Trio-, Jupyter-, Airflow-,
   and historical-backtracking-shaped dependency graphs;
-- cold and warm installation of those graphs with cpip and `uv pip`.
+- cold and warm installation of those graphs with core-pip and `uv pip`.
 
 The deterministic resolver cases generate 3,657 metadata-only wheels totaling
 about 3 MiB. They preserve the expensive graph dimensions without checking
@@ -121,63 +83,18 @@ uv run --group benchmark asv --config benchmarks/asv.conf.json run \
   --bench 'uv_(microbenchmarks|offline).*'
 ```
 
-Run only the cpip versus uv offline resolver comparison:
+Run only the core-pip versus uv offline resolver comparison:
 
 ```console
 uv run --group benchmark asv --config benchmarks/asv.conf.json run \
   --bench 'uv_offline.OfflineResolution.*'
 ```
 
-Run the deterministic resolver primitive benchmarks:
-
-```console
-uv run --group benchmark asv --config benchmarks/asv.conf.json run \
-  --bench 'cpip_primitives.*'
-```
-
-These isolate PEP 508 requirement parsing, version parsing, project-name
-normalization, wheel filename parsing, local specifier checks, and version
-filtering. The requirement benchmarks report both uncached parsing and cpip's
-cached parsing so cache effects are not mistaken for parser improvements.
-
-Run metadata-cache scaling benchmarks:
-
-```console
-uv run --group benchmark asv --config benchmarks/asv.conf.json run \
-  --bench 'metadata_cache.*'
-```
-
-These use deterministic wheelhouses containing 10, 100, 1,000, and 10,000
-metadata-only wheels, measured with cold, warm, and single-file-invalidation
-cache states.
-
-Run local index and requirements-file parsing benchmarks:
-
-```console
-uv run --group benchmark asv --config benchmarks/asv.conf.json run \
-  --bench 'io_primitives.*'
-```
-
-These scan local wheelhouses containing 10, 100, 1,000, and 10,000 files and
-parse flat, nested, and constraint-bearing requirements files at the same
-scales. The index cases include both wheel-only and mixed artifact directories.
-
-Run lockfile serialization benchmarks:
-
-```console
-uv run --group benchmark asv --config benchmarks/asv.conf.json run \
-  --bench 'lockfile_serialization.*'
-```
-
-These measure production TOML rendering for the regular and optimized lock
-paths with 10, 100, 1,000, and 10,000 packages, excluding resolution and file
-I/O.
-
 The authentic PyPI cases use uv's `2024-08-08` upload cutoff and are opt-in so
 normal revision benchmarks remain deterministic. Enable them with:
 
 ```console
-CPIP_BENCH_LIVE=1 uv run --group benchmark asv \
+PIP_BENCH_LIVE=1 uv run --group benchmark asv \
   --config benchmarks/asv.conf.json run --bench 'uv_live_pypi.*'
 ```
 
@@ -187,42 +104,38 @@ environment with cold and warm caches. Use Python 3.12 for parity with uv's
 benchmark fixture and to avoid source builds caused by unavailable wheels on
 newer Python versions.
 
-The startup install cases warm their local cache before measurement and recreate
-only the target directory between samples. The fallback case omits `--quiet`
-so it exercises the normal CLI path rather than the specialized fast installer.
-Core-cpip benchmark commands use a dedicated `PYTHONPYCACHEPREFIX`; the regular
-startup cases measure warm cached imports, while the `*-cold` cases remove that
-cache before every sample. This avoids inheriting an ambient
-`PYTHONDONTWRITEBYTECODE` setting from the shell.
-
-`startup-fast-install` measures the specialized pure-wheel route with
-`--no-compile`. `startup-fallback-install` starts with a marker in the target,
-which makes the target non-empty and therefore forces the normal installer
-while retaining the no-compile workload. `startup-compile-install` uses
-`--compile` for cpip and `--compile-bytecode` for uv, forcing normal
-installation and measuring bytecode generation explicitly.
-
 uv's universal resolver, workspace discovery, and tool-management benchmarks
-are now represented by `universal_resolution.CrossEnvironmentResolution` and
-`workspace_discovery.WorkspaceDiscovery`. The former resolves a marker-rich
-graph for multiple target Python versions; the latter measures discovery and
-TOML dependency collection over a 127-member workspace-shaped tree. They are
-analogues rather than claims that cpip implements uv's universal lockfile or
-workspace model. The dedicated `uv_live_pypi.CachedRegistryResolution` cases
-match uv's warm cached-registry Jupyter and Airflow workloads.
-
-Run the five uv-parity additions with:
-
-```console
-uv run --group benchmark asv --config benchmarks/asv.conf.json run \
-  --bench '(hash_throughput|pep440_parsing|universal_resolution|workspace_discovery).*'
-```
+are intentionally omitted because core-pip has no equivalent operation.
 
 ASV stores environments, results, and generated HTML under `benchmarks/.asv/`.
-The suite disables ASV's pre-build uninstall command because cpip is also the
+The suite disables ASV's pre-build uninstall command because pip is also the
 installer used to build the revision under test; the subsequent installation
 still uses ASV's forced reinstall. Its build command also uses `--no-deps` so
-ASV's build cache contains exactly the cpip wheel it expects to install.
-The build command runs `benchmarks/asv_build.py`, which adds the checked-out
-revision's `src` directory directly to `sys.path` before invoking cpip. This
-keeps ASV builds independent of shell-specific `PYTHONPATH` handling.
+ASV's build cache contains exactly the pip wheel it expects to install.
+
+## CodSpeed benchmarks
+
+`tests/benchmarks/` holds the `pytest-codspeed` suite that runs in CI for every
+pull request. It covers the CPU-bound code that dominates a `pip install`:
+
+- requirement, version, specifier, and marker handling in `pip.core.packaging`;
+- Simple API HTML and JSON page parsing, link construction, wheel filename
+  parsing, and candidate filtering and ranking;
+- requirements file parsing and offline dependency resolution, including a
+  backtracking scenario, against a generated local wheelhouse;
+- wheel metadata reading, validation, unpacking, hashing, and installation.
+
+Every workload is generated deterministically and no benchmark touches the
+network, so results only move when pip's own code changes. Run the suite
+locally with:
+
+```console
+uv run --all-groups pytest tests/benchmarks
+```
+
+To measure it the way CI does, use the
+[CodSpeed CLI](https://codspeed.io/docs/cli):
+
+```console
+codspeed run --mode simulation -- uv run pytest tests/benchmarks --codspeed
+```

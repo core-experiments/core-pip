@@ -6,13 +6,13 @@ import os
 import shutil
 from pathlib import Path
 
-from cpip.index.provider import CandidateProvider
-from cpip.resolution.resolver import Resolver
+from pip.index.provider import CandidateProvider
+from pip.resolution.resolver import Resolver
 
 from .cache_materialization import make_wheel_internal
 
 
-SIZES = (20, 40, 80, 256)
+SIZES = (20, 40, 80)
 
 
 def create_conflict_graph(root: Path, size: int) -> Path:
@@ -116,29 +116,6 @@ class ColdRangeConflictResolution(ColdConflictResolution):
         root.mkdir()
         return {
             size: os.fspath(create_range_conflict_graph(root, size)) for size in SIZES
-        }
-
-
-class WarmConflictResolution(ColdConflictResolution):
-    """Measure repeated resolution after populating the wheel metadata cache."""
-
-    def setup(self, wheelhouses: dict[int, str], versions: int) -> None:
-        cache = Path(wheelhouses[versions]).parent / "cache"
-        cache.mkdir(exist_ok=True)
-        self.provider = CandidateProvider.from_options(
-            find_links=[wheelhouses[versions]],
-            no_index=True,
-            wheel_cache_dir=cache,
-        )
-        Resolver(provider=self.provider, ignore_installed=True).resolve(["A"])
-
-    def time_resolve(self, wheelhouses: dict[int, str], versions: int) -> None:
-        del wheelhouses
-        plan = Resolver(provider=self.provider, ignore_installed=True).resolve(["A"])
-        assert {candidate.canonical_name for candidate in plan.candidates} == {
-            "a",
-            "b",
-            "c",
         }
 
 

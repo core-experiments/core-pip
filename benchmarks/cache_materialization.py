@@ -41,7 +41,7 @@ def make_wheel_internal(
         ).encode(),
         f"{dist}-{version}.dist-info/WHEEL": (
             "Wheel-Version: 1.0\n"
-            "Generator: cpip-asv\n"
+            "Generator: pip-asv\n"
             "Root-Is-Purelib: true\n"
             "Tag: py3-none-any\n"
         ).encode(),
@@ -62,7 +62,7 @@ def make_wheel_internal(
 def make_sdist_internal(wheelhouse: Path, project: str, version: str) -> Path:
     dist = project.replace("-", "_")
     root_name = f"{dist}-{version}"
-    source_root = Path(tempfile.mkdtemp(prefix="cpip-asv-sdist-")) / root_name
+    source_root = Path(tempfile.mkdtemp(prefix="pip-asv-sdist-")) / root_name
     package = source_root / dist
     package.mkdir(parents=True)
     package.joinpath("__init__.py").write_text(
@@ -73,7 +73,7 @@ def make_sdist_internal(wheelhouse: Path, project: str, version: str) -> Path:
             [
                 "[build-system]",
                 "requires = []",
-                'build-backend = "cpip.build.build_backend"',
+                'build-backend = "pip.build.build_backend"',
                 "",
                 "[project]",
                 f'name = "{project}"',
@@ -109,11 +109,11 @@ def create_workload(root: Path) -> dict[str, str]:
     }
 
 
-def cpip_command_internal(state: dict[str, str], *, install: bool) -> list[str]:
+def pip_command_internal(state: dict[str, str], *, install: bool) -> list[str]:
     command = [
         sys.executable,
         "-m",
-        "cpip",
+        "pip",
         "install",
         "--ignore-installed",
         "--no-index",
@@ -158,9 +158,9 @@ def run_command_internal(command: list[str]) -> None:
     env = os.environ.copy()
     env.update(
         {
-            "CPIP_DISABLE_CPIP_VERSION_CHECK": "1",
-            "CPIP_NO_INPUT": "1",
-            "CPIP_QUIET": "1",
+            "PIP_DISABLE_PIP_VERSION_CHECK": "1",
+            "PIP_NO_INPUT": "1",
+            "PIP_QUIET": "1",
         }
     )
     subprocess.run(
@@ -173,7 +173,7 @@ def run_command_internal(command: list[str]) -> None:
 
 
 def run_pip(state: dict[str, str], *, install: bool) -> None:
-    run_command_internal(cpip_command_internal(state, install=install))
+    run_command_internal(pip_command_internal(state, install=install))
 
 
 def run_uv(state: dict[str, str]) -> None:

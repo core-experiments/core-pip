@@ -1,17 +1,17 @@
 {
   "version": 1,
-  "project": "cpip",
-  "project_url": "https://cpip.pypa.io/",
+  "project": "pip",
+  "project_url": "https://pip.pypa.io/",
   "repo": "..",
-  "branches": ["HEAD"],
+  "branches": ["main"],
   "benchmark_dir": ".",
   "environment_type": "virtualenv",
-  "build_command": "python {build_dir}/benchmarks/asv_build.py wheel --no-deps -w {build_cache_dir} {build_dir}",
+  "build_command": "python -m pip wheel --no-deps -w {build_cache_dir} {build_dir}",
   "uninstall_command": [],
   "pythons": ["3.12"],
   "matrix": {
     "req": {
-      "uv": ["0.12.1"]
+      "uv": ["0.11.28"]
     }
   },
   "env_dir": ".asv/env",
