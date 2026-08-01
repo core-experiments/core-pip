@@ -244,6 +244,8 @@ def pytest_collection_modifyitems(config: Config, items: list[pytest.Function]) 
                     "Cannot use the ``script`` funcarg in a package unit test: "
                     f"(filename = {module_path}, item = {item})"
                 )
+        elif module_path.startswith("tests/benchmarks/"):
+            item.add_marker(pytest.mark.unit)
         elif module_path == "tests/test_workspace_boundaries.py":
             item.add_marker(pytest.mark.unit)
         else:
