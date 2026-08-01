@@ -8,8 +8,8 @@ touch the network.
 from __future__ import annotations
 
 from pathlib import Path
-import os
 
+import pytest
 from benchmark_support import reset_caches
 from pytest_codspeed import BenchmarkFixture
 from cpip.index.provider import CandidateProvider
@@ -102,8 +102,12 @@ def test_top88_requirements_stress(
     assert benchmark(resolve_stress) == 176
 
 
-def test_resolver_metrics(benchmark: BenchmarkFixture, graph_wheelhouse: Path) -> None:
-    os.environ["CPIP_RESOLVER_METRICS"] = "1"
+def test_resolver_metrics(
+    benchmark: BenchmarkFixture,
+    graph_wheelhouse: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CPIP_RESOLVER_METRICS", "1")
 
     def resolve_with_metrics() -> int:
         reset_caches()
