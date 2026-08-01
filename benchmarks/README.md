@@ -1,5 +1,16 @@
 # pip benchmarks
 
+[![CodSpeed](https://img.shields.io/endpoint?url=https://codspeed.io/badge.json)](https://app.codspeed.io/core-experiments/core-pip?utm_source=badge)
+
+pip has two benchmark suites:
+
+- the ASV suite in this directory, which measures end-to-end installation and
+  resolution workloads, including comparisons against `uv`;
+- the CodSpeed suite in `tests/benchmarks/`, which measures CPU-bound library
+  code on every pull request. See [CodSpeed benchmarks](#codspeed-benchmarks).
+
+## ASV benchmarks
+
 This directory contains the ASV benchmark suite for pip. The cache benchmarks
 follow uv's definitions:
 
@@ -101,3 +112,30 @@ The suite disables ASV's pre-build uninstall command because pip is also the
 installer used to build the revision under test; the subsequent installation
 still uses ASV's forced reinstall. Its build command also uses `--no-deps` so
 ASV's build cache contains exactly the pip wheel it expects to install.
+
+## CodSpeed benchmarks
+
+`tests/benchmarks/` holds the `pytest-codspeed` suite that runs in CI for every
+pull request. It covers the CPU-bound code that dominates a `pip install`:
+
+- requirement, version, specifier, and marker handling in `pip.core.packaging`;
+- Simple API HTML and JSON page parsing, link construction, wheel filename
+  parsing, and candidate filtering and ranking;
+- requirements file parsing and offline dependency resolution, including a
+  backtracking scenario, against a generated local wheelhouse;
+- wheel metadata reading, validation, unpacking, hashing, and installation.
+
+Every workload is generated deterministically and no benchmark touches the
+network, so results only move when pip's own code changes. Run the suite
+locally with:
+
+```console
+uv run --all-groups pytest tests/benchmarks
+```
+
+To measure it the way CI does, use the
+[CodSpeed CLI](https://codspeed.io/docs/cli):
+
+```console
+codspeed run --mode simulation -- uv run pytest tests/benchmarks --codspeed
+```
