@@ -51,7 +51,9 @@ def run_uninstall(args: list[str]) -> int:
         ).find(package)
         if options.verbose and distribution is not None:
             location = distribution.location
-            parent = os.path.dirname(os.path.dirname(location))
+            parent = os.path.dirname(
+                os.path.dirname(os.path.dirname(location)),
+            )
             if parent != os.path.dirname(parent):
                 scripts = "Scripts" if os.name == "nt" else "bin"
                 print(f"Uninstalling files from {os.path.join(parent, scripts)}")

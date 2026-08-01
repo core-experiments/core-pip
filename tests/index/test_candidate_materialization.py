@@ -100,7 +100,9 @@ def test_source_hashes_reuse_the_local_artifact_read(
 
     monkeypatch.setattr("builtins.open", counting_open)
 
-    assert materializer.source_hashes_for(record) == materializer.source_hashes_for(record)
+    assert materializer.source_hashes_for(record) == materializer.source_hashes_for(
+        record
+    )
     assert reads == 1
 
 
