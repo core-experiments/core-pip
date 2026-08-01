@@ -34,8 +34,6 @@ def run_install(args: list[str]) -> int:
     options = parser.parse_args(normalized_args)
 
     import logging
-    from pathlib import Path
-
     from cpip.cli.context import target_prefix as target_prefix_internal
     from cpip.cli.requirements import (
         bundle_install_requirements,
@@ -64,14 +62,17 @@ def run_install(args: list[str]) -> int:
         raise CommandError("--requirements-from-script can only be given once")
     if options.no_input:
         os.environ["GIT_TERMINAL_PROMPT"] = "0"
-    if any(Path(value).name == "requirements.txt" for value in options.requirements):
+    if any(
+        os.path.basename(value) == "requirements.txt"
+        for value in options.requirements
+    ):
         print(
             "Hint: It looks like you are trying to install a requirements file. "
             "Use the -r option to install the file, or provide a package literally "
             'named "requirements.txt".',
         )
     for filename in options.build_constraint_files:
-        if not Path(filename).is_file():
+        if not os.path.isfile(filename):
             raise InstallationError(
                 f"Could not open requirements file: {filename}: "
                 "No such file or directory",
@@ -99,10 +100,10 @@ def run_install(args: list[str]) -> int:
     for group in options.groups:
         file_name, sep, group_name = group.partition(":")
         if sep:
-            path = Path(file_name)
-            if path.name != "pyproject.toml":
+            path = os.path.normpath(file_name)
+            if os.path.basename(path) != "pyproject.toml":
                 parser.error("group paths use 'pyproject.toml' filenames")
-            group_items.append((os.fspath(path), group_name))
+            group_items.append((path, group_name))
             continue
         group_items.append(("pyproject.toml", file_name))
     if group_items:
@@ -114,7 +115,7 @@ def run_install(args: list[str]) -> int:
     script_requirements: list[str] = []
     if options.requirements_from_scripts:
         script_requirements = requirements_from_script(
-            Path(options.requirements_from_scripts[0]),
+            options.requirements_from_scripts[0],
         )
     format_control = FormatControl()
     index = 0
@@ -160,7 +161,13 @@ def run_install(args: list[str]) -> int:
                 if (
                     installed is not None
                     and not options.ignore_installed
-                    and not Path(installed.location).is_relative_to(user_lib_path())
+                    and os.path.commonpath(
+                        (
+                            os.path.abspath(installed.location),
+                            os.path.abspath(user_lib_path()),
+                        ),
+                    )
+                    != os.path.abspath(user_lib_path())
                     and installed.in_site_packages
                 ):
                     raise InstallationError(
@@ -544,7 +551,7 @@ def run_install(args: list[str]) -> int:
                     from cpip.install.direct_url import direct_url_from_link
 
                     direct_url = direct_url_from_link(source_requirement.link)
-                candidate_direct_urls[os.fspath(candidate.path)] = direct_url
+                candidate_direct_urls[candidate.path] = direct_url
             if not options.dry_run:
                 hybrid_installed = False
                 target_is_empty = target_library_is_empty(batch_target)
@@ -583,7 +590,7 @@ def run_install(args: list[str]) -> int:
                                 (
                                     candidate.path,
                                     candidate.canonical_name in requested_roots,
-                                    candidate_direct_urls[os.fspath(candidate.path)],
+                                    candidate_direct_urls[candidate.path],
                                 )
                                 for candidate in plan.candidates
                             ],
@@ -862,7 +869,7 @@ def run_install(args: list[str]) -> int:
         from cpip.install.report import write_install_report
 
         write_install_report(
-            Path(options.report),
+            options.report,
             report_items,
             network_stats=(
                 bundle.session.network_stats.as_dict()

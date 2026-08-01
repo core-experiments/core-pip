@@ -77,7 +77,7 @@ def resolve_requirement_set(
                 marker=None,
                 raw=f"{candidate.name}=={candidate.version}",
             ),
-            link=Link(path_to_url(os.path.realpath(os.fspath(candidate.path)))),
+            link=Link(path_to_url(os.path.realpath(candidate.path))),
         )
         if candidate.source_url is None:
             requirement.download_info = None

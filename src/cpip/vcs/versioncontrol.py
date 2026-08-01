@@ -603,8 +603,10 @@ class VersionControl:
         :param url: the repository URL starting with a vcs prefix.
         :param verbosity: verbosity level.
         """
-        if os.path.exists(location):
+        try:
             shutil.rmtree(location)
+        except FileNotFoundError:
+            pass
         self.obtain(location, url=url, verbosity=verbosity)
 
     @classmethod

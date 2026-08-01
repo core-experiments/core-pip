@@ -204,7 +204,7 @@ def test_install_root_relocates_default_library(tmp_path: Path) -> None:
 
     install_wheel(wheel, root=str(root))
 
-    relocated = root / Path(*default_lib_path().parts[1:])
+    relocated = root.joinpath(*default_lib_path().split(os.sep)[1:])
     assert (relocated / "owner_demo" / "__init__.py").exists()
 
 

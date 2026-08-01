@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+import os
+from collections.abc import Collection
 from typing import TYPE_CHECKING, TypeVar
 
 from cpip.core.errors import ResolutionError
 from cpip.core.hashes import file_hashes as compute_file_hashes
-from cpip.core.packaging import Version
 from cpip.core.wheel import WheelCandidate
 from cpip.index.candidate_materialization import LazyWheelCandidate
 from cpip.resolution.engine.algorithms import (
@@ -24,8 +24,8 @@ if TYPE_CHECKING:
 RequirementT = TypeVar("RequirementT", bound="RequirementInput")
 
 
-def file_hashes(path: Path) -> dict[str, str]:
-    return compute_file_hashes(path)
+def file_hashes(path: str) -> dict[str, str]:
+    return compute_file_hashes(os.fspath(path))
 
 
 def actual_hashes_for_candidate(candidate: WheelCandidate) -> dict[str, str]:
@@ -69,23 +69,14 @@ def get_installation_order(
         raise ResolutionError("installation order is unavailable before resolution")
     named = requirement_set.requirements
     ordered_names = resolver.installation_order(
-        {
-            name: WheelCandidate(
-                name=req.req.name,
-                version=Version("0"),
-                path=Path(),
-                dependencies=(),
-            )
-            for name, req in named.items()
-            if req.req is not None
-        },
+        {name for name, req in named.items() if req.req is not None},
         active_graph,
     )
     return [named[name] for name in ordered_names if name in named]
 
 
 def installation_order(
-    selected: dict[str, WheelCandidate],
+    selected: Collection[str],
     graph: dict[str, set[str]],
 ) -> list[str]:
     ordered: list[str] = []

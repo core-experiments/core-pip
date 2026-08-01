@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from typing import TYPE_CHECKING
 
 from cpip.core.packaging import Requirement, Version, canonicalize_name, marker_applies
@@ -269,7 +268,7 @@ class ConflictLearning:
         identity = (
             package_id,
             candidate.version,
-            candidate.source_url or os.fspath(candidate.path),
+            candidate.source_url or candidate.path,
         )
         candidate_id = self.candidate_ids.get(identity)
         if candidate_id is None:

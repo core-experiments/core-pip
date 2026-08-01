@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 from cpip.core.errors import ConfigurationError, InstallationError
@@ -153,14 +152,14 @@ def load_source_config(command: str | None = None) -> SourceConfig:
     return SourceConfig(find_links, index_url, extra_index_urls, no_index)
 
 
-def requirements_from_script(path: Path) -> list[str]:
+def requirements_from_script(path: str) -> list[str]:
     try:
         import tomllib
     except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility
         from cpip._vendor import tomli as tomllib
 
     try:
-        with open(os.fspath(path), encoding="utf-8") as file:
+        with open(path, encoding="utf-8") as file:
             source = file.read()
     except OSError as exc:
         raise InstallationError(f"Could not read script {path}: {exc}") from exc
@@ -481,7 +480,7 @@ def bundle_install_requirements(
             source_path = os.path.realpath(raw_path)
             try:
                 metadata = prepare_project_metadata(
-                    Path(source_path),
+                    source_path,
                     build_isolation=False,
                 )
                 source_name = canonicalize_name(metadata.name)
@@ -533,7 +532,7 @@ def bundle_install_requirements(
                 item.req = constrained
                 item.link = Link(item.req.url or "")
             wheel = parse_wheel_file(
-                Path(urllib.parse.urlparse(constrained.url or "").path),
+                urllib.parse.urlparse(constrained.url or "").path,
             )
             if (
                 wheel is not None

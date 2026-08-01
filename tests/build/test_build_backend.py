@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import zipfile
 from pathlib import Path
 
@@ -288,8 +289,8 @@ def test_default_wheel_directories_are_isolated() -> None:
     second = build_module.default_wheel_dir()
 
     assert first != second
-    assert first.is_dir()
-    assert second.is_dir()
+    assert os.path.isdir(first)
+    assert os.path.isdir(second)
 
 
 def write_project(tmp_path: Path, name: str, package: str, version: str) -> Path:

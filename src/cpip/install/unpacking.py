@@ -346,6 +346,12 @@ def untar_without_filter(
     # NOTE: This function can be removed once cpip requires CPython ≥ 3.12.​
     # PEP 706 added tarfile.data_filter, made tarfile extraction operations more secure.
     # This feature is fully supported from CPython 3.12 onward.
+    absolute_location = os.path.abspath(location)
+    resolved_location = os.path.realpath(location)
+
+    def is_within(root: str, target: str) -> bool:
+        return target == root or target.startswith(root + os.sep)
+
     for member in members:
         fn = member.name
         if leading:
@@ -355,10 +361,9 @@ def untar_without_filter(
         # The plain check rejects textual ".." escapes; resolving symlinks also
         # catches a later member redirected outside by an earlier member's
         # symlink (e.g. "link/../file").
-        if not is_within_directory(location, path) or not is_within_directory(
-            location,
-            path,
-            resolve_symlinks=True,
+        if not is_within(absolute_location, os.path.abspath(path)) or not is_within(
+            resolved_location,
+            os.path.realpath(path),
         ):
             message = (
                 "The tar file ({}) has a file ({}) trying to install "
@@ -371,7 +376,7 @@ def untar_without_filter(
             # Reject symlinks resolving outside the destination, so a later
             # member cannot be written through them.
             target = os.path.join(os.path.dirname(path), member.linkname)
-            if not is_within_directory(location, target, resolve_symlinks=True):
+            if not is_within(resolved_location, os.path.realpath(target)):
                 message = (
                     "The tar file ({}) has a file ({}) trying to install "
                     "outside target directory ({})"
@@ -437,7 +442,7 @@ class ArchiveExtractor:
         location: str,
         content_type: str | None = None,
     ) -> None:
-        self.filename = os.path.realpath(filename)
+        self.filename = os.fspath(filename)
         self.location = location
         self.content_type = content_type
 

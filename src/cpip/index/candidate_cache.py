@@ -7,7 +7,6 @@ import json
 import logging
 import os
 import shutil
-from pathlib import Path
 
 from cpip.index.links import Link
 from cpip.index.source_models import CandidateRecord
@@ -22,7 +21,7 @@ def source_hashes_for_link(link: Link) -> dict[str, str]:
     if hashes:
         return hashes
     local = ArtifactLocator().local_path(link.url)
-    if local is not None and os.path.isfile(local):
+    if local is not None:
         try:
             with open(local, "rb") as file:
                 return {"sha256": hashlib.sha256(file.read()).hexdigest()}
@@ -42,41 +41,49 @@ def cache_identity(url: str) -> str:
 
 
 def cached_wheel_for_link(
-    wheel_cache_dir: Path | None,
+    wheel_cache_dir: str | os.PathLike[str] | None,
     url: str,
-) -> tuple[Path, dict[str, str] | None] | None:
-    from cpip.index.cache import origin_hashes, wheel_cache_path
+) -> tuple[str, dict[str, str] | None] | None:
+    from cpip.index.cache import origin_hashes
 
     if wheel_cache_dir is None:
         return None
-    entry_dir = wheel_cache_path(wheel_cache_dir, cache_identity(url))
-    entry_dir_text = os.fspath(entry_dir)
-    if not os.path.isdir(entry_dir_text):
+    digest = hashlib.sha256(cache_identity(url).encode("utf-8")).hexdigest()
+    entry_dir_text = os.path.join(
+        os.fspath(wheel_cache_dir),
+        digest[:2],
+        digest[2:4],
+        digest,
+    )
+    try:
+        with os.scandir(entry_dir_text) as entries:
+            wheels = sorted(
+                entry.path
+                for entry in entries
+                if entry.name.endswith(".whl") and entry.is_file()
+            )
+    except OSError:
         return None
-    with os.scandir(entry_dir_text) as entries:
-        wheels = sorted(
-            Path(entry.path)
-            for entry in entries
-            if entry.name.endswith(".whl") and entry.is_file()
-        )
     if not wheels:
         return None
-    return wheels[0], origin_hashes(entry_dir / "origin.json")
+    return wheels[0], origin_hashes(os.path.join(entry_dir_text, "origin.json"))
 
 
 def cache_built_wheel(
-    wheel_cache_dir: Path | None,
+    wheel_cache_dir: str | os.PathLike[str] | None,
     candidate: CandidateRecord,
-    wheel: Path,
+    wheel: str,
 ) -> None:
     from cpip.index.cache import wheel_cache_path
 
     if wheel_cache_dir is None:
         return
-    entry_dir = wheel_cache_path(wheel_cache_dir, cache_identity(candidate.link.url))
-    entry_dir_text = os.fspath(entry_dir)
+    entry_dir_text = wheel_cache_path(
+        os.fspath(wheel_cache_dir),
+        cache_identity(candidate.link.url),
+    )
     os.makedirs(entry_dir_text, exist_ok=True)
-    shutil.copy2(wheel, os.path.join(entry_dir_text, wheel.name))
+    shutil.copy2(wheel, os.path.join(entry_dir_text, os.path.basename(wheel)))
     origin = {"archive_info": {"hashes": source_hashes_for_link(candidate.link)}}
     with open(
         os.path.join(entry_dir_text, "origin.json"),

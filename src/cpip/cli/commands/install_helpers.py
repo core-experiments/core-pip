@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 from typing import Any
 
 from cpip.core.hashes import Hashes
@@ -26,7 +25,7 @@ def normalize_install_args(args: list[str], options: frozenset[str]) -> list[str
 
 def target_library_is_empty(target: InstallTarget) -> bool:
     """Return whether target-mode library roots contain any entries."""
-    seen: set[Path] = set()
+    seen: set[str] = set()
     for root in target.library_roots:
         if root in seen:
             continue

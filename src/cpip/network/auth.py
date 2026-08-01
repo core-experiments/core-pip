@@ -22,7 +22,6 @@ import urllib.parse
 from abc import ABC, abstractmethod
 from functools import cache
 from os.path import commonpath
-from pathlib import Path
 from typing import Any, NamedTuple
 
 from cpip.core.contracts import AuthInfo
@@ -225,8 +224,11 @@ def get_keyring_provider(provider: str) -> KeyRingBaseProvider:
                 if spec is None or spec.origin is None:
                     raise ImportError("keyring is not installed")
                 try:
-                    Path(spec.origin).resolve().relative_to(Path(sys.prefix).resolve())
-                except ValueError as exc:
+                    if os.path.commonpath(
+                        (os.path.realpath(spec.origin), os.path.realpath(sys.prefix)),
+                    ) != os.path.realpath(sys.prefix):
+                        raise ValueError
+                except (OSError, ValueError) as exc:
                     raise ImportError(
                         "keyring is not installed in this environment",
                     ) from exc
@@ -259,13 +261,12 @@ def get_keyring_provider(provider: str) -> KeyRingBaseProvider:
 
                 return path
 
-            scripts = Path(sysconfig.get_path("scripts"))
+            scripts = sysconfig.get_path("scripts")
 
             paths = []
             for path in PATH_as_shutil_which_determines_it().split(os.pathsep):
-                p = Path(path)
                 try:
-                    if not p.samefile(scripts):
+                    if not os.path.samefile(path, scripts):
                         paths.append(path)
                 except FileNotFoundError:
                     pass

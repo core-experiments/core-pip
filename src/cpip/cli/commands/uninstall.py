@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import site
-from pathlib import Path
 
 from cpip.cli.parser import ArgumentParser
 
@@ -51,10 +50,11 @@ def run_uninstall(args: list[str]) -> int:
             user_site=site.getusersitepackages(),
         ).find(package)
         if options.verbose and distribution is not None:
-            location = Path(distribution.location)
-            if len(location.parents) >= 3:
+            location = distribution.location
+            parent = os.path.dirname(os.path.dirname(location))
+            if parent != os.path.dirname(parent):
                 scripts = "Scripts" if os.name == "nt" else "bin"
-                print(f"Uninstalling files from {location.parents[2] / scripts}")
+                print(f"Uninstalling files from {os.path.join(parent, scripts)}")
         if paths is None:
             removed_now = RequirementInstaller().uninstall(package)
         else:

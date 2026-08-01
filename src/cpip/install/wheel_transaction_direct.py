@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 from cpip.core.errors import InstallationError
@@ -13,7 +12,7 @@ from cpip.install.transaction import InstallTransaction
 from cpip.install.wheel_archive import (
     DestinationCache,
     ResolvedRoots,
-    destination_internal_parts,
+    destination_internal_parts_text,
     validate_member_parts,
 )
 
@@ -24,7 +23,7 @@ DIRECT_CONTENT_BATCH_LIMIT = 4 * 1024 * 1024
 
 
 def direct_batch_preflight(
-    requests: tuple[tuple[str | Path, bool, DirectUrl | None], ...],
+    requests: tuple[tuple[str, bool, DirectUrl | None], ...],
     candidates: tuple[WheelCandidate, ...],
     *,
     target: InstallTarget,
@@ -66,14 +65,13 @@ def direct_batch_preflight(
                 or (len(relative_parts) >= 2 and relative_parts[-2] == "scripts")
             ):
                 return None
-            destination = destination_internal_parts(
+            destination_text = destination_internal_parts_text(
                 target,
                 relative_parts,
                 name,
                 resolved_directories=resolved_directories,
                 resolved_roots=resolved_roots,
             )
-            destination_text = os.fspath(destination)
             if destination_text in destinations or os.path.lexists(destination_text):
                 return None
             destinations.add(destination_text)
@@ -81,7 +79,7 @@ def direct_batch_preflight(
 
 
 def install_wheels_directly(
-    requests: tuple[tuple[str | Path, bool, DirectUrl | None], ...],
+    requests: tuple[tuple[str, bool, DirectUrl | None], ...],
     candidates: tuple[WheelCandidate, ...],
     *,
     target: InstallTarget,
@@ -95,7 +93,7 @@ def install_wheels_directly(
 
         def install_one(
             index: int,
-            request: tuple[str | Path, bool, DirectUrl | None],
+            request: tuple[str, bool, DirectUrl | None],
             candidate: WheelCandidate,
         ) -> tuple[int, InstallTransaction, WheelCandidate]:
             local_transaction = InstallTransaction()

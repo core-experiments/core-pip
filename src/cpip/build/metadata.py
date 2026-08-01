@@ -90,10 +90,10 @@ class MetadataDistribution:
         with open(metadata_path, encoding="utf-8") as file:
             metadata = email.parser.Parser().parsestr(file.read())
         entry_points_path = os.path.join(directory, "entry_points.txt")
-        if os.path.exists(entry_points_path):
+        try:
             with open(entry_points_path, encoding="utf-8") as file:
                 entry_points_text = file.read()
-        else:
+        except OSError:
             entry_points_text = None
         return cls(
             metadata,

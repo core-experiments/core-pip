@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from typing import TYPE_CHECKING
 from collections.abc import Mapping
 
@@ -222,7 +221,7 @@ class SearchEngine:
                     # Lazy candidates expose their link URL without building
                     # the artifact.  Only concrete candidates without a URL
                     # need their path to distinguish same-version entries.
-                    "" if source_url else os.fspath(candidate.path),
+                    "" if source_url else candidate.path,
                 )
                 self.candidate_state_keys[id(candidate)] = key
             return key

@@ -5,7 +5,6 @@ import os
 import sysconfig
 from collections.abc import Collection, Iterable
 from email.message import Message
-from pathlib import Path
 from typing import Any, cast
 
 from .packaging import (
@@ -25,8 +24,8 @@ class InstalledDistribution:
         self,
         name: str,
         version: str,
-        location: Path,
-        metadata_location: Path | None,
+        location: str,
+        metadata_location: str | None,
         raw: importlib.metadata.Distribution,
     ) -> None:
         self.name = name
@@ -37,8 +36,8 @@ class InstalledDistribution:
 
     name: str
     version: str
-    location: Path
-    metadata_location: Path | None
+    location: str
+    metadata_location: str | None
     raw: importlib.metadata.Distribution
 
     @property
@@ -68,22 +67,22 @@ class InstalledDistribution:
         return sorted(str(file) for file in files)
 
 
-def default_lib_path() -> Path:
-    return Path(sysconfig.get_paths()["purelib"])
+def default_lib_path() -> str:
+    return sysconfig.get_paths()["purelib"]
 
 
-def default_scripts_path() -> Path:
-    return Path(sysconfig.get_paths()["scripts"])
+def default_scripts_path() -> str:
+    return sysconfig.get_paths()["scripts"]
 
 
-def user_lib_path() -> Path:
+def user_lib_path() -> str:
     import site
 
-    return Path(site.getusersitepackages())
+    return site.getusersitepackages()
 
 
-def user_scripts_path() -> Path:
-    return Path(sysconfig.get_path("scripts", f"{os.name}_user"))
+def user_scripts_path() -> str:
+    return sysconfig.get_path("scripts", f"{os.name}_user")
 
 
 def _iter_installed_distributions(
@@ -110,7 +109,7 @@ def _iter_installed_distributions(
         ):
             continue
         metadata_location = getattr(dist, "_path", None)
-        location = Path(str(dist.locate_file("")))
+        location = str(dist.locate_file(""))
         if metadata_location is None or str(location) == "<memory>":
             continue
         yield InstalledDistribution(
@@ -121,7 +120,7 @@ def _iter_installed_distributions(
             # remove them.
             version=str(version),
             location=location,
-            metadata_location=Path(metadata_location) if metadata_location else None,
+            metadata_location=(str(metadata_location) if metadata_location else None),
             raw=dist,
         )
 

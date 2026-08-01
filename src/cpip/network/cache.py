@@ -60,10 +60,14 @@ class SafeFileCache:
         # The cache entry is only valid if both metadata and body exist.
         metadata_path = self.get_cache_path(key)
         body_path = metadata_path + ".body"
-        if not (os.path.exists(metadata_path) and os.path.exists(body_path)):
-            return None
-        with suppressed_cache_errors(), open(metadata_path, "rb") as f:
-            return f.read()
+        metadata: bytes | None = None
+        with suppressed_cache_errors():
+            with open(metadata_path, "rb") as file:
+                contents = file.read()
+            with open(body_path, "rb"):
+                pass
+            metadata = contents
+        return metadata
 
     def write_to_file(self, path: str, writer_func: Callable[[BinaryIO], Any]) -> None:
         """Common file writing logic with proper permissions and atomic replacement."""
@@ -104,10 +108,11 @@ class SafeFileCache:
         # The cache entry is only valid if both metadata and body exist.
         metadata_path = self.get_cache_path(key)
         body_path = metadata_path + ".body"
-        if not (os.path.exists(metadata_path) and os.path.exists(body_path)):
-            return None
         with suppressed_cache_errors():
+            with open(metadata_path, "rb"):
+                pass
             return open(body_path, "rb")
+        return None
 
     def set_body(self, key: str, body: bytes) -> None:
         path = self.get_cache_path(key) + ".body"

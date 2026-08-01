@@ -51,10 +51,14 @@ def hide_url(url: str) -> HiddenText:
 
 
 def is_installable_dir(path: str) -> bool:
-    return os.path.isdir(path) and (
-        os.path.isfile(os.path.join(path, "pyproject.toml"))
-        or os.path.isfile(os.path.join(path, "setup.py"))
-    )
+    try:
+        with os.scandir(path) as entries:
+            return any(
+                entry.name in {"pyproject.toml", "setup.py"} and entry.is_file()
+                for entry in entries
+            )
+    except OSError:
+        return False
 
 
 def ask_path_exists(message: str, options: Iterable[str]) -> str:

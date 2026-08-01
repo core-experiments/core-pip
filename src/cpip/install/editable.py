@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 import shutil
 import sys
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from cpip.core.direct_url import DirectUrl, DirInfo
@@ -13,6 +12,7 @@ from cpip.core.errors import BuildError, CommandError
 from cpip.core.packaging import SpecifierSet, canonicalize_name
 from cpip.core.python import CURRENT_PYTHON_VERSION_FULL
 from cpip.core.temp_dir import remove_temp_directory
+from cpip.core.urls import path_to_url
 from cpip.index.artifacts import ArtifactLocator
 from cpip.install.direct_url import direct_url_from_link
 from cpip.resolution.engine.input.requirements import install_req_from_editable
@@ -26,7 +26,7 @@ def prepare_editable_source(
     *,
     build_isolation: bool = True,
     prepare_metadata: bool = True,
-) -> tuple[Path, DirectUrl | None, ProjectMetadata | None]:
+) -> tuple[str, DirectUrl | None, ProjectMetadata | None]:
     """Validate and prepare an editable source for the build service."""
     requirement = install_req_from_editable(editable)
     link = requirement.link
@@ -41,28 +41,36 @@ def prepare_editable_source(
     else:
         direct_url = None
     if link.is_vcs:
-        checkout_name = canonicalize_name(link.egg_fragment or source_path.name)
-        checkout_dir = Path(sys.prefix) / "src" / checkout_name
-        if os.path.exists(os.fspath(checkout_dir)):
+        checkout_name = canonicalize_name(
+            link.egg_fragment or os.path.basename(source_path),
+        )
+        checkout_dir = os.path.join(sys.prefix, "src", checkout_name)
+        try:
             shutil.rmtree(checkout_dir)
-        os.makedirs(os.fspath(checkout_dir.parent), exist_ok=True)
+        except FileNotFoundError:
+            pass
+        os.makedirs(os.path.dirname(checkout_dir), exist_ok=True)
         materialized_source = source_path
         shutil.copytree(materialized_source, checkout_dir, symlinks=True)
         remove_temp_directory(materialized_source)
         source_path = checkout_dir
         direct_url = DirectUrl(
-            url=checkout_dir.as_uri(),
+            url=path_to_url(checkout_dir),
             dir_info=DirInfo(editable=True),
         )
 
     if link.subdirectory_fragment:
-        source_path = source_path / link.subdirectory_fragment
+        source_path = os.path.join(source_path, link.subdirectory_fragment)
 
-    if not os.path.isdir(os.fspath(source_path)):
+    project_files: set[str] = set()
+    try:
+        with os.scandir(source_path) as entries:
+            for entry in entries:
+                if entry.name in {"setup.py", "pyproject.toml"} and entry.is_file():
+                    project_files.add(entry.name)
+    except OSError:
         raise CommandError(f"{source_path} is not a valid editable requirement")
-    if not os.path.isfile(os.fspath(source_path / "setup.py")) and not os.path.isfile(
-        os.fspath(source_path / "pyproject.toml"),
-    ):
+    if not project_files:
         raise CommandError(
             f"{source_path} does not appear to be a Python project: "
             "neither 'setup.py' nor 'pyproject.toml' found",
@@ -83,8 +91,8 @@ def prepare_editable_source(
                 if (
                     backend_spec is not None
                     and backend_spec.name.startswith("setuptools.build_meta")
-                    and os.path.isfile(os.fspath(source_path / "setup.py"))
-                    and os.path.isfile(os.fspath(source_path / "pyproject.toml"))
+                    and "setup.py" in project_files
+                    and "pyproject.toml" in project_files
                 ):
                     metadata = None
                 else:
@@ -94,7 +102,7 @@ def prepare_editable_source(
                     ) from exc
             if not build_isolation and (
                 "Cannot import 'setuptools.build_meta'" in str(exc)
-                or os.path.isfile(os.fspath(source_path / "pyproject.toml"))
+                or "pyproject.toml" in project_files
             ):
                 metadata = prepare_project_metadata(
                     source_path,

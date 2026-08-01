@@ -12,6 +12,7 @@ from cpip.core.marshal_cache import load_snapshot, save_snapshot
 from cpip.resolution.engine.sources.wheelhouse.archive import WheelhouseUnavailable
 from cpip.resolution.engine.sources.wheelhouse.cache import (
     _CATALOG_CACHE_VERSION,
+    artifact_identity_cache,
     CatalogIndexes,
     CatalogRecords,
     CatalogSignatures,
@@ -42,6 +43,7 @@ from cpip.resolution.engine.sources.wheelhouse.models import (
     LocalWheelRequirement,
     LocalWheelVersion,
 )
+from cpip.index.directory_index import local_source_snapshot
 
 if TYPE_CHECKING:
     from cpip.index.metadata_cache import WheelMetadataCache
@@ -414,13 +416,19 @@ def load_catalog(
     cache_dir: str | None,
     find_links: list[str],
 ) -> tuple[str | None, CatalogRecords | None]:
+    # Identities captured by a directory scan are valid only for that
+    # discovery pass. Warm catalog loads must re-stat artifacts so rewrites
+    # remain visible to the metadata cache.
+    artifact_identity_cache.clear()
     path = catalog_cache_path(cache_dir)
-    signatures = source_signatures(find_links)
-    if path is None or signatures is None:
+    if path is None:
         return path, None
     try:
         stat = os.stat(path)
     except OSError:
+        return path, None
+    signatures = source_signatures(find_links)
+    if signatures is None:
         return path, None
     identity = (stat.st_ino, stat.st_mtime_ns, stat.st_size)
     cached = catalog_snapshot_store.get(path)
@@ -473,29 +481,41 @@ def save_catalog(
 
 
 def scan_catalog(find_links: list[str]) -> CatalogRecords | None:
+    artifact_identity_cache.clear()
     records: CatalogRecords = {}
     for value in find_links:
         directory = value if os.path.isabs(value) else os.path.abspath(value)
-        try:
-            with os.scandir(directory) as entries:
-                for entry in entries:
-                    if not entry.name.endswith(".whl") or not entry.is_file():
-                        continue
-                    path = entry.path
-                    parsed = parse_wheel_filename(entry.name)
-                    if parsed is None:
-                        return None
-                    records.setdefault(parsed[0], []).append((path, parsed[1]))
-        except NotADirectoryError:
-            path = os.path.abspath(value)
-            if not path.endswith(".whl"):
-                continue
-            parsed = wheel_name(path)
+        if directory.endswith(".whl"):
+            try:
+                source_stat = os.stat(directory)
+            except OSError:
+                return None
+            if not stat.S_ISREG(source_stat.st_mode):
+                return None
+            parsed = wheel_name(directory)
             if parsed is None:
                 return None
-            records.setdefault(parsed[0], []).append((path, parsed[1]))
-        except OSError:
-            return None
+            artifact_identity_cache[directory] = (
+                source_stat.st_ino,
+                source_stat.st_size,
+                source_stat.st_mtime_ns,
+            )
+            records.setdefault(parsed[0], []).append((directory, parsed[1]))
+            continue
+        snapshot = local_source_snapshot(directory, suffixes=(".whl",))
+        if snapshot is not None:
+            for item in snapshot.entries:
+                filename = os.path.basename(item.path)
+                if not filename.endswith(".whl"):
+                    continue
+                path = item.path
+                artifact_identity_cache[path] = item.stat_identity
+                parsed = parse_wheel_filename(filename)
+                if parsed is None:
+                    return None
+                records.setdefault(parsed[0], []).append((path, parsed[1]))
+            continue
+        return None
     if not records:
         return None
     for values in records.values():

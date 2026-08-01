@@ -6,22 +6,21 @@ import hashlib
 import json
 import logging
 import os
-from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
 
-def wheel_cache_path(root: Path, url: str) -> Path:
+def wheel_cache_path(root: str, url: str) -> str:
     digest = hashlib.sha256(url.encode("utf-8")).hexdigest()
-    return root / digest[:2] / digest[2:4] / digest
+    return os.path.join(root, digest[:2], digest[2:4], digest)
 
 
-def origin_hashes(path: Path) -> dict[str, str] | None:
-    if not os.path.isfile(path):
-        return None
+def origin_hashes(path: str | os.PathLike[str]) -> dict[str, str] | None:
     try:
         with open(path, encoding="utf-8") as file:
             data = json.load(file)
+    except (FileNotFoundError, IsADirectoryError):
+        return None
     except (OSError, UnicodeError, json.JSONDecodeError):
         logger.warning("Ignoring invalid cache entry origin file %s", path)
         return None

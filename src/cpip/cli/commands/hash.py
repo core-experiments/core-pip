@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import hashlib
-from pathlib import Path
+import os
 
 from cpip.cli.parser import ArgumentParser
 
@@ -30,5 +30,8 @@ def run_hash(args: list[str]) -> int:
                 if not block:
                     break
                 digest.update(block)
-        print(f"{Path(filename).name}: --hash={options.algorithm}:{digest.hexdigest()}")
+        print(
+            f"{os.path.basename(filename)}: "
+            f"--hash={options.algorithm}:{digest.hexdigest()}",
+        )
     return 0

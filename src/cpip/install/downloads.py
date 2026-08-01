@@ -98,7 +98,9 @@ class DownloadManager:
     def local_file(self, link: Link, hashes: Hashes | None = None) -> File:
         cached = self.cached_path(link, hashes)
         path = cached or link.file_path
-        if hashes:
+        if hashes and not (
+            cached is not None and self.check_download_dir is check_download_dir
+        ):
             hashes.check_against_path(path)
         return File(path)
 
@@ -135,12 +137,11 @@ def check_download_dir(
     warn_on_hash_mismatch: bool = True,
 ) -> str | None:
     download_path = PathComponent(link.filename).join(download_dir)
-    if not os.path.exists(download_path):
-        return None
-    logger.info("File was already downloaded %s", download_path)
     if hashes:
         try:
             hashes.check_against_path(download_path)
+        except (FileNotFoundError, IsADirectoryError):
+            return None
         except HashMismatch:
             if warn_on_hash_mismatch:
                 logger.warning(
@@ -149,4 +150,9 @@ def check_download_dir(
                 )
             os.unlink(download_path)
             return None
+        logger.info("File was already downloaded %s", download_path)
+        return download_path
+    if not os.path.exists(download_path):
+        return None
+    logger.info("File was already downloaded %s", download_path)
     return download_path

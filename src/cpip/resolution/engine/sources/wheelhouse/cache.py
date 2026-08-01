@@ -34,6 +34,7 @@ MetadataCache = dict[str, tuple[int, int, MetadataHeaders | CachedMetadata]]
 MetadataCacheIdentity = tuple[int, int, int]
 MetadataCacheStore = dict[str, tuple[MetadataCacheIdentity | None, MetadataCache]]
 CandidateCache = dict[tuple[str, int, int, int], LocalWheelCandidate]
+ArtifactIdentityCache = dict[str, tuple[int, int, int]]
 CatalogRecords = dict[str, list[tuple[str, LocalWheelVersion]]]
 CatalogSignatures = tuple[tuple[str, str, int, int, int], ...]
 CatalogSnapshotStore = dict[
@@ -60,6 +61,7 @@ metadata_cache_paths: dict[int, str] = {}
 metadata_cache_dirty: set[str] = set()
 catalog_indexes_cache: dict[int, tuple[CatalogRecords, CatalogIndexes]] = {}
 candidate_cache: CandidateCache = {}
+artifact_identity_cache: ArtifactIdentityCache = {}
 catalog_snapshot_store: CatalogSnapshotStore = {}
 shared_preflight_cache: SharedPreflightCache = {}
 

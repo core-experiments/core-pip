@@ -56,12 +56,9 @@ class Subversion(VersionControl):
                 dirs[:] = []
                 continue  # no sense walking uncontrolled subdirs
             dirs.remove(cls.dirname)
-            entries_fn = os.path.join(base, cls.dirname, "entries")
-            if not os.path.exists(entries_fn):
-                # FIXME: should we warn?
-                continue
-
             dirurl, localrev = cls.get_svn_url_rev(base)
+            if dirurl is None:
+                continue
 
             if base == location:
                 assert dirurl is not None
@@ -133,10 +130,11 @@ class Subversion(VersionControl):
     @classmethod
     def get_svn_url_rev(cls, location: str) -> tuple[str | None, int]:
         entries_path = os.path.join(location, cls.dirname, "entries")
-        if os.path.exists(entries_path):
+        try:
             with open(entries_path) as f:
                 data = f.read()
-        else:  # subversion >= 1.7 does not have the 'entries' file
+        except FileNotFoundError:
+            # subversion >= 1.7 does not have the 'entries' file
             data = ""
 
         url = None

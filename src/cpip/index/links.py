@@ -5,10 +5,10 @@ import functools
 import os
 import posixpath
 import re
+import stat
 import urllib.parse
 from collections.abc import Mapping
 from enum import Enum
-from pathlib import Path
 from typing import Any, cast
 
 from cpip.core.errors import DiagnosticCpipError
@@ -125,6 +125,7 @@ class Link:
         "hashes_internal",
         "kind",
         "local_identity_internal",
+        "local_is_dir_internal",
         "metadata_file_data",
         "parsed_url_internal",
         "path_internal",
@@ -149,6 +150,7 @@ class Link:
         kind: ArtifactKind | None = None,
         local_path_internal: str | None = None,
         local_identity_internal: str | None = None,
+        local_is_dir_internal: bool | None = None,
     ) -> None:
         if url.startswith("\\\\"):
             url = path_to_url(url)
@@ -181,8 +183,9 @@ class Link:
         self.cache_link_parsing = cache_link_parsing
         self.egg_fragment = self.egg_fragment_internal()
         self.text = text
-        self.kind = kind if kind is not None else self.artifact_kind()
         self.local_identity_internal = local_identity_internal
+        self.local_is_dir_internal = local_is_dir_internal
+        self.kind = kind if kind is not None else self.artifact_kind()
 
     @property
     def scheme(self) -> str:
@@ -220,29 +223,42 @@ class Link:
     @classmethod
     def from_path(
         cls,
-        path: Path,
+        path: str,
         *,
         source_url: str | None,
         is_dir: bool | None = None,
         local_identity: str | None = None,
     ) -> Link:
+        path_text = os.fspath(path)
+        path_stat = None
         if is_dir is None:
-            is_dir = path.is_dir()
+            try:
+                path_stat = os.stat(path_text)
+            except OSError:
+                is_dir = False
+            else:
+                is_dir = stat.S_ISDIR(path_stat.st_mode)
+        if local_identity is None and path_stat is not None:
+            local_identity = (
+                f"stat:{path_stat.st_dev}:{path_stat.st_ino}:"
+                f"{path_stat.st_size}:{path_stat.st_mtime_ns}"
+            )
         # Keep the lexical path used by the caller.  Re-resolving temporary
         # paths through a file URL can rewrite `/var` to `/private/var` on
         # macOS, losing access to the project metadata.
-        local_path = path.absolute() if is_dir else path
+        local_path = os.path.abspath(path_text) if is_dir else path_text
         return cls(
-            local_path.as_uri(),
+            path_to_url(local_path),
             comes_from=source_url,
-            text=path.name,
+            text=os.path.basename(path_text),
             kind=(
                 ArtifactKind.SOURCE_TREE
                 if is_dir
-                else cls.artifact_kind_from_filename(path.name)
+                else cls.artifact_kind_from_filename(os.path.basename(path_text))
             ),
             local_path_internal=str(local_path),
             local_identity_internal=local_identity,
+            local_is_dir_internal=is_dir,
         )
 
     @classmethod
@@ -344,9 +360,20 @@ class Link:
         is_source_tree = self.is_vcs
         if self.is_file:
             try:
-                is_source_tree = os.path.isdir(self.file_path)
-            except ValueError:
-                pass
+                cached = self.local_is_dir_internal
+                if cached is None:
+                    path_stat = os.stat(self.file_path)
+                    is_source_tree = stat.S_ISDIR(path_stat.st_mode)
+                    self.local_identity_internal = (
+                        f"stat:{path_stat.st_dev}:{path_stat.st_ino}:"
+                        f"{path_stat.st_size}:{path_stat.st_mtime_ns}"
+                    )
+                else:
+                    is_source_tree = cached
+                self.local_is_dir_internal = is_source_tree
+            except (OSError, ValueError):
+                is_source_tree = False
+                self.local_is_dir_internal = False
         if is_source_tree:
             return ArtifactKind.SOURCE_TREE
         return self.artifact_kind_from_filename(str(self.filename))
@@ -427,7 +454,10 @@ class Link:
 
     @property
     def is_existing_dir(self) -> bool:
-        return self.is_file and os.path.isdir(self.file_path)
+        if not self.is_file:
+            return False
+        cached = self.local_is_dir_internal
+        return os.path.isdir(self.file_path) if cached is None else cached
 
     def is_hash_allowed(self, hashes: Hashes | None) -> bool:
         if hashes is None:

@@ -7,7 +7,6 @@ import shutil
 import subprocess
 import tempfile
 import urllib.parse
-from pathlib import Path
 
 from cpip.index.source_models import VcsReference
 
@@ -57,16 +56,16 @@ def materialize_vcs(
     *,
     emit_resolution: bool = True,
     prompting: bool = True,
-) -> Path:
+) -> str:
     reference = vcs_reference(url)
     if reference.vcs != "git":
         raise OSError(f"Unsupported VCS URL: {url}")
-    target = Path(tempfile.mkdtemp(prefix="cpip-index-vcs-"))
+    target_text = tempfile.mkdtemp(prefix="cpip-index-vcs-")
     environment = os.environ.copy()
     if not prompting:
         environment["GIT_TERMINAL_PROMPT"] = "0"
     process = subprocess.run(
-        ["git", "clone", reference.repo_url, str(target)],
+        ["git", "clone", reference.repo_url, target_text],
         text=True,
         capture_output=True,
         check=False,
@@ -74,12 +73,12 @@ def materialize_vcs(
     )
     if process.returncode != 0:
         detail = (process.stderr or process.stdout).strip()
-        shutil.rmtree(target, ignore_errors=True)
+        shutil.rmtree(target_text, ignore_errors=True)
         raise OSError(f"Failed to clone {url}: {detail}")
     if reference.requested_revision is not None:
         process = subprocess.run(
             ["git", "checkout", "-q", reference.requested_revision],
-            cwd=target,
+            cwd=target_text,
             text=True,
             capture_output=True,
             check=False,
@@ -87,7 +86,7 @@ def materialize_vcs(
         if process.returncode != 0:
             fetch = subprocess.run(
                 ["git", "fetch", "-q", "origin", reference.requested_revision],
-                cwd=target,
+                cwd=target_text,
                 text=True,
                 capture_output=True,
                 check=False,
@@ -95,22 +94,22 @@ def materialize_vcs(
             if fetch.returncode == 0:
                 process = subprocess.run(
                     ["git", "checkout", "-q", "FETCH_HEAD"],
-                    cwd=target,
+                    cwd=target_text,
                     text=True,
                     capture_output=True,
                     check=False,
                 )
         if process.returncode != 0:
             detail = (process.stderr or process.stdout).strip()
-            shutil.rmtree(target, ignore_errors=True)
+            shutil.rmtree(target_text, ignore_errors=True)
             raise OSError(f"Failed to checkout {url}: {detail}")
-    commit_id = git_revision(target)
+    commit_id = git_revision(target_text)
     if emit_resolution and not os.environ.get("CPIP_QUIET"):
         print(f"Resolved {reference.repo_url} to commit {commit_id}")
-    return target
+    return target_text
 
 
-def git_revision(source_dir: Path) -> str:
+def git_revision(source_dir: str) -> str:
     result = subprocess.run(
         ["git", "rev-parse", "HEAD"],
         cwd=source_dir,

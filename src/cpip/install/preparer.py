@@ -8,7 +8,6 @@ import logging
 import os
 import shutil
 from collections.abc import Iterable
-from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 from cpip.build.metadata import (
@@ -365,7 +364,7 @@ class RequirementPreparer:
             # Add the downloaded archive to the install requirement to unpack after
             # preparing the source dir.
             if not req.is_wheel:
-                req.needs_unpacked_archive(Path(filepath))
+                req.needs_unpacked_archive(filepath)
 
         # This step is necessary to ensure all lazy wheels are processed
         # successfully by the 'download', 'wheel', and 'install' commands.
@@ -601,14 +600,17 @@ class RequirementPreparer:
         req.ensure_has_source_dir(self.src_dir)
         SourceManager(req).update_editable()
         assert req.source_dir
-        source_path = Path(req.unpacked_source_directory)
-        vcs_backend = vcs.get_backend_for_dir(str(source_path))
+        source_path = os.path.join(
+            req.source_dir,
+            (req.link.subdirectory_fragment if req.link else None) or "",
+        )
+        vcs_backend = vcs.get_backend_for_dir(source_path)
         if vcs_backend is not None:
             req.download_info = DirectUrl(
-                url=vcs_backend.get_remote_url(str(source_path)),
+                url=vcs_backend.get_remote_url(source_path),
                 vcs_info=VcsInfo(
                     vcs=vcs_backend.name,
-                    commit_id=vcs_backend.get_revision(str(source_path)),
+                    commit_id=vcs_backend.get_revision(source_path),
                 ),
             )
         else:

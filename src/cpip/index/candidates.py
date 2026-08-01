@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from cpip.core.errors import BuildError
@@ -14,14 +13,14 @@ if TYPE_CHECKING:
     from cpip.index.source_models import CandidateRecord, RejectedCandidate
 
 
-def remove_temp_directory_internal(path: str | Path) -> None:
+def remove_temp_directory_internal(path: str) -> None:
     from cpip.core.temp_dir import remove_temp_directory
 
     remove_temp_directory(path)
 
 
 def prepare_project_metadata(
-    source_dir: Path,
+    source_dir: str | os.PathLike[str],
     *,
     editable: bool = False,
     build_constraints: list[str] | None = None,
@@ -134,16 +133,16 @@ class InstallationCandidate(CandidateRecord):
     ) -> InstallationCandidate | RejectedCandidate:
         from cpip.index.source_models import RejectedCandidate, RejectionReason
 
-        local = Path(link.file_path)
-        source_dir = os.fspath(local)
-        if not os.path.exists(source_dir):
+        local = link.file_path
+        source_dir = local
+        if not link.is_existing_dir:
             return RejectedCandidate(
                 link,
                 RejectionReason.MISSING_ARTIFACT,
                 "source tree is not local",
             )
         try:
-            metadata = prepare_project_metadata(local)
+            metadata = prepare_project_metadata(source_dir)
             version = Version(metadata.version)
         except ValueError:
             return RejectedCandidate(
@@ -152,13 +151,22 @@ class InstallationCandidate(CandidateRecord):
                 "invalid project version",
             )
         except BuildError:
-            if link.source_url is None and not (
-                os.path.isfile(os.path.join(source_dir, "pyproject.toml"))
-                or os.path.isfile(os.path.join(source_dir, "setup.py"))
-            ):
-                return cls(name=local.name or "source", version=Version("0"), link=link)
+            project_files: set[str] = set()
+            try:
+                with os.scandir(source_dir) as entries:
+                    for entry in entries:
+                        if entry.name in {"pyproject.toml", "setup.py"} and entry.is_file():
+                            project_files.add(entry.name)
+            except OSError:
+                pass
+            if link.source_url is None and not project_files:
+                return cls(
+                    name=os.path.basename(local) or "source",
+                    version=Version("0"),
+                    link=link,
+                )
             pyproject = os.path.join(source_dir, "pyproject.toml")
-            if os.path.isfile(pyproject):
+            if "pyproject.toml" in project_files:
                 try:
                     with open(pyproject, encoding="utf-8") as file:
                         if "version" in file.read():
@@ -169,7 +177,11 @@ class InstallationCandidate(CandidateRecord):
                             )
                 except OSError:
                     pass
-            return cls(name=local.name or "source", version=Version("0"), link=link)
+            return cls(
+                name=os.path.basename(local) or "source",
+                version=Version("0"),
+                link=link,
+            )
         except OSError:
             return RejectedCandidate(
                 link,

@@ -108,9 +108,9 @@ def test_requirement_source_paths() -> None:
     requirement = install_req_from_line("demo")
     requirement.source_dir = "/tmp/demo"
 
-    assert requirement.unpacked_source_directory == Path("/tmp/demo")
-    assert requirement.setup_py_path == Path("/tmp/demo/setup.py")
-    assert requirement.pyproject_toml_path == Path("/tmp/demo/pyproject.toml")
+    assert requirement.unpacked_source_directory == "/tmp/demo/"
+    assert requirement.setup_py_path == "/tmp/demo/setup.py"
+    assert requirement.pyproject_toml_path == "/tmp/demo/pyproject.toml"
 
 
 def test_invalid_wheel_requirement_raises() -> None:
@@ -494,40 +494,27 @@ def test_get_url_from_path(
         assert get_url_from_path(*args) is expected
 
 
-def test_get_url_from_path_archive_file() -> None:
+def test_get_url_from_path_archive_file(tmp_path: Path) -> None:
     name = "simple-0.1-py2.py3-none-any.whl"
-    path = f"/path/to/{name}"
-    expected = Path(path).resolve(strict=False).as_uri()
-    with mock.patch("cpip.resolution.req_install.os.path.isdir", return_value=False):
-        with mock.patch(
-            "cpip.resolution.req_install.os.path.isfile",
-            return_value=True,
-        ):
-            assert get_url_from_path(path, name) == expected
+    path = tmp_path / name
+    path.touch()
+    assert get_url_from_path(str(path), name) == path.resolve().as_uri()
 
 
-def test_get_url_from_path_installable_dir() -> None:
+def test_get_url_from_path_installable_dir(tmp_path: Path) -> None:
     name = "some/setuptools/project"
-    path = f"/path/to/{name}"
-    expected = Path(path).resolve(strict=False).as_uri()
-    with mock.patch("cpip.resolution.req_install.os.path.isdir", return_value=True):
-        with mock.patch(
-            "cpip.resolution.req_install.os.path.isfile",
-            return_value=True,
-        ):
-            assert get_url_from_path(path, name) == expected
+    path = tmp_path / name
+    path.mkdir(parents=True)
+    (path / "setup.py").touch()
+    assert get_url_from_path(str(path), name) == path.resolve().as_uri()
 
 
-def test_get_url_from_path_installable_error() -> None:
+def test_get_url_from_path_installable_error(tmp_path: Path) -> None:
     name = "some/setuptools/project"
-    path = f"/path/to/{name}"
-    with mock.patch("cpip.resolution.req_install.os.path.isdir", return_value=True):
-        with mock.patch(
-            "cpip.resolution.req_install.os.path.isfile",
-            return_value=False,
-        ):
-            with pytest.raises(InstallationError) as exc:
-                get_url_from_path(path, name)
+    path = tmp_path / name
+    path.mkdir(parents=True)
+    with pytest.raises(InstallationError) as exc:
+        get_url_from_path(str(path), name)
     assert "Neither 'setup.py' nor 'pyproject.toml' found" in str(exc.value)
 
 
@@ -563,3 +550,20 @@ def test_forward_slash_results_in_a_link(tmp_path: Path) -> None:
     setup_py_path.write_text("")
     requirement = install_req_from_line(install_dir.as_posix())
     assert requirement.link is not None
+
+
+def test_load_pyproject_reads_legacy_setup_once(tmp_path: Path) -> None:
+    setup_py = tmp_path / "setup.py"
+    setup_py.write_text("import pkg_resources\n")
+    requirement = InstallRequirement(None, None)
+    requirement.source_dir = tmp_path
+
+    with mock.patch("builtins.open", wraps=open) as open_file:
+        requirement.load_pyproject_toml()
+
+    setup_opens = [
+        call
+        for call in open_file.call_args_list
+        if call.args and os.fspath(setup_py) in os.fspath(call.args[0])
+    ]
+    assert len(setup_opens) == 1

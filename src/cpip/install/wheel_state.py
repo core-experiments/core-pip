@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import csv
 import os
+import stat
 from collections.abc import Iterable
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from cpip.core.errors import InstallationError
@@ -16,9 +16,9 @@ if TYPE_CHECKING:
 
 
 def compiled_files(
-    stage_root: Path,
-    staged: Iterable[tuple[Path, Path, str, int | None]],
-) -> list[tuple[Path, Path, str, int | None]]:
+    stage_root: str,
+    staged: Iterable[tuple[str, str, str, int | None]],
+) -> list[tuple[str, str, str, int | None]]:
     python_files = [
         (source, destination)
         for source, destination, _, _ in staged
@@ -30,31 +30,35 @@ def compiled_files(
     import compileall
     import importlib.util
 
-    for source, _ in python_files:
-        compileall.compile_file(os.fspath(source), force=True, quiet=1)
+    compiled = [
+        (source, destination)
+        for source, destination in python_files
+        if compileall.compile_file(os.fspath(source), force=True, quiet=1)
+    ]
     result = []
     stage_root_text = os.fspath(stage_root)
-    for source, destination in python_files:
+    for source, destination in compiled:
         cache_text = importlib.util.cache_from_source(os.fspath(source))
-        if os.path.isfile(cache_text):
-            relative = os.path.relpath(cache_text, stage_root_text)
-            relative_parts = relative.split(os.sep)
-            cache = Path(cache_text)
-            compiled_destination = destination.parent / Path(*relative_parts[-2:])
-            result.append(
-                (
-                    cache,
-                    compiled_destination,
-                    os.fspath(compiled_destination),
-                    None,
-                ),
-            )
+        relative = os.path.relpath(cache_text, stage_root_text)
+        relative_parts = relative.split(os.sep)
+        compiled_destination = os.path.join(
+            os.path.dirname(destination),
+            *relative_parts[-2:],
+        )
+        result.append(
+            (
+                cache_text,
+                compiled_destination,
+                compiled_destination,
+                None,
+            ),
+        )
     return result
 
 
 def existing_paths(
     distribution: InstalledMetadataDistribution | None,
-) -> tuple[set[Path], set[Path]]:
+) -> tuple[set[str], set[str]]:
     if distribution is None:
         return set(), set()
     if distribution.info_location and distribution.info_location.endswith(".dist-info"):
@@ -72,8 +76,18 @@ def existing_paths(
     else:
         entries = distribution.iter_declared_entries()
     root = os.fspath(distribution.location)
-    paths = {Path(os.path.realpath(os.path.join(root, entry))) for entry in entries}
-    existing = {path for path in paths if os.path.lexists(path)}
+    existing: set[str] = set()
+    for entry in entries:
+        path = os.path.join(root, entry)
+        try:
+            path_stat = os.lstat(path)
+        except OSError:
+            continue
+        existing.add(
+            os.path.realpath(path)
+            if stat.S_ISLNK(path_stat.st_mode)
+            else os.path.abspath(path),
+        )
     return existing, existing
 
 
@@ -107,9 +121,10 @@ class InstalledTargetInventory:
         return self.distributions.get(name)
 
 
-def is_within(path: Path, root: Path) -> bool:
+def is_within(path: str, root: str) -> bool:
     try:
-        path.relative_to(root)
-    except ValueError:
+        if os.path.commonpath((path, root)) != root:
+            raise ValueError
+    except (OSError, ValueError):
         return False
     return True

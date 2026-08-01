@@ -4,7 +4,6 @@ import logging
 import os
 import sys
 from collections.abc import Iterable
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
 from cpip.core.direct_url import ArchiveInfo, DirInfo
@@ -32,7 +31,7 @@ if TYPE_CHECKING:
     from cpip.resolution.engine.input.backend import ConfiguredBuildBackend
 
 
-def file_hashes(path: str | Path) -> dict[str, str]:
+def file_hashes(path: str) -> dict[str, str]:
     from cpip.core.hashes import file_hashes as compute_file_hashes
 
     return compute_file_hashes(path)
@@ -172,7 +171,7 @@ class InstallRequirement:
         cached_wheel_source_link: Link | None = None,
         metadata_internal: email.message.Message | None = None,
         distribution_internal: MetadataProvider | None = None,
-        archive_source_internal: Path | None = None,
+        archive_source_internal: str | os.PathLike[str] | None = None,
         needs_more_preparation: bool = False,
         build_env: Any = None,
         pyproject_requires: list[str] | None = None,
@@ -322,10 +321,10 @@ class InstallRequirement:
                 parallel_builds=parallel_builds,
             )
 
-    def needs_unpacked_archive(self, archive_source: Path) -> None:
+    def needs_unpacked_archive(self, archive_source: str | os.PathLike[str]) -> None:
         if self.archive_source_internal is not None:
             raise AssertionError("archive source already set")
-        self.archive_source_internal = archive_source
+        self.archive_source_internal = os.fspath(archive_source)
 
     def ensure_pristine_source_checkout(self) -> None:
         """Populate or validate the source directory before preparation."""
@@ -333,9 +332,16 @@ class InstallRequirement:
             raise InstallationError(f"No source directory for {self}")
         if self.archive_source_internal is not None:
             return
-        if os.path.isfile(
-            os.path.join(self.source_dir, "pyproject.toml"),
-        ) or os.path.isfile(os.path.join(self.source_dir, "setup.py")):
+        try:
+            with os.scandir(os.fspath(self.source_dir)) as entries:
+                has_project_file = any(
+                    entry.name in {"pyproject.toml", "setup.py"}
+                    and entry.is_file()
+                    for entry in entries
+                )
+        except OSError:
+            has_project_file = False
+        if has_project_file:
             raise InstallationError(
                 f"cpip can't proceed with requirement {self!r} because its source "
                 f"directory already contains an installable project",
@@ -422,10 +428,19 @@ class InstallRequirement:
         source_dir = os.fspath(self.source_dir)
         pyproject = os.path.join(source_dir, "pyproject.toml")
         setup_py = os.path.join(source_dir, "setup.py")
-        if os.path.isfile(pyproject):
+        setup_contents: str | None = None
+        try:
             with open(pyproject, encoding="utf-8") as file:
                 data = tomllib.loads(file.read())
-        elif os.path.isfile(setup_py):
+        except OSError:
+            try:
+                with open(setup_py, encoding="utf-8") as file:
+                    setup_contents = file.read()
+            except OSError:
+                raise InstallationError(
+                    f"{self} does not appear to be a Python project: neither "
+                    "'setup.py' nor 'pyproject.toml' found.",
+                ) from None
             data = {
                 "build-system": {
                     # setuptools 82 removed pkg_resources, which is still
@@ -434,11 +449,6 @@ class InstallRequirement:
                     "build-backend": "setuptools.build_meta:__legacy__",
                 },
             }
-        else:
-            raise InstallationError(
-                f"{self} does not appear to be a Python project: neither "
-                "'setup.py' nor 'pyproject.toml' found.",
-            )
         self.pyproject_data = data
         build_system = data.get("build-system")
         if not isinstance(build_system, dict):
@@ -480,14 +490,13 @@ class InstallRequirement:
                     error="direct references are not allowed",
                 )
         backend = build_system.get("build-backend", "setuptools.build_meta")
-        setup_uses_pkg_resources = False
-        if os.path.isfile(setup_py):
-            with open(setup_py, encoding="utf-8") as file:
-                setup_uses_pkg_resources = "pkg_resources" in file.read()
+        setup_uses_pkg_resources = (
+            setup_contents is not None and "pkg_resources" in setup_contents
+        )
         if (
             isinstance(backend, str)
             and backend.startswith("setuptools.build_meta")
-            and os.path.isfile(setup_py)
+            and setup_contents is not None
             and setup_uses_pkg_resources
             and not any(
                 canonicalize_name(parsed.name) == "setuptools"
@@ -502,7 +511,7 @@ class InstallRequirement:
         self.requirements_to_check = []
         return data
 
-    def configure_backend(self, python_executable: str | Path) -> None:
+    def configure_backend(self, python_executable: str) -> None:
         from cpip.resolution.engine.input.backend import ConfiguredBuildBackend
 
         if self.source_dir is None:
@@ -523,10 +532,10 @@ class InstallRequirement:
         if backend is None:
             backend = "setuptools.build_meta:__legacy__"
         self.pep517_backend = ConfiguredBuildBackend(
-            source_dir=Path(self.source_dir),
+            source_dir=self.source_dir,
             backend=backend,
             backend_path=backend_path,
-            python_executable=Path(python_executable),
+            python_executable=os.fspath(python_executable),
         )
 
     def editable_sanity_check(self) -> None:
@@ -542,7 +551,7 @@ class InstallRequirement:
 
         if self.source_dir is None or self.pep517_backend is None:
             raise InstallationError(f"Cannot prepare metadata for {self}")
-        metadata_root = Path(tempfile.mkdtemp(prefix="cpip-modern-metadata-"))
+        metadata_root = tempfile.mkdtemp(prefix="cpip-modern-metadata-")
         hook = (
             "prepare_metadata_for_build_editable"
             if self.editable and self.permit_editable_wheels
@@ -550,10 +559,10 @@ class InstallRequirement:
         )
         metadata_name = self.pep517_backend.call_hook(
             hook,
-            os.fspath(metadata_root),
+            metadata_root,
             self.config_settings,
         )
-        self.metadata_directory = os.fspath(metadata_root / str(metadata_name))
+        self.metadata_directory = os.path.join(metadata_root, str(metadata_name))
         self.warn_on_mismatching_name()
         self.assert_source_matches_version()
 
@@ -595,16 +604,16 @@ class InstallRequirement:
         return result
 
     @property
-    def unpacked_source_directory(self) -> Path:
+    def unpacked_source_directory(self) -> str:
         if self.source_dir is None:
             raise ValueError(f"No source directory for {self}")
         subdirectory = self.link.subdirectory_fragment if self.link else None
-        return Path(self.source_dir) / (subdirectory or "")
+        return os.path.join(self.source_dir, subdirectory or "")
 
     @property
-    def setup_py_path(self) -> Path:
-        return self.unpacked_source_directory / "setup.py"
+    def setup_py_path(self) -> str:
+        return os.path.join(self.unpacked_source_directory, "setup.py")
 
     @property
-    def pyproject_toml_path(self) -> Path:
-        return self.unpacked_source_directory / "pyproject.toml"
+    def pyproject_toml_path(self) -> str:
+        return os.path.join(self.unpacked_source_directory, "pyproject.toml")

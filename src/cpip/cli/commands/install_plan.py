@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 import zipfile
-from pathlib import Path
 from typing import Any
 
 
@@ -107,7 +106,7 @@ def try_local_wheelhouse_plan(
             candidate = WheelCandidate(
                 name=local_candidate.name,
                 version=Version(str(local_candidate.version)),
-                path=Path(local_candidate.path),
+                path=local_candidate.path,
                 dependencies=tuple(dependencies),
                 provided_extras=local_candidate.provided_extras,
                 requires_python=local_candidate.requires_python,
@@ -127,7 +126,7 @@ def try_local_wheelhouse_plan(
             with zipfile.ZipFile(candidate.path) as archive:
                 dist_info, _ = parse_wheel(
                     archive,
-                    candidate.path.name[:-4].split("-", 1)[0],
+                    os.path.basename(candidate.path)[:-4].split("-", 1)[0],
                 )
                 layout = wheel_candidate(
                     candidate.path,

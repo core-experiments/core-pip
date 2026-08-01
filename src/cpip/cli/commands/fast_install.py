@@ -391,8 +391,6 @@ def run_local_fallback(args: list[str]) -> int | None:
     ):
         return None
 
-    from pathlib import Path
-
     from cpip.core.packaging import Version
     from cpip.core.wheel import WheelCandidate, parse_wheel, wheel_candidate
     from cpip.install.target import InstallTarget
@@ -414,7 +412,7 @@ def run_local_fallback(args: list[str]) -> int | None:
                 WheelCandidate(
                     name=local_candidate.name,
                     version=Version(str(local_candidate.version)),
-                    path=Path(local_candidate.path),
+                    path=local_candidate.path,
                     dependencies=(),
                     provided_extras=local_candidate.provided_extras,
                     requires_python=local_candidate.requires_python,
@@ -434,7 +432,7 @@ def run_local_fallback(args: list[str]) -> int | None:
             with zipfile.ZipFile(candidate.path) as archive:
                 dist_info, _ = parse_wheel(
                     archive,
-                    candidate.path.name[:-4].split("-", 1)[0],
+                    os.path.basename(candidate.path)[:-4].split("-", 1)[0],
                 )
                 layout = wheel_candidate(
                     candidate.path,

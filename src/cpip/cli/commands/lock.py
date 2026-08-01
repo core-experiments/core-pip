@@ -116,12 +116,10 @@ def run_lock(args: list[str]) -> int:
     for value in options.requirements:
         local_directory = os.path.abspath(value)
         if os.path.isdir(local_directory):
-            from pathlib import Path
-
             from cpip.build.build_backend import prepare_project_metadata
 
             metadata = prepare_project_metadata(
-                Path(local_directory),
+                local_directory,
                 build_isolation=False,
             )
             directory_packages.append(
@@ -142,13 +140,12 @@ def run_lock(args: list[str]) -> int:
         item = install_req_from_line(value)
         if item.link is not None and not item.link.is_vcs:
             import hashlib
-            from pathlib import Path
 
             from cpip.build.build import unpack_source
             from cpip.build.build_backend import prepare_project_metadata
 
             source = artifact_locator.ensure_local(item.link.url)
-            if source.is_dir():
+            if os.path.isdir(source):
                 metadata = prepare_project_metadata(source, build_isolation=False)
                 directory_packages.append(
                     {"name": metadata.name, "directory": {"path": "."}},
@@ -158,17 +155,19 @@ def run_lock(args: list[str]) -> int:
             import tempfile
 
             with tempfile.TemporaryDirectory(prefix="cpip-lock-source-") as directory:
-                archive = Path(directory) / "source.tar.gz"
+                archive = os.path.join(directory, "source.tar.gz")
                 shutil.copyfile(source, archive)
-                project = unpack_source(archive, Path(directory) / "project")
+                project = unpack_source(archive, os.path.join(directory, "project"))
                 metadata = prepare_project_metadata(project, build_isolation=False)
+            with open(source, "rb") as file:
+                source_digest = hashlib.sha256(file.read()).hexdigest()
             archive_packages.append(
                 {
                     "name": metadata.name,
                     "archive": {
                         "url": value,
                         "hashes": {
-                            "sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+                            "sha256": source_digest,
                         },
                     },
                 },
@@ -177,15 +176,13 @@ def run_lock(args: list[str]) -> int:
         requirements.append(value)
     editable_packages: list[dict] = []
     for value in options.editable:
-        from pathlib import Path
-
         from cpip.build.build_backend import prepare_project_metadata
         from cpip.resolution.engine.input.requirements import install_req_from_line
 
         item = install_req_from_line(value)
         item.editable = True
         requirements.append(item)
-        editable_path = Path(value).resolve()
+        editable_path = os.path.realpath(value)
         metadata = prepare_project_metadata(editable_path)
         editable_packages.append(
             {
@@ -343,15 +340,15 @@ def run_lock(args: list[str]) -> int:
                 import hashlib
 
                 archive_path = artifact_locator.ensure_local(source)
+                with open(archive_path, "rb") as file:
+                    archive_digest = hashlib.sha256(file.read()).hexdigest()
                 packages.append(
                     {
                         "name": candidate.name,
                         "archive": {
                             "url": source,
                             "hashes": {
-                                "sha256": hashlib.sha256(
-                                    archive_path.read_bytes(),
-                                ).hexdigest(),
+                                "sha256": archive_digest,
                             },
                         },
                     },

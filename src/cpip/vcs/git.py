@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 import os.path
-import pathlib
 import re
 import urllib.parse
 from typing import Any
@@ -10,6 +9,7 @@ from typing import Any
 from cpip.core.contracts import AuthInfo
 from cpip.core.errors import InstallationError
 from cpip.core.filesystem import display_path
+from cpip.core.urls import path_to_url
 
 from .errors import BadCommand
 from .subprocess import make_command
@@ -454,7 +454,7 @@ class Git(VersionControl):
         if os.path.exists(url):
             # A local bare remote (git clone --mirror).
             # Needs a file:// prefix.
-            return pathlib.Path(url).as_uri()
+            return path_to_url(url)
         scp_match = SCP_REGEX.match(url)
         if scp_match:
             # Add an ssh:// prefix and replace the ':' with a '/'.

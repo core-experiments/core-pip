@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import sys
 from typing import TYPE_CHECKING
 
@@ -14,7 +13,6 @@ from cpip.core.errors import (
     VcsHashUnsupported,
 )
 from cpip.core.packaging import Requirement, SpecifierSet
-from cpip.core.urls import url_to_path
 from cpip.core.wheel import WheelCandidate
 from cpip.resolution.engine.algorithms import (
     actual_hashes_for_candidate,
@@ -109,8 +107,7 @@ class ValidationOperations:
                 "have a way to hash version control repositories",
             )
         if link_url.startswith("file://"):
-            local_path = url_to_path(link_url)
-            if os.path.isdir(local_path):
+            if source_req.link.is_existing_dir:
                 raise DirectoryUrlHashUnsupported(
                     "Can't verify hashes for these file:// requirements because "
                     "they point to directories",
@@ -167,8 +164,7 @@ class ValidationOperations:
                     "have a way to hash version control repositories",
                 )
             if link_url.startswith("file://"):
-                local_path = url_to_path(link_url)
-                if os.path.isdir(local_path):
+                if source_req.link.is_existing_dir:
                     raise DirectoryUrlHashUnsupported(
                         "Can't verify hashes for these file:// requirements because "
                         "they point to directories",

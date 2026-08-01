@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 
 import pytest
+import cpip.install.transaction as transaction_module
 from cpip.core.errors import InstallationError
 from cpip.install.transaction import InstallTransaction
 
@@ -42,6 +43,32 @@ def test_transaction_rejects_unowned_collision(tmp_path: Path) -> None:
         transaction.commit()
 
     assert destination.read_text(encoding="utf-8") == "unrelated"
+
+
+def test_transaction_validation_does_not_recheck_destination_file_type(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    destination = tmp_path / "demo.py"
+    destination.write_text("unrelated", encoding="utf-8")
+    source = tmp_path / "stage.py"
+    source.write_text("new", encoding="utf-8")
+    original_isfile = transaction_module.os.path.isfile
+    checked: list[str] = []
+
+    def counting_isfile(path: str | os.PathLike[str]) -> bool:
+        checked.append(os.fspath(path))
+        return original_isfile(path)
+
+    monkeypatch.setattr(transaction_module.os.path, "isfile", counting_isfile)
+    transaction = InstallTransaction()
+    transaction.add(source, destination)
+
+    with pytest.raises(InstallationError, match="unrelated file"):
+        transaction.commit()
+
+    assert os.fspath(source) in checked
+    assert os.fspath(destination) not in checked
 
 
 @pytest.mark.skipif(os.name == "nt", reason="requires POSIX symlinks")

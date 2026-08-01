@@ -6,7 +6,6 @@ import builtins
 import fnmatch
 import os
 import sys
-from pathlib import Path
 
 from cpip.core.appdirs import user_cache_dir
 
@@ -15,24 +14,24 @@ class CacheManager:
     """Inspect and remove files from cpip's cache directories."""
 
     def __init__(self, cache_dir: str | None = None) -> None:
-        self.cache_dir = Path(os.path.normcase(cache_dir or user_cache_dir("cpip")))
-        self.http_dir = self.cache_dir / "http-v2"
-        self.wheel_dir = self.cache_dir / "wheels"
+        self.cache_dir = os.path.normcase(cache_dir or user_cache_dir("cpip"))
+        self.http_dir = os.path.join(self.cache_dir, "http-v2")
+        self.wheel_dir = os.path.join(self.cache_dir, "wheels")
 
-    def wheel_files(self) -> builtins.list[Path]:
-        wheel_dir = os.fspath(self.wheel_dir)
+    def wheel_files(self) -> builtins.list[str]:
+        wheel_dir = self.wheel_dir
         if not os.path.isdir(wheel_dir):
             return []
         return sorted(
-            Path(os.path.join(current, name))
+            os.path.join(current, name)
             for current, _, files in os.walk(wheel_dir, followlinks=False)
             for name in files
             if name.endswith(".whl")
         )
 
     @staticmethod
-    def _files_under(root: Path) -> builtins.list[str]:
-        root_text = os.fspath(root)
+    def _files_under(root: str) -> builtins.list[str]:
+        root_text = root
         if not os.path.isdir(root_text):
             return []
         return [
@@ -47,12 +46,19 @@ class CacheManager:
             expression = (
                 pattern if any(char in pattern for char in "*?[]") else f"*{pattern}*"
             )
-            wheels = [path for path in wheels if fnmatch.fnmatch(path.name, expression)]
+            wheels = [
+                path
+                for path in wheels
+                if fnmatch.fnmatch(os.path.basename(path), expression)
+            ]
         if absolute:
-            return [os.fspath(path) for path in wheels]
+            return wheels
         if not wheels:
             return []
-        return [f" - {path.name} ({path.parent})" for path in wheels]
+        return [
+            f" - {os.path.basename(path)} ({os.path.dirname(path)})"
+            for path in wheels
+        ]
 
     def remove(
         self,
@@ -64,16 +70,20 @@ class CacheManager:
         if purge:
             files = [
                 path
-                for root in (self.http_dir, self.wheel_dir, self.cache_dir / "http")
+                for root in (
+                    self.http_dir,
+                    self.wheel_dir,
+                    os.path.join(self.cache_dir, "http"),
+                )
                 for path in self._files_under(root)
             ]
         else:
             files = [
-                os.fspath(path)
+                path
                 for path in self.wheel_files()
                 if pattern is not None
                 and fnmatch.fnmatch(
-                    path.name,
+                    os.path.basename(path),
                     pattern
                     if any(char in pattern for char in "*?[]")
                     else f"*{pattern}*",
@@ -103,16 +113,16 @@ class CacheManager:
             except FileNotFoundError:
                 pass
 
-        selfcheck = self.cache_dir / "selfcheck.json"
-        if purge and os.path.isfile(os.fspath(selfcheck)):
-            os.unlink(os.fspath(selfcheck))
+        selfcheck = os.path.join(self.cache_dir, "selfcheck.json")
+        if purge and os.path.isfile(selfcheck):
+            os.unlink(selfcheck)
             print("Removed legacy selfcheck.json file")
 
         directories_removed = 0
         directories = [
             os.path.join(current, name)
             for current, directory_names, _ in os.walk(
-                os.fspath(self.cache_dir),
+                self.cache_dir,
                 topdown=False,
                 followlinks=False,
             )
@@ -128,7 +138,7 @@ class CacheManager:
 
     def info(self) -> tuple[str, str, int]:
         return (
-            os.fspath(self.http_dir),
-            os.fspath(self.wheel_dir),
+            self.http_dir,
+            self.wheel_dir,
             len(self.wheel_files()),
         )
