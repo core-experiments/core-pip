@@ -38,7 +38,7 @@ def print_version(version: str | None, location: str | None) -> None:
         raise RuntimeError("cpip package location is unavailable")
     print(
         f"cpip {version} from {os.path.realpath(location)} "
-        f"(python {CURRENT_PYTHON_VERSION})"
+        f"(python {CURRENT_PYTHON_VERSION})",
     )
 
 
@@ -163,7 +163,7 @@ def main(
                     and "--no-compile" in argv
                     and "--target" in argv
                 )
-            )
+            ),
         )
         from cpip.cli._fallback_main import run as run_fallback_main
 

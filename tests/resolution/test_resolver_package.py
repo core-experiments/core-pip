@@ -17,39 +17,42 @@ from cpip.core.errors import (
     VcsHashUnsupported,
 )
 from cpip.core.format_control import FormatControl
-from cpip.core.packaging import parse_requirement, Requirement, Version
-from cpip.core.wheel import WheelCandidate
+from cpip.core.packaging import Requirement, Version, parse_requirement
+from cpip.core.wheel import TargetContext, WheelCandidate
 from cpip.index.cache import wheel_cache_path
 from cpip.index.candidate_materialization import CandidateStream, LazyWheelCandidate
 from cpip.index.provider import CandidateProvider
 from cpip.index.source_models import CandidateSummary
-from cpip.resolution.algorithms import is_pypi_hosted_url
-from cpip.resolution.req_install import (
-    file_hashes,
+from cpip.resolution.engine import ResolutionEngine
+from cpip.resolution.engine.algorithms import is_pypi_hosted_url
+from cpip.resolution.engine.input.requirements import (
     install_req_from_editable,
     install_req_from_line,
 )
-from cpip.resolution.requirement_set import RequirementSet
-from cpip.resolution.resolver import Resolver
-from cpip.resolution.resolver_internals.state.agenda import PendingAgenda
-from cpip.resolution.resolver_internals.state.domains import (
+from cpip.resolution.engine.state.agenda import PendingAgenda
+from cpip.resolution.engine.state.domains import (
     LearnedIncompatibility,
     PackageDomain,
 )
-from cpip.resolution.resolver_internals.state.requests import (
+from cpip.resolution.engine.state.requests import (
     SearchFrame,
     SearchRequest,
 )
+from cpip.resolution.engine.state.requirement_set import RequirementSet
+from cpip.resolution.req_install import file_hashes
+
 from .wheel_helpers import make_sdist, make_wheel
 
 
-class CountingFailedResolver(Resolver):
+class CountingFailedResolver(ResolutionEngine):
     def __init__(self) -> None:
         super().__init__(no_index=True)
         self.uncached_searches = 0
 
     def search_uncached(  # type: ignore[override]
-        self, *args: object, **kwargs: object
+        self,
+        *args: object,
+        **kwargs: object,
     ) -> SearchFrame:
         self.uncached_searches += 1
         if False:
@@ -85,17 +88,358 @@ def test_pending_agenda_rolls_back_nested_mutations() -> None:
     assert set(agenda.by_name) == {"first", "second", "third"}
 
 
-def test_resolver_metrics_are_opt_in(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("CPIP_RESOLVER_METRICS", raising=False)
-    disabled = Resolver(no_index=True)
-    assert not disabled.metrics.enabled
+def test_finite_domain_kernel_matches_generic_on_wide_roots(tmp_path: Path) -> None:
+    wheelhouse = tmp_path / "kernel-packages"
+    wheelhouse.mkdir()
+    for index in range(32):
+        make_wheel(
+            wheelhouse,
+            f"kernel-{index}",
+            f"kernel_{index}",
+            "1.0",
+        )
 
-    monkeypatch.setenv("CPIP_RESOLVER_METRICS", "1")
-    enabled = Resolver(no_index=True)
-    assert enabled.metrics.enabled
-    snapshot = enabled.metrics_snapshot()
-    assert snapshot["search_frames"] == 0
-    assert snapshot["candidates_considered"] == 0
+    resolver = ResolutionEngine(
+        provider=CandidateProvider.from_options(
+            find_links=[str(wheelhouse)],
+            no_index=True,
+        ),
+        ignore_installed=True,
+        compute_source_hashes=False,
+    )
+    plan = resolver.resolve([f"kernel-{index}" for index in range(32)])
+
+    assert len(plan.candidates) == 32
+    baseline_resolver = ResolutionEngine(
+        provider=CandidateProvider.from_options(
+            find_links=[str(wheelhouse)],
+            no_index=True,
+        ),
+        ignore_installed=True,
+        compute_source_hashes=False,
+    )
+    baseline_resolver.kernel_enabled = False
+    baseline = baseline_resolver.resolve([f"kernel-{index}" for index in range(32)])
+    assert {
+        (candidate.canonical_name, str(candidate.version))
+        for candidate in plan.candidates
+    } == {
+        (candidate.canonical_name, str(candidate.version))
+        for candidate in baseline.candidates
+    }
+
+
+def test_finite_domain_kernel_backtracks_and_matches_generic(
+    tmp_path: Path,
+) -> None:
+    wheelhouse = tmp_path / "kernel-backtracking"
+    wheelhouse.mkdir()
+    make_wheel(wheelhouse, "shared", "shared", "1.0")
+    make_wheel(wheelhouse, "shared", "shared", "1.1")
+    make_wheel(wheelhouse, "left", "left", "1.0", requires=["shared==1.0"])
+    make_wheel(wheelhouse, "left", "left", "2.0", requires=["shared==1.1"])
+    make_wheel(wheelhouse, "right", "right", "1.0", requires=["shared==1.1"])
+    make_wheel(wheelhouse, "right", "right", "2.0", requires=["shared==1.0"])
+    make_wheel(
+        wheelhouse,
+        "kernel-root",
+        "kernel_root",
+        "1.0",
+        requires=["left>=1", "right>=1"],
+    )
+    for index in range(31):
+        make_wheel(wheelhouse, f"leaf-{index}", f"leaf_{index}", "1.0")
+
+    requirements = ["kernel-root", *(f"leaf-{index}" for index in range(31))]
+    resolver = ResolutionEngine(
+        provider=CandidateProvider.from_options(
+            find_links=[str(wheelhouse)],
+            no_index=True,
+        ),
+        ignore_installed=True,
+    )
+    kernel_plan = resolver.resolve(requirements)
+
+    baseline_resolver = ResolutionEngine(
+        provider=CandidateProvider.from_options(
+            find_links=[str(wheelhouse)],
+            no_index=True,
+        ),
+        ignore_installed=True,
+    )
+    baseline_resolver.kernel_enabled = False
+    baseline_plan = baseline_resolver.resolve(requirements)
+
+    def validate(plan: object) -> set[str]:
+        candidates = plan.candidates  # type: ignore[attr-defined]
+        selected = {candidate.canonical_name: candidate for candidate in candidates}
+        for candidate in candidates:
+            for dependency in candidate.dependencies:
+                dependency_candidate = selected[dependency.canonical_name]
+                assert dependency.is_satisfied_by(
+                    dependency_candidate.version,
+                    allow_prereleases=True,
+                )
+        return set(selected)
+
+    assert validate(kernel_plan) == validate(baseline_plan)
+
+
+def test_finite_domain_kernel_supports_environment_markers(
+    tmp_path: Path,
+) -> None:
+    wheelhouse = tmp_path / "kernel-markers"
+    wheelhouse.mkdir()
+    make_wheel(
+        wheelhouse,
+        "marker-root",
+        "marker_root",
+        "1.0",
+        requires=["marker-leaf>=1; python_version >= '3.0'"],
+    )
+    make_wheel(wheelhouse, "marker-leaf", "marker_leaf", "1.0")
+    for index in range(31):
+        make_wheel(wheelhouse, f"marker-independent-{index}", "marker", "1.0")
+
+    requirements = [
+        "marker-root",
+        *(f"marker-independent-{index}" for index in range(31)),
+    ]
+    resolver = ResolutionEngine(
+        provider=CandidateProvider.from_options(
+            find_links=[str(wheelhouse)],
+            no_index=True,
+        ),
+        ignore_installed=True,
+    )
+    kernel_plan = resolver.resolve(requirements)
+
+    baseline_resolver = ResolutionEngine(
+        provider=CandidateProvider.from_options(
+            find_links=[str(wheelhouse)],
+            no_index=True,
+        ),
+        ignore_installed=True,
+    )
+    baseline_resolver.kernel_enabled = False
+    baseline_plan = baseline_resolver.resolve(requirements)
+
+    assert {candidate.canonical_name for candidate in kernel_plan.candidates} == {
+        candidate.canonical_name for candidate in baseline_plan.candidates
+    }
+
+
+def test_finite_domain_kernel_supports_root_extras(
+    tmp_path: Path,
+) -> None:
+    wheelhouse = tmp_path / "kernel-extras"
+    wheelhouse.mkdir()
+    make_wheel(wheelhouse, "extra-all", "extra_all", "1.0")
+    make_wheel(wheelhouse, "extra-dev", "extra_dev", "1.0")
+    make_wheel(
+        wheelhouse,
+        "extras-root",
+        "extras_root",
+        "1.0",
+        requires=[
+            "extra-all>=1; extra == 'all'",
+            "extra-dev>=1; extra == 'dev'",
+        ],
+        provides_extra=["all", "dev"],
+    )
+    for index in range(31):
+        make_wheel(wheelhouse, f"extra-independent-{index}", "extra", "1.0")
+
+    requirements = [
+        "extras-root[all,dev]",
+        *(f"extra-independent-{index}" for index in range(31)),
+    ]
+    resolver = ResolutionEngine(
+        provider=CandidateProvider.from_options(
+            find_links=[str(wheelhouse)],
+            no_index=True,
+        ),
+        ignore_installed=True,
+    )
+    kernel_plan = resolver.resolve(requirements)
+
+    baseline_resolver = ResolutionEngine(
+        provider=CandidateProvider.from_options(
+            find_links=[str(wheelhouse)],
+            no_index=True,
+        ),
+        ignore_installed=True,
+    )
+    baseline_resolver.kernel_enabled = False
+    baseline_plan = baseline_resolver.resolve(requirements)
+
+    kernel_names = {candidate.canonical_name for candidate in kernel_plan.candidates}
+    baseline_names = {
+        candidate.canonical_name for candidate in baseline_plan.candidates
+    }
+    assert kernel_names == baseline_names
+    assert "extra-all" in kernel_names
+    assert "extra-dev" in kernel_names
+
+
+def test_finite_domain_kernel_matches_generic_across_targets(tmp_path: Path) -> None:
+    wheelhouse = tmp_path / "kernel-targets"
+    wheelhouse.mkdir()
+    for index in range(32):
+        make_wheel(
+            wheelhouse,
+            f"target-independent-{index}",
+            "target_independent",
+            "1.0",
+        )
+    requirements = [f"target-independent-{index}" for index in range(32)]
+
+    for target in (
+        TargetContext(platforms=("linux_x86_64",), python_version="3.11"),
+        TargetContext(platforms=("win_amd64",), python_version="3.12"),
+        TargetContext(platforms=("macosx_11_0_arm64",), python_version="3.12"),
+    ):
+        resolver = ResolutionEngine(
+            provider=CandidateProvider.from_options(
+                find_links=[str(wheelhouse)],
+                no_index=True,
+                target=target,
+            ),
+            ignore_installed=True,
+        )
+        kernel_plan = resolver.resolve(requirements)
+        baseline_resolver = ResolutionEngine(
+            provider=CandidateProvider.from_options(
+                find_links=[str(wheelhouse)],
+                no_index=True,
+                target=target,
+            ),
+            ignore_installed=True,
+        )
+        baseline_resolver.kernel_enabled = False
+        baseline_plan = baseline_resolver.resolve(requirements)
+        assert {candidate.canonical_name for candidate in kernel_plan.candidates} == {
+            candidate.canonical_name for candidate in baseline_plan.candidates
+        }
+
+
+def test_finite_domain_kernel_repeats_conflicts_across_root_releases(
+    tmp_path: Path,
+) -> None:
+    wheelhouse = tmp_path / "kernel-repeated-conflicts"
+    wheelhouse.mkdir()
+    make_wheel(wheelhouse, "shared", "shared", "1.0")
+    make_wheel(wheelhouse, "shared", "shared", "1.1")
+    make_wheel(wheelhouse, "left", "left", "1.0", requires=["shared==1.0"])
+    make_wheel(wheelhouse, "left", "left", "2.0", requires=["shared==1.1"])
+    make_wheel(wheelhouse, "right", "right", "1.0", requires=["shared==1.0"])
+    make_wheel(wheelhouse, "right", "right", "2.0", requires=["shared==1.0"])
+    make_wheel(
+        wheelhouse,
+        "repeated-root",
+        "repeated_root",
+        "1.0",
+        requires=["left==1", "right>=1"],
+    )
+    make_wheel(
+        wheelhouse,
+        "repeated-root",
+        "repeated_root",
+        "2.0",
+        requires=["left==2", "right>=1"],
+    )
+    for index in range(31):
+        make_wheel(wheelhouse, f"repeated-leaf-{index}", "repeated_leaf", "1.0")
+
+    requirements = [
+        "repeated-root",
+        *(f"repeated-leaf-{index}" for index in range(31)),
+    ]
+    resolver = ResolutionEngine(
+        provider=CandidateProvider.from_options(
+            find_links=[str(wheelhouse)],
+            no_index=True,
+        ),
+        ignore_installed=True,
+    )
+    kernel_plan = resolver.resolve(requirements)
+
+    baseline_resolver = ResolutionEngine(
+        provider=CandidateProvider.from_options(
+            find_links=[str(wheelhouse)],
+            no_index=True,
+        ),
+        ignore_installed=True,
+    )
+    baseline_resolver.kernel_enabled = False
+    baseline_plan = baseline_resolver.resolve(requirements)
+
+    assert {candidate.canonical_name for candidate in kernel_plan.candidates} == {
+        candidate.canonical_name for candidate in baseline_plan.candidates
+    }
+
+
+def test_finite_domain_kernel_performs_nonchronological_backjump(
+    tmp_path: Path,
+) -> None:
+    wheelhouse = tmp_path / "kernel-backjump"
+    wheelhouse.mkdir()
+    make_wheel(wheelhouse, "shared", "shared", "1.0")
+    make_wheel(wheelhouse, "shared", "shared", "1.1")
+    make_wheel(wheelhouse, "noise", "noise", "1.0")
+    make_wheel(wheelhouse, "noise", "noise", "2.0")
+    make_wheel(wheelhouse, "right", "right", "1.0", requires=["shared==1.0"])
+    make_wheel(wheelhouse, "right", "right", "2.0", requires=["shared==1.0"])
+    make_wheel(
+        wheelhouse,
+        "left",
+        "left",
+        "1.0",
+        requires=["shared==1.0", "noise>=1"],
+    )
+    make_wheel(
+        wheelhouse,
+        "left",
+        "left",
+        "2.0",
+        requires=["shared==1.1", "noise>=1"],
+    )
+    make_wheel(
+        wheelhouse,
+        "backjump-root",
+        "backjump_root",
+        "1.0",
+        requires=["left>=1", "right>=1"],
+    )
+    for index in range(31):
+        make_wheel(wheelhouse, f"backjump-leaf-{index}", "backjump_leaf", "1.0")
+
+    requirements = [
+        "backjump-root",
+        *(f"backjump-leaf-{index}" for index in range(31)),
+    ]
+    resolver = ResolutionEngine(
+        provider=CandidateProvider.from_options(
+            find_links=[str(wheelhouse)],
+            no_index=True,
+        ),
+        ignore_installed=True,
+    )
+    kernel_plan = resolver.resolve(requirements)
+
+    baseline_resolver = ResolutionEngine(
+        provider=CandidateProvider.from_options(
+            find_links=[str(wheelhouse)],
+            no_index=True,
+        ),
+        ignore_installed=True,
+    )
+    baseline_resolver.kernel_enabled = False
+    baseline_plan = baseline_resolver.resolve(requirements)
+
+    assert {candidate.canonical_name for candidate in kernel_plan.candidates} == {
+        candidate.canonical_name for candidate in baseline_plan.candidates
+    }
 
 
 def test_pending_agenda_maintains_wide_state_key_incrementally() -> None:
@@ -115,7 +459,7 @@ def test_pending_agenda_maintains_wide_state_key_incrementally() -> None:
 def test_failed_search_frame_restores_pending_agenda(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    resolver = Resolver(no_index=True)
+    resolver = ResolutionEngine(no_index=True)
     requirement = parse_requirement("demo")
     agenda = PendingAgenda((requirement,))
 
@@ -140,7 +484,7 @@ def test_failed_search_frame_restores_pending_agenda(
 def test_resolver_search_driver_is_iterative(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    resolver = Resolver(no_index=True)
+    resolver = ResolutionEngine(no_index=True)
 
     def search_frame(request: SearchRequest) -> SearchFrame:
         if request.pending:
@@ -181,7 +525,8 @@ def test_non_http_source_skips_pypi_host_parsing(
         raise AssertionError(f"parsed non-HTTP package URL: {url}")
 
     monkeypatch.setattr(
-        "cpip.resolution.resolver.urllib.parse.urlparse", fail_url_parse
+        "cpip.resolution.engine.runtime.urllib.parse.urlparse",
+        fail_url_parse,
     )
 
     assert not is_pypi_hosted_url("file:///packages/demo-1.0.whl")
@@ -190,7 +535,7 @@ def test_non_http_source_skips_pypi_host_parsing(
 def test_resolver_caches_prerelease_policy(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    resolver = Resolver(no_index=True)
+    resolver = ResolutionEngine(no_index=True)
     requirement = parse_requirement("demo-pkg>=1")
 
     assert not resolver.allow_prereleases_internal(requirement)
@@ -199,7 +544,8 @@ def test_resolver_caches_prerelease_policy(
         raise AssertionError(f"recomputed prerelease policy: {requirement}")
 
     monkeypatch.setattr(
-        "cpip.resolution.resolver.is_direct_requirement", fail_direct_check
+        "cpip.resolution.engine.runtime.is_direct_requirement",
+        fail_direct_check,
     )
 
     assert not resolver.allow_prereleases_internal(parse_requirement("demo-pkg>=1"))
@@ -216,10 +562,10 @@ def test_resolver_indexes_installed_distributions_once(
         return []
 
     monkeypatch.setattr(
-        "cpip.resolution.resolver_internals.selection.iter_installed_distributions",
+        "cpip.resolution.engine.selection.iter_installed_distributions",
         installed_distributions,
     )
-    resolver = Resolver(no_index=True)
+    resolver = ResolutionEngine(no_index=True)
 
     assert resolver.find_installed_internal("first") is None
     assert resolver.find_installed_internal("second") is None
@@ -227,7 +573,8 @@ def test_resolver_indexes_installed_distributions_once(
 
 
 def test_file_hashes_streams_file_contents(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     artifact = tmp_path / "artifact.whl"
     payload = b"a" * (2 * 1024 * 1024 + 1)
@@ -265,7 +612,12 @@ def test_failed_search_state_is_independent_of_graph_history() -> None:
     }
 
     assert not resolver.search_internal(
-        pending, {}, {}, {}, {"<root>": {"demo-pkg"}}, **search_kwargs
+        pending,
+        {},
+        {},
+        {},
+        {"<root>": {"demo-pkg"}},
+        **search_kwargs,
     )
     assert not resolver.search_internal(
         pending,
@@ -282,7 +634,7 @@ def test_failed_search_state_is_independent_of_graph_history() -> None:
 def test_resolver_requirement_ordering_does_not_probe_package_paths(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    resolver = Resolver(no_index=True)
+    resolver = ResolutionEngine(no_index=True)
 
     def fail_exists(path: Path) -> bool:
         raise AssertionError(f"probed package requirement as a path: {path}")
@@ -300,22 +652,26 @@ def test_resolver_requirement_ordering_does_not_probe_package_paths(
 def test_resolver_caches_candidate_counts_per_requirement(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    resolver = Resolver(no_index=True)
+    resolver = ResolutionEngine(no_index=True)
     calls = 0
     matching_versions = resolver.provider.matching_versions
 
     def counted_matching_versions(
-        requirement: Requirement, *, allow_prereleases: bool
+        requirement: Requirement,
+        *,
+        allow_prereleases: bool,
     ) -> tuple[object, ...]:
         nonlocal calls
         calls += 1
         return matching_versions(requirement, allow_prereleases=allow_prereleases)
 
     monkeypatch.setattr(
-        resolver.provider, "matching_versions", counted_matching_versions
+        resolver.provider,
+        "matching_versions",
+        counted_matching_versions,
     )
     pending = PendingAgenda(
-        [parse_requirement("first>=1"), parse_requirement("second>=1")]
+        [parse_requirement("first>=1"), parse_requirement("second>=1")],
     )
 
     resolver.choose_requirement(pending, {})
@@ -325,7 +681,7 @@ def test_resolver_caches_candidate_counts_per_requirement(
 
 
 def test_resolver_prefers_last_successful_candidate_seed() -> None:
-    resolver = Resolver(no_index=True)
+    resolver = ResolutionEngine(no_index=True)
     resolver.resolution_seed["demo"] = ("2", "https://example.test/demo-2.whl")
     first = WheelCandidate(
         name="demo",
@@ -344,8 +700,9 @@ def test_resolver_prefers_last_successful_candidate_seed() -> None:
 
     preferred = CandidateStream(iter((first, second))).prefer(
         lambda candidate: resolver.candidate_matches_seed(
-            candidate, resolver.resolution_seed["demo"]
-        )
+            candidate,
+            resolver.resolution_seed["demo"],
+        ),
     )
 
     assert preferred[0] is second
@@ -355,9 +712,10 @@ def test_resolver_retains_successful_candidate_seed(tmp_path: Path) -> None:
     wheelhouse = tmp_path / "packages"
     wheelhouse.mkdir()
     make_wheel(wheelhouse, "demo", "demo", "1.0")
-    resolver = Resolver(
+    resolver = ResolutionEngine(
         provider=CandidateProvider.from_options(
-            find_links=[str(wheelhouse)], no_index=True
+            find_links=[str(wheelhouse)],
+            no_index=True,
         ),
         ignore_installed=True,
     )
@@ -369,10 +727,10 @@ def test_resolver_retains_successful_candidate_seed(tmp_path: Path) -> None:
 
 
 def test_resolver_interns_canonical_package_ids() -> None:
-    resolver = Resolver(no_index=True)
+    resolver = ResolutionEngine(no_index=True)
 
     assert resolver.package_id_internal("Demo_Pkg") == resolver.package_id_internal(
-        "demo-pkg"
+        "demo-pkg",
     )
     assert resolver.package_names_internal == ["demo-pkg"]
 
@@ -380,7 +738,7 @@ def test_resolver_interns_canonical_package_ids() -> None:
 def test_resolver_uses_conflict_activity_to_break_domain_ties(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    resolver = Resolver(no_index=True)
+    resolver = ResolutionEngine(no_index=True)
     first = parse_requirement("first>=1")
     active = parse_requirement("active>=1")
     monkeypatch.setattr(resolver, "decision_candidate_count", lambda item: 2)
@@ -391,7 +749,7 @@ def test_resolver_uses_conflict_activity_to_break_domain_ties(
 
 
 def test_resolver_conflict_activity_is_monotonic() -> None:
-    resolver = Resolver(no_index=True)
+    resolver = ResolutionEngine(no_index=True)
     resolver.bump_conflict_activity("active")
     resolver.bump_conflict_activity("active")
 
@@ -399,8 +757,7 @@ def test_resolver_conflict_activity_is_monotonic() -> None:
 
 
 def test_resolver_compacts_learned_incompatibilities() -> None:
-    resolver = Resolver(no_index=True)
-    resolver.metrics.enabled = True
+    resolver = ResolutionEngine(no_index=True)
     resolver.learned_clause_limit = 1
     first = LearnedIncompatibility(
         frozenset(
@@ -408,7 +765,7 @@ def test_resolver_compacts_learned_incompatibilities() -> None:
                 (resolver.package_id_internal("first"), 1, frozenset()),
                 (resolver.package_id_internal("fourth"), 1, frozenset()),
                 (resolver.package_id_internal("fifth"), 1, frozenset()),
-            )
+            ),
         ),
         (resolver.package_id_internal("first"),) * 2,
     )
@@ -418,7 +775,7 @@ def test_resolver_compacts_learned_incompatibilities() -> None:
                 (resolver.package_id_internal("second"), 1, frozenset()),
                 (resolver.package_id_internal("third"), 1, frozenset()),
                 (resolver.package_id_internal("sixth"), 1, frozenset()),
-            )
+            ),
         ),
         (
             resolver.package_id_internal("second"),
@@ -429,13 +786,12 @@ def test_resolver_compacts_learned_incompatibilities() -> None:
     resolver.record_learned_incompatibility(second)
 
     assert len(resolver.learned_incompatibilities) == 1
-    assert resolver.metrics_snapshot()["learned_clause_evictions"] == 1
 
 
 def test_resolver_ranks_each_pending_package_once(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    resolver = Resolver(no_index=True)
+    resolver = ResolutionEngine(no_index=True)
     requirements = [
         parse_requirement("demo>=1"),
         parse_requirement("demo<3"),
@@ -457,7 +813,7 @@ def test_resolver_ranks_each_pending_package_once(
 def test_resolver_reuses_version_masks_for_reversible_domains(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    resolver = Resolver(no_index=True)
+    resolver = ResolutionEngine(no_index=True)
     calls = 0
 
     def available_versions(
@@ -486,7 +842,7 @@ def test_resolver_reuses_version_masks_for_reversible_domains(
 def test_resolver_restores_domain_mask_after_dependency_backtrack(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    resolver = Resolver(no_index=True)
+    resolver = ResolutionEngine(no_index=True)
     monkeypatch.setattr(
         resolver.provider,
         "available_versions",
@@ -510,7 +866,7 @@ def test_resolver_restores_domain_mask_after_dependency_backtrack(
 
 
 def test_resolver_reuses_watched_incompatibility_for_exact_assignments() -> None:
-    resolver = Resolver(no_index=True)
+    resolver = ResolutionEngine(no_index=True)
     parent = WheelCandidate(
         name="parent",
         version=Version("1"),
@@ -545,18 +901,27 @@ def test_resolver_reuses_watched_incompatibility_for_exact_assignments() -> None
     )
 
     assert resolver.violates_watched_incompatibility(
-        child, frozenset(), {"parent": parent}, {}
+        child,
+        frozenset(),
+        {"parent": parent},
+        {},
     )
     assert not resolver.violates_watched_incompatibility(
-        child, frozenset(), {"parent": other_parent}, {}
+        child,
+        frozenset(),
+        {"parent": other_parent},
+        {},
     )
     assert not resolver.violates_watched_incompatibility(
-        child, frozenset(), {"parent": other_source}, {}
+        child,
+        frozenset(),
+        {"parent": other_source},
+        {},
     )
 
 
 def test_resolver_minimizes_watched_incompatibility_sources() -> None:
-    resolver = Resolver(no_index=True)
+    resolver = ResolutionEngine(no_index=True)
     parent = WheelCandidate(
         name="parent",
         version=Version("1"),
@@ -583,7 +948,7 @@ def test_resolver_minimizes_watched_incompatibility_sources() -> None:
             incoming={
                 "parent": (parse_requirement("shared<2"),),
                 "irrelevant": (parse_requirement("shared==3"),),
-            }
+            },
         ),
         {"parent": parent, "irrelevant": irrelevant},
         {},
@@ -591,12 +956,15 @@ def test_resolver_minimizes_watched_incompatibility_sources() -> None:
 
     assert len(resolver.learned_incompatibilities[0].terms) == 2
     assert resolver.violates_watched_incompatibility(
-        child, frozenset(), {"parent": parent}, {}
+        child,
+        frozenset(),
+        {"parent": parent},
+        {},
     )
 
 
 def test_resolver_learns_direct_selected_candidate_conflicts() -> None:
-    resolver = Resolver(no_index=True)
+    resolver = ResolutionEngine(no_index=True)
     child = WheelCandidate(
         name="child",
         version=Version("1"),
@@ -627,12 +995,15 @@ def test_resolver_learns_direct_selected_candidate_conflicts() -> None:
         1,
     }
     assert resolver.violates_watched_incompatibility(
-        child, frozenset(), {"shared": selected}, {}
+        child,
+        frozenset(),
+        {"shared": selected},
+        {},
     )
 
 
 def test_resolver_failure_result_carries_second_highest_level() -> None:
-    resolver = Resolver(no_index=True)
+    resolver = ResolutionEngine(no_index=True)
     first = (0, 0, frozenset())
     second = (1, 0, frozenset())
     conflict = LearnedIncompatibility(
@@ -657,7 +1028,7 @@ def test_resolver_minimizes_repeated_exact_conflict_sources() -> None:
         "irrelevant": (parse_requirement("shared>=1"),),
     }
 
-    assert Resolver.minimal_exact_conflict_sources(
+    assert ResolutionEngine.minimal_exact_conflict_sources(
         dependency,
         (),
         requirements,
@@ -666,7 +1037,8 @@ def test_resolver_minimizes_repeated_exact_conflict_sources() -> None:
 
 
 def test_resolver_skips_memoization_for_linear_search_states(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     wheelhouse = tmp_path / "packages"
     wheelhouse.mkdir()
@@ -679,9 +1051,10 @@ def test_resolver_skips_memoization_for_linear_search_states(
             "1.0",
             requires=requires,
         )
-    resolver = Resolver(
+    resolver = ResolutionEngine(
         provider=CandidateProvider.from_options(
-            find_links=[str(wheelhouse)], no_index=True
+            find_links=[str(wheelhouse)],
+            no_index=True,
         ),
         ignore_installed=True,
     )
@@ -689,14 +1062,17 @@ def test_resolver_skips_memoization_for_linear_search_states(
     calls = 0
 
     def counting_search_state_key(
-        *args: object, **kwargs: object
+        *args: object,
+        **kwargs: object,
     ) -> tuple[object, ...]:
         nonlocal calls
         calls += 1
         return search_state_key(*args, **kwargs)
 
     monkeypatch.setattr(
-        resolver, "search_state_key_internal", counting_search_state_key
+        resolver,
+        "search_state_key_internal",
+        counting_search_state_key,
     )
 
     def fail_candidate_count(requirement: Requirement) -> int:
@@ -711,19 +1087,21 @@ def test_resolver_skips_memoization_for_linear_search_states(
 
 
 def test_search_state_key_does_not_materialize_url_candidates(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     wheelhouse = tmp_path / "packages"
     wheelhouse.mkdir()
     make_wheel(wheelhouse, "demo-pkg", "demo_pkg", "1.0")
-    resolver = Resolver(
+    resolver = ResolutionEngine(
         provider=CandidateProvider.from_options(
-            find_links=[wheelhouse.as_posix()], no_index=True
+            find_links=[wheelhouse.as_posix()],
+            no_index=True,
         ),
         ignore_installed=True,
     )
     candidate = next(
-        iter(resolver.provider.find_candidates(parse_requirement("demo-pkg")))
+        iter(resolver.provider.find_candidates(parse_requirement("demo-pkg"))),
     )
 
     def fail_materialize(self: LazyWheelCandidate) -> WheelCandidate:
@@ -741,7 +1119,8 @@ def test_search_state_key_does_not_materialize_url_candidates(
 
 
 def test_resolver_caches_viable_candidate_counts(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     index = tmp_path / "simple"
     packages = tmp_path / "packages"
@@ -761,7 +1140,7 @@ def test_resolver_caches_viable_candidate_counts(
         return available_versions(requirement)
 
     monkeypatch.setattr(provider, "available_versions", counting_available_versions)
-    resolver = Resolver(provider=provider)
+    resolver = ResolutionEngine(provider=provider)
 
     assert resolver.candidate_count_internal(parse_requirement("demo-pkg>=2")) == 1
     assert resolver.candidate_count_internal(parse_requirement("demo-pkg>=2")) == 1
@@ -770,7 +1149,8 @@ def test_resolver_caches_viable_candidate_counts(
 
 
 def test_resolver_caches_candidate_streams(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     index = tmp_path / "simple"
     packages = tmp_path / "packages"
@@ -790,7 +1170,7 @@ def test_resolver_caches_candidate_streams(
         return find_candidates(requirement)
 
     monkeypatch.setattr(provider, "find_candidates", counting_find_candidates)
-    resolver = Resolver(provider=provider)
+    resolver = ResolutionEngine(provider=provider)
     requirement = parse_requirement("demo-pkg")
 
     first = resolver.find_candidates_internal(requirement)
@@ -805,7 +1185,8 @@ def test_resolver_caches_candidate_streams(
 
 
 def test_resolver_defers_local_wheel_hashing_until_selection(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     wheelhouse = tmp_path / "packages"
     wheelhouse.mkdir()
@@ -819,14 +1200,15 @@ def test_resolver_defers_local_wheel_hashing_until_selection(
         hashed_paths.append(path)
         return finalize_hashes(path)
 
-    monkeypatch.setattr(
-        "cpip.resolution.resolver_internals.outputs.file_hashes", counting_hashes
-    )
+    monkeypatch.setattr("cpip.resolution.engine.output.file_hashes", counting_hashes)
     provider = CandidateProvider.from_options(
-        find_links=[str(wheelhouse)], no_index=True
+        find_links=[str(wheelhouse)],
+        no_index=True,
     )
 
-    plan = Resolver(provider=provider, ignore_installed=True).resolve(["demo-pkg"])
+    plan = ResolutionEngine(provider=provider, ignore_installed=True).resolve(
+        ["demo-pkg"],
+    )
 
     assert [candidate.path for candidate in plan.candidates] == [selected_wheel]
     assert hashed_paths == [selected_wheel]
@@ -834,7 +1216,8 @@ def test_resolver_defers_local_wheel_hashing_until_selection(
 
 
 def test_resolver_can_skip_source_hashing_for_install(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     wheelhouse = tmp_path / "packages"
     wheelhouse.mkdir()
@@ -843,14 +1226,13 @@ def test_resolver_can_skip_source_hashing_for_install(
     def fail_hashing(path: Path) -> dict[str, str]:
         raise AssertionError(f"hashed install candidate: {path}")
 
-    monkeypatch.setattr(
-        "cpip.resolution.resolver_internals.outputs.file_hashes", fail_hashing
-    )
+    monkeypatch.setattr("cpip.resolution.engine.output.file_hashes", fail_hashing)
     provider = CandidateProvider.from_options(
-        find_links=[str(wheelhouse)], no_index=True
+        find_links=[str(wheelhouse)],
+        no_index=True,
     )
 
-    plan = Resolver(
+    plan = ResolutionEngine(
         provider=provider,
         ignore_installed=True,
         compute_source_hashes=False,
@@ -860,7 +1242,8 @@ def test_resolver_can_skip_source_hashing_for_install(
 
 
 def test_resolver_reuses_cataloged_wheel_filename(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     wheelhouse = tmp_path / "packages"
     wheelhouse.mkdir()
@@ -874,22 +1257,27 @@ def test_resolver_reuses_cataloged_wheel_filename(
         fail_filename_parse,
     )
     provider = CandidateProvider.from_options(
-        find_links=[str(wheelhouse)], no_index=True
+        find_links=[str(wheelhouse)],
+        no_index=True,
     )
 
-    plan = Resolver(provider=provider, ignore_installed=True).resolve(["demo-pkg"])
+    plan = ResolutionEngine(provider=provider, ignore_installed=True).resolve(
+        ["demo-pkg"],
+    )
 
     assert [candidate.path for candidate in plan.candidates] == [wheel]
 
 
 def test_resolver_reuses_cataloged_wheel_version(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     wheelhouse = tmp_path / "packages"
     wheelhouse.mkdir()
     wheel = make_wheel(wheelhouse, "demo-pkg", "demo_pkg", "1.0")
     provider = CandidateProvider.from_options(
-        find_links=[str(wheelhouse)], no_index=True
+        find_links=[str(wheelhouse)],
+        no_index=True,
     )
     requirement = parse_requirement("demo-pkg")
     provider.available_versions(requirement)
@@ -905,7 +1293,8 @@ def test_resolver_reuses_cataloged_wheel_version(
 
 
 def test_resolver_reuses_link_vcs_classification(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     wheelhouse = tmp_path / "packages"
     wheelhouse.mkdir()
@@ -917,19 +1306,24 @@ def test_resolver_reuses_link_vcs_classification(
     monkeypatch.setattr("cpip.index.vcs.vcs_scheme", fail_vcs_parse)
     monkeypatch.setattr("cpip.index.artifacts.vcs_scheme", fail_vcs_parse)
     monkeypatch.setattr(
-        "cpip.index.candidate_materialization.vcs_scheme", fail_vcs_parse
+        "cpip.index.candidate_materialization.vcs_scheme",
+        fail_vcs_parse,
     )
     provider = CandidateProvider.from_options(
-        find_links=[str(wheelhouse)], no_index=True
+        find_links=[str(wheelhouse)],
+        no_index=True,
     )
 
-    plan = Resolver(provider=provider, ignore_installed=True).resolve(["demo-pkg"])
+    plan = ResolutionEngine(provider=provider, ignore_installed=True).resolve(
+        ["demo-pkg"],
+    )
 
     assert [candidate.path for candidate in plan.candidates] == [wheel]
 
 
 def test_resolver_reuses_link_local_path(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     wheelhouse = tmp_path / "packages"
     wheelhouse.mkdir()
@@ -939,19 +1333,24 @@ def test_resolver_reuses_link_local_path(
         raise AssertionError(f"reparsed classified local URL: {url}")
 
     monkeypatch.setattr(
-        "cpip.index.artifacts.ArtifactLocator.local_path", fail_url_parse
+        "cpip.index.artifacts.ArtifactLocator.local_path",
+        fail_url_parse,
     )
     provider = CandidateProvider.from_options(
-        find_links=[str(wheelhouse)], no_index=True
+        find_links=[str(wheelhouse)],
+        no_index=True,
     )
 
-    plan = Resolver(provider=provider, ignore_installed=True).resolve(["demo-pkg"])
+    plan = ResolutionEngine(provider=provider, ignore_installed=True).resolve(
+        ["demo-pkg"],
+    )
 
     assert [candidate.path for candidate in plan.candidates] == [wheel]
 
 
 def test_resolver_reuses_validated_wheel_dist_info_directory(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     wheelhouse = tmp_path / "packages"
     wheelhouse.mkdir()
@@ -962,16 +1361,20 @@ def test_resolver_reuses_validated_wheel_dist_info_directory(
 
     monkeypatch.setattr(zipfile.ZipFile, "namelist", fail_namelist)
     provider = CandidateProvider.from_options(
-        find_links=[str(wheelhouse)], no_index=True
+        find_links=[str(wheelhouse)],
+        no_index=True,
     )
 
-    plan = Resolver(provider=provider, ignore_installed=True).resolve(["demo-pkg"])
+    plan = ResolutionEngine(provider=provider, ignore_installed=True).resolve(
+        ["demo-pkg"],
+    )
 
     assert [candidate.path for candidate in plan.candidates] == [wheel]
 
 
 def test_resolver_reads_only_required_core_metadata_headers(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     wheelhouse = tmp_path / "packages"
     wheelhouse.mkdir()
@@ -989,10 +1392,13 @@ def test_resolver_reads_only_required_core_metadata_headers(
 
     monkeypatch.setattr("cpip.core.wheel.Parser", fail_parser)
     provider = CandidateProvider.from_options(
-        find_links=[str(wheelhouse)], no_index=True
+        find_links=[str(wheelhouse)],
+        no_index=True,
     )
 
-    plan = Resolver(provider=provider, ignore_installed=True).resolve(["demo-pkg"])
+    plan = ResolutionEngine(provider=provider, ignore_installed=True).resolve(
+        ["demo-pkg"],
+    )
 
     assert [
         candidate.path
@@ -1015,10 +1421,13 @@ def test_resolver_ignores_metadata_body_headers(tmp_path: Path) -> None:
                 + "\nDescription body\nRequires-Dist: nonexistent-package\n" * 1000,
             )
     provider = CandidateProvider.from_options(
-        find_links=[str(wheelhouse)], no_index=True
+        find_links=[str(wheelhouse)],
+        no_index=True,
     )
 
-    plan = Resolver(provider=provider, ignore_installed=True).resolve(["demo-pkg"])
+    plan = ResolutionEngine(provider=provider, ignore_installed=True).resolve(
+        ["demo-pkg"],
+    )
 
     assert [candidate.path for candidate in plan.candidates] == [wheel]
 
@@ -1037,16 +1446,20 @@ def test_resolver_ignores_unneeded_core_metadata_headers(tmp_path: Path) -> None
         with pytest.warns(UserWarning, match="Duplicate name"):
             archive.writestr(metadata_path, metadata + extra_headers)
     provider = CandidateProvider.from_options(
-        find_links=[str(wheelhouse)], no_index=True
+        find_links=[str(wheelhouse)],
+        no_index=True,
     )
 
-    plan = Resolver(provider=provider, ignore_installed=True).resolve(["demo-pkg"])
+    plan = ResolutionEngine(provider=provider, ignore_installed=True).resolve(
+        ["demo-pkg"],
+    )
 
     assert [candidate.path for candidate in plan.candidates] == [wheel]
 
 
 def test_resolver_propagates_contradictory_exact_dependencies(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     wheelhouse = tmp_path / "packages"
     wheelhouse.mkdir()
@@ -1071,7 +1484,8 @@ def test_resolver_propagates_contradictory_exact_dependencies(
         )
         make_wheel(wheelhouse, "C", "c", version)
     provider = CandidateProvider.from_options(
-        find_links=[str(wheelhouse)], no_index=True
+        find_links=[str(wheelhouse)],
+        no_index=True,
     )
     find_candidates = provider.find_candidates
     c_searches = 0
@@ -1084,7 +1498,7 @@ def test_resolver_propagates_contradictory_exact_dependencies(
 
     monkeypatch.setattr(provider, "find_candidates", counting_find_candidates)
 
-    plan = Resolver(provider=provider, ignore_installed=True).resolve(["A"])
+    plan = ResolutionEngine(provider=provider, ignore_installed=True).resolve(["A"])
 
     assert {candidate.canonical_name for candidate in plan.candidates} == {
         "a",
@@ -1095,7 +1509,8 @@ def test_resolver_propagates_contradictory_exact_dependencies(
 
 
 def test_resolver_propagates_disjoint_dependency_ranges(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     wheelhouse = tmp_path / "packages"
     wheelhouse.mkdir()
@@ -1120,7 +1535,8 @@ def test_resolver_propagates_disjoint_dependency_ranges(
         )
         make_wheel(wheelhouse, "C", "c", version)
     provider = CandidateProvider.from_options(
-        find_links=[str(wheelhouse)], no_index=True
+        find_links=[str(wheelhouse)],
+        no_index=True,
     )
     find_candidates = provider.find_candidates
     c_searches = 0
@@ -1133,7 +1549,7 @@ def test_resolver_propagates_disjoint_dependency_ranges(
 
     monkeypatch.setattr(provider, "find_candidates", counting_find_candidates)
 
-    plan = Resolver(provider=provider, ignore_installed=True).resolve(["A"])
+    plan = ResolutionEngine(provider=provider, ignore_installed=True).resolve(["A"])
 
     assert {candidate.canonical_name for candidate in plan.candidates} == {
         "a",
@@ -1156,9 +1572,10 @@ def test_resolver_propagates_consumed_root_constraints(tmp_path: Path) -> None:
             version,
             requires=[f"shared=={version}"],
         )
-    resolver = Resolver(
+    resolver = ResolutionEngine(
         provider=CandidateProvider.from_options(
-            find_links=[str(wheelhouse)], no_index=True
+            find_links=[str(wheelhouse)],
+            no_index=True,
         ),
         ignore_installed=True,
     )
@@ -1192,9 +1609,10 @@ def test_resolver_propagates_root_incompatibilities(tmp_path: Path) -> None:
             f"{index}.0",
             requires=["child"],
         )
-    resolver = Resolver(
+    resolver = ResolutionEngine(
         provider=CandidateProvider.from_options(
-            find_links=[str(wheelhouse)], no_index=True
+            find_links=[str(wheelhouse)],
+            no_index=True,
         ),
         ignore_installed=True,
     )
@@ -1240,9 +1658,10 @@ def test_root_incompatibility_does_not_escape_requirement_domain(
         "1.0",
         requires=["child>=2"],
     )
-    resolver = Resolver(
+    resolver = ResolutionEngine(
         provider=CandidateProvider.from_options(
-            find_links=[str(wheelhouse)], no_index=True
+            find_links=[str(wheelhouse)],
+            no_index=True,
         ),
         ignore_installed=True,
     )
@@ -1265,7 +1684,7 @@ def test_resolver_prefers_stable_release_by_default(tmp_path: Path) -> None:
     write_simple_project_archive_index(index, "demo-pkg", [stable, prerelease])
 
     provider = CandidateProvider.from_options(index_url=index.as_uri())
-    plan = Resolver(provider=provider).resolve(["demo-pkg"])
+    plan = ResolutionEngine(provider=provider).resolve(["demo-pkg"])
 
     assert [str(candidate.version) for candidate in plan.candidates] == ["1.0"]
 
@@ -1279,7 +1698,9 @@ def test_resolver_allows_prerelease_with_pre_flag(tmp_path: Path) -> None:
     write_simple_project_archive_index(index, "demo-pkg", [stable, prerelease])
 
     provider = CandidateProvider.from_options(index_url=index.as_uri())
-    plan = Resolver(provider=provider, allow_prereleases=True).resolve(["demo-pkg"])
+    plan = ResolutionEngine(provider=provider, allow_prereleases=True).resolve(
+        ["demo-pkg"],
+    )
 
     assert [str(candidate.version) for candidate in plan.candidates] == ["2.0b1"]
 
@@ -1293,7 +1714,7 @@ def test_resolver_allows_prerelease_when_specifier_mentions_one(tmp_path: Path) 
     write_simple_project_archive_index(index, "demo-pkg", [stable, prerelease])
 
     provider = CandidateProvider.from_options(index_url=index.as_uri())
-    plan = Resolver(provider=provider).resolve(["demo-pkg>=0.0.dev0"])
+    plan = ResolutionEngine(provider=provider).resolve(["demo-pkg>=0.0.dev0"])
 
     assert [str(candidate.version) for candidate in plan.candidates] == ["2.0b1"]
 
@@ -1313,7 +1734,7 @@ def test_resolver_only_binary_rejects_source_only_project(tmp_path: Path) -> Non
     )
 
     with pytest.raises(DistributionNotFound, match="No matching distribution found"):
-        Resolver(provider=provider).resolve(["demo-pkg"])
+        ResolutionEngine(provider=provider).resolve(["demo-pkg"])
 
 
 def test_resolver_no_binary_allows_source_only_selection(tmp_path: Path) -> None:
@@ -1330,7 +1751,7 @@ def test_resolver_no_binary_allows_source_only_selection(tmp_path: Path) -> None
         index_url=index.as_uri(),
         format_control=format_control,
     )
-    plan = Resolver(provider=provider).resolve(["demo-pkg"])
+    plan = ResolutionEngine(provider=provider).resolve(["demo-pkg"])
 
     assert [str(candidate.version) for candidate in plan.candidates] == ["2.0"]
 
@@ -1351,8 +1772,8 @@ def test_resolver_prefer_binary_prefers_older_wheel_over_newer_source(
         prefer_binary=True,
     )
 
-    default_plan = Resolver(provider=default_provider).resolve(["demo-pkg"])
-    preferred_plan = Resolver(provider=preferred_provider).resolve(["demo-pkg"])
+    default_plan = ResolutionEngine(provider=default_provider).resolve(["demo-pkg"])
+    preferred_plan = ResolutionEngine(provider=preferred_provider).resolve(["demo-pkg"])
 
     assert [str(candidate.version) for candidate in default_plan.candidates] == ["2.0"]
     assert preferred_plan.candidates[0].path == wheel
@@ -1367,13 +1788,15 @@ def test_resolver_applies_version_constraints(tmp_path: Path) -> None:
     write_simple_project_archive_index(index, "demo-pkg", [old, new])
 
     provider = CandidateProvider.from_options(index_url=index.as_uri())
-    plan = Resolver(provider=provider, constraints=["demo-pkg<2"]).resolve(["demo-pkg"])
+    plan = ResolutionEngine(provider=provider, constraints=["demo-pkg<2"]).resolve(
+        ["demo-pkg"],
+    )
 
     assert [str(candidate.version) for candidate in plan.candidates] == ["1.0"]
 
 
 def test_resolver_indexes_constraints_by_canonical_name() -> None:
-    resolver = Resolver(
+    resolver = ResolutionEngine(
         no_index=True,
         constraints=["Demo_Pkg>=1", "demo-pkg<3", "other-pkg==2"],
     )
@@ -1387,7 +1810,7 @@ def test_resolver_indexes_constraints_by_canonical_name() -> None:
 
 
 def test_resolver_maintains_reverse_dependency_index(tmp_path: Path) -> None:
-    resolver = Resolver(no_index=True)
+    resolver = ResolutionEngine(no_index=True)
     candidate = WheelCandidate(
         name="parent",
         version=Version("1"),
@@ -1409,7 +1832,9 @@ def test_resolver_maintains_reverse_dependency_index(tmp_path: Path) -> None:
     resolver.add_candidate_dependencies("sibling", sibling)
     initial_domain = resolver.domains_internal["child"].requirements()
     active = resolver.active_requirements_for(
-        "child", parse_requirement("child!=2"), [parse_requirement("deferred")]
+        "child",
+        parse_requirement("child!=2"),
+        [parse_requirement("deferred")],
     )
 
     assert [item.raw for item in active] == [
@@ -1424,7 +1849,7 @@ def test_resolver_maintains_reverse_dependency_index(tmp_path: Path) -> None:
     assert tuple(resolver.incoming_requirements["child"]) == ("sibling",)
     assert resolver.domains_internal["child"].requirements() != initial_domain
     assert [item.raw for item in resolver.domains_internal["child"].requirements()] == [
-        "child>=2"
+        "child>=2",
     ]
 
     resolver.remove_candidate_dependencies("sibling", sibling)
@@ -1442,7 +1867,7 @@ def test_resolver_only_materializes_top_matching_wheels(tmp_path: Path) -> None:
     write_simple_project_archive_index(index, "demo-pkg", [prerelease, newest, older])
 
     provider = CandidateProvider.from_options(index_url=index.as_uri())
-    plan = Resolver(provider=provider).resolve(["demo-pkg"])
+    plan = ResolutionEngine(provider=provider).resolve(["demo-pkg"])
 
     assert [str(candidate.version) for candidate in plan.candidates] == ["3.0"]
 
@@ -1453,7 +1878,7 @@ def test_resolver_applies_direct_url_constraint(tmp_path: Path) -> None:
     direct = make_wheel(packages, "demo-pkg", "demo_pkg", "1.0")
 
     provider = CandidateProvider.from_options(no_index=True)
-    plan = Resolver(
+    plan = ResolutionEngine(
         provider=provider,
         constraints=[f"demo-pkg @ {direct.as_uri()}"],
     ).resolve(["demo-pkg"])
@@ -1473,8 +1898,8 @@ def test_resolver_prefers_direct_requirement_over_index_candidates(
     write_simple_project_archive_index(index, "demo-pkg", [indexed])
 
     provider = CandidateProvider.from_options(index_url=index.as_uri())
-    plan = Resolver(provider=provider).resolve(
-        ["demo-pkg", f"demo-pkg @ {direct.as_uri()}"]
+    plan = ResolutionEngine(provider=provider).resolve(
+        ["demo-pkg", f"demo-pkg @ {direct.as_uri()}"],
     )
 
     assert len(plan.candidates) == 1
@@ -1492,7 +1917,7 @@ def test_resolver_accepts_requirement_set_input(tmp_path: Path) -> None:
     reqset = RequirementSet()
     reqset.add_named_requirement(install_req_from_line("demo-pkg"))
 
-    plan = Resolver(provider=provider).resolve(reqset)
+    plan = ResolutionEngine(provider=provider).resolve(reqset)
 
     assert [str(candidate.version) for candidate in plan.candidates] == ["1.0"]
 
@@ -1505,7 +1930,7 @@ def test_resolver_can_return_requirement_set(tmp_path: Path) -> None:
     write_simple_project_archive_index(index, "demo-pkg", [wheel])
 
     provider = CandidateProvider.from_options(index_url=index.as_uri())
-    resolved = Resolver(provider=provider).resolve_requirement_set(["demo-pkg"])
+    resolved = ResolutionEngine(provider=provider).resolve_requirement_set(["demo-pkg"])
 
     assert resolved.has_requirement("demo-pkg")
     assert len(resolved.all_requirements) == 1
@@ -1523,7 +1948,7 @@ def test_resolved_requirement_set_includes_download_info_for_local_wheel(
     packages.mkdir()
     wheel = make_wheel(packages, "demo-pkg", "demo_pkg", "1.0")
 
-    resolved = Resolver().resolve_requirement_set([wheel.as_posix()])
+    resolved = ResolutionEngine().resolve_requirement_set([wheel.as_posix()])
 
     req = resolved.all_requirements[0]
     assert req.download_info is not None
@@ -1547,12 +1972,12 @@ def test_resolved_requirement_set_includes_download_info_for_local_dir(
                 'version = "1.0"',
                 "dependencies = []",
                 "",
-            ]
+            ],
         ),
         encoding="utf-8",
     )
 
-    resolved = Resolver().resolve_requirement_set([source.as_posix()])
+    resolved = ResolutionEngine().resolve_requirement_set([source.as_posix()])
 
     req = resolved.all_requirements[0]
     assert req.download_info is not None
@@ -1572,7 +1997,7 @@ def test_resolved_requirement_set_includes_download_info_for_find_links(
         find_links=[wheelhouse.as_posix()],
         no_index=True,
     )
-    resolved = Resolver(provider=provider).resolve_requirement_set(["demo-pkg"])
+    resolved = ResolutionEngine(provider=provider).resolve_requirement_set(["demo-pkg"])
 
     req = resolved.all_requirements[0]
     assert req.download_info is not None
@@ -1589,7 +2014,7 @@ def test_resolved_requirement_set_preserves_direct_archive_url(
     archive = make_sdist(packages, "demo-pkg", "demo_pkg", "1.0")
     archive_url = archive.as_uri()
 
-    resolved = Resolver().resolve_requirement_set([f"demo-pkg @ {archive_url}"])
+    resolved = ResolutionEngine().resolve_requirement_set([f"demo-pkg @ {archive_url}"])
 
     req = resolved.all_requirements[0]
     assert req.download_info is not None
@@ -1605,7 +2030,8 @@ def test_resolved_requirement_set_marks_local_editable_dir(
     package = source / "editable_demo"
     package.mkdir(parents=True)
     package.joinpath("__init__.py").write_text(
-        "NAME = 'editable-demo'\n", encoding="utf-8"
+        "NAME = 'editable-demo'\n",
+        encoding="utf-8",
     )
     source.joinpath("pyproject.toml").write_text(
         "\n".join(
@@ -1615,13 +2041,13 @@ def test_resolved_requirement_set_marks_local_editable_dir(
                 'version = "1.0"',
                 "dependencies = []",
                 "",
-            ]
+            ],
         ),
         encoding="utf-8",
     )
 
-    resolved = Resolver().resolve_requirement_set(
-        [install_req_from_editable(source.as_posix())]
+    resolved = ResolutionEngine().resolve_requirement_set(
+        [install_req_from_editable(source.as_posix())],
     )
 
     req = resolved.all_requirements[0]
@@ -1647,15 +2073,23 @@ def test_resolved_requirement_set_includes_vcs_info_for_git_source(
                 'version = "1.0"',
                 "dependencies = []",
                 "",
-            ]
+            ],
         ),
         encoding="utf-8",
     )
     subprocess.run(
-        ["git", "init"], cwd=repo, check=True, capture_output=True, text=True
+        ["git", "init"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
     )
     subprocess.run(
-        ["git", "add", "."], cwd=repo, check=True, capture_output=True, text=True
+        ["git", "add", "."],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
     )
     subprocess.run(
         [
@@ -1674,7 +2108,9 @@ def test_resolved_requirement_set_includes_vcs_info_for_git_source(
         text=True,
     )
 
-    resolved = Resolver().resolve_requirement_set([f"demo-pkg @ git+{repo.as_uri()}"])
+    resolved = ResolutionEngine().resolve_requirement_set(
+        [f"demo-pkg @ git+{repo.as_uri()}"],
+    )
 
     req = resolved.all_requirements[0]
     assert req.download_info is not None
@@ -1696,8 +2132,8 @@ def test_resolved_requirement_set_marks_cached_wheel_for_direct_archive(
     cached_wheel = make_wheel(entry_dir, "demo-pkg", "demo_pkg", "1.0")
 
     provider = CandidateProvider.from_options(no_index=True, wheel_cache_dir=cache_dir)
-    resolved = Resolver(provider=provider).resolve_requirement_set(
-        [f"demo-pkg @ {archive_url}"]
+    resolved = ResolutionEngine(provider=provider).resolve_requirement_set(
+        [f"demo-pkg @ {archive_url}"],
     )
 
     req = resolved.all_requirements[0]
@@ -1730,8 +2166,8 @@ def test_resolved_requirement_set_reads_origin_hashes_from_cache(
     )
 
     provider = CandidateProvider.from_options(no_index=True, wheel_cache_dir=cache_dir)
-    resolved = Resolver(provider=provider).resolve_requirement_set(
-        [f"demo-pkg @ {archive_url}"]
+    resolved = ResolutionEngine(provider=provider).resolve_requirement_set(
+        [f"demo-pkg @ {archive_url}"],
     )
 
     req = resolved.all_requirements[0]
@@ -1742,7 +2178,8 @@ def test_resolved_requirement_set_reads_origin_hashes_from_cache(
 
 
 def test_invalid_cache_origin_file_is_ignored(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     packages = tmp_path / "packages"
     packages.mkdir()
@@ -1755,8 +2192,8 @@ def test_invalid_cache_origin_file_is_ignored(
     entry_dir.joinpath("origin.json").write_text("{", encoding="utf-8")
 
     provider = CandidateProvider.from_options(no_index=True, wheel_cache_dir=cache_dir)
-    resolved = Resolver(provider=provider).resolve_requirement_set(
-        [f"demo-pkg @ {archive_url}"]
+    resolved = ResolutionEngine(provider=provider).resolve_requirement_set(
+        [f"demo-pkg @ {archive_url}"],
     )
 
     req = resolved.all_requirements[0]
@@ -1785,9 +2222,10 @@ def test_require_hashes_rejects_missing_hash_for_pinned_requirement(
     reqset.add_named_requirement(install_req_from_line("demo-pkg==1.0"))
 
     with pytest.raises(
-        HashMissing, match="Missing hash for:\n    demo-pkg==1.0 --hash=sha256:"
+        HashMissing,
+        match="Missing hash for:\n    demo-pkg==1.0 --hash=sha256:",
     ) as exc_info:
-        Resolver(provider=provider, require_hashes=True).resolve(reqset)
+        ResolutionEngine(provider=provider, require_hashes=True).resolve(reqset)
     assert file_hashes(wheel)["sha256"] in str(exc_info.value)
 
 
@@ -1804,15 +2242,23 @@ def test_require_hashes_rejects_vcs_requirements(tmp_path: Path) -> None:
                 'version = "1.0"',
                 "dependencies = []",
                 "",
-            ]
+            ],
         ),
         encoding="utf-8",
     )
     subprocess.run(
-        ["git", "init"], cwd=repo, check=True, capture_output=True, text=True
+        ["git", "init"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
     )
     subprocess.run(
-        ["git", "add", "."], cwd=repo, check=True, capture_output=True, text=True
+        ["git", "add", "."],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
     )
     subprocess.run(
         [
@@ -1834,7 +2280,7 @@ def test_require_hashes_rejects_vcs_requirements(tmp_path: Path) -> None:
     req.hash_options = {"sha256": ["badbad"]}
 
     with pytest.raises(VcsHashUnsupported, match="hash version control repositories"):
-        Resolver(require_hashes=True).resolve([req])
+        ResolutionEngine(require_hashes=True).resolve([req])
 
 
 def test_require_hashes_rejects_directory_urls(tmp_path: Path) -> None:
@@ -1850,7 +2296,7 @@ def test_require_hashes_rejects_directory_urls(tmp_path: Path) -> None:
                 'version = "1.0"',
                 "dependencies = []",
                 "",
-            ]
+            ],
         ),
         encoding="utf-8",
     )
@@ -1858,7 +2304,7 @@ def test_require_hashes_rejects_directory_urls(tmp_path: Path) -> None:
     req = install_req_from_line(source.as_posix())
 
     with pytest.raises(DirectoryUrlHashUnsupported, match="they point to directories"):
-        Resolver(require_hashes=True).resolve([req])
+        ResolutionEngine(require_hashes=True).resolve([req])
 
 
 def test_require_hashes_rejects_hash_mismatch(tmp_path: Path) -> None:
@@ -1869,7 +2315,7 @@ def test_require_hashes_rejects_hash_mismatch(tmp_path: Path) -> None:
     req.hash_options = {"sha256": ["badbad"]}
 
     with pytest.raises(HashMismatch, match="Expected sha256 badbad"):
-        Resolver(require_hashes=True).resolve([req])
+        ResolutionEngine(require_hashes=True).resolve([req])
 
 
 def test_require_hashes_lazily_selects_matching_artifact(tmp_path: Path) -> None:
@@ -1883,7 +2329,7 @@ def test_require_hashes_lazily_selects_matching_artifact(tmp_path: Path) -> None
     req.hash_options = {"sha256": [file_hashes(archive)["sha256"]]}
     provider = CandidateProvider.from_options(index_url=index.as_uri())
 
-    plan = Resolver(provider=provider, require_hashes=True).resolve([req])
+    plan = ResolutionEngine(provider=provider, require_hashes=True).resolve([req])
 
     assert len(plan.candidates) == 1
     assert plan.candidates[0].source_kind == "sdist"
@@ -1908,8 +2354,8 @@ def test_require_hashes_rejects_unpinned_transitive_dependency(tmp_path: Path) -
     req = install_req_from_line("toporequires2==0.0.1")
     req.hash_options = {
         "sha256": [
-            file_hashes(wheelhouse / "toporequires2-0.0.1-py3-none-any.whl")["sha256"]
-        ]
+            file_hashes(wheelhouse / "toporequires2-0.0.1-py3-none-any.whl")["sha256"],
+        ],
     }
     provider = CandidateProvider.from_options(
         find_links=[wheelhouse.as_posix()],
@@ -1917,7 +2363,7 @@ def test_require_hashes_rejects_unpinned_transitive_dependency(tmp_path: Path) -
     )
 
     with pytest.raises(HashUnpinned, match="Unpinned requirement:\n    toporequires"):
-        Resolver(provider=provider, require_hashes=True).resolve([req])
+        ResolutionEngine(provider=provider, require_hashes=True).resolve([req])
 
 
 def test_require_hashes_allows_hashed_transitive_dependency(tmp_path: Path) -> None:
@@ -1945,8 +2391,8 @@ def test_require_hashes_allows_hashed_transitive_dependency(tmp_path: Path) -> N
         no_index=True,
     )
 
-    plan = Resolver(provider=provider, require_hashes=True).resolve(
-        [parent_req, dep_req]
+    plan = ResolutionEngine(provider=provider, require_hashes=True).resolve(
+        [parent_req, dep_req],
     )
 
     assert [candidate.name for candidate in plan.candidates] == [
@@ -1956,7 +2402,9 @@ def test_require_hashes_allows_hashed_transitive_dependency(tmp_path: Path) -> N
 
 
 def write_simple_project_archive_index(
-    index: Path, project: str, archives: list[Path]
+    index: Path,
+    project: str,
+    archives: list[Path],
 ) -> None:
     project_dir = index / project
     project_dir.mkdir(parents=True)

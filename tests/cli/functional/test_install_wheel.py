@@ -25,10 +25,10 @@ def make_wheel_with_file(name: str, version: str, **kwargs: Any) -> WheelBuilder
 
 
 def test_install_from_future_wheel_version(
-    script: CpipTestEnvironment, tmpdir: Path
+    script: CpipTestEnvironment,
+    tmpdir: Path,
 ) -> None:
-    """
-    Test installing a wheel with a WHEEL metadata version that is:
+    """Test installing a wheel with a WHEEL metadata version that is:
     - a major version ahead of what we expect (not ok), and
     - a minor version ahead of what we expect (ok)
     """
@@ -61,11 +61,11 @@ def test_install_from_future_wheel_version(
     ],
 )
 def test_install_from_broken_wheel(
-    script: CpipTestEnvironment, data: TestData, wheel_name: str
+    script: CpipTestEnvironment,
+    data: TestData,
+    wheel_name: str,
 ) -> None:
-    """
-    Test that installing a broken wheel fails properly
-    """
+    """Test that installing a broken wheel fails properly"""
     from cpip_test_support import TestFailure
 
     package = data.packages.joinpath(wheel_name)
@@ -75,11 +75,11 @@ def test_install_from_broken_wheel(
 
 
 def test_basic_install_from_wheel(
-    script: CpipTestEnvironment, shared_data: TestData, tmpdir: Path
+    script: CpipTestEnvironment,
+    shared_data: TestData,
+    tmpdir: Path,
 ) -> None:
-    """
-    Test installing from a wheel (that has a script)
-    """
+    """Test installing from a wheel (that has a script)"""
     shutil.copy(shared_data.packages / "has.script-1.0-py2.py3-none-any.whl", tmpdir)
     result = script.cpip(
         "install",
@@ -95,11 +95,11 @@ def test_basic_install_from_wheel(
 
 
 def test_basic_install_from_wheel_with_extras(
-    script: CpipTestEnvironment, shared_data: TestData, tmpdir: Path
+    script: CpipTestEnvironment,
+    shared_data: TestData,
+    tmpdir: Path,
 ) -> None:
-    """
-    Test installing from a wheel with extras.
-    """
+    """Test installing from a wheel with extras."""
     shutil.copy(shared_data.packages / "complex_dist-0.1-py2.py3-none-any.whl", tmpdir)
     shutil.copy(shared_data.packages / "simple.dist-0.1-py2.py3-none-any.whl", tmpdir)
     result = script.cpip(
@@ -116,11 +116,10 @@ def test_basic_install_from_wheel_with_extras(
 
 
 def test_basic_install_from_wheel_file(
-    script: CpipTestEnvironment, data: TestData
+    script: CpipTestEnvironment,
+    data: TestData,
 ) -> None:
-    """
-    Test installing directly from a wheel file.
-    """
+    """Test installing directly from a wheel file."""
     package = data.packages.joinpath("simple.dist-0.1-py2.py3-none-any.whl")
     result = script.cpip("install", package, "--no-index")
     dist_info_folder = script.site_packages / "simple.dist-0.1.dist-info"
@@ -137,11 +136,10 @@ def test_basic_install_from_wheel_file(
 # Installation seems to work, but scripttest fails to check.
 # I really don't care now since we're desupporting it soon anyway.
 def test_basic_install_from_unicode_wheel(
-    script: CpipTestEnvironment, data: TestData
+    script: CpipTestEnvironment,
+    data: TestData,
 ) -> None:
-    """
-    Test installing from a wheel (that has a script)
-    """
+    """Test installing from a wheel (that has a script)"""
     make_wheel(
         "unicode_package",
         "1.0",
@@ -169,7 +167,8 @@ def test_basic_install_from_unicode_wheel(
 
 
 def get_header_scheme_path_for_script(
-    script: CpipTestEnvironment, dist_name: str
+    script: CpipTestEnvironment,
+    dist_name: str,
 ) -> Path:
     command = (
         "from cpip.platform.locations.sysconfig import get_scheme;"
@@ -181,9 +180,7 @@ def get_header_scheme_path_for_script(
 
 
 def test_install_from_wheel_with_headers(script: CpipTestEnvironment) -> None:
-    """
-    Test installing from a wheel file with headers
-    """
+    """Test installing from a wheel file with headers"""
     header_text = "/* hello world */\n"
     package = make_wheel(
         "headers.dist",
@@ -200,11 +197,11 @@ def test_install_from_wheel_with_headers(script: CpipTestEnvironment) -> None:
 
 
 def test_install_wheel_with_target(
-    script: CpipTestEnvironment, shared_data: TestData, tmpdir: Path
+    script: CpipTestEnvironment,
+    shared_data: TestData,
+    tmpdir: Path,
 ) -> None:
-    """
-    Test installing a wheel using cpip install --target
-    """
+    """Test installing a wheel using cpip install --target"""
     shutil.copy(shared_data.packages / "simple.dist-0.1-py2.py3-none-any.whl", tmpdir)
     target_dir = script.scratch_path / "target"
     result = script.cpip(
@@ -220,10 +217,10 @@ def test_install_wheel_with_target(
 
 
 def test_install_wheel_with_target_and_data_files(
-    script: CpipTestEnvironment, data: TestData
+    script: CpipTestEnvironment,
+    data: TestData,
 ) -> None:
-    """
-    Test for issue #4092. It will be checked that a data_files specification in
+    """Test for issue #4092. It will be checked that a data_files specification in
     setup.py is handled correctly when a wheel is installed with the --target
     option.
 
@@ -250,11 +247,11 @@ def test_install_wheel_with_target_and_data_files(
 
 
 def test_install_wheel_with_root(
-    script: CpipTestEnvironment, shared_data: TestData, tmpdir: Path
+    script: CpipTestEnvironment,
+    shared_data: TestData,
+    tmpdir: Path,
 ) -> None:
-    """
-    Test installing a wheel using cpip install --root
-    """
+    """Test installing a wheel using cpip install --root"""
     root_dir = script.scratch_path / "root"
     shutil.copy(shared_data.packages / "simple.dist-0.1-py2.py3-none-any.whl", tmpdir)
     result = script.cpip(
@@ -270,11 +267,11 @@ def test_install_wheel_with_root(
 
 
 def test_install_wheel_with_prefix(
-    script: CpipTestEnvironment, shared_data: TestData, tmpdir: Path
+    script: CpipTestEnvironment,
+    shared_data: TestData,
+    tmpdir: Path,
 ) -> None:
-    """
-    Test installing a wheel using cpip install --prefix
-    """
+    """Test installing a wheel using cpip install --prefix"""
     prefix_dir = script.scratch_path / "prefix"
     shutil.copy(shared_data.packages / "simple.dist-0.1-py2.py3-none-any.whl", tmpdir)
     result = script.cpip(
@@ -287,17 +284,18 @@ def test_install_wheel_with_prefix(
         tmpdir,
     )
     lib = sysconfig.get_path(
-        "purelib", vars={"base": os.path.join("scratch", "prefix")}
+        "purelib",
+        vars={"base": os.path.join("scratch", "prefix")},
     )
     result.did_create(lib)
 
 
 def test_install_from_wheel_installs_deps(
-    script: CpipTestEnvironment, data: TestData, tmpdir: Path
+    script: CpipTestEnvironment,
+    data: TestData,
+    tmpdir: Path,
 ) -> None:
-    """
-    Test can install dependencies of wheels
-    """
+    """Test can install dependencies of wheels"""
     # 'requires_source' depends on the 'source' project
     package = data.packages.joinpath("requires_source-1.0-py2.py3-none-any.whl")
     shutil.copy(data.packages / "source-1.0.tar.gz", tmpdir)
@@ -313,11 +311,11 @@ def test_install_from_wheel_installs_deps(
 
 
 def test_install_from_wheel_no_deps(
-    script: CpipTestEnvironment, data: TestData, tmpdir: Path
+    script: CpipTestEnvironment,
+    data: TestData,
+    tmpdir: Path,
 ) -> None:
-    """
-    Test --no-deps works with wheel installs
-    """
+    """Test --no-deps works with wheel installs"""
     # 'requires_source' depends on the 'source' project
     package = data.packages.joinpath("requires_source-1.0-py2.py3-none-any.whl")
     shutil.copy(data.packages / "source-1.0.tar.gz", tmpdir)
@@ -334,7 +332,8 @@ def test_install_from_wheel_no_deps(
 
 
 def test_wheel_record_lines_in_deterministic_order(
-    script: CpipTestEnvironment, data: TestData
+    script: CpipTestEnvironment,
+    data: TestData,
 ) -> None:
     to_install = data.packages.joinpath("simplewheel-1.0-py2.py3-none-any.whl")
     result = script.cpip("install", to_install)
@@ -374,8 +373,7 @@ def test_wheel_record_lines_have_hash_for_data_files(
 def test_wheel_record_lines_have_updated_hash_for_scripts(
     script: CpipTestEnvironment,
 ) -> None:
-    """
-    cpip rewrites "#!python" shebang lines in scripts when it installs them;
+    """Cpip rewrites "#!python" shebang lines in scripts when it installs them;
     make sure it updates the RECORD file correspondingly.
     """
     package = make_wheel(
@@ -401,7 +399,8 @@ def test_wheel_record_lines_have_updated_hash_for_scripts(
     )
 
     script_record_path = os.path.relpath(
-        script_path, script.site_packages_path
+        script_path,
+        script.site_packages_path,
     ).replace(os.path.sep, "/")
     assert records[script_record_path] == [
         f"sha256={script_digest_b64}",
@@ -411,11 +410,11 @@ def test_wheel_record_lines_have_updated_hash_for_scripts(
 
 @pytest.mark.usefixtures("enable_user_site")
 def test_install_user_wheel(
-    script: CpipTestEnvironment, shared_data: TestData, tmpdir: Path
+    script: CpipTestEnvironment,
+    shared_data: TestData,
+    tmpdir: Path,
 ) -> None:
-    """
-    Test user install from wheel (that has a script)
-    """
+    """Test user install from wheel (that has a script)"""
     shutil.copy(shared_data.packages / "has.script-1.0-py2.py3-none-any.whl", tmpdir)
     result = script.cpip(
         "install",
@@ -432,11 +431,11 @@ def test_install_user_wheel(
 
 
 def test_install_from_wheel_gen_entrypoint(
-    script: CpipTestEnvironment, shared_data: TestData, tmpdir: Path
+    script: CpipTestEnvironment,
+    shared_data: TestData,
+    tmpdir: Path,
 ) -> None:
-    """
-    Test installing scripts (entry points are generated)
-    """
+    """Test installing scripts (entry points are generated)"""
     shutil.copy(
         shared_data.packages / "script.wheel1a-0.1-py2.py3-none-any.whl",
         tmpdir,
@@ -459,11 +458,11 @@ def test_install_from_wheel_gen_entrypoint(
 
 
 def test_install_from_wheel_gen_uppercase_entrypoint(
-    script: CpipTestEnvironment, shared_data: TestData, tmpdir: Path
+    script: CpipTestEnvironment,
+    shared_data: TestData,
+    tmpdir: Path,
 ) -> None:
-    """
-    Test installing scripts with uppercase letters in entry point names
-    """
+    """Test installing scripts with uppercase letters in entry point names"""
     shutil.copy(
         shared_data.packages / "console_scripts_uppercase-1.0-py2.py3-none-any.whl",
         tmpdir,
@@ -507,11 +506,11 @@ def test_install_from_wheel_gen_unicode_entrypoint(script: CpipTestEnvironment) 
 
 
 def test_install_from_wheel_with_legacy(
-    script: CpipTestEnvironment, shared_data: TestData, tmpdir: Path
+    script: CpipTestEnvironment,
+    shared_data: TestData,
+    tmpdir: Path,
 ) -> None:
-    """
-    Test installing scripts (legacy scripts are preserved)
-    """
+    """Test installing scripts (legacy scripts are preserved)"""
     shutil.copy(
         shared_data.packages / "script.wheel2a-0.1-py2.py3-none-any.whl",
         tmpdir,
@@ -535,10 +534,11 @@ def test_install_from_wheel_with_legacy(
 
 
 def test_install_from_wheel_no_setuptools_entrypoint(
-    script: CpipTestEnvironment, shared_data: TestData, tmpdir: Path
+    script: CpipTestEnvironment,
+    shared_data: TestData,
+    tmpdir: Path,
 ) -> None:
-    """
-    Test that when we generate scripts, any existing setuptools wrappers in
+    """Test that when we generate scripts, any existing setuptools wrappers in
     the wheel are skipped.
     """
     shutil.copy(shared_data.packages / "script.wheel1-0.1-py2.py3-none-any.whl", tmpdir)
@@ -565,10 +565,11 @@ def test_install_from_wheel_no_setuptools_entrypoint(
 
 
 def test_skipping_setuptools_doesnt_skip_legacy(
-    script: CpipTestEnvironment, shared_data: TestData, tmpdir: Path
+    script: CpipTestEnvironment,
+    shared_data: TestData,
+    tmpdir: Path,
 ) -> None:
-    """
-    Test installing scripts (legacy scripts are preserved even when we skip
+    """Test installing scripts (legacy scripts are preserved even when we skip
     setuptools wrappers)
     """
     shutil.copy(shared_data.packages / "script.wheel2-0.1-py2.py3-none-any.whl", tmpdir)
@@ -590,11 +591,11 @@ def test_skipping_setuptools_doesnt_skip_legacy(
 
 
 def test_install_from_wheel_gui_entrypoint(
-    script: CpipTestEnvironment, shared_data: TestData, tmpdir: Path
+    script: CpipTestEnvironment,
+    shared_data: TestData,
+    tmpdir: Path,
 ) -> None:
-    """
-    Test installing scripts (gui entry points are generated)
-    """
+    """Test installing scripts (gui entry points are generated)"""
     shutil.copy(shared_data.packages / "script.wheel3-0.1-py2.py3-none-any.whl", tmpdir)
     result = script.cpip(
         "install",
@@ -611,11 +612,11 @@ def test_install_from_wheel_gui_entrypoint(
 
 
 def test_wheel_compiles_pyc(
-    script: CpipTestEnvironment, shared_data: TestData, tmpdir: Path
+    script: CpipTestEnvironment,
+    shared_data: TestData,
+    tmpdir: Path,
 ) -> None:
-    """
-    Test installing from wheel with --compile on
-    """
+    """Test installing from wheel with --compile on"""
     shutil.copy(shared_data.packages / "simple.dist-0.1-py2.py3-none-any.whl", tmpdir)
     script.cpip(
         "install",
@@ -635,11 +636,11 @@ def test_wheel_compiles_pyc(
 
 
 def test_wheel_no_compiles_pyc(
-    script: CpipTestEnvironment, shared_data: TestData, tmpdir: Path
+    script: CpipTestEnvironment,
+    shared_data: TestData,
+    tmpdir: Path,
 ) -> None:
-    """
-    Test installing from wheel with --compile on
-    """
+    """Test installing from wheel with --compile on"""
     shutil.copy(shared_data.packages / "simple.dist-0.1-py2.py3-none-any.whl", tmpdir)
     script.cpip(
         "install",
@@ -660,7 +661,8 @@ def test_wheel_no_compiles_pyc(
 
 
 def test_install_from_wheel_uninstalls_old_version(
-    script: CpipTestEnvironment, data: TestData
+    script: CpipTestEnvironment,
+    data: TestData,
 ) -> None:
     # regression test for https://github.com/pypa/cpip/issues/1825
     package = data.packages.joinpath("simplewheel-1.0-py2.py3-none-any.whl")
@@ -674,7 +676,8 @@ def test_install_from_wheel_uninstalls_old_version(
 
 
 def test_wheel_compile_syntax_error(
-    script: CpipTestEnvironment, data: TestData
+    script: CpipTestEnvironment,
+    data: TestData,
 ) -> None:
     package = data.packages.joinpath("compilewheel-1.0-py2.py3-none-any.whl")
     result = script.cpip("install", "--compile", package, "--no-index")
@@ -683,7 +686,8 @@ def test_wheel_compile_syntax_error(
 
 
 def test_wheel_install_with_no_cache_dir(
-    script: CpipTestEnvironment, data: TestData
+    script: CpipTestEnvironment,
+    data: TestData,
 ) -> None:
     """Check wheel installations work, even with no cache."""
     package = data.packages.joinpath("simple.dist-0.1-py2.py3-none-any.whl")
@@ -702,7 +706,11 @@ def test_wheel_install_fails_with_extra_dist_info(script: CpipTestEnvironment) -
         },
     )
     result = script.cpip(
-        "install", "--no-cache-dir", "--no-index", package, expect_error=True
+        "install",
+        "--no-cache-dir",
+        "--no-index",
+        package,
+        expect_error=True,
     )
     assert "multiple .dist-info directories" in result.stderr
 
@@ -757,10 +765,14 @@ def test_wheel_install_fails_with_badly_encoded_metadata(
     script: CpipTestEnvironment,
 ) -> None:
     package = make_wheel("simple", "0.1.0", metadata=b"\xff").save_to_dir(
-        script.scratch_path
+        script.scratch_path,
     )
     result = script.cpip(
-        "install", "--no-cache-dir", "--no-index", package, expect_error=True
+        "install",
+        "--no-cache-dir",
+        "--no-index",
+        package,
+        expect_error=True,
     )
     assert "Error decoding metadata for" in result.stderr
     assert "simple-0.1.0-py2.py3-none-any.whl" in result.stderr
@@ -772,7 +784,8 @@ def test_wheel_install_fails_with_badly_encoded_metadata(
     ["simple-package", "simple_package"],
 )
 def test_correct_package_name_while_creating_wheel_bug(
-    script: CpipTestEnvironment, package_name: str
+    script: CpipTestEnvironment,
+    package_name: str,
 ) -> None:
     """Check that the package name is correctly named while creating
     a .whl file with a given format
@@ -784,14 +797,18 @@ def test_correct_package_name_while_creating_wheel_bug(
 
 @pytest.mark.parametrize("name", ["purelib", "abc"])
 def test_wheel_with_file_in_data_dir_has_reasonable_error(
-    script: CpipTestEnvironment, tmpdir: Path, name: str
+    script: CpipTestEnvironment,
+    tmpdir: Path,
+    name: str,
 ) -> None:
     """Normally we expect entities in the .data directory to be in a
     subdirectory, but if they are not then we should show a reasonable error
     message that includes the path.
     """
     wheel_path = make_wheel(
-        "simple", "0.1.0", extra_data_files={name: "hello world"}
+        "simple",
+        "0.1.0",
+        extra_data_files={name: "hello world"},
     ).save_to_dir(tmpdir)
 
     result = script.cpip("install", "--no-index", str(wheel_path), expect_error=True)
@@ -799,10 +816,13 @@ def test_wheel_with_file_in_data_dir_has_reasonable_error(
 
 
 def test_wheel_with_unknown_subdir_in_data_dir_has_reasonable_error(
-    script: CpipTestEnvironment, tmpdir: Path
+    script: CpipTestEnvironment,
+    tmpdir: Path,
 ) -> None:
     wheel_path = make_wheel(
-        "simple", "0.1.0", extra_data_files={"unknown/hello.txt": "hello world"}
+        "simple",
+        "0.1.0",
+        extra_data_files={"unknown/hello.txt": "hello world"},
     ).save_to_dir(tmpdir)
 
     result = script.cpip("install", "--no-index", str(wheel_path), expect_error=True)

@@ -10,7 +10,8 @@ from cpip_test_support import CpipTestEnvironment, TestData
 
 
 def expected_simplewheel_lock(
-    shared_data: TestData, wheel_name: str
+    shared_data: TestData,
+    wheel_name: str,
 ) -> dict[str, object]:
     wheel = shared_data.root.joinpath("packages", wheel_name)
     assert wheel.is_file()
@@ -22,7 +23,9 @@ def expected_simplewheel_lock(
 
 
 def test_lock_wheel_from_findlinks(
-    script: CpipTestEnvironment, shared_data: TestData, tmp_path: Path
+    script: CpipTestEnvironment,
+    shared_data: TestData,
+    tmp_path: Path,
 ) -> None:
     """Test locking a simple wheel package, to the default pylock.toml."""
     result = script.cpip(
@@ -46,7 +49,7 @@ def test_lock_wheel_from_findlinks(
                 "wheels": [
                     {
                         **expected_simplewheel_lock(shared_data, wheel_name),
-                    }
+                    },
                 ],
             },
         ],
@@ -54,7 +57,8 @@ def test_lock_wheel_from_findlinks(
 
 
 def test_lock_sdist_from_findlinks(
-    script: CpipTestEnvironment, shared_data: TestData
+    script: CpipTestEnvironment,
+    shared_data: TestData,
 ) -> None:
     """Test locking a simple wheel package, to the default pylock.toml."""
     result = script.cpip(
@@ -82,7 +86,7 @@ def test_lock_sdist_from_findlinks(
                 },
                 "name": "simple-2.0.tar.gz",
                 "url": path_to_url(
-                    str(shared_data.root / "packages" / "simple-2.0.tar.gz")
+                    str(shared_data.root / "packages" / "simple-2.0.tar.gz"),
                 ),
             },
             "version": "2.0",
@@ -91,7 +95,9 @@ def test_lock_sdist_from_findlinks(
 
 
 def test_lock_local_directory(
-    script: CpipTestEnvironment, shared_data: TestData, tmp_path: Path
+    script: CpipTestEnvironment,
+    shared_data: TestData,
+    tmp_path: Path,
 ) -> None:
     project_path = tmp_path / "pkga"
     project_path.mkdir()
@@ -100,7 +106,7 @@ def test_lock_local_directory(
             [project]
             name = "pkga"
             version = "1.0"
-            """)
+            """),
     )
     result = script.cpip(
         "lock",
@@ -124,7 +130,9 @@ def test_lock_local_directory(
 
 
 def test_lock_local_editable_with_dep(
-    script: CpipTestEnvironment, shared_data: TestData, tmp_path: Path
+    script: CpipTestEnvironment,
+    shared_data: TestData,
+    tmp_path: Path,
 ) -> None:
     project_path = tmp_path / "pkga"
     project_path.mkdir()
@@ -134,7 +142,7 @@ def test_lock_local_editable_with_dep(
             name = "pkga"
             version = "1.0"
             dependencies = ["simplewheel==2.0"]
-            """)
+            """),
     )
     result = script.cpip(
         "lock",
@@ -162,7 +170,7 @@ def test_lock_local_editable_with_dep(
             "wheels": [
                 {
                     **expected_simplewheel_lock(shared_data, wheel_name),
-                }
+                },
             ],
         },
     ]

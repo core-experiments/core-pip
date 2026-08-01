@@ -21,7 +21,7 @@ _CACHE_INSTANCES: dict[str, WheelMetadataCache] = {}
 class WheelMetadataCache:
     """Process-local metadata cache backed by an atomic marshal snapshot."""
 
-    __slots__ = ("entries", "path", "dirty")
+    __slots__ = ("dirty", "entries", "path")
 
     def __init__(self, cache_dir: str | os.PathLike[str]) -> None:
         self.path = Path(cache_dir) / _CACHE_NAME
@@ -43,7 +43,7 @@ class WheelMetadataCache:
         for key, value in payload[2].items():
             if not self.valid_identity(key) or not self.valid_headers(value):
                 continue
-            self.entries[cast(MetadataIdentity, key)] = cast(MetadataHeaders, value)
+            self.entries[cast("MetadataIdentity", key)] = cast("MetadataHeaders", value)
 
     @staticmethod
     def valid_identity(value: object) -> bool:
@@ -85,7 +85,9 @@ class WheelMetadataCache:
         self.dirty = True
 
     def put_reference(
-        self, identity: MetadataIdentity, headers: MetadataHeaders
+        self,
+        identity: MetadataIdentity,
+        headers: MetadataHeaders,
     ) -> None:
         """Store already-owned immutable headers without copying them."""
         if identity not in self.entries and len(self.entries) >= _MAX_ENTRIES:

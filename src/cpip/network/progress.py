@@ -48,7 +48,10 @@ def raw_progress_bar(
 
 
 def get_download_progress_renderer(
-    *, bar_type: BarType, size: int | None = None, initial_progress: int | None = None
+    *,
+    bar_type: BarType,
+    size: int | None = None,
+    initial_progress: int | None = None,
 ) -> ProgressRenderer[bytes]:
     """Get an object that can be used to render the download progress.
 
@@ -60,5 +63,4 @@ def get_download_progress_renderer(
             size=size,
             initial_progress=initial_progress,
         )
-    else:
-        return iter  # no-op, when passed an iterator
+    return iter  # no-op, when passed an iterator

@@ -16,7 +16,7 @@ def print_version(location: str | None = None) -> None:
         location = str(get_cpip_distribution().locate_file("cpip"))
     print(
         f"cpip {get_cpip_version()} from {Path(location).resolve()} "
-        f"(python {CURRENT_PYTHON_VERSION})"
+        f"(python {CURRENT_PYTHON_VERSION})",
     )
 
 

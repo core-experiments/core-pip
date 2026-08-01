@@ -11,11 +11,9 @@ from collections.abc import Generator, Iterable
 from typing import Any
 from unittest.mock import Mock
 
-import pytest
-
 import cpip.network.auth
+import pytest
 from cpip.network.auth import MultiDomainBasicAuth
-
 from cpip_test_support.requests_mocks import MockConnection, MockRequest, MockResponse
 
 
@@ -59,7 +57,10 @@ def reset_keyring() -> Iterable[None]:
     ],
 )
 def test_get_credentials_parses_correctly(
-    input_url: str, url: str, username: str | None, password: str | None
+    input_url: str,
+    url: str,
+    username: str | None,
+    password: str | None,
 ) -> None:
     auth = MultiDomainBasicAuth()
     get = auth.get_url_and_credentials
@@ -116,10 +117,12 @@ def test_get_index_url_credentials() -> None:
         index_urls=[
             "http://example.com/",
             "http://foo:bar@example.com/path",
-        ]
+        ],
     )
     get = functools.partial(
-        auth.get_new_credentials, allow_netrc=False, allow_keyring=False
+        auth.get_new_credentials,
+        allow_netrc=False,
+        allow_keyring=False,
     )
 
     # Check resolution of indexes
@@ -132,10 +135,12 @@ def test_prioritize_longest_path_prefix_match_organization() -> None:
         index_urls=[
             "http://foo:bar@example.com/org-name-alpha/repo-alias/simple",
             "http://bar:foo@example.com/org-name-beta/repo-alias/simple",
-        ]
+        ],
     )
     get = functools.partial(
-        auth.get_new_credentials, allow_netrc=False, allow_keyring=False
+        auth.get_new_credentials,
+        allow_netrc=False,
+        allow_keyring=False,
     )
 
     # Inspired by Azure DevOps URL structure, GitLab should look similar
@@ -151,18 +156,20 @@ def test_prioritize_longest_path_prefix_match_project() -> None:
         index_urls=[
             "http://foo:bar@example.com/org-alpha/project-name-alpha/repo-alias/simple",
             "http://bar:foo@example.com/org-alpha/project-name-beta/repo-alias/simple",
-        ]
+        ],
     )
     get = functools.partial(
-        auth.get_new_credentials, allow_netrc=False, allow_keyring=False
+        auth.get_new_credentials,
+        allow_netrc=False,
+        allow_keyring=False,
     )
 
     # Inspired by Azure DevOps URL structure, GitLab should look similar
     assert get(
-        "http://example.com/org-alpha/project-name-alpha/repo-guid/dowbload/"
+        "http://example.com/org-alpha/project-name-alpha/repo-guid/dowbload/",
     ) == ("foo", "bar")
     assert get(
-        "http://example.com/org-alpha/project-name-beta/repo-guid/dowbload/"
+        "http://example.com/org-alpha/project-name-beta/repo-guid/dowbload/",
     ) == ("bar", "foo")
 
 
@@ -258,7 +265,9 @@ def test_keyring_get_password_username_in_index(
         keyring_provider="import",
     )
     get = functools.partial(
-        auth.get_new_credentials, allow_netrc=False, allow_keyring=True
+        auth.get_new_credentials,
+        allow_netrc=False,
+        allow_keyring=True,
     )
 
     assert get("http://example.com/path2/path3") == ("user", "user!url")
@@ -341,11 +350,12 @@ class KeyringModuleV2:
 
     def __init__(self) -> None:
         self.saved_credential_by_username_by_system: dict[
-            str, dict[str, KeyringModuleV2.Credential]
+            str,
+            dict[str, KeyringModuleV2.Credential],
         ] = {}
 
     class Credential:
-        __slots__ = ("username", "password")
+        __slots__ = ("password", "username")
 
         def __init__(self, username: str, password: str) -> None:
             self.username = username
@@ -363,7 +373,8 @@ class KeyringModuleV2:
 
     def get_credential(self, system: str, username: str | None) -> Credential | None:
         credential_by_username = self.saved_credential_by_username_by_system.get(
-            system, {}
+            system,
+            {},
         )
         if username is None:
             # Just return the first cred we can find (if
@@ -391,10 +402,12 @@ class KeyringModuleV2:
 
     @contextlib.contextmanager
     def add_credential(
-        self, system: str, username: str, password: str
+        self,
+        system: str,
+        username: str,
+        password: str,
     ) -> Generator[None]:
-        """
-        Context manager that adds the given credential to the keyring
+        """Context manager that adds the given credential to the keyring
         and yields. Once the yield is done, the credential is removed
         from the keyring.
 
@@ -421,7 +434,9 @@ class KeyringModuleV2:
     ],
 )
 def test_keyring_get_credential(
-    monkeypatch: pytest.MonkeyPatch, url: str, expect: tuple[str, str]
+    monkeypatch: pytest.MonkeyPatch,
+    url: str,
+    expect: tuple[str, str],
 ) -> None:
     keyring = KeyringModuleV2()
     monkeypatch.setitem(sys.modules, "keyring", keyring)
@@ -456,7 +471,8 @@ def test_broken_keyring_disables_keyring(monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.setitem(sys.modules, "keyring", keyring_broken)
 
     auth = MultiDomainBasicAuth(
-        index_urls=["http://example.com/"], keyring_provider="import"
+        index_urls=["http://example.com/"],
+        keyring_provider="import",
     )
 
     assert keyring_broken.call_count_internal == 0
@@ -559,7 +575,7 @@ class KeyringSubprocessResult(KeyringModuleV2):
                 {
                     "username": creds.username,
                     "password": creds.password,
-                }
+                },
             ).encode("utf-8")
 
     def set_subcommand(
@@ -587,7 +603,7 @@ class KeyringSubprocessResult(KeyringModuleV2):
 
     def check_returncode(self) -> None:
         if self.returncode:
-            raise Exception()
+            raise Exception
 
 
 @pytest.mark.parametrize(
@@ -619,10 +635,14 @@ def test_keyring_cli_get_password(
     with (
         keyring_subprocess.add_credential("example.com", "example", "!netloc"),
         keyring_subprocess.add_credential(
-            "http://example.com/path2/", "saved-user1", "pw1"
+            "http://example.com/path2/",
+            "saved-user1",
+            "pw1",
         ),
         keyring_subprocess.add_credential(
-            "http://example.com/path2/", "saved-user2", "pw2"
+            "http://example.com/path2/",
+            "saved-user2",
+            "pw2",
         ),
     ):
         actual = auth.get_new_credentials(url, allow_netrc=False, allow_keyring=True)
@@ -700,7 +720,8 @@ def test_keyring_cli_set_password(
         assert keyring.saved_credential_by_username_by_system == {
             "example.com": {
                 expected_username: KeyringModuleV2.Credential(
-                    expected_username, expected_password
+                    expected_username,
+                    expected_password,
                 ),
             },
         }
@@ -741,10 +762,14 @@ def test_keyring_cli_outdated_version(
     with (
         keyring_subprocess.add_credential("example.com", "example", "!netloc"),
         keyring_subprocess.add_credential(
-            "http://example.com/path2/", "saved-user1", "pw1"
+            "http://example.com/path2/",
+            "saved-user1",
+            "pw1",
         ),
         keyring_subprocess.add_credential(
-            "http://example.com/path2/", "saved-user2", "pw2"
+            "http://example.com/path2/",
+            "saved-user2",
+            "pw2",
         ),
     ):
         actual = auth.get_new_credentials(url, allow_netrc=False, allow_keyring=True)

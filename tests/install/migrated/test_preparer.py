@@ -18,16 +18,13 @@ from cpip.install.metadata import (
     check_sidecar_matches_wheel,
 )
 from cpip.network.download import Downloader
-from cpip.network.http import NetworkSession
+from cpip.network.http import HttpResponse, NetworkSession
 from cpip_test_support import TestData
 from cpip_test_support.requests_mocks import MockResponse
-from cpip.network.http import HttpResponse
 
 
 def test_unpack_url_with_urllib_response_without_content_type(data: TestData) -> None:
-    """
-    It should download and unpack files even if no Content-Type header exists
-    """
+    """It should download and unpack files even if no Content-Type header exists"""
     real_session = NetworkSession()
 
     def fake_session_get(*args: Any, **kwargs: Any) -> HttpResponse:
@@ -58,10 +55,10 @@ def test_unpack_url_with_urllib_response_without_content_type(data: TestData) ->
 
 @patch("cpip.network.download.raise_for_status")
 def test_download_http_url__no_directory_traversal(
-    mock_raise_for_status: Mock, tmp_path: Path
+    mock_raise_for_status: Mock,
+    tmp_path: Path,
 ) -> None:
-    """
-    Test that directory traversal doesn't happen on download when the
+    """Test that directory traversal doesn't happen on download when the
     Content-Disposition header contains a filename with a ".." path part.
     """
     mock_url = "http://www.example.com/whatever.tgz"
@@ -78,7 +75,7 @@ def test_download_http_url__no_directory_traversal(
             # mimetypes.guess_extension from guessing the extension.
             "content-type": "random",
             "content-disposition": 'attachment;filename="../out_dir_file"',
-        }
+        },
     )
     session.get.return_value = resp
     download = Downloader(session, progress_bar="on")
@@ -118,15 +115,15 @@ class Test_unpack_url:
     def test_unpack_url_no_download(self, tmp_path: Path, data: TestData) -> None:
         self.prep(tmp_path, data)
         DownloadManager(self.no_download).unpack(
-            self.dist_url, self.build_dir, verbosity=0
+            self.dist_url,
+            self.build_dir,
+            verbosity=0,
         )
         assert os.path.isdir(os.path.join(self.build_dir, "simple"))
         assert not os.path.isfile(os.path.join(self.download_dir, self.dist_file))
 
     def test_unpack_url_bad_hash(self, tmp_path: Path, data: TestData) -> None:
-        """
-        Test when the file url hash fragment is wrong
-        """
+        """Test when the file url hash fragment is wrong"""
         self.prep(tmp_path, data)
         url = f"{self.dist_url.url}#md5=bogus"
         dist_url = Link(url)
@@ -151,7 +148,8 @@ def metadata_internal(*lines: str, name: str = "pkg", version: str = "1.0") -> s
 
 def make_distribution(metadata: str) -> MetadataDistribution:
     return MetadataDistribution.from_metadata_file_contents(
-        metadata.encode("utf-8"), "pkg"
+        metadata.encode("utf-8"),
+        "pkg",
     )
 
 
@@ -171,7 +169,7 @@ class TestCheckSidecarMatchesWheel:
                 "Requires-Python: >=3.9",
                 "Requires-Dist: requests>=2.0",
                 "Provides-Extra: extra",
-            )
+            ),
         )
         check_sidecar_matches_wheel(self.req_internal(), dist, dist)
 
@@ -189,7 +187,7 @@ class TestCheckSidecarMatchesWheel:
             metadata_internal(
                 "Requires-Dist:",
                 " some-package-with-a-very-long-name[extra-one]>=2.31.0,<3.0.0",
-            )
+            ),
         )
         check_sidecar_matches_wheel(self.req_internal(), dist, dist)
 
@@ -208,14 +206,14 @@ class TestCheckSidecarMatchesWheel:
                 "Requires-Dist: shared-a",
                 "Requires-Dist: shared-b",
                 "Requires-Dist: only-in-sidecar",
-            )
+            ),
         )
         wheel = make_distribution(
             metadata_internal(
                 "Requires-Dist: shared-a",
                 "Requires-Dist: shared-b",
                 "Requires-Dist: only-in-wheel",
-            )
+            ),
         )
         with pytest.raises(SidecarMetadataInconsistent) as excinfo:
             check_sidecar_matches_wheel(self.req_internal(), sidecar, wheel)
@@ -271,7 +269,7 @@ class TestCheckSidecarMatchesWheel:
 
     def test_invalid_requires_dist_raises_metadata_invalid(self) -> None:
         sidecar = make_distribution(
-            metadata_internal("Requires-Dist: not a valid requirement")
+            metadata_internal("Requires-Dist: not a valid requirement"),
         )
         wheel = make_distribution(metadata_internal())
         with pytest.raises(MetadataInvalid):

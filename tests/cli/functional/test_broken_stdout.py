@@ -6,7 +6,8 @@ BROKEN_STDOUT_RETURN_CODE = 120
 
 
 def setup_broken_stdout_test(
-    args: list[str], deprecated_python: bool
+    args: list[str],
+    deprecated_python: bool,
 ) -> tuple[str, int]:
     proc = subprocess.Popen(
         args,
@@ -34,9 +35,7 @@ def setup_broken_stdout_test(
 
 
 def test_broken_stdout_pipe(deprecated_python: bool) -> None:
-    """
-    Test a broken pipe to stdout.
-    """
+    """Test a broken pipe to stdout."""
     stderr, returncode = setup_broken_stdout_test(
         ["cpip", "list"],
         deprecated_python=deprecated_python,
@@ -50,9 +49,7 @@ def test_broken_stdout_pipe(deprecated_python: bool) -> None:
 
 
 def test_broken_stdout_pipe__log_option(deprecated_python: bool, tmpdir: Path) -> None:
-    """
-    Test a broken pipe to stdout when --log is passed.
-    """
+    """Test a broken pipe to stdout when --log is passed."""
     log_path = os.path.join(str(tmpdir), "log.txt")
     stderr, returncode = setup_broken_stdout_test(
         ["cpip", "--log", log_path, "list"],
@@ -67,9 +64,7 @@ def test_broken_stdout_pipe__log_option(deprecated_python: bool, tmpdir: Path) -
 
 
 def test_broken_stdout_pipe__verbose(deprecated_python: bool) -> None:
-    """
-    Test a broken pipe to stdout with verbose logging enabled.
-    """
+    """Test a broken pipe to stdout with verbose logging enabled."""
     stderr, returncode = setup_broken_stdout_test(
         ["cpip", "-vv", "list"],
         deprecated_python=deprecated_python,

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from cpip.core.errors import DiagnosticCpipError, CpipError
+from cpip.core.errors import CpipError, DiagnosticCpipError
 
 
 class NetworkConnectionError(CpipError):
@@ -40,7 +40,12 @@ class ConnectionTimeoutError(DiagnosticCpipError):
     reference = "connection-timeout"
 
     def __init__(
-        self, url: str, host: str, *, kind: Literal["connect", "read"], timeout: float
+        self,
+        url: str,
+        host: str,
+        *,
+        kind: Literal["connect", "read"],
+        timeout: float,
     ) -> None:
         context = f"{host} didn't respond within {timeout} seconds"
         if kind == "connect":

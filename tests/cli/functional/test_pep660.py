@@ -4,7 +4,6 @@ from typing import Any
 
 import pytest
 import tomli_w
-
 from cpip_test_support import CpipTestEnvironment
 
 SETUP_PY = """
@@ -63,7 +62,10 @@ def build_editable(wheel_directory, config_settings=None, metadata_directory=Non
 
 
 def make_project_internal(
-    tmpdir: Path, backend_code: str, with_setup_py: bool, with_pyproject: bool = True
+    tmpdir: Path,
+    backend_code: str,
+    with_setup_py: bool,
+    with_pyproject: bool = True,
 ) -> Path:
     project_dir = tmpdir / "project"
     project_dir.mkdir()
@@ -90,7 +92,9 @@ def assert_hook_called(project_dir: Path, hook: str) -> None:
 
 
 def assert_hook_called_with_config_settings(
-    project_dir: Path, hook: str, config_settings: dict[str, str]
+    project_dir: Path,
+    hook: str,
+    config_settings: dict[str, str],
 ) -> None:
     log = project_dir.joinpath("log.txt").read_text()
     assert f":{hook} called" in log, f"{hook} has not been called"
@@ -105,11 +109,11 @@ def assert_hook_not_called(project_dir: Path, hook: str) -> None:
 
 
 def test_install_pep517_basic(tmpdir: Path, script: CpipTestEnvironment) -> None:
-    """
-    Check that the test harness we have in this file is sane.
-    """
+    """Check that the test harness we have in this file is sane."""
     project_dir = make_project_internal(
-        tmpdir, BACKEND_WITHOUT_PEP660, with_setup_py=False
+        tmpdir,
+        BACKEND_WITHOUT_PEP660,
+        with_setup_py=False,
     )
     script.cpip(
         "install",
@@ -122,11 +126,11 @@ def test_install_pep517_basic(tmpdir: Path, script: CpipTestEnvironment) -> None
 
 
 def test_install_pep660_basic(tmpdir: Path, script: CpipTestEnvironment) -> None:
-    """
-    Test with backend that supports build_editable.
-    """
+    """Test with backend that supports build_editable."""
     project_dir = make_project_internal(
-        tmpdir, BACKEND_WITH_PEP660, with_setup_py=False
+        tmpdir,
+        BACKEND_WITH_PEP660,
+        with_setup_py=False,
     )
     result = script.cpip(
         "install",
@@ -146,13 +150,14 @@ def test_install_pep660_basic(tmpdir: Path, script: CpipTestEnvironment) -> None
 
 
 def test_install_pep660_from_reqs_file(
-    tmpdir: Path, script: CpipTestEnvironment
+    tmpdir: Path,
+    script: CpipTestEnvironment,
 ) -> None:
-    """
-    Test with backend that supports build_editable.
-    """
+    """Test with backend that supports build_editable."""
     project_dir = make_project_internal(
-        tmpdir, BACKEND_WITH_PEP660, with_setup_py=False
+        tmpdir,
+        BACKEND_WITH_PEP660,
+        with_setup_py=False,
     )
     reqs_file = tmpdir / "requirements.txt"
     reqs_file.write_text(f"-e {project_dir.as_uri()} --config-setting x=y\n")
@@ -178,13 +183,14 @@ def test_install_no_pep660(
     script: CpipTestEnvironment,
     common_wheels: Path,
 ) -> None:
-    """
-    Test the error message when the build backend does not support PEP 660.
+    """Test the error message when the build backend does not support PEP 660.
 
     The error is the same with and without build isolation.
     """
     project_dir = make_project_internal(
-        tmpdir, BACKEND_WITHOUT_PEP660, with_setup_py=True
+        tmpdir,
+        BACKEND_WITHOUT_PEP660,
+        with_setup_py=True,
     )
     result = script.cpip(
         "install",
@@ -201,12 +207,13 @@ def test_install_no_pep660(
 
 
 def test_wheel_editable_pep660_basic(tmpdir: Path, script: CpipTestEnvironment) -> None:
-    """
-    Test 'cpip wheel' of an editable pep 660 project.
+    """Test 'cpip wheel' of an editable pep 660 project.
     It must *not* call prepare_metadata_for_build_editable.
     """
     project_dir = make_project_internal(
-        tmpdir, BACKEND_WITH_PEP660, with_setup_py=False
+        tmpdir,
+        BACKEND_WITH_PEP660,
+        with_setup_py=False,
     )
     wheel_dir = tmpdir / "dist"
     script.cpip(
@@ -226,14 +233,16 @@ def test_wheel_editable_pep660_basic(tmpdir: Path, script: CpipTestEnvironment) 
 
 
 def test_download_editable_pep660_basic(
-    tmpdir: Path, script: CpipTestEnvironment
+    tmpdir: Path,
+    script: CpipTestEnvironment,
 ) -> None:
-    """
-    Test 'cpip download' of an editable pep 660 project.
+    """Test 'cpip download' of an editable pep 660 project.
     It must *not* call prepare_metadata_for_build_editable.
     """
     project_dir = make_project_internal(
-        tmpdir, BACKEND_WITH_PEP660, with_setup_py=False
+        tmpdir,
+        BACKEND_WITH_PEP660,
+        with_setup_py=False,
     )
     reqs_file = tmpdir / "requirements.txt"
     reqs_file.write_text(f"-e {project_dir.as_uri()}\n")

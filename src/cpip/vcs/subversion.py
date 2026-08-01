@@ -5,8 +5,8 @@ import os
 import re
 import sys
 
-from cpip.core.errors import InstallationError
 from cpip.core.contracts import AuthInfo
+from cpip.core.errors import InstallationError
 from cpip.core.filesystem import display_path
 from cpip.core.subprocess import CommandArgs
 from cpip.core.urls import split_auth_from_netloc
@@ -47,9 +47,7 @@ class Subversion(VersionControl):
 
     @classmethod
     def get_revision(cls, location: str) -> str:
-        """
-        Return the maximum revision for all files under a given location
-        """
+        """Return the maximum revision for all files under a given location"""
         # Note: taken from setuptools.command.egg_info
         revision = 0
 
@@ -76,10 +74,11 @@ class Subversion(VersionControl):
 
     @classmethod
     def get_netloc_and_auth(
-        cls, netloc: str, scheme: str
+        cls,
+        netloc: str,
+        scheme: str,
     ) -> tuple[str, tuple[str | None, str | None]]:
-        """
-        This override allows the auth information to be passed to svn via the
+        """This override allows the auth information to be passed to svn via the
         --username and --password options instead of via the URL.
         """
         if scheme == "ssh":
@@ -278,7 +277,11 @@ class Subversion(VersionControl):
         return []
 
     def fetch_new(
-        self, dest: str, url: HiddenText, rev_options: RevOptions, verbosity: int
+        self,
+        dest: str,
+        url: HiddenText,
+        rev_options: RevOptions,
+        verbosity: int,
     ) -> None:
         rev_display = rev_options.to_display()
         logger.info(

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from cpip.resolution.algorithms import topological_weights
+from cpip.resolution.engine.algorithms import topological_weights
 
 
 def test_topological_weights_handles_deep_chain() -> None:

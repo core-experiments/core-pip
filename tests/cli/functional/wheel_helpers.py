@@ -85,7 +85,7 @@ def make_sdist(
                 'build-backend = "local_backend"',
                 'backend-path = ["backend"]',
                 "",
-            ]
+            ],
         )
     pyproject_lines.extend(
         [
@@ -96,7 +96,7 @@ def make_sdist(
             dependencies,
             "]",
             "",
-        ]
+        ],
     )
     root.joinpath("pyproject.toml").write_text(
         "\n".join(pyproject_lines),

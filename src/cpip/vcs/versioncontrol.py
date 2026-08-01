@@ -14,8 +14,8 @@ from typing import (
     cast,
 )
 
-from cpip.core.errors import InstallationError
 from cpip.core.contracts import AuthInfo
+from cpip.core.errors import InstallationError
 from cpip.core.filesystem import display_path
 from cpip.core.subprocess import CommandArgs, format_command_args
 
@@ -37,14 +37,17 @@ logger = logging.getLogger(__name__)
 
 
 def make_vcs_requirement_url(
-    repo_url: str, rev: str, project_name: str, subdir: str | None = None
+    repo_url: str,
+    rev: str,
+    project_name: str,
+    subdir: str | None = None,
 ) -> str:
-    """
-    Return the URL for a VCS requirement.
+    """Return the URL for a VCS requirement.
 
     Args:
       repo_url: the remote VCS url, with any needed VCS prefix (e.g. "git+").
       project_name: the (unescaped) project name.
+
     """
     quoted_rev = urllib.parse.quote(rev, "/")
     egg_project_name = project_name.replace("-", "_")
@@ -56,10 +59,10 @@ def make_vcs_requirement_url(
 
 
 def find_path_to_project_root_from_repo_root(
-    location: str, repo_root: str
+    location: str,
+    repo_root: str,
 ) -> str | None:
-    """
-    Find the the Python project's root by searching up the filesystem from
+    """Find the the Python project's root by searching up the filesystem from
     `location`. Return the path to project root relative to `repo_root`.
     Return None if the project root is `repo_root`, or cannot be found.
     """
@@ -95,17 +98,17 @@ class RemoteNotValidError(Exception):
 
 
 class RevOptions:
-    """
-    Encapsulates a VCS-specific revision to install, along with any VCS
+    """Encapsulates a VCS-specific revision to install, along with any VCS
     install options.
 
     Args:
         vc_class: a VersionControl subclass.
         rev: the name of the revision to install.
         extra_args: a list of extra options.
+
     """
 
-    __slots__ = ("vc_class", "rev", "extra_args", "branch_name")
+    __slots__ = ("branch_name", "extra_args", "rev", "vc_class")
 
     def __init__(
         self,
@@ -140,9 +143,7 @@ class RevOptions:
         return self.rev
 
     def to_args(self) -> CommandArgs:
-        """
-        Return the VCS-specific command arguments.
-        """
+        """Return the VCS-specific command arguments."""
         args: CommandArgs = []
         rev = self.arg_rev
         if rev is not None:
@@ -158,11 +159,11 @@ class RevOptions:
         return f" (to revision {self.rev})"
 
     def make_new(self, rev: str) -> RevOptions:
-        """
-        Make a copy of the current instance, but with a new rev.
+        """Make a copy of the current instance, but with a new rev.
 
         Args:
           rev: the name of the revision for the new object.
+
         """
         return self.vc_class.make_rev_options(rev, extra_args=self.extra_args)
 
@@ -221,8 +222,7 @@ class VcsSupport:
             del self.registry_internal[name]
 
     def get_backend_for_dir(self, location: str) -> VersionControl | None:
-        """
-        Return a VersionControl object if a repository of that type is found
+        """Return a VersionControl object if a repository of that type is found
         at the given directory.
         """
         self._ensure_builtin_backends_loaded()
@@ -245,9 +245,7 @@ class VcsSupport:
         return vcs_backends[inner_most_repo_path]
 
     def get_backend_for_scheme(self, scheme: str) -> VersionControl | None:
-        """
-        Return a VersionControl object or None.
-        """
+        """Return a VersionControl object or None."""
         self._ensure_builtin_backends_loaded()
         for vcs_backend in self.registry_internal.values():
             if scheme in vcs_backend.schemes:
@@ -255,9 +253,7 @@ class VcsSupport:
         return None
 
     def get_backend(self, name: str) -> VersionControl | None:
-        """
-        Return a VersionControl object or None.
-        """
+        """Return a VersionControl object or None."""
         self._ensure_builtin_backends_loaded()
         name = name.lower()
         return self.registry_internal.get(name)
@@ -278,31 +274,26 @@ class VersionControl:
 
     @classmethod
     def should_add_vcs_url_prefix(cls, remote_url: str) -> bool:
-        """
-        Return whether the vcs prefix (e.g. "git+") should be added to a
+        """Return whether the vcs prefix (e.g. "git+") should be added to a
         repository's remote url when used in a requirement.
         """
         return not remote_url.lower().startswith(f"{cls.name}:")
 
     @classmethod
     def get_subdirectory(cls, location: str) -> str | None:
-        """
-        Return the path to Python project root, relative to the repo root.
+        """Return the path to Python project root, relative to the repo root.
         Return None if the project root is in the repo root.
         """
         return None
 
     @classmethod
     def get_requirement_revision(cls, repo_dir: str) -> str:
-        """
-        Return the revision string that should be used in a requirement.
-        """
+        """Return the revision string that should be used in a requirement."""
         return cls.get_revision(repo_dir)
 
     @classmethod
     def get_src_requirement(cls, repo_dir: str, project_name: str) -> str:
-        """
-        Return the requirement string to use to redownload the files
+        """Return the requirement string to use to redownload the files
         currently at the given repository directory.
 
         Args:
@@ -311,6 +302,7 @@ class VersionControl:
         The return value has a form similar to the following:
 
             {repository_url}@{revision}#egg={project_name}
+
         """
         repo_url = cls.get_remote_url(repo_dir)
 
@@ -325,17 +317,16 @@ class VersionControl:
 
     @staticmethod
     def get_base_rev_args(rev: str) -> list[str]:
-        """
-        Return the base revision arguments for a vcs command.
+        """Return the base revision arguments for a vcs command.
 
         Args:
           rev: the name of a revision to install.  Cannot be None.
+
         """
         raise NotImplementedError
 
     def is_immutable_rev_checkout(self, url: str, dest: str) -> bool:
-        """
-        Return true if the commit hash checked out at dest matches
+        """Return true if the commit hash checked out at dest matches
         the revision in url.
 
         Always return False, if the VCS does not support immutable commit
@@ -348,21 +339,22 @@ class VersionControl:
 
     @classmethod
     def make_rev_options(
-        cls, rev: str | None = None, extra_args: CommandArgs | None = None
+        cls,
+        rev: str | None = None,
+        extra_args: CommandArgs | None = None,
     ) -> RevOptions:
-        """
-        Return a RevOptions object.
+        """Return a RevOptions object.
 
         Args:
           rev: the name of a revision to install.
           extra_args: a list of extra options.
+
         """
         return RevOptions(cls, rev, extra_args=extra_args or [])
 
     @classmethod
     def is_local_repository(cls, repo: str) -> bool:
-        """
-        posix absolute paths start with os.path.sep,
+        """Posix absolute paths start with os.path.sep,
         win32 ones start with drive (like c:\\folder)
         """
         drive, tail = os.path.splitdrive(repo)
@@ -370,10 +362,11 @@ class VersionControl:
 
     @classmethod
     def get_netloc_and_auth(
-        cls, netloc: str, scheme: str
+        cls,
+        netloc: str,
+        scheme: str,
     ) -> tuple[str, tuple[str | None, str | None]]:
-        """
-        Parse the repository URL's netloc, and return the new netloc to use
+        """Parse the repository URL's netloc, and return the new netloc to use
         along with auth information.
 
         Args:
@@ -386,13 +379,13 @@ class VersionControl:
         such an option, auth information must stay in the URL.
 
         Returns: (netloc, (username, password)).
+
         """
         return netloc, (None, None)
 
     @classmethod
     def get_url_rev_and_auth(cls, url: str) -> tuple[str, str | None, AuthInfo]:
-        """
-        Parse the repository URL to use, and return the URL, revision,
+        """Parse the repository URL to use, and return the URL, revision,
         and auth info to use.
 
         Returns: (url, rev, (username, password)).
@@ -402,7 +395,7 @@ class VersionControl:
             raise ValueError(
                 f"Sorry, {url!r} is a malformed VCS url. "
                 "The format is <vcs>+<protocol>://<url>, "
-                "e.g. svn+http://myrepo/svn/MyApp#egg=MyApp"
+                "e.g. svn+http://myrepo/svn/MyApp#egg=MyApp",
             )
         # Remove the vcs prefix.
         scheme = scheme.split("+", 1)[1]
@@ -414,7 +407,7 @@ class VersionControl:
                 raise InstallationError(
                     f"The URL {url!r} has an empty revision (after @) "
                     "which is not supported. Include a revision after @ "
-                    "or remove @ from the URL."
+                    "or remove @ from the URL.",
                 )
             rev = urllib.parse.unquote(rev)
         url = urllib.parse.urlunsplit((scheme, netloc, path, query, ""))
@@ -422,14 +415,11 @@ class VersionControl:
 
     @staticmethod
     def make_rev_args(username: str | None, password: HiddenText | None) -> CommandArgs:
-        """
-        Return the RevOptions "extra arguments" to use in obtain().
-        """
+        """Return the RevOptions "extra arguments" to use in obtain()."""
         return []
 
     def get_url_rev_options(self, url: HiddenText) -> tuple[HiddenText, RevOptions]:
-        """
-        Return the URL and RevOptions object to use in obtain(),
+        """Return the URL and RevOptions object to use in obtain(),
         as a tuple (url, rev_options).
         """
         secret_url, rev, user_pass = self.get_url_rev_and_auth(url.secret)
@@ -444,30 +434,31 @@ class VersionControl:
 
     @staticmethod
     def normalize_url(url: str) -> str:
-        """
-        Normalize a URL for comparison by unquoting it and removing any
+        """Normalize a URL for comparison by unquoting it and removing any
         trailing slash.
         """
         return urllib.parse.unquote(url).rstrip("/")
 
     @classmethod
     def compare_urls(cls, url1: str, url2: str) -> bool:
-        """
-        Compare two repo URLs for identity, ignoring incidental differences.
-        """
+        """Compare two repo URLs for identity, ignoring incidental differences."""
         return cls.normalize_url(url1) == cls.normalize_url(url2)
 
     def fetch_new(
-        self, dest: str, url: HiddenText, rev_options: RevOptions, verbosity: int
+        self,
+        dest: str,
+        url: HiddenText,
+        rev_options: RevOptions,
+        verbosity: int,
     ) -> None:
-        """
-        Fetch a revision from a repository, in the case that this is the
+        """Fetch a revision from a repository, in the case that this is the
         first fetch from the repository.
 
         Args:
           dest: the directory to fetch the repository to.
           rev_options: a RevOptions object.
           verbosity: verbosity level.
+
         """
         raise NotImplementedError
 
@@ -478,11 +469,11 @@ class VersionControl:
         rev_options: RevOptions,
         verbosity: int = 0,
     ) -> None:
-        """
-        Switch the repo at ``dest`` to point to ``URL``.
+        """Switch the repo at ``dest`` to point to ``URL``.
 
         Args:
           rev_options: a RevOptions object.
+
         """
         raise NotImplementedError
 
@@ -493,28 +484,27 @@ class VersionControl:
         rev_options: RevOptions,
         verbosity: int = 0,
     ) -> None:
-        """
-        Update an already-existing repo to the given ``rev_options``.
+        """Update an already-existing repo to the given ``rev_options``.
 
         Args:
           rev_options: a RevOptions object.
+
         """
         raise NotImplementedError
 
     @classmethod
     def is_commit_id_equal(cls, dest: str, name: str | None) -> bool:
-        """
-        Return whether the id of the current commit equals the given name.
+        """Return whether the id of the current commit equals the given name.
 
         Args:
           dest: the repository directory.
           name: a string name.
+
         """
         raise NotImplementedError
 
     def obtain(self, dest: str, url: HiddenText, verbosity: int) -> None:
-        """
-        Install or update in editable mode the package represented by this
+        """Install or update in editable mode the package represented by this
         VersionControl object.
 
         :param dest: the repository directory in which to install or update.
@@ -607,8 +597,7 @@ class VersionControl:
             self.switch(dest, url, rev_options, verbosity=verbosity)
 
     def unpack(self, location: str, url: HiddenText, verbosity: int) -> None:
-        """
-        Clean up current location and download the url repository
+        """Clean up current location and download the url repository
         (and vcs infos) into location
 
         :param url: the repository URL starting with a vcs prefix.
@@ -620,8 +609,7 @@ class VersionControl:
 
     @classmethod
     def get_remote_url(cls, location: str) -> str:
-        """
-        Return the url used at location
+        """Return the url used at location
 
         Raises RemoteNotFoundError if the repository does not have a remote
         url configured.
@@ -630,9 +618,7 @@ class VersionControl:
 
     @classmethod
     def get_revision(cls, location: str) -> str:
-        """
-        Return the current commit id of the files at the given location.
-        """
+        """Return the current commit id of the files at the given location."""
         raise NotImplementedError
 
     @classmethod
@@ -649,12 +635,11 @@ class VersionControl:
         log_failed_cmd: bool = True,
         stdout_only: bool = False,
     ) -> str:
-        """
-        Run a VCS subcommand
+        """Run a VCS subcommand
         This is simply a wrapper around call_subprocess that adds the VCS
         command name, and checks that the VCS is available
         """
-        cmd = make_command(cls.name, cast(CommandArgs, cmd))
+        cmd = make_command(cls.name, cast("CommandArgs", cmd))
         if command_desc is None:
             command_desc = format_command_args(cmd)
         try:
@@ -678,7 +663,7 @@ class VersionControl:
             # In other words, the VCS executable isn't available
             raise BadCommand(
                 f"Cannot find command {cls.name!r} - do you have "
-                f"{cls.name!r} installed and in your PATH?"
+                f"{cls.name!r} installed and in your PATH?",
             )
         except PermissionError:
             # errno.EACCES = Permission denied
@@ -690,21 +675,18 @@ class VersionControl:
                 f"locally, globally (ask admin), or check your PATH. "
                 f"See possible solutions at "
                 f"https://cpip.pypa.io/en/latest/reference/cpip_freeze/"
-                f"#fixing-permission-denied."
+                f"#fixing-permission-denied.",
             )
 
     @classmethod
     def is_repository_directory(cls, path: str) -> bool:
-        """
-        Return whether a directory path is a repository directory.
-        """
+        """Return whether a directory path is a repository directory."""
         logger.debug("Checking in %s for %s (%s)...", path, cls.dirname, cls.name)
         return os.path.exists(os.path.join(path, cls.dirname))
 
     @classmethod
     def get_repository_root(cls, location: str) -> str | None:
-        """
-        Return the "root" (top-level) directory controlled by the vcs,
+        """Return the "root" (top-level) directory controlled by the vcs,
         or `None` if the directory is not in any.
 
         It is meant to be overridden to implement smarter detection

@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+import logging
 import mimetypes
 import os
 import tempfile
-import logging
 from typing import Protocol
 
 from cpip.core.errors import HashMismatch, InstallationError
@@ -36,7 +36,7 @@ class VCSUnpacker(Protocol):
 
 
 class File:
-    __slots__ = ("path", "content_type")
+    __slots__ = ("content_type", "path")
 
     def __init__(self, path: str, content_type: str | None = None) -> None:
         self.path = path
@@ -88,7 +88,8 @@ class DownloadManager:
         if cached:
             return File(cached)
         path, content_type = self.download(
-            link, tempfile.mkdtemp(prefix="cpip-unpack-")
+            link,
+            tempfile.mkdtemp(prefix="cpip-unpack-"),
         )
         if hashes:
             hashes.check_against_path(path)

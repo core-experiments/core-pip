@@ -10,7 +10,6 @@ from cpip.core.errors import InstallationError
 from cpip.platform.scheme import SCHEME_KEYS, Scheme
 from cpip.platform.virtualenv import running_under_virtualenv
 
-
 from .base import change_root, get_major_minor_version, is_osx_framework
 
 logger = logging.getLogger(__name__)
@@ -42,7 +41,9 @@ class UserInstallationInvalid(InstallationError):
 AVAILABLE_SCHEMES = set(sysconfig.get_scheme_names())
 
 PREFERRED_SCHEME_API: Callable[[str], str] | None = getattr(
-    sysconfig, "get_preferred_scheme", None
+    sysconfig,
+    "get_preferred_scheme",
+    None,
 )
 
 
@@ -114,7 +115,7 @@ def infer_user() -> str:
     if suffixed in AVAILABLE_SCHEMES:
         return suffixed
     if "posix_user" not in AVAILABLE_SCHEMES:  # User scheme unavailable.
-        raise UserInstallationInvalid()
+        raise UserInstallationInvalid
     return "posix_user"
 
 
@@ -149,8 +150,7 @@ def get_scheme(
     isolated: bool = False,
     prefix: str | None = None,
 ) -> Scheme:
-    """
-    Get the "scheme" corresponding to the input parameters.
+    """Get the "scheme" corresponding to the input parameters.
 
     :param dist_name: the name of the package to retrieve the scheme for, used
         in the headers scheme path
@@ -181,9 +181,9 @@ def get_scheme(
         scheme_name = "posix_prefix"
 
     if home is not None:
-        variables = {k: home for k in HOME_KEYS}
+        variables = dict.fromkeys(HOME_KEYS, home)
     elif prefix is not None:
-        variables = {k: prefix for k in HOME_KEYS}
+        variables = dict.fromkeys(HOME_KEYS, prefix)
     else:
         variables = {}
 

@@ -7,24 +7,25 @@ import itertools
 from pathlib import Path
 
 from benchmark_support import REAL_WORLD_CORPORA, make_wheel, reset_caches
-from pytest_codspeed import BenchmarkFixture
-from cpip.core.packaging import SpecifierSet, parse_requirement
-from cpip.core.wheel import read_wheel_metadata
-from cpip.install.unpacking import unzip_file
-from cpip.install.target import InstallTarget
-from cpip.install.uninstall import DistributionUninstaller
-from cpip.install.wheel_transaction import WheelInstaller
-from cpip.index.provider import CandidateProvider
-from cpip.resolution.req_file import parse_requirements
-from cpip.core.errors import BuildError
-from cpip.index.candidates import prepare_project_metadata
-from cpip.index.candidate_materialization import CandidateMaterializer
-from cpip.index.candidate_materialization import validate_build_requirements
-from cpip.index.candidates import InstallationCandidate
-from cpip.index.links import Link
-from cpip.resolution.resolver import Resolver
 from cpip.build.build_backend import ProjectBuilder
 from cpip.build.metadata import InstalledDistributionStore
+from cpip.core.errors import BuildError
+from cpip.core.packaging import SpecifierSet, parse_requirement
+from cpip.core.wheel import read_wheel_metadata
+from cpip.index.candidate_materialization import (
+    CandidateMaterializer,
+    validate_build_requirements,
+)
+from cpip.index.candidates import InstallationCandidate, prepare_project_metadata
+from cpip.index.links import Link
+from cpip.index.provider import CandidateProvider
+from cpip.install.target import InstallTarget
+from cpip.install.uninstall import DistributionUninstaller
+from cpip.install.unpacking import unzip_file
+from cpip.install.wheel_transaction import WheelInstaller
+from cpip.resolution.engine import ResolutionEngine
+from cpip.resolution.engine.input.files import parse_requirements
+from pytest_codspeed import BenchmarkFixture
 
 
 def test_hash_throughput(benchmark: BenchmarkFixture) -> None:
@@ -75,7 +76,8 @@ def test_metadata_scaling(benchmark: BenchmarkFixture, payload_wheel: Path) -> N
 
 
 def test_metadata_variation(
-    benchmark: BenchmarkFixture, metadata_variation_wheels: list[Path]
+    benchmark: BenchmarkFixture,
+    metadata_variation_wheels: list[Path],
 ) -> None:
     def read_all_metadata() -> int:
         reset_caches()
@@ -99,7 +101,7 @@ def test_metadata_cache_miss(benchmark: BenchmarkFixture, payload_wheel: Path) -
 
     def load_uncached() -> str:
         candidate = InstallationCandidate.from_link(
-            Link.from_path(payload_wheel, source_url=None)
+            Link.from_path(payload_wheel, source_url=None),
         )
         materializer = CandidateMaterializer(build_isolation=False)
         return materializer.metadata_loader(candidate, requirement).load().name
@@ -110,7 +112,7 @@ def test_metadata_cache_miss(benchmark: BenchmarkFixture, payload_wheel: Path) -
 def test_metadata_cache_hit(benchmark: BenchmarkFixture, payload_wheel: Path) -> None:
     requirement = parse_requirement("payload-pkg")
     candidate = InstallationCandidate.from_link(
-        Link.from_path(payload_wheel, source_url=None)
+        Link.from_path(payload_wheel, source_url=None),
     )
     materializer = CandidateMaterializer(build_isolation=False)
     materializer.metadata_loader(candidate, requirement).load()
@@ -120,7 +122,8 @@ def test_metadata_cache_hit(benchmark: BenchmarkFixture, payload_wheel: Path) ->
 
 
 def test_sdist_metadata_build_isolated(
-    benchmark: BenchmarkFixture, isolated_source_tree: Path
+    benchmark: BenchmarkFixture,
+    isolated_source_tree: Path,
 ) -> None:
     def prepare_metadata() -> str:
         return prepare_project_metadata(isolated_source_tree).version
@@ -129,7 +132,9 @@ def test_sdist_metadata_build_isolated(
 
 
 def test_editable_build(
-    benchmark: BenchmarkFixture, source_tree: Path, tmp_path: Path
+    benchmark: BenchmarkFixture,
+    source_tree: Path,
+    tmp_path: Path,
 ) -> None:
     wheel_directory = tmp_path / "editable-wheel"
     wheel_directory.mkdir()
@@ -141,7 +146,8 @@ def test_editable_build(
 
 
 def test_build_isolation_requirements_validation(
-    benchmark: BenchmarkFixture, tmp_path: Path
+    benchmark: BenchmarkFixture,
+    tmp_path: Path,
 ) -> None:
     project = tmp_path / "build-requirements"
     project.mkdir()
@@ -158,7 +164,8 @@ def test_build_isolation_requirements_validation(
 
 
 def test_sdist_metadata_build_failure(
-    benchmark: BenchmarkFixture, failing_source_tree: Path
+    benchmark: BenchmarkFixture,
+    failing_source_tree: Path,
 ) -> None:
     def format_failure() -> int:
         try:
@@ -171,26 +178,29 @@ def test_sdist_metadata_build_failure(
 
 
 def test_extras_marker_combinatorics(
-    benchmark: BenchmarkFixture, extras_marker_wheelhouse: Path
+    benchmark: BenchmarkFixture,
+    extras_marker_wheelhouse: Path,
 ) -> None:
     def resolve_extras() -> int:
         reset_caches()
         return len(
-            Resolver(
+            ResolutionEngine(
                 provider=CandidateProvider.from_options(
-                    find_links=[str(extras_marker_wheelhouse)], no_index=True
+                    find_links=[str(extras_marker_wheelhouse)],
+                    no_index=True,
                 ),
                 ignore_installed=True,
             )
             .resolve(["extras-root[all,dev]"])
-            .candidates
+            .candidates,
         )
 
     assert benchmark(resolve_extras) > 40
 
 
 def test_incremental_target_install(
-    benchmark: BenchmarkFixture, tmp_path: Path
+    benchmark: BenchmarkFixture,
+    tmp_path: Path,
 ) -> None:
     wheelhouse = tmp_path / "incremental-wheelhouse"
     wheelhouse.mkdir()
@@ -213,7 +223,8 @@ def test_incremental_target_install(
 
 
 def test_large_archive_installation(
-    benchmark: BenchmarkFixture, tmp_path: Path
+    benchmark: BenchmarkFixture,
+    tmp_path: Path,
 ) -> None:
     wheelhouse = tmp_path / "wheelhouse"
     wheelhouse.mkdir()
@@ -243,22 +254,24 @@ def test_marker_heavy_resolution(benchmark: BenchmarkFixture, tmp_path: Path) ->
             requires=list(requirements),
         )
     provider = CandidateProvider.from_options(
-        find_links=[str(wheelhouse)], no_index=True
+        find_links=[str(wheelhouse)],
+        no_index=True,
     )
 
     def resolve() -> int:
         reset_caches()
         return len(
-            Resolver(provider=provider, ignore_installed=True)
+            ResolutionEngine(provider=provider, ignore_installed=True)
             .resolve(["marker-provider-063"])
-            .candidates
+            .candidates,
         )
 
     assert benchmark(resolve) == 64
 
 
 def test_requirements_file_scaling(
-    benchmark: BenchmarkFixture, requirements_file: Path
+    benchmark: BenchmarkFixture,
+    requirements_file: Path,
 ) -> None:
     def parse_file() -> int:
         reset_caches()
@@ -312,13 +325,15 @@ def test_installed_state_scan(benchmark: BenchmarkFixture, tmp_path: Path) -> No
 
 
 def test_cold_and_warm_resolution_cache(
-    benchmark: BenchmarkFixture, graph_wheelhouse: Path
+    benchmark: BenchmarkFixture,
+    graph_wheelhouse: Path,
 ) -> None:
     def cold_resolution() -> int:
         reset_caches()
-        resolver = Resolver(
+        resolver = ResolutionEngine(
             provider=CandidateProvider.from_options(
-                find_links=[str(graph_wheelhouse)], no_index=True
+                find_links=[str(graph_wheelhouse)],
+                no_index=True,
             ),
             ignore_installed=True,
         )
@@ -328,11 +343,13 @@ def test_cold_and_warm_resolution_cache(
 
 
 def test_warm_resolution_cache(
-    benchmark: BenchmarkFixture, graph_wheelhouse: Path
+    benchmark: BenchmarkFixture,
+    graph_wheelhouse: Path,
 ) -> None:
-    resolver = Resolver(
+    resolver = ResolutionEngine(
         provider=CandidateProvider.from_options(
-            find_links=[str(graph_wheelhouse)], no_index=True
+            find_links=[str(graph_wheelhouse)],
+            no_index=True,
         ),
         ignore_installed=True,
     )

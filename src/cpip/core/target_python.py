@@ -29,7 +29,7 @@ def get_supported(
             tuple(platforms) if platforms is not None else None,
             impl,
             tuple(abis) if abis is not None else None,
-        )
+        ),
     )
 
 
@@ -63,7 +63,7 @@ def get_supported_internal(
                     interpreter=tag.interpreter.replace("-", "_"),
                     abi=tag.abi.replace("-", "_"),
                     platform=tag.platform.replace("-", "_"),
-                )
+                ),
             )
         return tuple(normalized)
     return tuple(supported)
@@ -71,12 +71,12 @@ def get_supported_internal(
 
 class TargetPython:
     __slots__ = (
-        "platforms",
-        "py_version_info",
         "abis",
-        "implementation",
         "given_py_version_info",
+        "implementation",
+        "platforms",
         "py_version",
+        "py_version_info",
         "valid_tags",
         "valid_tags_set",
     )

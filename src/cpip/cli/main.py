@@ -7,7 +7,6 @@ import sys
 
 from cpip.core.python import CURRENT_PYTHON_VERSION
 
-
 HELP_TEXT = """Usage:
   cpip <command> [options]
 
@@ -29,7 +28,9 @@ Commands:
 
 
 def _run_bootstrap_command(
-    argv: list[str], version: str | None, location: str | None
+    argv: list[str],
+    version: str | None,
+    location: str | None,
 ) -> int | None:
     if len(argv) == 2 and argv[0] == "help":
         from cpip.cli._help import COMMAND_HELP_TEXT
@@ -56,7 +57,7 @@ def _run_bootstrap_command(
         raise RuntimeError("cpip package location is unavailable")
     sys.stdout.write(
         f"cpip {version} from {os.path.realpath(location)} "
-        f"(python {CURRENT_PYTHON_VERSION})\n"
+        f"(python {CURRENT_PYTHON_VERSION})\n",
     )
     return 0
 
@@ -78,7 +79,10 @@ def main(
 
 
 def run(
-    args: list[str], *, require_virtualenv: bool = False, location: str | None = None
+    args: list[str],
+    *,
+    require_virtualenv: bool = False,
+    location: str | None = None,
 ) -> int:
     from cpip.cli._main_fallback import run as run_fallback
 

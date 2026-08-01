@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 
 
 class CommandSpec:
-    __slots__ = ("name", "module", "runner", "parser_factory", "visible")
+    __slots__ = ("module", "name", "parser_factory", "runner", "visible")
 
     def __init__(
         self,
@@ -63,10 +63,16 @@ COMMAND_SPECS = (
     CommandSpec("wheel", "cpip.cli.commands.wheel", "run_wheel", "create_parser"),
     CommandSpec("index", "cpip.cli.commands.index", "run_index", "create_parser"),
     CommandSpec(
-        "download", "cpip.cli.commands.download", "run_download", "create_parser"
+        "download",
+        "cpip.cli.commands.download",
+        "run_download",
+        "create_parser",
     ),
     CommandSpec(
-        "uninstall", "cpip.cli.commands.uninstall", "run_uninstall", "create_parser"
+        "uninstall",
+        "cpip.cli.commands.uninstall",
+        "run_uninstall",
+        "create_parser",
     ),
     CommandSpec("list", "cpip.cli.commands.list", "run_list", "create_parser"),
     CommandSpec("freeze", "cpip.cli.commands.freeze", "run_freeze", "create_parser"),

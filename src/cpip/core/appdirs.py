@@ -7,7 +7,7 @@ import sys
 def user_cache_dir(appname: str) -> str:
     if sys.platform == "win32":
         local = os.environ.get("LOCALAPPDATA") or os.path.expanduser(
-            "~\\AppData\\Local"
+            "~\\AppData\\Local",
         )
         return os.path.join(local, appname, "Cache")
     xdg_cache = os.environ.get("XDG_CACHE_HOME")
@@ -48,7 +48,7 @@ def user_config_dir(appname: str, roaming: bool = True) -> str:
     if sys.platform == "win32":
         base = "APPDATA" if roaming else "LOCALAPPDATA"
         root = os.environ.get(base) or os.path.expanduser(
-            "~\\AppData\\Roaming" if roaming else "~\\AppData\\Local"
+            "~\\AppData\\Roaming" if roaming else "~\\AppData\\Local",
         )
         return os.path.join(root, appname)
     if sys.platform == "darwin":

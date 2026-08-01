@@ -8,11 +8,10 @@ from bisect import bisect_left, bisect_right
 from collections.abc import Generator
 from contextlib import contextmanager
 from tempfile import NamedTemporaryFile
-from typing import Any
+from types import TracebackType
 from zipfile import BadZipFile, ZipFile
 
 from cpip.build.metadata import MetadataDistribution
-
 from cpip.network.exceptions import InvalidWheel, NetworkConnectionError
 from cpip.network.http import HttpResponse, NetworkSession
 from cpip.network.utils import HEADERS, raise_for_status, response_chunks
@@ -25,7 +24,9 @@ class HTTPRangeRequestUnsupported(Exception):
 
 
 def dist_from_wheel_url(
-    name: str, url: str, session: NetworkSession
+    name: str,
+    url: str,
+    session: NetworkSession,
 ) -> MetadataDistribution:
     """Return a distribution object from the given wheel URL.
 
@@ -52,7 +53,10 @@ class LazyZipOverHTTP:
     """
 
     def __init__(
-        self, url: str, session: NetworkSession, chunk_size: int = CONTENT_CHUNK_SIZE
+        self,
+        url: str,
+        session: NetworkSession,
+        chunk_size: int = CONTENT_CHUNK_SIZE,
     ) -> None:
         head = session.head(url, headers=HEADERS)
         raise_for_status(head)
@@ -144,8 +148,13 @@ class LazyZipOverHTTP:
         self.file_internal.__enter__()
         return self
 
-    def __exit__(self, *exc: Any) -> None:
-        self.file_internal.__exit__(*exc)
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> bool | None:
+        return self.file_internal.__exit__(exc_type, exc_value, traceback)
 
     @contextmanager
     def stay(self) -> Generator[None, None, None]:
@@ -180,7 +189,10 @@ class LazyZipOverHTTP:
                     break
 
     def stream_response(
-        self, start: int, end: int, base_headers: dict[str, str] = HEADERS
+        self,
+        start: int,
+        end: int,
+        base_headers: dict[str, str] = HEADERS,
     ) -> HttpResponse:
         """Return HTTP response to a range request from start to end."""
         headers = base_headers.copy()
@@ -188,11 +200,17 @@ class LazyZipOverHTTP:
         # TODO: Get range requests to be correctly cached
         headers["Cache-Control"] = "no-cache"
         return self.session_internal.get(
-            self.url_internal, headers=headers, stream=True
+            self.url_internal,
+            headers=headers,
+            stream=True,
         )
 
     def merge(
-        self, start: int, end: int, left: int, right: int
+        self,
+        start: int,
+        end: int,
+        left: int,
+        right: int,
     ) -> Generator[tuple[int, int], None, None]:
         """Return a generator of intervals to be fetched.
 
@@ -201,6 +219,7 @@ class LazyZipOverHTTP:
             end (int): End of needed interval
             left (int): Index of first overlapping downloaded data
             right (int): Index after last overlapping downloaded data
+
         """
         lslice, rslice = self.left_internal[left:right], self.right_internal[left:right]
         i = start = min([start] + lslice[:1])

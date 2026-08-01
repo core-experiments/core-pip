@@ -59,7 +59,8 @@ class ConfigurationStore:
             if os.path.isfile(os.fspath(location.path)):
                 try:
                     self.parser_internal.read(
-                        os.fspath(location.path), encoding="utf-8"
+                        os.fspath(location.path),
+                        encoding="utf-8",
                     )
                 except configparser.Error as exc:
                     raise ConfigurationError(str(exc)) from exc
@@ -122,7 +123,7 @@ class ConfigurationStore:
                             location.kind,
                             f"{section}.{option.replace('_', '-')}",
                             value,
-                        )
+                        ),
                     )
         env_vars = sorted(
             (key, value)
@@ -162,7 +163,7 @@ def config_locations() -> list[ConfigLocation]:
         # site-level cpip.conf should apply.
         prefix = os.fspath(executable_prefix)
     purelib = Path(
-        sysconfig.get_path("purelib", vars={"base": prefix, "platbase": prefix})
+        sysconfig.get_path("purelib", vars={"base": prefix, "platbase": prefix}),
     )
     site_path = Path(prefix) / CONFIG_BASENAME
     for parent in purelib.parents:
@@ -180,7 +181,7 @@ def split_key(key: str) -> tuple[str, str]:
     if "." not in key:
         raise ConfigurationError(
             "Key does not contain dot separated section and key. "
-            "Perhaps you wanted to use 'global.index-url' instead?"
+            "Perhaps you wanted to use 'global.index-url' instead?",
         )
     section, option = key.split(".", 1)
     if not section or not option:

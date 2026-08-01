@@ -8,7 +8,7 @@ from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any, BinaryIO, NoReturn
 
-from cpip.core.errors import HashMissing, HashMismatch, InstallationError
+from cpip.core.errors import HashMismatch, HashMissing, InstallationError
 
 Hash = Any
 
@@ -71,7 +71,7 @@ class Hashes:
                     if digest in self.allowed_internal.get(algorithm, [])
                 ]
                 for algorithm, digests in other.allowed_internal.items()
-            }
+            },
         )
 
     @property
@@ -135,8 +135,8 @@ class Hashes:
                     ":".join((algorithm, digest))
                     for algorithm, digest_list in self.allowed_internal.items()
                     for digest in digest_list
-                )
-            )
+                ),
+            ),
         )
 
 

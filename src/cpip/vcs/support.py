@@ -8,7 +8,7 @@ from cpip.core.urls import split_auth_from_netloc
 
 
 class HiddenText:
-    __slots__ = ("secret", "redacted")
+    __slots__ = ("redacted", "secret")
 
     def __init__(self, secret: str, redacted: str) -> None:
         self.secret = secret
@@ -45,7 +45,7 @@ def hide_url(url: str) -> HiddenText:
     else:
         redacted_netloc = f"{urllib.parse.quote(user)}:****@{netloc}"
     redacted = urllib.parse.urlunsplit(
-        (parsed.scheme, redacted_netloc, parsed.path, parsed.query, parsed.fragment)
+        (parsed.scheme, redacted_netloc, parsed.path, parsed.query, parsed.fragment),
     )
     return HiddenText(url, redacted)
 
@@ -68,5 +68,5 @@ def ask_path_exists(message: str, options: Iterable[str]) -> str:
         if response in options:
             return response
         print(
-            f"Your response ({response!r}) was not one of the expected responses: {', '.join(options)}"
+            f"Your response ({response!r}) was not one of the expected responses: {', '.join(options)}",
         )

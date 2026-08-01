@@ -2,10 +2,9 @@ from __future__ import annotations
 
 import logging
 import os
-
-from cpip.build.pep517_hooks import HookMissing
 from typing import Any
 
+from cpip.build.pep517_hooks import HookMissing
 from cpip.core.subprocess import call_subprocess
 
 logger = logging.getLogger(__name__)

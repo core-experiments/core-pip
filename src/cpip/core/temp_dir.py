@@ -61,7 +61,9 @@ def remove_temp_directory(path: str | os.PathLike[str]) -> None:
 
 
 tempdir_kinds = enum(
-    BUILD_ENV="build-env", EPHEM_WHEEL_CACHE="ephem-wheel-cache", REQ_BUILD="req-build"
+    BUILD_ENV="build-env",
+    EPHEM_WHEEL_CACHE="ephem-wheel-cache",
+    REQ_BUILD="req-build",
 )
 tempdir_manager: ExitStack | None = None
 
@@ -120,7 +122,7 @@ class TempDirectory:
         return self
 
     def __exit__(self, exc: Any, value: Any, tb: Any) -> None:
-        if self.delete is not None and self.delete or self.delete is None:
+        if (self.delete is not None and self.delete) or self.delete is None:
             self.cleanup()
 
     def create_internal(self, kind: str) -> str:
@@ -135,13 +137,17 @@ class TempDirectory:
         errors: list[BaseException] = []
 
         def onerror(
-            func: Callable[..., Any], path: Path, exc_val: BaseException
+            func: Callable[..., Any],
+            path: Path,
+            exc_val: BaseException,
         ) -> None:
             formatted = "".join(
-                traceback.format_exception_only(type(exc_val), exc_val)
+                traceback.format_exception_only(type(exc_val), exc_val),
             ).rstrip()
             logger.debug(
-                "Failed to remove temporary file '%s' due to %s.", path, formatted
+                "Failed to remove temporary file '%s' due to %s.",
+                path,
+                formatted,
             )
             errors.append(exc_val)
 
@@ -170,14 +176,16 @@ class AdjacentTempDirectory(TempDirectory):
     def generate_names(cls, name: str) -> Generator[str, None, None]:
         for i in range(1, len(name)):
             for candidate in itertools.combinations_with_replacement(
-                cls.LEADING_CHARS, i - 1
+                cls.LEADING_CHARS,
+                i - 1,
             ):
                 new_name = "~" + "".join(candidate) + name[i:]
                 if new_name != name:
                     yield new_name
         for i in range(len(cls.LEADING_CHARS)):
             for candidate in itertools.combinations_with_replacement(
-                cls.LEADING_CHARS, i
+                cls.LEADING_CHARS,
+                i,
             ):
                 new_name = "~" + "".join(candidate) + name
                 if new_name != name:

@@ -4,7 +4,6 @@ import sys
 from pathlib import Path
 
 import pytest
-
 from cpip_test_support import (
     CpipTestEnvironment,
     ResolverVariant,
@@ -17,10 +16,7 @@ from cpip_test_support.wheel import make_wheel
 
 
 def test_no_upgrade_unless_requested(script: CpipTestEnvironment) -> None:
-    """
-    No upgrade if not specifically requested.
-
-    """
+    """No upgrade if not specifically requested."""
     script.cpip_install_local("simplewheel==1.0")
     result = script.cpip_install_local("simplewheel")
     assert not result.files_created, (
@@ -29,12 +25,12 @@ def test_no_upgrade_unless_requested(script: CpipTestEnvironment) -> None:
 
 
 def test_invalid_upgrade_strategy_causes_error(script: CpipTestEnvironment) -> None:
-    """
-    It errors out when the upgrade-strategy is an invalid/unrecognised one
-
-    """
+    """It errors out when the upgrade-strategy is an invalid/unrecognised one"""
     result = script.cpip_install_local(
-        "--upgrade", "--upgrade-strategy=bazinga", "simple", expect_error=True
+        "--upgrade",
+        "--upgrade-strategy=bazinga",
+        "simple",
+        expect_error=True,
     )
 
     assert result.returncode
@@ -42,15 +38,15 @@ def test_invalid_upgrade_strategy_causes_error(script: CpipTestEnvironment) -> N
 
 
 def test_only_if_needed_does_not_upgrade_deps_when_satisfied(
-    script: CpipTestEnvironment, resolver_variant: ResolverVariant
+    script: CpipTestEnvironment,
+    resolver_variant: ResolverVariant,
 ) -> None:
-    """
-    It doesn't upgrade a dependency if it already satisfies the requirements.
-
-    """
+    """It doesn't upgrade a dependency if it already satisfies the requirements."""
     script.cpip_install_local("simple==2.0")
     result = script.cpip_install_local(
-        "--upgrade", "--upgrade-strategy=only-if-needed", "require_simple"
+        "--upgrade",
+        "--upgrade-strategy=only-if-needed",
+        "require_simple",
     )
 
     assert (
@@ -71,13 +67,12 @@ def test_only_if_needed_does_not_upgrade_deps_when_satisfied(
 def test_only_if_needed_does_upgrade_deps_when_no_longer_satisfied(
     script: CpipTestEnvironment,
 ) -> None:
-    """
-    It does upgrade a dependency if it no longer satisfies the requirements.
-
-    """
+    """It does upgrade a dependency if it no longer satisfies the requirements."""
     script.cpip_install_local("simple==1.0")
     result = script.cpip_install_local(
-        "--upgrade", "--upgrade-strategy=only-if-needed", "require_simple"
+        "--upgrade",
+        "--upgrade-strategy=only-if-needed",
+        "require_simple",
     )
 
     assert (
@@ -92,13 +87,12 @@ def test_only_if_needed_does_upgrade_deps_when_no_longer_satisfied(
 def test_eager_does_upgrade_dependencies_when_currently_satisfied(
     script: CpipTestEnvironment,
 ) -> None:
-    """
-    It does upgrade a dependency even if it already satisfies the requirements.
-
-    """
+    """It does upgrade a dependency even if it already satisfies the requirements."""
     script.cpip_install_local("simple==2.0")
     result = script.cpip_install_local(
-        "--upgrade", "--upgrade-strategy=eager", "require_simple"
+        "--upgrade",
+        "--upgrade-strategy=eager",
+        "require_simple",
     )
 
     assert (
@@ -112,13 +106,12 @@ def test_eager_does_upgrade_dependencies_when_currently_satisfied(
 def test_eager_does_upgrade_dependencies_when_no_longer_satisfied(
     script: CpipTestEnvironment,
 ) -> None:
-    """
-    It does upgrade a dependency if it no longer satisfies the requirements.
-
-    """
+    """It does upgrade a dependency if it no longer satisfies the requirements."""
     script.cpip_install_local("simple==1.0")
     result = script.cpip_install_local(
-        "--upgrade", "--upgrade-strategy=eager", "require_simple"
+        "--upgrade",
+        "--upgrade-strategy=eager",
+        "require_simple",
     )
 
     assert (
@@ -134,10 +127,7 @@ def test_eager_does_upgrade_dependencies_when_no_longer_satisfied(
 
 
 def test_upgrade_to_specific_version(script: CpipTestEnvironment) -> None:
-    """
-    It does upgrade to specific version requested.
-
-    """
+    """It does upgrade to specific version requested."""
     script.cpip_install_local("simplewheel==1.0")
     result = script.cpip_install_local("simplewheel==2.0")
     assert result.files_created, "cpip install with specific version did not upgrade"
@@ -146,10 +136,7 @@ def test_upgrade_to_specific_version(script: CpipTestEnvironment) -> None:
 
 
 def test_upgrade_if_requested(script: CpipTestEnvironment) -> None:
-    """
-    And it does upgrade if requested.
-
-    """
+    """And it does upgrade if requested."""
     script.cpip_install_local("simplewheel==1.0")
     result = script.cpip_install_local("--upgrade", "simplewheel")
     assert result.files_created, "cpip install --upgrade did not upgrade"
@@ -157,10 +144,11 @@ def test_upgrade_if_requested(script: CpipTestEnvironment) -> None:
 
 
 def test_upgrade_with_newest_already_installed(
-    script: CpipTestEnvironment, data: TestData, resolver_variant: ResolverVariant
+    script: CpipTestEnvironment,
+    data: TestData,
+    resolver_variant: ResolverVariant,
 ) -> None:
-    """
-    If the newest version of a package is already installed, the package should
+    """If the newest version of a package is already installed, the package should
     not be reinstalled and the user should be informed.
     """
     script.cpip(
@@ -189,8 +177,7 @@ def test_upgrade_with_newest_already_installed(
 
 
 def test_upgrade_force_reinstall_newest(script: CpipTestEnvironment) -> None:
-    """
-    Force reinstallation of a package even if it is already at its newest
+    """Force reinstallation of a package even if it is already at its newest
     version if --force-reinstall is supplied.
     """
     result = script.cpip_install_local("simplewheel")
@@ -202,10 +189,7 @@ def test_upgrade_force_reinstall_newest(script: CpipTestEnvironment) -> None:
 
 
 def test_uninstall_before_upgrade(script: CpipTestEnvironment) -> None:
-    """
-    Automatic uninstall-before-upgrade.
-
-    """
+    """Automatic uninstall-before-upgrade."""
     result = script.cpip_install_local("simplewheel==1.0")
     result.did_create(script.site_packages / "simplewheel")
     result2 = script.cpip_install_local("simplewheel==2.0")
@@ -216,10 +200,7 @@ def test_uninstall_before_upgrade(script: CpipTestEnvironment) -> None:
 
 @pytest.mark.network
 def test_uninstall_before_upgrade_from_url(script: CpipTestEnvironment) -> None:
-    """
-    Automatic uninstall-before-upgrade from URL.
-
-    """
+    """Automatic uninstall-before-upgrade from URL."""
     result = script.cpip("install", "INITools==0.2")
     result.did_create(script.site_packages / "initools")
     result2 = script.cpip(
@@ -233,8 +214,7 @@ def test_uninstall_before_upgrade_from_url(script: CpipTestEnvironment) -> None:
 
 @pytest.mark.network
 def test_upgrade_to_same_version_from_url(script: CpipTestEnvironment) -> None:
-    """
-    When installing from a URL the same version that is already installed, no
+    """When installing from a URL the same version that is already installed, no
     need to uninstall and reinstall if --upgrade is not specified.
 
     """
@@ -252,10 +232,7 @@ def test_upgrade_to_same_version_from_url(script: CpipTestEnvironment) -> None:
 
 
 def test_upgrade_from_reqs_file(script: CpipTestEnvironment) -> None:
-    """
-    Upgrade from a requirements file.
-
-    """
+    """Upgrade from a requirements file."""
     req_file = script.temporary_multiline_file(
         "test-req.txt",
         """\
@@ -283,8 +260,7 @@ def test_upgrade_from_reqs_file(script: CpipTestEnvironment) -> None:
 
 
 def test_uninstall_rollback(script: CpipTestEnvironment, data: TestData) -> None:
-    """
-    Test uninstall-rollback (using test package with a setup.py
+    """Test uninstall-rollback (using test package with a setup.py
     crafted to fail on install).
 
     """
@@ -319,10 +295,10 @@ def test_uninstall_rollback(script: CpipTestEnvironment, data: TestData) -> None
 
 
 def test_should_not_install_always_from_cache(
-    script: CpipTestEnvironment, data: TestData
+    script: CpipTestEnvironment,
+    data: TestData,
 ) -> None:
-    """
-    If there is an old cached package, cpip should download the newer version
+    """If there is an old cached package, cpip should download the newer version
     Related to issue #175
     """
     script.cpip_install_local("simplewheel==2.0")
@@ -333,9 +309,7 @@ def test_should_not_install_always_from_cache(
 
 
 def test_install_with_ignoreinstalled_requested(script: CpipTestEnvironment) -> None:
-    """
-    Test old conflicting package is completely ignored
-    """
+    """Test old conflicting package is completely ignored"""
     script.cpip_install_local("simplewheel==1.0")
     result = script.cpip_install_local("-I", "simplewheel==2.0")
     assert result.files_created, "cpip install -I did not install"
@@ -346,14 +320,15 @@ def test_install_with_ignoreinstalled_requested(script: CpipTestEnvironment) -> 
 
 @pytest.mark.network
 def test_upgrade_vcs_req_with_no_dists_found(
-    script: CpipTestEnvironment, tmpdir: Path
+    script: CpipTestEnvironment,
+    tmpdir: Path,
 ) -> None:
     """It can upgrade a VCS requirement that has no distributions otherwise."""
     req = "{checkout}#egg=pip-test-package".format(
         checkout=local_checkout(
             "git+https://github.com/pypa/pip-test-package.git",
             tmpdir,
-        )
+        ),
     )
     script.cpip("install", req)
     result = script.cpip("install", "-U", req)
@@ -382,11 +357,13 @@ def test_upgrade_vcs_req_with_dist_found(script: CpipTestEnvironment) -> None:
         itertools.product(
             ["foo.bar", "foo_bar", "foo-bar"],
             ["foo.bar", "foo_bar", "foo-bar"],
-        )
+        ),
     ),
 )
 def test_install_find_existing_package_canonicalize(
-    script: CpipTestEnvironment, req1: str, req2: str
+    script: CpipTestEnvironment,
+    req1: str,
+    req2: str,
 ) -> None:
     """Ensure an already-installed dist is found no matter how the dist name
     was normalized on installation. (pypa/cpip#8645)
@@ -423,7 +400,11 @@ def test_install_find_existing_package_canonicalize(
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows-only test")
 def test_modifying_cpip_presents_error(script: CpipTestEnvironment) -> None:
     result = script.cpip(
-        "install", "cpip", "--force-reinstall", use_module=False, expect_error=True
+        "install",
+        "cpip",
+        "--force-reinstall",
+        use_module=False,
+        expect_error=True,
     )
 
     assert "python.exe" in result.stderr or "python.EXE" in result.stderr, str(result)

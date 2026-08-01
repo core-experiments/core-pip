@@ -202,7 +202,10 @@ def make_backtracking_graph(wheelhouse: Path) -> None:
 
 
 def make_wrong_package_graph(
-    wheelhouse: Path, prefix: str, *, versions: int = 64
+    wheelhouse: Path,
+    prefix: str,
+    *,
+    versions: int = 64,
 ) -> None:
     """Build a uv-style wrong-package/backtracking workload.
 
@@ -280,7 +283,7 @@ def requirement_lines(count: int = 300) -> list[str]:
         elif index % 5 == 3:
             lines.append(
                 f"Package.{index} @ "
-                f"https://example.invalid/wheels/package_{index}-1.0-py3-none-any.whl"
+                f"https://example.invalid/wheels/package_{index}-1.0-py3-none-any.whl",
             )
         else:
             lines.append(f"package-{index}!=1.0,!=1.1,>=0.9,<9.9")
@@ -331,7 +334,7 @@ def simple_index_html(count: int = 400) -> str:
                 f'#sha256={SHA256_PLACEHOLDER}" '
                 'data-requires-python="&gt;=3.9" '
                 f'data-core-metadata="sha256={METADATA_PLACEHOLDER}">'
-                f"{filename}</a><br/>"
+                f"{filename}</a><br/>",
             )
     body = "\n".join(rows)
     return (
@@ -353,10 +356,10 @@ def simple_index_json(count: int = 400) -> str:
                 "requires-python": ">=3.9",
                 "yanked": index % 50 == 0,
                 "core-metadata": {"sha256": METADATA_PLACEHOLDER},
-            }
+            },
         )
     return json.dumps(
-        {"meta": {"api-version": "1.1"}, "name": "package", "files": files}
+        {"meta": {"api-version": "1.1"}, "name": "package", "files": files},
     )
 
 

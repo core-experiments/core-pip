@@ -20,7 +20,7 @@ PackageSet = dict[str, "PackageDetails"]
 
 
 class PackageDetails:
-    __slots__ = ("version", "dependencies", "requested_extras")
+    __slots__ = ("dependencies", "requested_extras", "version")
 
     def __init__(
         self,
@@ -38,7 +38,7 @@ class PackageDetails:
         version: Version,
         dependencies: list[Requirement],
         requested_extras: frozenset[str] = frozenset(),
-    ) -> "PackageDetails":
+    ) -> PackageDetails:
         return cls(version, tuple(dependencies), requested_extras)
 
 
@@ -80,7 +80,7 @@ def check_package_set(
                 continue
             if not requirement.is_satisfied_by(dependency.version):
                 conflicting.setdefault(name, []).append(
-                    (canonical, str(dependency.version), requirement)
+                    (canonical, str(dependency.version), requirement),
                 )
     return missing, conflicting
 

@@ -3,30 +3,33 @@ from __future__ import annotations
 import logging
 import os
 import sys
-
+from collections.abc import Iterable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Iterable, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
+from cpip.core.direct_url import ArchiveInfo, DirInfo
 from cpip.core.errors import (
     DiagnosticCpipError,
     InstallationError,
 )
-from cpip.core.direct_url import ArchiveInfo, DirInfo
 from cpip.core.hashes import Hashes
-from cpip.index.links import Link
 from cpip.core.packaging import (
     Requirement as ParsedRequirement,
+)
+from cpip.core.packaging import (
     SpecifierSet,
     Version,
     canonicalize_name,
     marker_applies,
     parse_requirement,
 )
-from cpip.resolution.requirements.backend import ConfiguredBuildBackend
-from cpip.resolution.requirements.paths import looks_like_path
+from cpip.index.links import Link
+from cpip.resolution.engine.input.paths import looks_like_path
 
 if TYPE_CHECKING:
     import email.message
+
+    from cpip.resolution.engine.input.backend import ConfiguredBuildBackend
 
 
 def file_hashes(path: str | Path) -> dict[str, str]:
@@ -76,7 +79,7 @@ class VcsInfo:
 
 
 class DownloadInfo:
-    __slots__ = ("url", "archive_info", "dir_info", "vcs_info")
+    __slots__ = ("archive_info", "dir_info", "url", "vcs_info")
 
     def __init__(
         self,
@@ -104,7 +107,8 @@ class NoOpBuildEnvironment_internal:
         del args, kwargs
 
     def check_requirements(
-        self, requirements: Iterable[str]
+        self,
+        requirements: Iterable[str],
     ) -> tuple[set[str], set[str]]:
         del requirements
         return set(), set()
@@ -112,37 +116,37 @@ class NoOpBuildEnvironment_internal:
 
 class InstallRequirement:
     __slots__ = (
-        "req",
-        "comes_from",
-        "link",
-        "marker_internal",
-        "editable",
-        "isolated",
-        "hash_options",
-        "constraint",
-        "config_settings",
-        "user_supplied",
-        "permit_editable_wheels",
-        "original_link",
-        "satisfied_by",
-        "extras_override",
-        "source_dir",
-        "local_file_path",
-        "download_info",
-        "is_wheel_from_cache",
-        "cached_wheel_source_link",
-        "metadata_internal",
-        "distribution_internal",
         "archive_source_internal",
-        "needs_more_preparation",
         "build_env",
-        "pyproject_requires",
-        "requirements_to_check",
-        "metadata_directory",
-        "pyproject_data",
-        "pep517_backend",
-        "should_reinstall",
+        "cached_wheel_source_link",
+        "comes_from",
+        "config_settings",
+        "constraint",
+        "distribution_internal",
+        "download_info",
+        "editable",
+        "extras_override",
+        "hash_options",
         "install_succeeded",
+        "is_wheel_from_cache",
+        "isolated",
+        "link",
+        "local_file_path",
+        "marker_internal",
+        "metadata_directory",
+        "metadata_internal",
+        "needs_more_preparation",
+        "original_link",
+        "pep517_backend",
+        "permit_editable_wheels",
+        "pyproject_data",
+        "pyproject_requires",
+        "req",
+        "requirements_to_check",
+        "satisfied_by",
+        "should_reinstall",
+        "source_dir",
+        "user_supplied",
     )
 
     def __init__(
@@ -330,11 +334,11 @@ class InstallRequirement:
         if self.archive_source_internal is not None:
             return
         if os.path.isfile(
-            os.path.join(self.source_dir, "pyproject.toml")
+            os.path.join(self.source_dir, "pyproject.toml"),
         ) or os.path.isfile(os.path.join(self.source_dir, "setup.py")):
             raise InstallationError(
                 f"cpip can't proceed with requirement {self!r} because its source "
-                f"directory already contains an installable project"
+                f"directory already contains an installable project",
             )
 
     def set_dist(self, distribution: MetadataProvider) -> None:
@@ -428,12 +432,12 @@ class InstallRequirement:
                     # imported by many legacy setup.py files.
                     "requires": ["setuptools>=40.8.0,<82"],
                     "build-backend": "setuptools.build_meta:__legacy__",
-                }
+                },
             }
         else:
             raise InstallationError(
                 f"{self} does not appear to be a Python project: neither "
-                "'setup.py' nor 'pyproject.toml' found."
+                "'setup.py' nor 'pyproject.toml' found.",
             )
         self.pyproject_data = data
         build_system = data.get("build-system")
@@ -453,7 +457,7 @@ class InstallRequirement:
                     error="build requirements must be strings",
                 )
             if looks_like_path(item) or item.startswith(
-                ("git+", "hg+", "svn+", "bzr+")
+                ("git+", "hg+", "svn+", "bzr+"),
             ):
                 raise InvalidPyProjectBuildRequires(
                     package=package,
@@ -499,6 +503,8 @@ class InstallRequirement:
         return data
 
     def configure_backend(self, python_executable: str | Path) -> None:
+        from cpip.resolution.engine.input.backend import ConfiguredBuildBackend
+
         if self.source_dir is None:
             raise InstallationError("Install requirement has no source directory")
         data = self.pyproject_data or self.load_pyproject_toml()
@@ -527,7 +533,7 @@ class InstallRequirement:
         """Validate that editable preparation has a backend to call."""
         if self.editable and self.pep517_backend is None:
             raise InstallationError(
-                f"Project {self} has no configured build backend for editable installation"
+                f"Project {self} has no configured build backend for editable installation",
             )
 
     def prepare_metadata(self) -> None:
@@ -602,12 +608,3 @@ class InstallRequirement:
     @property
     def pyproject_toml_path(self) -> Path:
         return self.unpacked_source_directory / "pyproject.toml"
-
-
-def __getattr__(name: str):
-    """Load parser entry points only when a caller requests them."""
-    if name in {"install_req_from_editable", "install_req_from_line", "parse_editable"}:
-        from cpip.resolution.requirements import parsing
-
-        return getattr(parsing, name)
-    raise AttributeError(name)

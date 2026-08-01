@@ -23,7 +23,8 @@ def warn_about_install_conflicts(changed_names: set[str]) -> None:
         dependencies_by_name[dist.canonical_name] = dependencies
         for requirement in dependencies:
             dependents_by_name.setdefault(
-                canonicalize_name(requirement.name), set()
+                canonicalize_name(requirement.name),
+                set(),
             ).add(dist.canonical_name)
     package_set = {
         dist.canonical_name: PackageDetails.from_dependencies(

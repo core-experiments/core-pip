@@ -8,7 +8,9 @@ import re
 from collections.abc import Iterable
 from tempfile import TemporaryDirectory
 
+from cpip.build.cache import WheelCache
 from cpip.build.metadata import MetadataDistribution
+from cpip.build.wheels import build_wheel_pep517
 from cpip.core.errors import InvalidWheelFilename, UnsupportedWheel
 from cpip.core.filesystem import ensure_dir
 from cpip.core.hashes import hash_file
@@ -18,13 +20,10 @@ from cpip.core.packaging import (
     canonicalize_name,
     canonicalize_version,
 )
+from cpip.core.urls import path_to_url
 from cpip.core.wheel import Wheel
 from cpip.index.links import Link
 from cpip.resolution.req_install import InstallRequirement
-
-from cpip.build.wheels import build_wheel_pep517
-from cpip.build.cache import WheelCache
-from cpip.core.urls import path_to_url
 from cpip.vcs.versioncontrol import vcs
 
 logger = logging.getLogger(__name__)
@@ -38,8 +37,7 @@ BuildResult = tuple[list[InstallRequirement], list[InstallRequirement]]
 def should_cache(
     req: InstallRequirement,
 ) -> bool:
-    """
-    Return whether a built InstallRequirement can be stored in the persistent
+    """Return whether a built InstallRequirement can be stored in the persistent
     wheel cache, assuming the wheel cache is available.
     """
     if req.editable or not req.source_dir:
@@ -94,7 +92,7 @@ def verify_one(req: InstallRequirement, wheel_path: str) -> None:
         raise UnsupportedWheel(msg)
     if metadata_version >= Version("1.2") and not isinstance(dist.version, Version):
         raise UnsupportedWheel(
-            f"Metadata 1.2 mandates PEP 440 version, but {dist_verstr!r} is not"
+            f"Metadata 1.2 mandates PEP 440 version, but {dist_verstr!r} is not",
         )
 
 

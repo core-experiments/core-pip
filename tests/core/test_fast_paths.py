@@ -7,16 +7,16 @@ import zipfile
 from pathlib import Path
 
 import pytest
-
-from cpip.cli.commands.fast_install import is_safe_member, run as run_fast_install
-from cpip.resolution.fast_local_wheelhouse import (
-    LocalWheelVersion,
-    build_catalog_indexes,
-    quote_path,
+from cpip.cli.commands.fast_install import is_safe_member
+from cpip.cli.commands.fast_install import run as run_fast_install
+from cpip.resolution.engine import ResolutionEngine
+from cpip.resolution.engine.sources.wheelhouse.catalog import build_catalog_indexes
+from cpip.resolution.engine.sources.wheelhouse.metadata import (
     parse_requirement,
-    resolve,
+    quote_path,
+    read_wheel_metadata,
 )
-from cpip.resolution.fast_wheelhouse.metadata import read_wheel_metadata
+from cpip.resolution.engine.sources.wheelhouse.models import LocalWheelVersion
 
 
 def test_local_wheel_version_caches_comparison_key() -> None:
@@ -30,7 +30,7 @@ def test_local_wheel_version_caches_comparison_key() -> None:
 
 def test_catalog_indexes_reuse_the_same_records_snapshot() -> None:
     records = {
-        "demo": [("/tmp/demo-1.0-py3-none-any.whl", LocalWheelVersion((1,), "1.0"))]
+        "demo": [("/tmp/demo-1.0-py3-none-any.whl", LocalWheelVersion((1,), "1.0"))],
     }
 
     first = build_catalog_indexes(records)
@@ -115,7 +115,7 @@ def test_local_resolution_narrows_range_domain(tmp_path: Path) -> None:
             version=version,
         )
 
-    plan = resolve(
+    plan = ResolutionEngine.resolve_wheelhouse(
         [str(wheelhouse)],
         ["demo>=1.0,<2.0"],
         cache_dir=str(tmp_path / "cache"),
@@ -133,14 +133,22 @@ def test_local_resolution_catalog_cache_invalidates_on_wheel_changes(
     cache = tmp_path / "cache"
     write_wheel(wheelhouse / "demo-1.0-py3-none-any.whl", purelib=True)
 
-    first = resolve([str(wheelhouse)], ["demo"], cache_dir=str(cache))
+    first = ResolutionEngine.resolve_wheelhouse(
+        [str(wheelhouse)],
+        ["demo"],
+        cache_dir=str(cache),
+    )
 
     assert first is not None
     assert [str(candidate.version) for candidate in first.candidates] == ["1.0"]
     assert (cache / "fast-wheelhouse-catalog-v1.marshal").is_file()
 
     write_wheel(wheelhouse / "demo-2.0-py3-none-any.whl", purelib=True, version="2.0")
-    second = resolve([str(wheelhouse)], ["demo"], cache_dir=str(cache))
+    second = ResolutionEngine.resolve_wheelhouse(
+        [str(wheelhouse)],
+        ["demo"],
+        cache_dir=str(cache),
+    )
 
     assert second is not None
     assert [str(candidate.version) for candidate in second.candidates] == ["2.0"]
@@ -156,18 +164,26 @@ def test_local_resolution_candidate_cache_invalidates_on_wheel_rewrite(
     write_wheel(path, purelib=True)
     write_wheel(wheelhouse / "shared-1.0-py3-none-any.whl", purelib=True)
 
-    first = resolve([str(wheelhouse)], ["demo"], cache_dir=str(cache))
+    first = ResolutionEngine.resolve_wheelhouse(
+        [str(wheelhouse)],
+        ["demo"],
+        cache_dir=str(cache),
+    )
     assert first is not None
     assert first.candidates[0].dependencies == ()
 
     previous = path.stat()
     write_wheel(path, purelib=True, requires_dist=("shared==1.0",))
     os.utime(path, ns=(previous.st_atime_ns, previous.st_mtime_ns + 1_000_000))
-    second = resolve([str(wheelhouse)], ["demo"], cache_dir=str(cache))
+    second = ResolutionEngine.resolve_wheelhouse(
+        [str(wheelhouse)],
+        ["demo"],
+        cache_dir=str(cache),
+    )
 
     assert second is not None
     assert [dependency.name for dependency in second.candidates[0].dependencies] == [
-        "shared"
+        "shared",
     ]
 
 
@@ -178,10 +194,21 @@ def test_local_resolution_recovers_from_corrupt_catalog_cache(
     wheelhouse.mkdir()
     cache = tmp_path / "cache"
     write_wheel(wheelhouse / "demo-1.0-py3-none-any.whl", purelib=True)
-    assert resolve([str(wheelhouse)], ["demo"], cache_dir=str(cache)) is not None
+    assert (
+        ResolutionEngine.resolve_wheelhouse(
+            [str(wheelhouse)],
+            ["demo"],
+            cache_dir=str(cache),
+        )
+        is not None
+    )
 
     (cache / "fast-wheelhouse-catalog-v1.marshal").write_bytes(b"invalid")
-    recovered = resolve([str(wheelhouse)], ["demo"], cache_dir=str(cache))
+    recovered = ResolutionEngine.resolve_wheelhouse(
+        [str(wheelhouse)],
+        ["demo"],
+        cache_dir=str(cache),
+    )
 
     assert recovered is not None
     assert [str(candidate.version) for candidate in recovered.candidates] == ["1.0"]
@@ -227,7 +254,7 @@ def test_local_resolution_preflights_exact_dependency_fanout(tmp_path: Path) -> 
             version=version,
         )
 
-    plan = resolve(
+    plan = ResolutionEngine.resolve_wheelhouse(
         [str(wheelhouse)],
         ["root"],
         cache_dir=str(tmp_path / "cache"),
@@ -266,7 +293,7 @@ def test_fast_install_falls_back_for_non_pure_wheels(tmp_path: Path) -> None:
             str(tmp_path / "cache"),
             "-r",
             str(requirements),
-        ]
+        ],
     )
 
     assert status is None
@@ -274,7 +301,8 @@ def test_fast_install_falls_back_for_non_pure_wheels(tmp_path: Path) -> None:
 
 
 def test_fast_install_skips_resolution_for_nonempty_target(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     wheelhouse = tmp_path / "wheelhouse"
     wheelhouse.mkdir()
@@ -287,9 +315,11 @@ def test_fast_install_skips_resolution_for_nonempty_target(
     def fail_resolution(*args: object, **kwargs: object) -> object:
         raise AssertionError("fast resolver should not run for a non-empty target")
 
-    import cpip.resolution.fast_local_wheelhouse as fast_wheelhouse
-
-    monkeypatch.setattr(fast_wheelhouse, "resolve", fail_resolution)
+    monkeypatch.setattr(
+        ResolutionEngine,
+        "resolve_wheelhouse",
+        staticmethod(fail_resolution),
+    )
     status = run_fast_install(
         [
             "--no-index",
@@ -302,7 +332,7 @@ def test_fast_install_skips_resolution_for_nonempty_target(
             str(target),
             "-r",
             str(requirements),
-        ]
+        ],
     )
 
     assert status is None
@@ -318,7 +348,7 @@ def test_fast_resolution_defers_wheel_validation_to_install(tmp_path: Path) -> N
             "Metadata-Version: 2.1\nName: demo\nVersion: 1.0\n",
         )
 
-    plan = resolve([str(wheelhouse)], ["demo"])
+    plan = ResolutionEngine.resolve_wheelhouse([str(wheelhouse)], ["demo"])
 
     assert plan is not None
     assert (
@@ -333,7 +363,7 @@ def test_fast_resolution_defers_wheel_validation_to_install(tmp_path: Path) -> N
                 "--target",
                 str(tmp_path / "target"),
                 "demo",
-            ]
+            ],
         )
         is None
     )
@@ -351,14 +381,15 @@ def test_fast_resolution_falls_back_for_nonstandard_metadata_path(
             "Metadata-Version: 2.1\nName: demo\nVersion: 1.0\n",
         )
 
-    plan = resolve([str(wheelhouse)], ["demo"])
+    plan = ResolutionEngine.resolve_wheelhouse([str(wheelhouse)], ["demo"])
 
     assert plan is not None
     assert plan.candidates[0].name == "demo"
 
 
 def test_fast_install_preserves_normal_output_for_local_wheels(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     wheelhouse = tmp_path / "wheelhouse"
     wheelhouse.mkdir()
@@ -375,7 +406,7 @@ def test_fast_install_preserves_normal_output_for_local_wheels(
             "--target",
             str(target),
             "demo",
-        ]
+        ],
     )
 
     assert status == 0
@@ -433,7 +464,6 @@ for module in (
     "cpip.cli.logging_config",
     "cpip.cli._main_fallback",
     "cpip.cli.requirements",
-    "cpip.resolution.resolver",
 ):
     assert module not in sys.modules, module
 """
@@ -462,7 +492,6 @@ for module in (
     "cpip.cli._main_fallback",
     "cpip.cli.commands.registry",
     "cpip.cli.requirements",
-    "cpip.resolution.resolver",
 ):
     assert module not in sys.modules, module
 """
@@ -490,7 +519,6 @@ for module in (
     "cpip.cli.logging_config",
     "cpip.cli._main_fallback",
     "cpip.cli.requirements",
-    "cpip.resolution.resolver",
 ):
     assert module not in sys.modules, module
 """
@@ -569,7 +597,6 @@ for module in (
     "cpip.cli.logging_config",
     "cpip.core.temp_dir",
     "cpip.index.provider",
-    "cpip.resolution.resolver",
 ):
     assert module not in sys.modules, module
 """
@@ -604,7 +631,6 @@ for module in (
     "cpip.build.metadata",
     "cpip.index.provider",
     "cpip.network.http",
-    "cpip.resolution.resolver",
     "cpip.install.wheel_transaction",
     "cpip.vcs.bazaar",
     "cpip.vcs.git",

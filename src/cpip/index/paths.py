@@ -9,7 +9,7 @@ class PathComponent(str):
     """A filename component that cannot escape its containing directory."""
 
     @classmethod
-    def from_name(cls, name: str, *, required: bool = False) -> "PathComponent":
+    def from_name(cls, name: str, *, required: bool = False) -> PathComponent:
         component = os.path.basename(name)
         if component in ("", os.curdir, os.pardir):
             component = ""

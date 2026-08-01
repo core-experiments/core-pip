@@ -39,7 +39,7 @@ def direct_batch_preflight(
         if request[2] is not None or candidate.wheel_layout is None:
             return None
         _, raw_members, _ = cast(
-            tuple[str, tuple[tuple[str, int, int, int, int, int], ...], bool],
+            "tuple[str, tuple[tuple[str, int, int, int, int, int], ...], bool]",
             candidate.wheel_layout,
         )
         member_sets.append(raw_members)
@@ -126,7 +126,7 @@ def install_wheels_directly(
                     futures = [
                         pool.submit(install_one, index, request, candidate)
                         for index, (request, candidate) in enumerate(
-                            zip(requests, candidates)
+                            zip(requests, candidates),
                         )
                     ]
                     staged_results = [future.result() for future in futures]
@@ -151,7 +151,8 @@ def install_wheels_directly(
                     direct=True,
                 )
                 for (path, requested, direct_url), candidate in zip(
-                    requests, candidates
+                    requests,
+                    candidates,
                 )
             )
             transaction.finish_successfully()

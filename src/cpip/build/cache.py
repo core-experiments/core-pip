@@ -8,11 +8,10 @@ import logging
 import os
 import sys
 from pathlib import Path
+from typing import Any
 
 from cpip.core.direct_url import DirectUrl
 from cpip.core.python import CURRENT_PYTHON_VERSION_DIGITS
-from typing import Any
-
 from cpip.core.temp_dir import TempDirectory, tempdir_kinds
 
 logger = logging.getLogger(__name__)
@@ -65,7 +64,9 @@ class WheelCache:
 
     def get_ephem_path_for_link(self, link: Any) -> str:
         return os.path.join(
-            self.temp_dir_internal.path, "wheels", *self.get_cache_path_parts(link)
+            self.temp_dir_internal.path,
+            "wheels",
+            *self.get_cache_path_parts(link),
         )
 
     @staticmethod

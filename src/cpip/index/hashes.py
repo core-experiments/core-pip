@@ -13,7 +13,8 @@ def hashes_from_url(url: str) -> dict[str, str]:
     result: dict[str, str] = {}
     parsed = urllib.parse.urlparse(url)
     for key, values in urllib.parse.parse_qs(
-        parsed.fragment, keep_blank_values=True
+        parsed.fragment,
+        keep_blank_values=True,
     ).items():
         if key in SUPPORTED_RECORD_HASHES and values:
             result[key] = values[0]

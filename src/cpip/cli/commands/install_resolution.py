@@ -37,7 +37,7 @@ def create_candidate_provider(
         target=target,
         uploaded_prior_to=(
             datetime.datetime.fromisoformat(
-                options.uploaded_prior_to.replace("Z", "+00:00")
+                options.uploaded_prior_to.replace("Z", "+00:00"),
             )
             if options.uploaded_prior_to
             else None

@@ -11,31 +11,51 @@ from cpip.cli.parser import ArgumentParser
 
 def create_parser() -> ArgumentParser:
     """Build wheels for requirements without installing them."""
-
     parser = ArgumentParser(prog="cpip wheel")
     parser.add_argument("requirements", nargs="*")
     parser.add_argument("--group", dest="groups", action="append", default=[])
     parser.add_argument(
-        "-r", "--requirement", dest="requirement_files", action="append", default=[]
+        "-r",
+        "--requirement",
+        dest="requirement_files",
+        action="append",
+        default=[],
     )
     parser.add_argument(
-        "-c", "--constraint", dest="constraint_files", action="append", default=[]
+        "-c",
+        "--constraint",
+        dest="constraint_files",
+        action="append",
+        default=[],
     )
     parser.add_argument(
-        "--build-constraint", dest="build_constraint_files", action="append", default=[]
+        "--build-constraint",
+        dest="build_constraint_files",
+        action="append",
+        default=[],
     )
     parser.add_argument(
-        "-e", "--editable", dest="editables", action="append", default=[]
+        "-e",
+        "--editable",
+        dest="editables",
+        action="append",
+        default=[],
     )
     parser.add_argument("-f", "--find-links", action="append", default=[])
     parser.add_argument("-i", "--index-url")
     parser.add_argument("--extra-index-url", action="append", default=[])
     parser.add_argument(
-        "--trusted-host", dest="trusted_hosts", action="append", default=[]
+        "--trusted-host",
+        dest="trusted_hosts",
+        action="append",
+        default=[],
     )
     parser.add_argument("--proxy")
     parser.add_argument(
-        "--use-feature", dest="use_features", action="append", default=[]
+        "--use-feature",
+        dest="use_features",
+        action="append",
+        default=[],
     )
     parser.add_argument("--no-index", action="store_true")
     parser.add_argument("--no-build-isolation", action="store_true")
@@ -60,8 +80,8 @@ def run_wheel(args: list[str]) -> int:
     from cpip.core.format_control import FormatControl
     from cpip.core.wheel import wheel_candidate
     from cpip.index.provider import CandidateProvider
-    from cpip.resolution.req_install import install_req_from_line
-    from cpip.resolution.resolver import Resolver
+    from cpip.resolution.engine import ResolutionEngine
+    from cpip.resolution.engine.input.requirements import install_req_from_line
 
     options = create_parser().parse_args([arg for arg in args if arg])
 
@@ -99,7 +119,7 @@ def run_wheel(args: list[str]) -> int:
     raw_requirements = [*bundle.requirements, *bundle.editables]
     if not raw_requirements and not options.requirement_files and not options.groups:
         raise CommandError(
-            'You must give at least one requirement to wheel (see "cpip help wheel")'
+            'You must give at least one requirement to wheel (see "cpip help wheel")',
         )
     requirements = []
     for requirement in raw_requirements:
@@ -131,7 +151,7 @@ def run_wheel(args: list[str]) -> int:
         session=bundle.session,
         build_isolation=not options.no_build_isolation,
     )
-    plan = Resolver(
+    plan = ResolutionEngine(
         provider=provider,
         no_deps=options.no_deps,
         constraints=bundle.constraints,
@@ -152,7 +172,7 @@ def run_wheel(args: list[str]) -> int:
         else:
             destination = wheel_dir / source.name
             if os.path.realpath(os.fspath(source)) != os.path.realpath(
-                os.fspath(destination)
+                os.fspath(destination),
             ):
                 shutil.copy2(source, destination)
             source = destination

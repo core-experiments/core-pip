@@ -13,5 +13,6 @@ def test_collect_requirements_uses_http_cache_directory(tmp_path: Path) -> None:
     )
 
     assert bundle.session.cache.directory == os.path.join(
-        os.fspath(tmp_path), "http-v1"
+        os.fspath(tmp_path),
+        "http-v1",
     )

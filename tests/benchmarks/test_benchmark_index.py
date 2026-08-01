@@ -15,7 +15,6 @@ from benchmark_support import (
     simple_index_json,
     wheel_filenames,
 )
-from pytest_codspeed import BenchmarkFixture
 from cpip.core.packaging import SpecifierSet, parse_requirement
 from cpip.core.wheel import (
     TargetContext,
@@ -28,6 +27,7 @@ from cpip.index.candidates import BestCandidateResult, InstallationCandidate
 from cpip.index.links import Link
 from cpip.index.page_parsing import IndexPageParser
 from cpip.index.provider import CandidateProvider
+from pytest_codspeed import BenchmarkFixture
 
 PAGE_URL = "https://example.invalid/simple/package/"
 WHEEL_FILENAMES = wheel_filenames()
@@ -187,7 +187,8 @@ def test_index_topology_ranking(benchmark: BenchmarkFixture) -> None:
             "package",
             filename.split("-", 2)[1].removesuffix(".tar.gz"),
             Link.from_url(
-                f"https://example.invalid/{source}/{filename}", source_url=source
+                f"https://example.invalid/{source}/{filename}",
+                source_url=source,
             ),
         )
         for source in ("find-links", "index")
@@ -195,7 +196,9 @@ def test_index_topology_ranking(benchmark: BenchmarkFixture) -> None:
     ]
     default = CandidateEvaluator.create("package", specifier=SpecifierSet(">=1"))
     binary = CandidateEvaluator.create(
-        "package", specifier=SpecifierSet(">=1"), prefer_binary=True
+        "package",
+        specifier=SpecifierSet(">=1"),
+        prefer_binary=True,
     )
 
     def rank_sources() -> str:
@@ -209,7 +212,8 @@ def test_index_topology_ranking(benchmark: BenchmarkFixture) -> None:
 
 
 def test_index_fallback_and_duplicate_topology(
-    benchmark: BenchmarkFixture, tmp_path: Path
+    benchmark: BenchmarkFixture,
+    tmp_path: Path,
 ) -> None:
     primary = tmp_path / "primary"
     fallback = tmp_path / "fallback"
@@ -228,8 +232,8 @@ def test_index_fallback_and_duplicate_topology(
                             "filename": "topology-2.0.0-py3-none-any.whl",
                             "url": "https://example.invalid/topology-2.0.0.whl",
                         },
-                    ]
-                }
+                    ],
+                },
             ),
             encoding="utf-8",
         )
@@ -402,7 +406,8 @@ def test_evaluate_links(benchmark: BenchmarkFixture) -> None:
 def test_compute_best_candidate(benchmark: BenchmarkFixture) -> None:
     candidates = build_candidates()
     evaluator = CandidateEvaluator.create(
-        "package", specifier=SpecifierSet(">=1.20,<1.390")
+        "package",
+        specifier=SpecifierSet(">=1.20,<1.390"),
     )
 
     def compute_best() -> BestCandidateResult:

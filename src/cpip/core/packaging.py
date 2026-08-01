@@ -81,14 +81,14 @@ class InvalidVersion(ValueError):
 
 class Version:
     __slots__ = (
-        "epoch",
-        "release",
-        "pre",
-        "post",
-        "dev",
-        "local",
-        "public",
         "comparison_key",
+        "dev",
+        "epoch",
+        "local",
+        "post",
+        "pre",
+        "public",
+        "release",
     )
 
     def __init__(self, value: str):
@@ -246,7 +246,7 @@ class Version:
 
 
 class Specifier:
-    __slots__ = ("operator", "version", "_parsed_version", "_compatible_upper_bound")
+    __slots__ = ("_compatible_upper_bound", "_parsed_version", "operator", "version")
 
     def __init__(self, operator: str, version: str) -> None:
         self.operator = operator
@@ -269,7 +269,7 @@ class Specifier:
     def compatible_upper_bound(self) -> Version:
         if self._compatible_upper_bound is None:
             self._compatible_upper_bound = compatible_upper_bound_internal(
-                self.parsed_version
+                self.parsed_version,
             )
         return self._compatible_upper_bound
 
@@ -288,7 +288,7 @@ class Specifier:
         if self.operator in {"==", "!="} and self.version.endswith(".*"):
             prefix = self.version[:-2]
             matches = version.public == prefix or version.public.startswith(
-                prefix + "."
+                prefix + ".",
             )
             return matches if self.operator == "==" else not matches
         other = self.parsed_version
@@ -335,16 +335,22 @@ class SpecifierSet:
         )
 
     def contains(
-        self, version: Version | str, *, allow_prereleases: bool = False
+        self,
+        version: Version | str,
+        *,
+        allow_prereleases: bool = False,
     ) -> bool:
         parsed = version if isinstance(version, Version) else Version(version)
-        if parsed.is_prerelease and not allow_prereleases:
-            if not any(
+        if (
+            parsed.is_prerelease
+            and not allow_prereleases
+            and not any(
                 spec.parsed_version.is_prerelease
                 for spec in self.specifiers
                 if spec.operator != "===" and not spec.version.endswith(".*")
-            ):
-                return False
+            )
+        ):
+            return False
         return all(spec.contains(parsed) for spec in self.specifiers)
 
     def bounds(
@@ -399,13 +405,13 @@ class SpecifierSet:
 
 class Requirement:
     __slots__ = (
-        "name",
-        "specifier",
-        "extras",
-        "url",
-        "marker",
-        "raw",
         "_canonical_name",
+        "extras",
+        "marker",
+        "name",
+        "raw",
+        "specifier",
+        "url",
     )
 
     def __init__(
@@ -461,7 +467,10 @@ class Requirement:
         return type(self)(**values)
 
     def is_satisfied_by(
-        self, version: str | Version, *, allow_prereleases: bool = True
+        self,
+        version: str | Version,
+        *,
+        allow_prereleases: bool = True,
     ) -> bool:
         return self.specifier.contains(version, allow_prereleases=allow_prereleases)
 
@@ -657,9 +666,14 @@ def split_marker(value: str) -> tuple[str, str | None]:
 def marker_applies(marker: str | None, *, extras: Iterable[str] = ()) -> bool:
     if not marker:
         return True
-    extra_values = {safe_extra(extra) for extra in extras if extra}
+    normalized_extras = tuple(sorted(safe_extra(extra) for extra in extras if extra))
+    return _marker_applies_cached(marker, normalized_extras)
+
+
+@lru_cache(maxsize=4096)
+def _marker_applies_cached(marker: str, extras: tuple[str, ...]) -> bool:
     env = default_environment()
-    return marker_applies_internal(marker, env, extra_values)
+    return marker_applies_internal(marker, env, set(extras))
 
 
 def marker_applies_internal(

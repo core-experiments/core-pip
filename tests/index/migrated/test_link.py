@@ -27,7 +27,9 @@ class TestLink:
         assert repr(link) == expected
 
     def test_from_known_file_skips_directory_probe(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         wheel = tmp_path / "demo-1.0-py3-none-any.whl"
         wheel.touch()
@@ -42,7 +44,9 @@ class TestLink:
         assert link.kind is ArtifactKind.WHEEL
 
     def test_from_path_retains_known_local_path(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         wheel = tmp_path / "demo-1.0-py3-none-any.whl"
         wheel.touch()
@@ -138,19 +142,19 @@ class TestLink:
         assert name not in (os.curdir, os.pardir)
 
     def test_splitext(self) -> None:
-        assert ("wheel", ".whl") == Link("http://yo/wheel.whl").splitext()
+        assert Link("http://yo/wheel.whl").splitext() == ("wheel", ".whl")
 
     def test_no_ext(self) -> None:
-        assert "" == Link("http://yo/wheel").ext
+        assert Link("http://yo/wheel").ext == ""
 
     def test_ext(self) -> None:
-        assert ".whl" == Link("http://yo/wheel.whl").ext
+        assert Link("http://yo/wheel.whl").ext == ".whl"
 
     def test_ext_fragment(self) -> None:
-        assert ".whl" == Link("http://yo/wheel.whl#frag").ext
+        assert Link("http://yo/wheel.whl#frag").ext == ".whl"
 
     def test_ext_query(self) -> None:
-        assert ".whl" == Link("http://yo/wheel.whl?a=b").ext
+        assert Link("http://yo/wheel.whl?a=b").ext == ".whl"
 
     def test_is_wheel(self) -> None:
         assert Link("http://yo/wheel.whl").is_wheel
@@ -160,14 +164,14 @@ class TestLink:
 
     def test_fragments(self) -> None:
         url = "git+https://example.com/package#egg=eggname"
-        assert "eggname" == Link(url).egg_fragment
+        assert Link(url).egg_fragment == "eggname"
         assert None is Link(url).subdirectory_fragment
         url = "git+https://example.com/package#egg=eggname&subdirectory=subdir"
-        assert "eggname" == Link(url).egg_fragment
-        assert "subdir" == Link(url).subdirectory_fragment
+        assert Link(url).egg_fragment == "eggname"
+        assert Link(url).subdirectory_fragment == "subdir"
         url = "git+https://example.com/package#subdirectory=subdir&egg=eggname"
-        assert "eggname" == Link(url).egg_fragment
-        assert "subdir" == Link(url).subdirectory_fragment
+        assert Link(url).egg_fragment == "eggname"
+        assert Link(url).subdirectory_fragment == "subdir"
 
     @pytest.mark.parametrize(
         "fragment",
@@ -192,7 +196,6 @@ class TestLink:
 
     def test_invalid_egg_fragment_with_extras_and_version_hint(self) -> None:
         """Test that fragments with extras and version specifiers get proper hint."""
-
         url = "git+https://example.com/package#egg=eggname[extra]==1.0"
         with pytest.raises(InvalidEggFragment) as exc_info:
             Link(url)
@@ -233,7 +236,10 @@ class TestLink:
         ],
     )
     def test_is_hash_allowed(
-        self, hash_name: str, hex_digest: str, expected: bool
+        self,
+        hash_name: str,
+        hex_digest: str,
+        expected: bool,
     ) -> None:
         url = f"https://example.com/wheel.whl#{hash_name}={hex_digest}"
         link = Link(url)
@@ -260,7 +266,9 @@ class TestLink:
         ],
     )
     def test_is_hash_allowed__none_hashes(
-        self, hashes: Hashes | None, expected: bool
+        self,
+        hashes: Hashes | None,
+        expected: bool,
     ) -> None:
         url = "https://example.com/wheel.whl#sha512={}".format(128 * "a")
         link = Link(url)

@@ -10,22 +10,21 @@ from io import StringIO
 from typing import TYPE_CHECKING, Protocol
 
 from cpip.build.metadata import InstalledDistributionStore
-
-from cpip.install.build_env.base import Prefix
 from cpip.core.errors import (
-    DiagnosticCpipError,
     CpipError,
+    DiagnosticCpipError,
 )
 from cpip.core.format_control import FormatControl
 from cpip.core.release_control import ReleaseControl
 from cpip.core.temp_dir import TempDirectory
+from cpip.install.build_env.base import Prefix
 from cpip.install.requirements import installed_packages_summary
 
 if TYPE_CHECKING:
     from cpip.build.cache import WheelCache
     from cpip.build.tracker import BuildTracker
-    from cpip.resolution.req_install import InstallRequirement
     from cpip.network.http import NetworkSession
+    from cpip.resolution.req_install import InstallRequirement
 
 
 logger = logging.getLogger(__name__)
@@ -55,17 +54,17 @@ class BuildConfiguration:
     """Settings inherited by an isolated build dependency installation."""
 
     __slots__ = (
-        "session",
-        "format_control",
-        "release_control",
-        "index_urls",
-        "find_links",
-        "proxy",
-        "no_proxy_env",
-        "trusted_hosts",
-        "custom_cert",
         "client_cert",
+        "custom_cert",
+        "find_links",
+        "format_control",
+        "index_urls",
+        "no_proxy_env",
         "prefer_binary",
+        "proxy",
+        "release_control",
+        "session",
+        "trusted_hosts",
         "uploaded_prior_to",
     )
 
@@ -145,7 +144,7 @@ class BuildDependencyInstallError(DiagnosticCpipError):
                 log_lines.append(f"ERROR: {cause}")
             else:
                 log_lines.extend(
-                    "".join(traceback.format_exception(cause)).splitlines()
+                    "".join(traceback.format_exception(cause)).splitlines(),
                 )
             context = (
                 f"Installing {' '.join(build_reqs)}\n"
@@ -154,13 +153,15 @@ class BuildDependencyInstallError(DiagnosticCpipError):
                 + "\n[end of output]"
             )
         super().__init__(
-            message=message, context=context, hint_stmt=None, note_stmt=note
+            message=message,
+            context=context,
+            hint_stmt=None,
+            note_stmt=note,
         )
 
 
 class InprocessBuildEnvironmentInstaller:
-    """
-    Install build dependencies via the already running cpip process.
+    """Install build dependencies via the already running cpip process.
 
     This contains a stripped down version of the install command with
     only the logic necessary for installing build dependencies. The
@@ -181,8 +182,8 @@ class InprocessBuildEnvironmentInstaller:
         build_constraints: Sequence[InstallRequirement] = (),
         verbosity: int = 0,
     ) -> None:
-        from cpip.install.preparer import RequirementPreparer
         from cpip.index.provider import CandidateProvider
+        from cpip.install.preparer import RequirementPreparer
 
         self.build_constraints_internal = build_constraints
         self.wheel_cache_internal = wheel_cache
@@ -239,7 +240,10 @@ class InprocessBuildEnvironmentInstaller:
             logger.error("%s", exc)
             logger.info("")
             raise BuildDependencyInstallError(
-                for_req, requirements, cause=exc, log_lines=None
+                for_req,
+                requirements,
+                cause=exc,
+                log_lines=None,
             )
 
         except Exception as exc:
@@ -249,32 +253,37 @@ class InprocessBuildEnvironmentInstaller:
             else:
                 logger.exception("cpip crashed unexpectedly")
             raise BuildDependencyInstallError(
-                for_req, requirements, cause=exc, log_lines=logs
+                for_req,
+                requirements,
+                cause=exc,
+                log_lines=logs,
             )
 
     def install_impl(self, requirements: Iterable[str], prefix: Prefix) -> None:
         """Core build dependency install logic."""
         from cpip.install.requirements import RequirementInstaller
-        from cpip.resolution.req_install import install_req_from_line
-
         from cpip.install.wheel_builder import WheelBuilder
+        from cpip.resolution.engine.input.requirements import install_req_from_line
 
         ireqs = [install_req_from_line(req, user_supplied=True) for req in requirements]
         ireqs.extend(self.build_constraints_internal)
 
-        from cpip.resolution.resolver import Resolver
+        from cpip.resolution.engine import ResolutionEngine
 
-        resolver = Resolver(provider=self.provider_internal, ignore_installed=True)
+        resolver = ResolutionEngine(
+            provider=self.provider_internal,
+            ignore_installed=True,
+        )
         resolved_set = resolver.resolve_requirement_set(ireqs)
         self.preparer_internal.prepare_linked_requirements_more(
-            resolved_set.requirements.values()
+            resolved_set.requirements.values(),
         )
 
         reqs_to_build = [
             r for r in resolved_set.requirements_to_install if not r.is_wheel
         ]
         _, build_failures = WheelBuilder(self.wheel_cache_internal, verify=True).build(
-            reqs_to_build
+            reqs_to_build,
         )
         if build_failures:
             raise InstallWheelBuildError(build_failures)

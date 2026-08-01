@@ -5,7 +5,7 @@ import sys
 
 
 class LockOptions:
-    __slots__ = ("requirements", "find_links", "no_index", "output")
+    __slots__ = ("find_links", "no_index", "output", "requirements")
 
     def __init__(
         self,
@@ -48,7 +48,7 @@ def parse_arguments(args: list[str]) -> "LockOptions | None":
                 find_links.append(value)
             elif token in ("-r", "--requirement"):
                 if os.path.basename(value).startswith("pylock") and value.endswith(
-                    ".toml"
+                    ".toml",
                 ):
                     return None
                 values = read_requirements(value)
@@ -97,7 +97,7 @@ def render_lock(packages: list[tuple[str, str, str, str, str]]) -> str:
                 "[packages.wheels.hashes]",
                 f"sha256 = {toml_string(digest)}",
                 "",
-            )
+            ),
         )
     return "\n".join(lines)
 
@@ -120,7 +120,7 @@ def plan_cache_key(options: LockOptions) -> "PlanCacheKey | None":
                         continue
                     stat = entry.stat()
                     signatures.append(
-                        (root, entry.name, stat.st_mtime_ns, stat.st_size)
+                        (root, entry.name, stat.st_mtime_ns, stat.st_size),
                     )
         except NotADirectoryError:
             if not value.endswith(".whl"):
@@ -130,7 +130,7 @@ def plan_cache_key(options: LockOptions) -> "PlanCacheKey | None":
             except OSError:
                 return None
             signatures.append(
-                (os.path.abspath(value), "", stat.st_mtime_ns, stat.st_size)
+                (os.path.abspath(value), "", stat.st_mtime_ns, stat.st_size),
             )
             continue
         except OSError:
@@ -166,7 +166,7 @@ def cache_path(options: LockOptions) -> "str | None":
 
 def load_plan_cache(path: "str | None", key: "bytes | None") -> "str | None":
     if path is None or key is None:
-        return
+        return None
     try:
         with open(path, "rb") as file:
             size = int.from_bytes(file.read(8), "big")
@@ -202,6 +202,8 @@ def write_output(output: str, rendered: str) -> None:
 
 def run(args: list[str]) -> "int | None":
     """Run the local-wheel fast path, or return ``None`` for fallback."""
+    from cpip.resolution.engine import ResolutionEngine
+
     options = parse_arguments(args)
     if options is None or not options.no_index or not options.requirements:
         return None
@@ -216,11 +218,8 @@ def run(args: list[str]) -> "int | None":
     if cached_output is not None:
         write_output(options.output, cached_output)
         return 0
-    from cpip.resolution.fast_local_wheelhouse import (
-        resolve as resolve_local_wheelhouse,
-    )
 
-    plan = resolve_local_wheelhouse(options.find_links, options.requirements)
+    plan = ResolutionEngine.resolve_wheelhouse(options.find_links, options.requirements)
     if plan is None:
         return None
     packages: list[tuple[str, str, str, str, str]] = []
@@ -241,7 +240,7 @@ def run(args: list[str]) -> "int | None":
                 os.path.basename(candidate.path),
                 source,
                 digest,
-            )
+            ),
         )
     rendered = render_lock(packages)
     save_plan_cache(cache_file, serialized_plan_key, rendered)

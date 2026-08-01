@@ -35,7 +35,11 @@ def test_basic_check_missing_dependency(script: CpipTestEnvironment) -> None:
     )
     # Let's install pkga without its dependency
     res = script.cpip(
-        "install", "--no-build-isolation", "--no-index", pkga_path, "--no-deps"
+        "install",
+        "--no-build-isolation",
+        "--no-index",
+        pkga_path,
+        "--no-deps",
     )
     assert "Successfully installed pkga-1.0" in res.stdout, str(res)
 
@@ -56,7 +60,11 @@ def test_basic_check_broken_dependency(script: CpipTestEnvironment) -> None:
     )
     # Let's install pkga without its dependency
     res = script.cpip(
-        "install", "--no-build-isolation", "--no-index", pkga_path, "--no-deps"
+        "install",
+        "--no-build-isolation",
+        "--no-index",
+        pkga_path,
+        "--no-deps",
     )
     assert "Successfully installed pkga-1.0" in res.stdout, str(res)
 
@@ -94,7 +102,11 @@ def test_basic_check_broken_dependency_and_missing_dependency(
     )
     # Let's install pkga without its dependency
     res = script.cpip(
-        "install", "--no-build-isolation", "--no-index", pkga_path, "--no-deps"
+        "install",
+        "--no-build-isolation",
+        "--no-index",
+        pkga_path,
+        "--no-deps",
     )
     assert "Successfully installed pkga-1.0" in res.stdout, str(res)
 
@@ -107,7 +119,11 @@ def test_basic_check_broken_dependency_and_missing_dependency(
     )
     # Let's install broken==0.1
     res = script.cpip(
-        "install", "--no-build-isolation", "--no-index", broken_path, "--no-deps"
+        "install",
+        "--no-build-isolation",
+        "--no-index",
+        broken_path,
+        "--no-deps",
     )
     assert "Successfully installed broken-0.1" in res.stdout, str(res)
 
@@ -132,7 +148,11 @@ def test_check_complicated_name_missing(script: CpipTestEnvironment) -> None:
 
     # Without dependency
     result = script.cpip(
-        "install", "--no-build-isolation", "--no-index", package_a_path, "--no-deps"
+        "install",
+        "--no-build-isolation",
+        "--no-index",
+        package_a_path,
+        "--no-deps",
     )
     assert (
         "Successfully installed package_A-1.0" in result.stdout
@@ -160,7 +180,11 @@ def test_check_complicated_name_broken(script: CpipTestEnvironment) -> None:
 
     # With broken dependency
     result = script.cpip(
-        "install", "--no-build-isolation", "--no-index", package_a_path, "--no-deps"
+        "install",
+        "--no-build-isolation",
+        "--no-index",
+        package_a_path,
+        "--no-deps",
     )
     assert (
         "Successfully installed package_A-1.0" in result.stdout
@@ -199,7 +223,11 @@ def test_check_complicated_name_clean(script: CpipTestEnvironment) -> None:
     )
 
     result = script.cpip(
-        "install", "--no-build-isolation", "--no-index", package_a_path, "--no-deps"
+        "install",
+        "--no-build-isolation",
+        "--no-index",
+        package_a_path,
+        "--no-deps",
     )
     assert (
         "Successfully installed package_A-1.0" in result.stdout
@@ -233,7 +261,11 @@ def test_check_considers_conditional_reqs(script: CpipTestEnvironment) -> None:
     )
 
     result = script.cpip(
-        "install", "--no-build-isolation", "--no-index", package_a_path, "--no-deps"
+        "install",
+        "--no-build-isolation",
+        "--no-index",
+        package_a_path,
+        "--no-deps",
     )
     assert (
         "Successfully installed package_A-1.0" in result.stdout
@@ -258,7 +290,11 @@ def test_check_development_versions_are_also_considered(
     )
     # Let's install pkga without its dependency
     res = script.cpip(
-        "install", "--no-build-isolation", "--no-index", pkga_path, "--no-deps"
+        "install",
+        "--no-build-isolation",
+        "--no-index",
+        pkga_path,
+        "--no-deps",
     )
     assert "Successfully installed pkga-1.0" in res.stdout, str(res)
 
@@ -293,7 +329,7 @@ def test_basic_check_broken_metadata(script: CpipTestEnvironment) -> None:
             "Metadata-Version: 2.1\n"
             "Name: pkga\n"
             "Version: 1.0\n"
-            'Requires-Dist: cpip; python_version == "3.4";extra == "test"\n'
+            'Requires-Dist: cpip; python_version == "3.4";extra == "test"\n',
         )
 
     result = script.cpip("check", expect_error=True)
@@ -303,15 +339,16 @@ def test_basic_check_broken_metadata(script: CpipTestEnvironment) -> None:
 
 
 def test_check_skip_work_dir_pkg(script: CpipTestEnvironment) -> None:
-    """
-    Test that check should not include package
+    """Test that check should not include package
     present in working directory
     """
-
     # Create a test package with dependency missing
     # and create .egg-info dir
     pkg_path = create_test_package_with_setup(
-        script, name="simple", version="1.0", install_requires=["missing==0.1"]
+        script,
+        name="simple",
+        version="1.0",
+        install_requires=["missing==0.1"],
     )
 
     script.run("python", "setup.py", "egg_info", expect_stderr=True, cwd=pkg_path)
@@ -325,15 +362,16 @@ def test_check_skip_work_dir_pkg(script: CpipTestEnvironment) -> None:
 
 
 def test_check_include_work_dir_pkg(script: CpipTestEnvironment) -> None:
-    """
-    Test that check should include package in working directory
+    """Test that check should include package in working directory
     if working directory is added in PYTHONPATH
     """
-
     # Create a test package with dependency missing
     # and create .egg-info dir
     pkg_path = create_test_package_with_setup(
-        script, name="simple", version="1.0", install_requires=["missing==0.1"]
+        script,
+        name="simple",
+        version="1.0",
+        install_requires=["missing==0.1"],
     )
 
     script.run("python", "setup.py", "egg_info", expect_stderr=True, cwd=pkg_path)
@@ -353,11 +391,12 @@ def test_check_unsupported(
     script: CpipTestEnvironment,
 ) -> None:
     script.scratch_path.joinpath("base-0.1.0-py2.py3-none-any.whl").write_bytes(
-        create_really_basic_wheel("base", "0.1.0")
+        create_really_basic_wheel("base", "0.1.0"),
     )
     script.cpip_install_local("base==0.1.0", find_links=script.scratch_path)
     with open(
-        script.site_packages_path.joinpath("base-0.1.0.dist-info/WHEEL"), "a"
+        script.site_packages_path.joinpath("base-0.1.0.dist-info/WHEEL"),
+        "a",
     ) as f:
         f.write("\nTag: cp310-cp310-musllinux_1_1_x86_64\n")
     result = script.cpip("check", expect_error=True)

@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import csv
 import os
+from collections.abc import Iterable
 from pathlib import Path
-from typing import TYPE_CHECKING, Iterable
+from typing import TYPE_CHECKING
 
 from cpip.core.errors import InstallationError
 
@@ -45,7 +46,7 @@ def compiled_files(
                     compiled_destination,
                     os.fspath(compiled_destination),
                     None,
-                )
+                ),
             )
     return result
 
@@ -65,7 +66,7 @@ def existing_paths(
         except FileNotFoundError as exc:
             raise InstallationError(
                 f"Cannot replace {distribution.raw_name} {distribution.version}: "
-                "no RECORD file was found"
+                "no RECORD file was found",
             ) from exc
     else:
         entries = distribution.iter_declared_entries()

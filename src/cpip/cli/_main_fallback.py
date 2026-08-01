@@ -9,7 +9,10 @@ HELP_FLAGS = frozenset(("-h", "--help"))
 
 
 def run(
-    args: list[str], *, require_virtualenv: bool = False, location: str | None = None
+    args: list[str],
+    *,
+    require_virtualenv: bool = False,
+    location: str | None = None,
 ) -> int:
     if not args:
         from cpip.cli.help import print_help

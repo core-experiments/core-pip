@@ -3,7 +3,6 @@ import sys
 import urllib.parse
 
 import pytest
-
 from cpip.core.urls import path_to_url, url_to_path
 
 

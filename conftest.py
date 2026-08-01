@@ -22,7 +22,7 @@ from enum import Enum
 from hashlib import sha256
 from pathlib import Path
 from textwrap import dedent
-from typing import TYPE_CHECKING, Any, AnyStr, ClassVar
+from typing import Any, AnyStr, ClassVar
 from unittest.mock import patch
 from zipfile import ZipFile
 
@@ -43,24 +43,22 @@ from _pytest.config import Config
 # Parser will be available from the public API in pytest >= 7.0.0:
 # https://github.com/pytest-dev/pytest/commit/538b5c24999e9ebb4fab43faabc8bcc28737bcdf
 from _pytest.config.argparsing import Parser
-from installer import install
-from installer.destinations import SchemeDictionaryDestination
-from installer.sources import WheelFile
-from cpip.core.temp_dir import global_tempdir_manager
 from cpip_test_support import (
     DATA_DIR,
     SRC_DIR,
     CertFactory,
-    InMemoryCpip,
     CpipTestEnvironment,
+    InMemoryCpip,
     ScriptFactory,
     TestData,
 )
 from cpip_test_support.server import MockServer, make_mock_server, patch_getfqdn
 from cpip_test_support.venv import VirtualEnvironment, VirtualEnvironmentType
+from installer import install
+from installer.destinations import SchemeDictionaryDestination
+from installer.sources import WheelFile
 
-if TYPE_CHECKING:
-    from typing_extensions import Self
+from cpip.core.temp_dir import global_tempdir_manager
 
 # For the cpip zipapp, Python modules are replaced with their .pyc equivalent to
 # speed up startup, but some modules must remain as .py files for cpip to function.
@@ -168,10 +166,9 @@ def pytest_collection_modifyitems(config: Config, items: list[pytest.Function]) 
         if item.get_closest_marker("network") is not None:
             item.add_marker(pytest.mark.enable_socket)
 
-        if "CI" in os.environ:
-            # Mark network tests as flaky
-            if item.get_closest_marker("network") is not None:
-                item.add_marker(pytest.mark.flaky(reruns=3, reruns_delay=2))
+        # Mark network tests as flaky in CI.
+        if "CI" in os.environ and item.get_closest_marker("network") is not None:
+            item.add_marker(pytest.mark.flaky(reruns=3, reruns_delay=2))
 
         if (
             item.get_closest_marker("incompatible_with_venv")
@@ -181,7 +178,7 @@ def pytest_collection_modifyitems(config: Config, items: list[pytest.Function]) 
 
         module_file = item.module.__file__
         module_path = Path(
-            os.path.relpath(module_file, os.path.commonpath([__file__, module_file]))
+            os.path.relpath(module_file, os.path.commonpath([__file__, module_file])),
         ).as_posix()
 
         module_root_dir = Path(module_path).parts[0]
@@ -192,7 +189,7 @@ def pytest_collection_modifyitems(config: Config, items: list[pytest.Function]) 
             if "script" in item.fixturenames:
                 raise RuntimeError(
                     "Cannot use the ``script`` funcarg in a migrated unit test: "
-                    f"(filename = {module_path}, item = {item})"
+                    f"(filename = {module_path}, item = {item})",
                 )
         elif (
             len(Path(module_path).parts) >= 2
@@ -213,7 +210,7 @@ def pytest_collection_modifyitems(config: Config, items: list[pytest.Function]) 
             if "script" in item.fixturenames:
                 raise RuntimeError(
                     "Cannot use the ``script`` funcarg in a package unit test: "
-                    f"(filename = {module_path}, item = {item})"
+                    f"(filename = {module_path}, item = {item})",
                 )
         elif module_root_dir.startswith(("functional", "integration", "lib")):
             item.add_marker(pytest.mark.integration)
@@ -225,7 +222,7 @@ def pytest_collection_modifyitems(config: Config, items: list[pytest.Function]) 
             if "script" in item.fixturenames:
                 raise RuntimeError(
                     "Cannot use the ``script`` funcarg in a unit test: "
-                    f"(filename = {module_path}, item = {item})"
+                    f"(filename = {module_path}, item = {item})",
                 )
         elif module_root_dir in {
             "core",
@@ -242,11 +239,12 @@ def pytest_collection_modifyitems(config: Config, items: list[pytest.Function]) 
             if "script" in item.fixturenames:
                 raise RuntimeError(
                     "Cannot use the ``script`` funcarg in a package unit test: "
-                    f"(filename = {module_path}, item = {item})"
+                    f"(filename = {module_path}, item = {item})",
                 )
-        elif module_path.startswith("tests/benchmarks/"):
-            item.add_marker(pytest.mark.unit)
-        elif module_path == "tests/test_workspace_boundaries.py":
+        elif (
+            module_path.startswith("tests/benchmarks/")
+            or module_path == "tests/test_workspace_boundaries.py"
+        ):
             item.add_marker(pytest.mark.unit)
         else:
             raise RuntimeError(f"Unknown test type (filename = {module_path})")
@@ -268,11 +266,11 @@ def shard_collected_items(config: Config, items: list[pytest.Function]) -> None:
         return
     if num_groups is None or group is None:
         raise pytest.UsageError(
-            "--num-test-groups and --test-group must be supplied together"
+            "--num-test-groups and --test-group must be supplied together",
         )
     if num_groups < 1 or not 1 <= group <= num_groups:
         raise pytest.UsageError(
-            f"--test-group must be between 1 and --num-test-groups ({num_groups})"
+            f"--test-group must be between 1 and --num-test-groups ({num_groups})",
         )
 
     selected: list[pytest.Function] = []
@@ -330,14 +328,12 @@ def tmpdir(tmp_path: Path) -> Path:
 
 @pytest.fixture(autouse=True)
 def isolate(tmpdir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """
-    Isolate our tests so that things like global configuration files and the
+    """Isolate our tests so that things like global configuration files and the
     like do not affect our test results.
 
     We use an autouse function scoped fixture because we want to ensure that
     every test has it's own isolated home directory.
     """
-
     # TODO: Figure out how to isolate from *system* level configuration files
     #       as well as user level configuration files.
 
@@ -397,7 +393,7 @@ def isolate(tmpdir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
                 [
                     os.path.join(fake_root, "usr", "local", "share"),
                     os.path.join(fake_root, "usr", "share"),
-                ]
+                ],
             ),
         )
         monkeypatch.setenv(
@@ -485,7 +481,8 @@ def cpip_src(tmpdir_factory: pytest.TempPathFactory) -> Path:
 
 @pytest.fixture(scope="session")
 def cpip_editable_parts(
-    cpip_src: Path, tmpdir_factory: pytest.TempPathFactory
+    cpip_src: Path,
+    tmpdir_factory: pytest.TempPathFactory,
 ) -> tuple[Path, ...]:
     cpip_editable = tmpdir_factory.mktemp("cpip") / "cpip"
     shutil.copytree(cpip_src, cpip_editable, symlinks=True)
@@ -513,7 +510,7 @@ def cpip_editable_parts(
                 "--no-deps",
                 "-e",
                 cpip_editable,
-            ]
+            ],
         )
     pth = next(cpip_self_install_path.glob("*cpip*.pth"))
     pth.write_text(
@@ -527,7 +524,9 @@ def cpip_editable_parts(
 
 
 def common_wheel_editable_install(
-    tmpdir_factory: pytest.TempPathFactory, common_wheels: Path, package: str
+    tmpdir_factory: pytest.TempPathFactory,
+    common_wheels: Path,
+    package: str,
 ) -> Path:
     wheel_candidates = list(common_wheels.glob(f"{package}-*.whl"))
     assert len(wheel_candidates) == 1, (
@@ -563,7 +562,8 @@ def common_wheel_editable_install(
 
 @pytest.fixture(scope="session")
 def setuptools_install(
-    tmpdir_factory: pytest.TempPathFactory, common_wheels: Path
+    tmpdir_factory: pytest.TempPathFactory,
+    common_wheels: Path,
 ) -> Path:
     return common_wheel_editable_install(tmpdir_factory, common_wheels, "setuptools")
 
@@ -594,7 +594,9 @@ def coverage_install(tmpdir_factory: pytest.TempPathFactory) -> Path:
 @pytest.fixture(scope="session")
 def socket_install(tmpdir_factory: pytest.TempPathFactory, common_wheels: Path) -> Path:
     lib_dir = common_wheel_editable_install(
-        tmpdir_factory, common_wheels, "pytest_subket"
+        tmpdir_factory,
+        common_wheels,
+        "pytest_subket",
     )
     # pytest-subket is only included so it can intercept and block unexpected
     # network requests. It should NOT be visible to the cpip under test.
@@ -604,10 +606,13 @@ def socket_install(tmpdir_factory: pytest.TempPathFactory, common_wheels: Path) 
 
 
 def install_pth_link(
-    venv: VirtualEnvironment, project_name: str, lib_dir: Path
+    venv: VirtualEnvironment,
+    project_name: str,
+    lib_dir: Path,
 ) -> None:
     venv.site.joinpath(f"_cpip_testsuite_{project_name}.pth").write_text(
-        str(lib_dir.resolve()), encoding="utf-8"
+        str(lib_dir.resolve()),
+        encoding="utf-8",
     )
 
 
@@ -645,10 +650,12 @@ def virtualenv_template(
             package_path = Path(distribution.locate_file(package_name)).resolve()
             if package_path.exists():
                 (dependency_root / package_name).symlink_to(
-                    package_path, target_is_directory=package_path.is_dir()
+                    package_path,
+                    target_is_directory=package_path.is_dir(),
                 )
     venv.site.joinpath("_cpip_testsuite_dependencies.pth").write_text(
-        str(dependency_root), encoding="utf-8"
+        str(dependency_root),
+        encoding="utf-8",
     )
     # Also copy pytest-subket's .pth file so it can intercept socket calls.
     with open(venv.site / "pytest_socket.pth", "w") as f:
@@ -658,7 +665,10 @@ def virtualenv_template(
 
     shutil.copy(pth, venv.site)
     shutil.copytree(
-        dist_info, venv.site / dist_info.name, dirs_exist_ok=True, symlinks=True
+        dist_info,
+        venv.site / dist_info.name,
+        dirs_exist_ok=True,
+        symlinks=True,
     )
     # Create placeholder ``easy-install.pth``, as several tests depend on its
     # existence.  TODO: Ensure
@@ -697,10 +707,10 @@ def virtualenv_factory(
 
 @pytest.fixture
 def virtualenv(
-    virtualenv_factory: Callable[[Path], VirtualEnvironment], tmpdir: Path
+    virtualenv_factory: Callable[[Path], VirtualEnvironment],
+    tmpdir: Path,
 ) -> VirtualEnvironment:
-    """
-    Return a virtual environment which is unique to each test function
+    """Return a virtual environment which is unique to each test function
     invocation created inside of a sub directory of the test function's
     temporary directory. The returned object is a
     ``cpip_test_support.venv.VirtualEnvironment`` object.
@@ -789,8 +799,7 @@ def zipapp(
     cpip_src: Path,
     tmpdir_factory: pytest.TempPathFactory,
 ) -> str | None:
-    """
-    If the user requested for cpip to be run from a zipapp, build that zipapp
+    """If the user requested for cpip to be run from a zipapp, build that zipapp
     and return its location. If the user didn't request a zipapp, return None.
 
     This fixture is session scoped, so the zipapp will only be created once.
@@ -815,8 +824,7 @@ def script(
     virtualenv: VirtualEnvironment,
     script_factory: ScriptFactory,
 ) -> CpipTestEnvironment:
-    """
-    Return a CpipTestEnvironment which is unique to each test function and
+    """Return a CpipTestEnvironment which is unique to each test function and
     will execute all commands inside of the unique virtual environment for this
     test function. The returned object is a
     ``cpip_test_support.CpipTestEnvironment``.
@@ -892,7 +900,8 @@ def enable_user_site(virtualenv: VirtualEnvironment) -> None:
 
 class MetadataKind(Enum):
     """All the types of values we might be provided for the data-dist-info-metadata
-    attribute from PEP 658."""
+    attribute from PEP 658.
+    """
 
     # Valid: will read metadata from the dist instead.
     No = "none"
@@ -911,7 +920,8 @@ class FakePackage:
     """Mock package structure used to generate a PyPI repository.
 
     FakePackage name and version should correspond to sdists (.tar.gz files) in our test
-    data."""
+    data.
+    """
 
     name: str
     version: str
@@ -930,7 +940,8 @@ class FakePackage:
 
     def generate_additional_tag(self) -> str:
         """This gets injected into the <a> tag in the generated PyPI index page for this
-        package."""
+        package.
+        """
         if self.metadata == MetadataKind.No:
             return ""
         if self.metadata in [MetadataKind.Unhashed, MetadataKind.NoFile]:
@@ -943,7 +954,8 @@ class FakePackage:
 
     def generate_metadata(self) -> bytes:
         """This is written to `self.metadata_filename()` and will override the actual
-        dist's METADATA, unless `self.metadata == MetadataKind.NoFile`."""
+        dist's METADATA, unless `self.metadata == MetadataKind.NoFile`.
+        """
         lines = [
             "Metadata-Version: 2.1",
             f"Name: {self.metadata_name or self.name}",
@@ -1056,12 +1068,13 @@ def html_index_for_packages(
     tmpdir_factory: pytest.TempPathFactory,
 ) -> Path:
     """Generate a PyPI HTML package index within a local directory pointing to
-    synthetic test data."""
+    synthetic test data.
+    """
     html_dir = tmpdir_factory.mktemp("fake_index_html_content")
 
     # (1) Generate the content for a PyPI index.html.
     pkg_links = "\n".join(
-        f'    <a href="{pkg}/index.html">{pkg}</a>' for pkg in fake_packages.keys()
+        f'    <a href="{pkg}/index.html">{pkg}</a>' for pkg in fake_packages
     )
     # Output won't be nicely indented because dedent() acts after f-string
     # arg insertion.
@@ -1090,7 +1103,7 @@ def html_index_for_packages(
             # (3.1) Generate the <a> tag which cpip can crawl pointing to this
             # specific package version.
             download_links.append(
-                f'    <a href="{package_link.filename}" {package_link.generate_additional_tag()}>{package_link.filename}</a><br/>'  # noqa: E501
+                f'    <a href="{package_link.filename}" {package_link.generate_additional_tag()}>{package_link.filename}</a><br/>',  # noqa: E501
             )
             # (3.2) Copy over the corresponding file in `shared_data.packages`.
             shutil.copy(
@@ -1126,7 +1139,8 @@ def html_index_for_packages(
 
 class OneTimeDownloadHandler(http.server.SimpleHTTPRequestHandler):
     """Serve files from the current directory, but error if a file is downloaded more
-    than once."""
+    than once.
+    """
 
     seen_paths: ClassVar[set[str]] = set()
 
@@ -1153,7 +1167,11 @@ def html_index_with_onetime_server(
     """
 
     class InDirectoryServer(http.server.ThreadingHTTPServer):
-        def finish_request(self: Self, request: Any, client_address: Any) -> None:
+        def finish_request(
+            self: http.server.ThreadingHTTPServer,
+            request: Any,
+            client_address: Any,
+        ) -> None:
             self.RequestHandlerClass(
                 request,
                 client_address,

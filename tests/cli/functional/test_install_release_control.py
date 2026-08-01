@@ -10,7 +10,9 @@ def test_all_releases_allows_prereleases(script: CpipTestEnvironment) -> None:
     pkg_path = create_basic_wheel_for_package(script, "simple", "1.0a1")
 
     result = script.cpip_install_local(
-        "--all-releases=:all:", "simple==1.0a1", find_links=[pkg_path.parent]
+        "--all-releases=:all:",
+        "simple==1.0a1",
+        find_links=[pkg_path.parent],
     )
     result.assert_installed("simple", editable=False)
 
@@ -20,7 +22,9 @@ def test_all_releases_package_specific(script: CpipTestEnvironment) -> None:
     pkg_path = create_basic_wheel_for_package(script, "simple", "1.0a1")
 
     result = script.cpip_install_local(
-        "--all-releases=simple", "simple==1.0a1", find_links=[pkg_path.parent]
+        "--all-releases=simple",
+        "simple==1.0a1",
+        find_links=[pkg_path.parent],
     )
     result.assert_installed("simple", editable=False)
 
@@ -60,7 +64,9 @@ def test_pre_transforms_to_all_releases(script: CpipTestEnvironment) -> None:
     pkg_path = create_basic_wheel_for_package(script, "simple", "1.0a1")
 
     result = script.cpip_install_local(
-        "--pre", "simple==1.0a1", find_links=[pkg_path.parent]
+        "--pre",
+        "simple==1.0a1",
+        find_links=[pkg_path.parent],
     )
     result.assert_installed("simple", editable=False)
 
@@ -128,7 +134,8 @@ def test_requirements_file_all_releases(script: CpipTestEnvironment) -> None:
     pkg_path = create_basic_wheel_for_package(script, "simple", "1.0a1")
 
     req_file = script.temporary_file(
-        "reqs.txt", "--all-releases :all:\nsimple==1.0a1\n"
+        "reqs.txt",
+        "--all-releases :all:\nsimple==1.0a1\n",
     )
 
     result = script.cpip_install_local("-r", req_file, find_links=[pkg_path.parent])
@@ -267,7 +274,10 @@ def test_reqfile_all_releases_overrides_cmdline_only_final(
     )
 
     report = script.cpip_install_local_report(
-        "--only-final=:all:", "-r", req_file, find_links=[]
+        "--only-final=:all:",
+        "-r",
+        req_file,
+        find_links=[],
     )
     assert len(report["install"]) == 1
     assert report["install"][0]["metadata"]["version"] == "2.0a1"
@@ -286,7 +296,10 @@ def test_reqfile_only_final_overrides_cmdline_all_releases(
     )
 
     report = script.cpip_install_local_report(
-        "--all-releases=:all:", "-r", req_file, find_links=[]
+        "--all-releases=:all:",
+        "-r",
+        req_file,
+        find_links=[],
     )
     assert len(report["install"]) == 1
     assert report["install"][0]["metadata"]["version"] == "1.0"

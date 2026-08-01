@@ -99,7 +99,8 @@ def list_matches_wheel(wheel_name: str, result: TestCpipResult) -> bool:
     a `cpip cache list` call, matches `wheel_name`.
 
     E.g., If wheel_name is `foo-1.2.3` it searches for a line starting with
-          `- foo-1.2.3-py3-none-any.whl `."""
+          `- foo-1.2.3-py3-none-any.whl `.
+    """
     lines = result.stdout.splitlines()
     expected = f" - {wheel_name}-py3-none-any.whl "
     return any(line.startswith(expected) for line in lines)
@@ -111,7 +112,8 @@ def list_matches_wheel_abspath(wheel_name: str, result: TestCpipResult) -> bool:
     `wheel_name`.
 
     E.g., If wheel_name is `foo-1.2.3` it searches for a line starting with
-          `foo-1.2.3-py3-none-any.whl`."""
+          `foo-1.2.3-py3-none-any.whl`.
+    """
     lines = result.stdout.splitlines()
     expected = f"{wheel_name}-py3-none-any.whl"
     return any(
@@ -133,7 +135,8 @@ def remove_matches_http(http_cache_dir: str) -> RemoveMatches:
     """
 
     def remove_matches_http_internal(
-        http_filename: str, result: TestCpipResult
+        http_filename: str,
+        result: TestCpipResult,
     ) -> bool:
         lines = result.stdout.splitlines()
 
@@ -216,7 +219,8 @@ def test_cache_info(
 @pytest.mark.usefixtures("populate_wheel_cache")
 def test_cache_list(script: CpipTestEnvironment) -> None:
     """Running `cpip cache list` should return exactly what the
-    populate_wheel_cache fixture adds."""
+    populate_wheel_cache fixture adds.
+    """
     result = script.cpip("cache", "list")
 
     assert list_matches_wheel("yyy-1.2.3", result)
@@ -228,7 +232,8 @@ def test_cache_list(script: CpipTestEnvironment) -> None:
 @pytest.mark.usefixtures("populate_wheel_cache")
 def test_cache_list_abspath(script: CpipTestEnvironment) -> None:
     """Running `cpip cache list --format=abspath` should return full
-    paths of exactly what the populate_wheel_cache fixture adds."""
+    paths of exactly what the populate_wheel_cache fixture adds.
+    """
     result = script.cpip("cache", "list", "--format=abspath")
 
     assert list_matches_wheel_abspath("yyy-1.2.3", result)
@@ -240,7 +245,8 @@ def test_cache_list_abspath(script: CpipTestEnvironment) -> None:
 @pytest.mark.usefixtures("empty_wheel_cache")
 def test_cache_list_with_empty_cache(script: CpipTestEnvironment) -> None:
     """Running `cpip cache list` with an empty cache should print
-    "No locally built wheels cached." and exit."""
+    "No locally built wheels cached." and exit.
+    """
     result = script.cpip("cache", "list")
     assert result.stdout == "No locally built wheels cached.\n"
 
@@ -248,7 +254,8 @@ def test_cache_list_with_empty_cache(script: CpipTestEnvironment) -> None:
 @pytest.mark.usefixtures("empty_wheel_cache")
 def test_cache_list_with_empty_cache_abspath(script: CpipTestEnvironment) -> None:
     """Running `cpip cache list --format=abspath` with an empty cache should not
-    print anything and exit."""
+    print anything and exit.
+    """
     result = script.cpip("cache", "list", "--format=abspath")
     assert result.stdout.strip() == ""
 
@@ -256,7 +263,8 @@ def test_cache_list_with_empty_cache_abspath(script: CpipTestEnvironment) -> Non
 @pytest.mark.usefixtures("empty_wheel_cache")
 def test_cache_purge_with_empty_cache(script: CpipTestEnvironment) -> None:
     """Running `cpip cache purge` with an empty cache should print a warning
-    and exit without an error code."""
+    and exit without an error code.
+    """
     result = script.cpip("cache", "purge", allow_stderr_warning=True)
     assert result.stderr == "WARNING: No matching packages\n"
     assert result.stdout == "Files removed: 0 (0 bytes)\nDirectories removed: 0\n"
@@ -265,7 +273,8 @@ def test_cache_purge_with_empty_cache(script: CpipTestEnvironment) -> None:
 @pytest.mark.usefixtures("populate_wheel_cache")
 def test_cache_remove_with_bad_pattern(script: CpipTestEnvironment) -> None:
     """Running `cpip cache remove` with a bad pattern should print a warning
-    and exit without an error code."""
+    and exit without an error code.
+    """
     result = script.cpip("cache", "remove", "aaa", allow_stderr_warning=True)
     assert result.stderr == 'WARNING: No matching packages for pattern "aaa"\n'
     assert result.stdout == "Files removed: 0 (0 bytes)\nDirectories removed: 0\n"
@@ -279,7 +288,8 @@ def test_cache_list_too_many_args(script: CpipTestEnvironment) -> None:
 @pytest.mark.usefixtures("populate_wheel_cache")
 def test_cache_list_name_match(script: CpipTestEnvironment) -> None:
     """Running `cpip cache list zzz` should list zzz-4.5.6, zzz-4.5.7,
-    zzz-7.8.9, but nothing else."""
+    zzz-7.8.9, but nothing else.
+    """
     result = script.cpip("cache", "list", "zzz", "--verbose")
 
     assert not list_matches_wheel("yyy-1.2.3", result)
@@ -291,7 +301,8 @@ def test_cache_list_name_match(script: CpipTestEnvironment) -> None:
 @pytest.mark.usefixtures("populate_wheel_cache")
 def test_cache_list_name_match_abspath(script: CpipTestEnvironment) -> None:
     """Running `cpip cache list zzz --format=abspath` should list paths of
-    zzz-4.5.6, zzz-4.5.7, zzz-7.8.9, but nothing else."""
+    zzz-4.5.6, zzz-4.5.7, zzz-7.8.9, but nothing else.
+    """
     result = script.cpip("cache", "list", "zzz", "--format=abspath", "--verbose")
 
     assert not list_matches_wheel_abspath("yyy-1.2.3", result)
@@ -303,7 +314,8 @@ def test_cache_list_name_match_abspath(script: CpipTestEnvironment) -> None:
 @pytest.mark.usefixtures("populate_wheel_cache")
 def test_cache_list_name_and_version_match(script: CpipTestEnvironment) -> None:
     """Running `cpip cache list zzz-4.5.6` should list zzz-4.5.6, but
-    nothing else."""
+    nothing else.
+    """
     result = script.cpip("cache", "list", "zzz-4.5.6", "--verbose")
 
     assert not list_matches_wheel("yyy-1.2.3", result)
@@ -315,7 +327,8 @@ def test_cache_list_name_and_version_match(script: CpipTestEnvironment) -> None:
 @pytest.mark.usefixtures("populate_wheel_cache")
 def test_cache_list_name_and_version_match_abspath(script: CpipTestEnvironment) -> None:
     """Running `cpip cache list zzz-4.5.6 --format=abspath` should list path of
-    zzz-4.5.6, but nothing else."""
+    zzz-4.5.6, but nothing else.
+    """
     result = script.cpip("cache", "list", "zzz-4.5.6", "--format=abspath", "--verbose")
 
     assert not list_matches_wheel_abspath("yyy-1.2.3", result)
@@ -337,10 +350,12 @@ def test_cache_remove_too_many_args(script: CpipTestEnvironment) -> None:
 
 @pytest.mark.usefixtures("populate_wheel_cache")
 def test_cache_remove_name_match(
-    script: CpipTestEnvironment, remove_matches_wheel: RemoveMatches
+    script: CpipTestEnvironment,
+    remove_matches_wheel: RemoveMatches,
 ) -> None:
     """Running `cpip cache remove zzz` should remove zzz-4.5.6 and zzz-7.8.9,
-    but nothing else."""
+    but nothing else.
+    """
     result = script.cpip("cache", "remove", "zzz", "--verbose")
 
     assert not remove_matches_wheel("yyy-1.2.3", result)
@@ -351,10 +366,12 @@ def test_cache_remove_name_match(
 
 @pytest.mark.usefixtures("populate_wheel_cache")
 def test_cache_remove_name_and_version_match(
-    script: CpipTestEnvironment, remove_matches_wheel: RemoveMatches
+    script: CpipTestEnvironment,
+    remove_matches_wheel: RemoveMatches,
 ) -> None:
     """Running `cpip cache remove zzz-4.5.6` should remove zzz-4.5.6, but
-    nothing else."""
+    nothing else.
+    """
     result = script.cpip("cache", "remove", "zzz-4.5.6", "--verbose")
 
     assert not remove_matches_wheel("yyy-1.2.3", result)
@@ -370,7 +387,8 @@ def test_cache_purge(
     remove_matches_wheel: RemoveMatches,
 ) -> None:
     """Running `cpip cache purge` should remove all cached http files and
-    wheels."""
+    wheels.
+    """
     result = script.cpip("cache", "purge", "--verbose")
 
     assert remove_matches_http("aaaaaaaaa", result)
@@ -390,7 +408,8 @@ def test_cache_purge_too_many_args(
     wheel_cache_files: list[str],
 ) -> None:
     """Running `cpip cache purge aaa` should raise an error and remove no
-    cached http files or wheels."""
+    cached http files or wheels.
+    """
     result = script.cpip("cache", "purge", "aaa", "--verbose", expect_error=True)
     assert result.stdout == ""
 
@@ -405,10 +424,12 @@ def test_cache_purge_too_many_args(
 
 @pytest.mark.parametrize("command", ["info", "list", "remove", "purge"])
 def test_cache_abort_when_no_cache_dir(
-    script: CpipTestEnvironment, command: str
+    script: CpipTestEnvironment,
+    command: str,
 ) -> None:
     """Running any cpip cache command when cache is disabled should
-    abort and log an informative error"""
+    abort and log an informative error
+    """
     result = script.cpip("cache", command, "--no-cache-dir", expect_error=True)
     assert result.stdout == ""
 
@@ -456,7 +477,7 @@ def create_selfcheck_json(cache_dir: str) -> None:
                 "/some/prefix": {
                     "last_check": "2020-01-01T00:00:00",
                     "pypi_version": "20.0.1",
-                }
+                },
             },
             statefile,
         )

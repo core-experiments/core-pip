@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-
 from .errors import CommandError
 from .packaging import canonicalize_name
 
@@ -26,7 +25,7 @@ class ReleaseControl:
             raise ValueError(f"unknown release control kind: {kind}")
         if value.startswith("-"):
             raise CommandError(
-                "--all-releases / --only-final option requires 1 argument."
+                "--all-releases / --only-final option requires 1 argument.",
             )
         entries = [item.strip() for item in value.split(",") if item.strip()]
         if not entries:
@@ -69,6 +68,10 @@ class ReleaseControl:
         return list(self.ordered_args)
 
     def handle_mutual_excludes(
-        self, value: str, target: set[str], other: set[str], attr_name: str
+        self,
+        value: str,
+        target: set[str],
+        other: set[str],
+        attr_name: str,
     ) -> None:
         self.apply(attr_name, value)

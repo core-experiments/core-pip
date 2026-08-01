@@ -21,8 +21,8 @@ from typing import (
 )
 from zipfile import ZipFile
 
-from packaging.utils import canonicalize_name
 from cpip.build.metadata import MetadataDistribution
+from packaging.utils import canonicalize_name
 
 # As would be used in metadata
 HeaderValue = str | list[str]
@@ -49,7 +49,7 @@ default_internal = Default.token
 T = TypeVar("T")
 
 # A type which may be defaulted.
-Defaulted = Union[Default, T]  # noqa: UP007
+Defaulted = Union[Default, T]
 
 
 def ensure_binary(value: bytes | str) -> bytes:
@@ -97,7 +97,7 @@ def make_metadata_file(
             "Metadata-Version": "2.1",
             "Name": name,
             "Version": version,
-        }
+        },
     )
     if updates is not default_internal:
         metadata.update(updates)
@@ -171,7 +171,9 @@ def make_files(files: dict[str, bytes | str]) -> list[File]:
 
 
 def make_metadata_files(
-    name: str, version: str, files: dict[str, AnyStr]
+    name: str,
+    version: str,
+    files: dict[str, AnyStr],
 ) -> list[File]:
     get_path = partial(dist_info_path, name, version)
     return [
@@ -205,7 +207,7 @@ def record_file_maker_wrapper(
     records: list[Record] = []
     for file in files:
         records.append(
-            Record(file.name, digest(file.contents), str(len(file.contents)))
+            Record(file.name, digest(file.contents), str(len(file.contents))),
         )
         yield file
 
@@ -243,7 +245,7 @@ def wheel_name(
             ".".join(pythons),
             ".".join(abis),
             ".".join(platforms),
-        ]
+        ],
     )
     return f"{stem}.whl"
 
@@ -309,11 +311,9 @@ def make_wheel(
     entry_points: Defaulted[dict[str, list[str]]] = default_internal,
     record: Defaulted[AnyStr | None] = default_internal,
 ) -> WheelBuilder:
-    """
-    Helper function for generating test wheels which are compliant by default.
+    """Helper function for generating test wheels which are compliant by default.
 
     Examples:
-
     ```
     # Basic wheel, which will have valid metadata, RECORD, etc
     make_wheel(name="foo", version="0.1.0")
@@ -368,6 +368,7 @@ def make_wheel(
     :param entry_points:
     :param record: if provided and None, then no RECORD file is generated;
         else if a string then sets the content of the RECORD file
+
     """
     pythons = ["py2", "py3"]
     abis = ["none"]
@@ -377,7 +378,11 @@ def make_wheel(
     possible_files = [
         make_metadata_file(name, version, metadata, metadata_updates, metadata_body),
         make_wheel_metadata_file(
-            name, version, wheel_metadata, tags, wheel_metadata_updates
+            name,
+            version,
+            wheel_metadata,
+            tags,
+            wheel_metadata_updates,
         ),
         make_entry_points_file(name, version, entry_points, console_scripts),
     ]
@@ -394,7 +399,10 @@ def make_wheel(
     actual_files = filter(None, possible_files)
 
     files_and_record_file = record_file_maker_wrapper(
-        name, version, actual_files, record
+        name,
+        version,
+        actual_files,
+        record,
     )
     wheel_file_name = wheel_name(name, version, pythons, abis, platforms)
 

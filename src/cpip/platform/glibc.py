@@ -5,12 +5,12 @@ import sys
 
 
 def glibc_version_string() -> str | None:
-    "Returns glibc version string, or None if not using glibc."
+    """Returns glibc version string, or None if not using glibc."""
     return glibc_version_string_confstr() or glibc_version_string_ctypes()
 
 
 def glibc_version_string_confstr() -> str | None:
-    "Primary implementation of glibc_version_string using os.confstr."
+    """Primary implementation of glibc_version_string using os.confstr."""
     # os.confstr is quite a bit faster than ctypes.DLL. It's also less likely
     # to be broken or missing. This strategy is used in the standard library
     # platform module:
@@ -30,8 +30,7 @@ def glibc_version_string_confstr() -> str | None:
 
 
 def glibc_version_string_ctypes() -> str | None:
-    "Fallback implementation of glibc_version_string using ctypes."
-
+    """Fallback implementation of glibc_version_string using ctypes."""
     try:
         import ctypes
     except ImportError:
@@ -98,5 +97,4 @@ def libc_ver() -> tuple[str, str]:
     glibc_version = glibc_version_string()
     if glibc_version is None:
         return ("", "")
-    else:
-        return ("glibc", glibc_version)
+    return ("glibc", glibc_version)

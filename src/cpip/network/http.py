@@ -32,7 +32,7 @@ MAX_IDLE_CONNECTIONS_PER_ORIGIN = 8
 
 
 class HttpRequest:
-    __slots__ = ("method", "url", "headers", "body")
+    __slots__ = ("body", "headers", "method", "url")
 
     def __init__(
         self,
@@ -172,14 +172,14 @@ class NetworkStats:
     """Optional counters for diagnosing network behavior."""
 
     __slots__ = (
-        "cache_hits",
-        "coalesced_waiters",
-        "network_requests",
-        "catalog_requests",
-        "metadata_requests",
-        "pypi_json_requests",
         "artifact_requests",
+        "cache_hits",
+        "catalog_requests",
+        "coalesced_waiters",
+        "metadata_requests",
+        "network_requests",
         "other_requests",
+        "pypi_json_requests",
     )
 
     def __init__(self) -> None:
@@ -297,7 +297,10 @@ class NetworkSession:
         return f"cpip/{version} Python/{platform.python_version()}"
 
     def add_trusted_host(
-        self, host: str, source: str | None = None, suppress_logging: bool = False
+        self,
+        host: str,
+        source: str | None = None,
+        suppress_logging: bool = False,
     ) -> None:
         del source, suppress_logging
         self.trusted_hosts.add(host.lower().split(":", 1)[0])
@@ -398,7 +401,11 @@ class NetworkSession:
         raise AssertionError("unreachable")
 
     def open_coalesced(
-        self, request: HttpRequest, timeout: Any, *, stream: bool = False
+        self,
+        request: HttpRequest,
+        timeout: Any,
+        *,
+        stream: bool = False,
     ) -> HttpResponse:
         if request.method != "GET" or stream or "Range" in request.headers:
             return self.open_internal(request, timeout, stream=stream)
@@ -407,7 +414,9 @@ class NetworkSession:
             request.method,
             request.url,
             tuple(
-                sorted((name.lower(), value) for name, value in request.headers.items())
+                sorted(
+                    (name.lower(), value) for name, value in request.headers.items()
+                ),
             ),
         )
         with self.inflight_requests_lock:
@@ -427,7 +436,7 @@ class NetworkSession:
                 raise flight.error
             if flight.response is None:
                 raise NetworkConnectionError(
-                    f"coalesced request completed without a response: {request.url}"
+                    f"coalesced request completed without a response: {request.url}",
                 )
             status, reason, url, headers, body = flight.response
             return HttpResponse(
@@ -518,7 +527,9 @@ class NetworkSession:
             return None
 
     def revalidated_response(
-        self, request: HttpRequest, metadata: dict[str, Any]
+        self,
+        request: HttpRequest,
+        metadata: dict[str, Any],
     ) -> HttpResponse:
         headers = metadata.get("headers", {})
         if not isinstance(headers, dict):
@@ -532,7 +543,7 @@ class NetworkSession:
         body = self.cache.get_body(request.url)
         if body is None:
             raise NetworkConnectionError(
-                f"Cached response body missing for url: {request.url}"
+                f"Cached response body missing for url: {request.url}",
             )
         response_headers = email.message.Message()
         for name, value in headers.items():
@@ -589,7 +600,7 @@ class NetworkSession:
                     "expires_at": expires_at,
                     "etag": response.headers.get("ETag"),
                     "last_modified": response.headers.get("Last-Modified"),
-                }
+                },
             ).encode("utf-8"),
         )
         self.cache.set_body(response.url, body)
@@ -597,7 +608,11 @@ class NetworkSession:
         response.content_internal = body
 
     def open_internal(
-        self, request: HttpRequest, timeout: Any, *, stream: bool = False
+        self,
+        request: HttpRequest,
+        timeout: Any,
+        *,
+        stream: bool = False,
     ) -> HttpResponse:
         parsed = urllib.parse.urlsplit(request.url)
         if not stream and parsed.scheme in {"http", "https"} and self.proxies is None:
@@ -624,7 +639,7 @@ class NetworkSession:
                     context = ssl._create_unverified_context()
                 else:
                     context = ssl.create_default_context(
-                        cafile=self.verify if isinstance(self.verify, str) else None
+                        cafile=self.verify if isinstance(self.verify, str) else None,
                     )
                     if self.cert:
                         context.load_cert_chain(self.cert)
@@ -635,14 +650,17 @@ class NetworkSession:
                     timeout=timeout_value(timeout or self.timeout),
                 )
             return http.client.HTTPConnection(
-                hostname, port, timeout=timeout_value(timeout or self.timeout)
+                hostname,
+                port,
+                timeout=timeout_value(timeout or self.timeout),
             )
 
         with self.connection_pools_lock:
             pool = self.connection_pools.get(key)
             if pool is None:
                 pool = PersistentConnectionPool(
-                    create_connection, MAX_IDLE_CONNECTIONS_PER_ORIGIN
+                    create_connection,
+                    MAX_IDLE_CONNECTIONS_PER_ORIGIN,
                 )
                 self.connection_pools[key] = pool
         connection = pool.acquire()
@@ -683,17 +701,21 @@ class NetworkSession:
             raise urllib.error.URLError(exc) from exc
 
     def open_with_urllib(
-        self, request: HttpRequest, timeout: Any, *, stream: bool = False
+        self,
+        request: HttpRequest,
+        timeout: Any,
+        *,
+        stream: bool = False,
     ) -> HttpResponse:
         parsed = urllib.parse.urlsplit(request.url)
         context = None
-        if parsed.hostname and parsed.hostname.lower() in self.trusted_hosts:
-            context = getattr(ssl, "create_unverified_context")()
-        elif self.verify is False:
-            context = getattr(ssl, "create_unverified_context")()
+        if (
+            parsed.hostname and parsed.hostname.lower() in self.trusted_hosts
+        ) or self.verify is False:
+            context = ssl._create_unverified_context()
         else:
             context = ssl.create_default_context(
-                cafile=self.verify if isinstance(self.verify, str) else None
+                cafile=self.verify if isinstance(self.verify, str) else None,
             )
             if self.cert:
                 context.load_cert_chain(self.cert)
@@ -765,7 +787,9 @@ class NetworkSession:
         if credentials is not None and retry.status_code < 400:
             try:
                 self.auth.keyring_provider.save_auth_info(
-                    credentials.url, credentials.username, credentials.password
+                    credentials.url,
+                    credentials.username,
+                    credentials.password,
                 )
             except Exception:
                 logger.exception("Failed to save credentials")

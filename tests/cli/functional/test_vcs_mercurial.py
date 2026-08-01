@@ -1,7 +1,6 @@
 import os
 
 from cpip.vcs.mercurial import Mercurial
-
 from cpip_test_support import CpipTestEnvironment, create_test_package, need_mercurial
 
 

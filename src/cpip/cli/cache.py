@@ -55,7 +55,11 @@ class CacheManager:
         return [f" - {path.name} ({path.parent})" for path in wheels]
 
     def remove(
-        self, pattern: str | None, *, purge: bool, verbose: bool
+        self,
+        pattern: str | None,
+        *,
+        purge: bool,
+        verbose: bool,
     ) -> tuple[int, int, int]:
         if purge:
             files = [
@@ -108,7 +112,9 @@ class CacheManager:
         directories = [
             os.path.join(current, name)
             for current, directory_names, _ in os.walk(
-                os.fspath(self.cache_dir), topdown=False, followlinks=False
+                os.fspath(self.cache_dir),
+                topdown=False,
+                followlinks=False,
             )
             for name in directory_names
         ]

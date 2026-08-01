@@ -1,6 +1,4 @@
-"""
-Test specific for the --no-color option
-"""
+"""Test specific for the --no-color option"""
 
 import os
 import shutil
@@ -8,7 +6,6 @@ import subprocess
 import sys
 
 import pytest
-
 from cpip_test_support import CpipTestEnvironment
 
 

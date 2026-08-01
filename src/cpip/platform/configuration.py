@@ -21,11 +21,11 @@ import sys
 from collections.abc import Iterable
 from typing import Any, NewType
 
+from cpip.core.appdirs import site_config_dirs, user_config_dir
 from cpip.core.errors import (
     ConfigurationError,
 )
 from cpip.core.filesystem import ensure_dir
-from cpip.core.appdirs import site_config_dirs, user_config_dir
 from cpip.core.misc import enum
 
 WINDOWS = os.name == "nt"
@@ -130,8 +130,8 @@ class Configuration:
         if load_only is not None and load_only not in VALID_LOAD_ONLY:
             raise ConfigurationError(
                 "Got invalid value for load_only - should be one of {}".format(
-                    ", ".join(map(repr, VALID_LOAD_ONLY))
-                )
+                    ", ".join(map(repr, VALID_LOAD_ONLY)),
+                ),
             )
         self.isolated = isolated
         self.load_only = load_only
@@ -223,7 +223,7 @@ class Configuration:
             ):
                 # The option was not removed.
                 raise ConfigurationError(
-                    "Fatal Internal error [id=1]. Please report as a bug."
+                    "Fatal Internal error [id=1]. Please report as a bug.",
                 )
 
             # The section may be empty after the option was removed.
@@ -252,7 +252,7 @@ class Configuration:
             except OSError as error:
                 raise ConfigurationError(
                     f"An error occurred while writing to the configuration file "
-                    f"{fname}: {error}"
+                    f"{fname}: {error}",
                 )
 
     #
@@ -282,7 +282,7 @@ class Configuration:
         if config_files[kinds.ENV][0:1] == [os.devnull]:
             logger.debug(
                 "Skipping loading configuration files due to "
-                "environment's CPIP_CONFIG_FILE being os.devnull"
+                "environment's CPIP_CONFIG_FILE being os.devnull",
             )
             return
 
@@ -307,7 +307,7 @@ class Configuration:
             items = parser.items(section)
             self.config_internal[variant].setdefault(fname, {})
             self.config_internal[variant][fname].update(
-                self.normalized_keys(section, items)
+                self.normalized_keys(section, items),
             )
 
         return parser
@@ -337,11 +337,13 @@ class Configuration:
         """Loads configuration from environment variables"""
         self.config_internal[kinds.ENV_VAR].setdefault(":env:", {})
         self.config_internal[kinds.ENV_VAR][":env:"].update(
-            self.normalized_keys(":env:", self.get_environ_vars())
+            self.normalized_keys(":env:", self.get_environ_vars()),
         )
 
     def normalized_keys(
-        self, section: str, items: Iterable[tuple[str, Any]]
+        self,
+        section: str,
+        items: Iterable[tuple[str, Any]],
     ) -> dict[str, Any]:
         """Normalizes items to construct a dictionary with normalized keys.
 
@@ -406,7 +408,7 @@ class Configuration:
         if not parsers:
             # This should not happen if everything works correctly.
             raise ConfigurationError(
-                "Fatal Internal error [id=2]. Please report as a bug."
+                "Fatal Internal error [id=2]. Please report as a bug.",
             )
 
         # Use the highest priority parser.

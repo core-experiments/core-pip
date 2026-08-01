@@ -9,12 +9,14 @@ from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
 def make_tls_cert(hostname: str) -> tuple[x509.Certificate, rsa.RSAPrivateKey]:
     key = rsa.generate_private_key(
-        public_exponent=65537, key_size=2048, backend=default_backend()
+        public_exponent=65537,
+        key_size=2048,
+        backend=default_backend(),
     )
     subject = issuer = x509.Name(
         [
             x509.NameAttribute(NameOID.COMMON_NAME, hostname),
-        ]
+        ],
     )
     cert = (
         x509.CertificateBuilder()
@@ -37,7 +39,7 @@ def make_tls_cert(hostname: str) -> tuple[x509.Certificate, rsa.RSAPrivateKey]:
                 [
                     ExtendedKeyUsageOID.CLIENT_AUTH,
                     ExtendedKeyUsageOID.SERVER_AUTH,
-                ]
+                ],
             ),
             critical=True,
         )

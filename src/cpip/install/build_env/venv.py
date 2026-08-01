@@ -8,13 +8,13 @@ from collections.abc import Iterable
 from types import TracebackType
 from typing import TYPE_CHECKING, Any
 
+from cpip.core.errors import DiagnosticCpipError
+from cpip.core.temp_dir import TempDirectory, tempdir_kinds
 from cpip.install.build_env.base import (
     BuildEnvironment,
     BuildEnvironmentInstaller,
     Prefix,
 )
-from cpip.core.errors import DiagnosticCpipError
-from cpip.core.temp_dir import TempDirectory, tempdir_kinds
 
 if TYPE_CHECKING:
     from cpip.resolution.req_install import InstallRequirement
@@ -73,7 +73,8 @@ class VenvBuildEnvironment(BuildEnvironment):
         # We defer these imports because certain distributions of Python do not
         # include a functional venv out of the box.
         self.temp_dir_internal = TempDirectory(
-            kind=tempdir_kinds.BUILD_ENV, globally_managed=True
+            kind=tempdir_kinds.BUILD_ENV,
+            globally_managed=True,
         )
         self.env_path_internal = self.temp_dir_internal.path
         context: Any = None
@@ -131,18 +132,20 @@ class VenvBuildEnvironment(BuildEnvironment):
             # This also keeps cpip compatible with virtualenv versions that
             # intentionally return no context from their CLI entry point.
             self.lib_dirs = [
-                get_venv_path_from_sysconfig("purelib", self.env_path_internal)
+                get_venv_path_from_sysconfig("purelib", self.env_path_internal),
             ]
             self.bin_path_internal = get_venv_path_from_sysconfig(
-                "scripts", self.env_path_internal
+                "scripts",
+                self.env_path_internal,
             )
         elif sys.version_info[:2] == (3, 11):
             # On Python 3.11, we can use sysconfig.
             self.lib_dirs = [
-                get_venv_path_from_sysconfig("purelib", self.env_path_internal)
+                get_venv_path_from_sysconfig("purelib", self.env_path_internal),
             ]
             self.bin_path_internal = get_venv_path_from_sysconfig(
-                "scripts", self.env_path_internal
+                "scripts",
+                self.env_path_internal,
             )
         else:
             # Otherwise, we need to manually construct all the paths... sigh.
@@ -163,7 +166,8 @@ class VenvBuildEnvironment(BuildEnvironment):
             except AttributeError:
                 scripts_dir = "Scripts" if os.name == "nt" else "bin"
                 self.bin_path_internal = os.path.join(
-                    self.env_path_internal, scripts_dir
+                    self.env_path_internal,
+                    scripts_dir,
                 )
 
         # There are enough ways trying to construct the Python executable path can go
@@ -180,7 +184,8 @@ class VenvBuildEnvironment(BuildEnvironment):
             except AttributeError:
                 executable_name = "python.exe" if os.name == "nt" else "python"
                 self.python_executable = os.path.join(
-                    self.bin_path_internal, executable_name
+                    self.bin_path_internal,
+                    executable_name,
                 )
 
         self.save_env: dict[str, str | None] = {}
@@ -189,7 +194,7 @@ class VenvBuildEnvironment(BuildEnvironment):
         if not os.path.exists(self.python_executable):
             # This error is only likely on Windows due to interference from AV software.
             raise VenvCreationError(
-                f"Python executable failed to copy to {self.python_executable}"
+                f"Python executable failed to copy to {self.python_executable}",
             )
 
     def __enter__(self) -> None:
@@ -229,8 +234,12 @@ class VenvBuildEnvironment(BuildEnvironment):
         # TODO: when better support for installing to arbitrary Python environments
         # is added, replace this prefix hack with that.
         prefix = Prefix(
-            self.env_path_internal, python_executable=self.python_executable
+            self.env_path_internal,
+            python_executable=self.python_executable,
         )
         self.installer_internal.install(
-            requirements, prefix, kind=kind, for_req=for_req
+            requirements,
+            prefix,
+            kind=kind,
+            for_req=for_req,
         )

@@ -22,7 +22,7 @@ CacheValue = tuple[str, str, tuple[str, ...], tuple[str, ...], str | None]
 class CandidateMetadataCache:
     """Process-local metadata cache backed by an atomic marshal snapshot."""
 
-    __slots__ = ("decoded", "entries", "path", "dirty")
+    __slots__ = ("decoded", "dirty", "entries", "path")
 
     def __init__(self, cache_dir: str | os.PathLike[str]) -> None:
         self.path = Path(cache_dir) / NAME
@@ -44,7 +44,7 @@ class CandidateMetadataCache:
             return
         for key, value in payload[2].items():
             if self.valid_key(key) and self.valid_value(value):
-                self.entries[cast(CacheKey, key)] = cast(CacheValue, value)
+                self.entries[cast("CacheKey", key)] = cast("CacheValue", value)
 
     @staticmethod
     def valid_key(value: object) -> bool:
@@ -73,7 +73,8 @@ class CandidateMetadataCache:
         )
 
     def get(
-        self, key: tuple[str, str, tuple[str, ...], str]
+        self,
+        key: tuple[str, str, tuple[str, ...], str],
     ) -> CandidateMetadata | None:
         decoded = self.decoded.get(key)
         if decoded is not None:

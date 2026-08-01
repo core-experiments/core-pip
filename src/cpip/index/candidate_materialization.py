@@ -12,8 +12,8 @@ import tempfile
 import urllib.parse
 import urllib.request
 import zipfile
-from pathlib import Path
 from collections.abc import Generator, Iterator
+from pathlib import Path
 from typing import Any
 
 from cpip.core.errors import BuildError, InstallationError, UnsupportedWheel
@@ -30,21 +30,23 @@ from cpip.core.wheel import (
     wheel_candidate,
 )
 from cpip.index.candidate_cache import (
-    cached_wheel_for_link,
-    emit_build_message,
     cache_built_wheel as store_cached_wheel,
 )
+from cpip.index.candidate_cache import (
+    cached_wheel_for_link,
+    emit_build_message,
+)
+from cpip.index.candidate_metadata_cache import get_candidate_metadata_cache
 from cpip.index.candidate_stream import CandidateStream
+from cpip.index.metadata_cache import get_wheel_metadata_cache
+from cpip.index.prefetch import Prefetcher
 from cpip.index.source_models import (
+    SOURCE_ARTIFACT_KINDS,
     ArtifactKind,
     CandidateMetadata,
     CandidateRecord,
     LazyCandidateMetadata,
-    SOURCE_ARTIFACT_KINDS,
 )
-from cpip.index.metadata_cache import get_wheel_metadata_cache
-from cpip.index.candidate_metadata_cache import get_candidate_metadata_cache
-from cpip.index.prefetch import Prefetcher
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +65,8 @@ def project_provided_extras(project: object) -> frozenset[str]:
 
 
 def project_dependencies(
-    project: object, requested_extras: frozenset[str]
+    project: object,
+    requested_extras: frozenset[str],
 ) -> tuple[Requirement, ...]:
     values = list(getattr(project, "dependencies", ()))
     optional_dependencies = getattr(project, "optional_dependencies", {})
@@ -123,12 +126,13 @@ class LazyWheelCandidate(WheelCandidate):
         if candidate is None:
             candidates = list(
                 self.materializer_internal.iter_materialize(
-                    self.requirement_internal, (self.record_internal,)
-                )
+                    self.requirement_internal,
+                    (self.record_internal,),
+                ),
             )
             if not candidates:
                 raise BuildError(
-                    f"Unable to materialize candidate {self.record_internal.name}"
+                    f"Unable to materialize candidate {self.record_internal.name}",
                 )
             candidate = candidates[0]
             self.materialized_internal = candidate
@@ -193,7 +197,7 @@ class LazyWheelCandidate(WheelCandidate):
                 url = self.record_internal.link.url
                 if self.materializer_internal.vcs_revision(url) is None:
                     local = self.materializer_internal.ensure_local(
-                        self.record_internal
+                        self.record_internal,
                     )
                     remove_temp_directory_internal(local)
                 return None
@@ -278,7 +282,8 @@ class CandidateMaterializer:
         self.artifacts = None
         self.invalid_links: set[str] = set()
         self.wheel_candidates: dict[
-            tuple[str, int, int, frozenset[str]], WheelCandidate
+            tuple[str, int, int, frozenset[str]],
+            WheelCandidate,
         ] = {}
         self.metadata_cache: dict[tuple[str, frozenset[str]], CandidateMetadata] = {}
         self.release_metadata_cache: dict[
@@ -329,7 +334,6 @@ class CandidateMaterializer:
 
     def vcs_revision(self, url: str) -> str | None:
         """Return the revision observed while materializing a VCS candidate."""
-
         return self.vcs_revisions.get(url)
 
     def materialize(
@@ -343,7 +347,13 @@ class CandidateMaterializer:
             )
             for candidate in accepted
         )
-        self.prefetch_metadata(records[:2])
+        # Keep the speculative window bounded, but widen it for large remote
+        # candidate sets.  The resolver usually consumes candidates in order;
+        # overlapping metadata-only requests for the first few candidates
+        # avoids serial latency without downloading artifacts or building
+        # sdists.  Small sets retain the old two-request footprint.
+        prefetch_count = min(8, max(2, len(records) // 8))
+        self.prefetch_metadata(records[:prefetch_count])
 
         def generate() -> Iterator[WheelCandidate]:
             invalid_versions: set[tuple[str, Version]] = set()
@@ -374,12 +384,12 @@ class CandidateMaterializer:
                         print(
                             f"WARNING: {candidate.name} has an inconsistent version: "
                             f"expected '{candidate.version}', but metadata has "
-                            f"'{metadata.version}'"
+                            f"'{metadata.version}'",
                         )
                         if requirement.extras:
                             print(
                                 f"Requested {requirement.raw or requirement.name}, "
-                                f"but installing version {metadata.version}"
+                                f"but installing version {metadata.version}",
                             )
                         self.invalid_links.add(candidate.link.url)
                         invalid_versions.add(identity)
@@ -413,7 +423,9 @@ class CandidateMaterializer:
             self.metadata_prefetcher = None
 
     def metadata_loader(
-        self, candidate: CandidateRecord, requirement: Requirement
+        self,
+        candidate: CandidateRecord,
+        requirement: Requirement,
     ) -> LazyCandidateMetadata:
         requested_extras = frozenset(requirement.extras)
         key = (candidate.link.url, requested_extras)
@@ -442,7 +454,8 @@ class CandidateMaterializer:
                     self.metadata_cache[key] = metadata
                     if self.persistent_candidate_metadata_cache is not None:
                         self.persistent_candidate_metadata_cache.put(
-                            persistent_key, metadata
+                            persistent_key,
+                            metadata,
                         )
                     return metadata
             if candidate.link.kind is ArtifactKind.WHEEL and self.dry_run:
@@ -460,7 +473,8 @@ class CandidateMaterializer:
                     self.metadata_cache[key] = metadata
                     if self.persistent_candidate_metadata_cache is not None:
                         self.persistent_candidate_metadata_cache.put(
-                            persistent_key, metadata
+                            persistent_key,
+                            metadata,
                         )
                     return metadata
             local_path = (
@@ -492,14 +506,15 @@ class CandidateMaterializer:
                         metadata = self.pypi_metadata(candidate, requested_extras)
                         if metadata is None:
                             raise BuildError(
-                                f"Failed to build '{candidate.name}': {exc}"
+                                f"Failed to build '{candidate.name}': {exc}",
                             ) from exc
                     else:
                         metadata = CandidateMetadata(
                             name=project.name,
                             version=Version(project.version),
                             dependencies=project_dependencies(
-                                project, requested_extras
+                                project,
+                                requested_extras,
                             ),
                             provided_extras=project_provided_extras(project),
                             requires_python=project.requires_python,
@@ -733,7 +748,7 @@ class CandidateMaterializer:
                     except BuildError as exc:
                         emit_build_message(f"Failed to build '{display_name}'")
                         raise BuildError(
-                            f"Failed to build '{display_name}': {exc}"
+                            f"Failed to build '{display_name}': {exc}",
                         ) from exc
                     emit_build_message(f"Created wheel for {display_name}")
                     emit_build_message(f"Successfully built {display_name}")
@@ -766,7 +781,8 @@ class CandidateMaterializer:
                                 validate_wheel_with_metadata(
                                     archive,
                                     os.path.basename(os.fspath(path))[:-4].split(
-                                        "-", 1
+                                        "-",
+                                        1,
                                     )[0],
                                 )
                             )
@@ -800,12 +816,12 @@ class CandidateMaterializer:
                 print(
                     f"WARNING: {candidate.name} has an inconsistent version: "
                     f"expected '{candidate.version}', but metadata has "
-                    f"'{built.version}'"
+                    f"'{built.version}'",
                 )
                 if requirement.extras:
                     print(
                         f"Requested {requirement.raw or requirement.name}, "
-                        f"but installing version {built.version}"
+                        f"but installing version {built.version}",
                     )
                 self.invalid_links.add(candidate.link.url)
                 continue
@@ -871,25 +887,25 @@ def validate_build_requirements(source: Path) -> None:
             data = tomllib.loads(file.read())
     except tomllib.TOMLDecodeError as exc:
         raise BuildError(
-            f"Invalid PEP 518 build requirements in {pyproject}: {exc}"
+            f"Invalid PEP 518 build requirements in {pyproject}: {exc}",
         ) from exc
     if "build-system" not in data:
         return
     build_system = data["build-system"]
     if not isinstance(build_system, dict):
         raise BuildError(
-            f"Invalid PEP 518 [build-system] table in {pyproject}: mandatory `requires` key is missing"
+            f"Invalid PEP 518 [build-system] table in {pyproject}: mandatory `requires` key is missing",
         )
     if "requires" not in build_system:
         raise BuildError(
-            f"Invalid PEP 518 [build-system] table in {pyproject}: mandatory `requires` key is missing"
+            f"Invalid PEP 518 [build-system] table in {pyproject}: mandatory `requires` key is missing",
         )
     requires = build_system.get("requires")
     if not isinstance(requires, list) or not all(
         isinstance(item, str) for item in requires
     ):
         raise BuildError(
-            f"Invalid PEP 518 build requirements in {pyproject}: build-system.requires is not a list of strings"
+            f"Invalid PEP 518 build requirements in {pyproject}: build-system.requires is not a list of strings",
         )
     for item in requires:
         try:
@@ -905,5 +921,5 @@ def validate_build_requirements(source: Path) -> None:
             ):
                 raise BuildError(
                     f"Some build dependencies for {source.as_uri()} conflict with PEP 517/518 supported requirements: "
-                    "setuptools==1.0 is incompatible with setuptools>=40.8.0,<82."
+                    "setuptools==1.0 is incompatible with setuptools>=40.8.0,<82.",
                 )

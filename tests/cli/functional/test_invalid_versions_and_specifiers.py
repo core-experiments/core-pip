@@ -1,29 +1,32 @@
 import zipfile
 
 import pytest
-
 from cpip_test_support import CpipTestEnvironment, TestData
 
 
 def test_install_from_index_with_invalid_version(
-    script: CpipTestEnvironment, data: TestData
+    script: CpipTestEnvironment,
+    data: TestData,
 ) -> None:
-    """
-    Test that cpip does not crash when installing a package from an index with
+    """Test that cpip does not crash when installing a package from an index with
     an invalid version. It ignores invalid versions.
     """
     index_url = data.index_url("invalid-version")
     result = script.cpip(
-        "install", "--dry-run", "--index-url", index_url, "invalid-version"
+        "install",
+        "--dry-run",
+        "--index-url",
+        index_url,
+        "invalid-version",
     )
     assert "Would install invalid-version-1.0" in result.stdout
 
 
 def test_install_from_index_with_invalid_specifier(
-    script: CpipTestEnvironment, data: TestData
+    script: CpipTestEnvironment,
+    data: TestData,
 ) -> None:
-    """
-    Test that cpip does not crash when installing a package with an invalid
+    """Test that cpip does not crash when installing a package with an invalid
     version specifier in its dependencies.
     """
     index_url = data.index_url("require-invalid-version")
@@ -43,40 +46,33 @@ def test_install_from_index_with_invalid_specifier(
 
 
 def install_invalid_version(script: CpipTestEnvironment, data: TestData) -> None:
-    """
-    Install a package with an invalid version.
-    """
+    """Install a package with an invalid version."""
     with zipfile.ZipFile(
-        data.packages.joinpath("invalid_version-2010i-py3-none-any.whl")
+        data.packages.joinpath("invalid_version-2010i-py3-none-any.whl"),
     ) as zf:
         zf.extractall(script.site_packages_path)
 
 
 def install_require_invalid_version(
-    script: CpipTestEnvironment, data: TestData
+    script: CpipTestEnvironment,
+    data: TestData,
 ) -> None:
-    """
-    Install a package with an invalid version.
-    """
+    """Install a package with an invalid version."""
     with zipfile.ZipFile(
-        data.packages.joinpath("require_invalid_version-1.0-py3-none-any.whl")
+        data.packages.joinpath("require_invalid_version-1.0-py3-none-any.whl"),
     ) as zf:
         zf.extractall(script.site_packages_path)
 
 
 def test_uninstall_invalid_version(script: CpipTestEnvironment, data: TestData) -> None:
-    """
-    Test that it is possible to uninstall a distribution with an invalid version.
-    """
+    """Test that it is possible to uninstall a distribution with an invalid version."""
     install_invalid_version(script, data)
     script.cpip("uninstall", "-y", "invalid-version")
 
 
 @pytest.mark.xfail
 def test_upgrade_invalid_version(script: CpipTestEnvironment, data: TestData) -> None:
-    """
-    Test that it is possible to upgrade a distribution with an invalid version.
-    """
+    """Test that it is possible to upgrade a distribution with an invalid version."""
     install_invalid_version(script, data)
     index_url = data.index_url("invalid-version")
     script.cpip("install", "--index-url", index_url, "invalid-version")
@@ -84,11 +80,10 @@ def test_upgrade_invalid_version(script: CpipTestEnvironment, data: TestData) ->
 
 @pytest.mark.xfail
 def test_upgrade_require_invalid_version(
-    script: CpipTestEnvironment, data: TestData
+    script: CpipTestEnvironment,
+    data: TestData,
 ) -> None:
-    """
-    Test that it is possible to upgrade a distribution with an invalid metadata.
-    """
+    """Test that it is possible to upgrade a distribution with an invalid metadata."""
     install_require_invalid_version(script, data)
     index_url = data.index_url("require-invalid-version")
     script.cpip("install", "--index-url", index_url, "require-invalid-version")
@@ -96,39 +91,34 @@ def test_upgrade_require_invalid_version(
 
 @pytest.mark.parametrize("format", ["columns", "freeze", "json"])
 def test_list_invalid_version(
-    script: CpipTestEnvironment, data: TestData, format: str
+    script: CpipTestEnvironment,
+    data: TestData,
+    format: str,
 ) -> None:
-    """
-    Test that cpip can list an environment containing a package with a legacy version.
-    """
+    """Test that cpip can list an environment containing a package with a legacy version."""
     install_invalid_version(script, data)
     script.cpip("list", f"--format={format}")
 
 
 def test_freeze_invalid_version(script: CpipTestEnvironment, data: TestData) -> None:
-    """
-    Test that cpip can freeze an environment containing a package with a legacy version.
-    """
+    """Test that cpip can freeze an environment containing a package with a legacy version."""
     install_invalid_version(script, data)
     result = script.cpip("freeze")
     assert "invalid-version===2010i\n" in result.stdout
 
 
 def test_show_invalid_version(script: CpipTestEnvironment, data: TestData) -> None:
-    """
-    Test that cpip can show an installed distribution with a legacy version.
-    """
+    """Test that cpip can show an installed distribution with a legacy version."""
     install_invalid_version(script, data)
     result = script.cpip("show", "invalid-version")
     assert "Name: invalid-version\nVersion: 2010i\n" in result.stdout
 
 
 def test_show_require_invalid_version(
-    script: CpipTestEnvironment, data: TestData
+    script: CpipTestEnvironment,
+    data: TestData,
 ) -> None:
-    """
-    Test that cpip can show an installed distribution with a legacy specifier.
-    """
+    """Test that cpip can show an installed distribution with a legacy specifier."""
     install_require_invalid_version(script, data)
     result = script.cpip("show", "require-invalid-version")
     assert "Name: require-invalid-version\nVersion: 1.0\n" in result.stdout

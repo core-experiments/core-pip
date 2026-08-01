@@ -1,5 +1,4 @@
 import pytest
-
 from cpip_test_support import CpipTestEnvironment, TestData, create_test_package
 
 
@@ -21,7 +20,8 @@ def test_install_vcs_non_editable_direct_url(script: CpipTestEnvironment) -> Non
 
 
 def test_install_archive_direct_url(
-    script: CpipTestEnvironment, data: TestData
+    script: CpipTestEnvironment,
+    data: TestData,
 ) -> None:
     req = "simple @ " + data.packages.joinpath("simple-2.0.tar.gz").as_uri()
     assert req.startswith("simple @ file://")
@@ -35,7 +35,7 @@ def test_install_vcs_constraint_direct_url(script: CpipTestEnvironment) -> None:
     constraints_file.write_text(
         "git+https://github.com/pypa/pip-test-package"
         "@5547fa909e83df8bd743d3978d6667497983a4b7"
-        "#egg=pip-test-package"
+        "#egg=pip-test-package",
     )
     result = script.cpip("install", "pip-test-package", "-c", constraints_file)
     assert result.get_created_direct_url("pip_test_package")
@@ -47,6 +47,10 @@ def test_install_vcs_constraint_direct_file_url(script: CpipTestEnvironment) -> 
     constraints_file = script.scratch_path / "constraints.txt"
     constraints_file.write_text(f"git+{url}#egg=testpkg")
     result = script.cpip(
-        "install", "--no-build-isolation", "testpkg", "-c", constraints_file
+        "install",
+        "--no-build-isolation",
+        "testpkg",
+        "-c",
+        constraints_file,
     )
     assert result.get_created_direct_url("testpkg")

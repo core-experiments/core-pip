@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import contextlib
 import base64
 import configparser
+import contextlib
 import csv
 import email.parser
 import hashlib
@@ -22,10 +22,9 @@ except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility
     from cpip._vendor import tomli as tomllib
 import zipfile
 from collections.abc import Iterable, Iterator
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, cast
-
-from dataclasses import dataclass
 
 from cpip.core.errors import BuildError
 from cpip.core.packaging import (
@@ -108,7 +107,8 @@ class BackendSpec:
             and not any(
                 canonicalize_name(parse_requirement(item).name) == "setuptools"
                 and not parse_requirement(item).specifier.contains(
-                    Version("81"), allow_prereleases=True
+                    Version("81"),
+                    allow_prereleases=True,
                 )
                 for item in requires
             )
@@ -147,7 +147,7 @@ class BackendRunner:
 
         if not self.build_isolation:
             with tempfile.TemporaryDirectory(
-                prefix="pip-build-metadata-"
+                prefix="pip-build-metadata-",
             ) as metadata_dir:
                 caller = BuildBackendHookCaller(
                     os.fspath(self.source_dir),
@@ -185,7 +185,7 @@ class BackendRunner:
                                 "bin/python"
                                 if os.name != "nt"
                                 else "Scripts/python.exe"
-                            )
+                            ),
                         ),
                         "-m",
                         "ensurepip",
@@ -279,7 +279,7 @@ class BackendRunner:
                             is not None
                         ):
                             with tempfile.TemporaryDirectory(
-                                prefix="pip-build-metadata-"
+                                prefix="pip-build-metadata-",
                             ) as metadata_dir:
                                 caller = BuildBackendHookCaller(
                                     os.fspath(self.source_dir),
@@ -307,7 +307,8 @@ def build_wheel(
     metadata_directory: str | None = None,
 ) -> str:
     return ProjectBuilder(Path.cwd()).build_wheel(
-        Path(wheel_directory), config_settings=config_settings
+        Path(wheel_directory),
+        config_settings=config_settings,
     )
 
 
@@ -342,7 +343,8 @@ def build_editable(
     metadata_directory: str | None = None,
 ) -> str:
     return ProjectBuilder(Path.cwd()).build_editable(
-        Path(wheel_directory), config_settings=config_settings
+        Path(wheel_directory),
+        config_settings=config_settings,
     )
 
 
@@ -360,7 +362,9 @@ def build_sdist(
     with tarfile.open(sdist_path, "w:gz") as archive:
         source_dir_text = os.fspath(source_dir)
         for current, directories, files in os.walk(
-            source_dir_text, topdown=True, followlinks=False
+            source_dir_text,
+            topdown=True,
+            followlinks=False,
         ):
             directories[:] = sorted(name for name in directories if name != ".git")
             for name in sorted(files):
@@ -436,11 +440,15 @@ class ProjectBuilder:
             and os.path.isfile(os.path.join(os.fspath(self.source_dir), "setup.py"))
         ):
             return self.build_external(
-                wheel_directory, config_settings=config_settings, editable=False
+                wheel_directory,
+                config_settings=config_settings,
+                editable=False,
             )
         if self.backend_spec is not None:
             return self.build_external(
-                wheel_directory, config_settings=config_settings, editable=True
+                wheel_directory,
+                config_settings=config_settings,
+                editable=True,
             )
         if callable(backend) and backend is not build_editable:
             with backend_environment(self.source_dir):
@@ -451,7 +459,7 @@ class ProjectBuilder:
                 )
             if not isinstance(wheel_name, str):
                 raise BuildError(
-                    "Build backend did not return an editable wheel filename"
+                    "Build backend did not return an editable wheel filename",
                 )
             return wheel_name
         return self.build_fallback_wheel(wheel_directory, editable=True)
@@ -459,7 +467,7 @@ class ProjectBuilder:
     def load_backend_hook(self, name: str) -> BuildWheelHook | None:
         backend = load_project_backend(self.source_dir)
         hook = getattr(backend, name, None) if backend is not None else None
-        return cast(BuildWheelHook, hook) if callable(hook) else None
+        return cast("BuildWheelHook", hook) if callable(hook) else None
 
     def build_external(
         self,
@@ -474,38 +482,42 @@ class ProjectBuilder:
         os.makedirs(os.fspath(wheel_directory), exist_ok=True)
         backend_name = self.backend_spec.name
         try:
-            with BackendRunner(
-                self.source_dir,
-                self.backend_spec,
-                build_constraints=self.build_constraints,
-                build_isolation=self.build_isolation,
-            ).caller() as (caller, _):
-                with caller.subprocess_runner(call_subprocess):
-                    if editable:
-                        wheel_name = caller.build_editable(
-                            os.fspath(wheel_directory), config_settings=config_settings
-                        )
-                    else:
-                        wheel_name = caller.build_wheel(
-                            os.fspath(wheel_directory), config_settings=config_settings
-                        )
+            with (
+                BackendRunner(
+                    self.source_dir,
+                    self.backend_spec,
+                    build_constraints=self.build_constraints,
+                    build_isolation=self.build_isolation,
+                ).caller() as (caller, _),
+                caller.subprocess_runner(call_subprocess),
+            ):
+                if editable:
+                    wheel_name = caller.build_editable(
+                        os.fspath(wheel_directory),
+                        config_settings=config_settings,
+                    )
+                else:
+                    wheel_name = caller.build_wheel(
+                        os.fspath(wheel_directory),
+                        config_settings=config_settings,
+                    )
         except HookMissing as exc:
             if editable:
                 raise BuildError(
                     "Cannot build editable "
                     f"{self.source_dir} because the build backend is missing "
-                    "the 'build_editable' hook"
+                    "the 'build_editable' hook",
                 ) from exc
             raise BuildError(
-                f"Build backend {backend_name} is missing the 'build_wheel' hook"
+                f"Build backend {backend_name} is missing the 'build_wheel' hook",
             ) from exc
         except Exception as exc:
             raise BuildError(
-                f"Failed to build {self.source_dir} with {backend_name}: {exc}"
+                f"Failed to build {self.source_dir} with {backend_name}: {exc}",
             ) from exc
         if not isinstance(wheel_name, str):
             raise BuildError(
-                f"Build backend {backend_name} did not return a wheel filename"
+                f"Build backend {backend_name} did not return a wheel filename",
             )
         return wheel_name
 
@@ -524,7 +536,9 @@ class ProjectBuilder:
             records.append((path, raw))
 
         with zipfile.ZipFile(
-            wheel_path, "w", compression=zipfile.ZIP_DEFLATED
+            wheel_path,
+            "w",
+            compression=zipfile.ZIP_DEFLATED,
         ) as archive:
             if editable:
                 import_root = (
@@ -560,7 +574,8 @@ class ProjectBuilder:
             if entry_points:
                 write_file(archive, f"{dist_info}/entry_points.txt", entry_points)
             archive.writestr(
-                f"{dist_info}/RECORD", record_text_internal(records, dist_info)
+                f"{dist_info}/RECORD",
+                record_text_internal(records, dist_info),
             )
         return wheel_name
 
@@ -595,11 +610,11 @@ class ProjectBuilder:
                     if editable:
                         try:
                             dist_info = caller.prepare_metadata_for_build_editable(
-                                os.fspath(metadata_path)
+                                os.fspath(metadata_path),
                             )
                         except HookMissing:
                             with tempfile.TemporaryDirectory(
-                                prefix="cpip-metadata-editable-"
+                                prefix="cpip-metadata-editable-",
                             ) as wheel_directory:
                                 wheel_name = caller.build_editable(wheel_directory)
                                 assert wheel_name is not None
@@ -611,17 +626,17 @@ class ProjectBuilder:
                                         if name.endswith(".dist-info/METADATA")
                                     )
                                     metadata = email.parser.BytesParser().parsebytes(
-                                        wheel.read(metadata_name)
+                                        wheel.read(metadata_name),
                                     )
                             dist_info = None
                     else:
                         try:
                             dist_info = caller.prepare_metadata_for_build_wheel(
-                                os.fspath(metadata_path)
+                                os.fspath(metadata_path),
                             )
                         except HookMissing:
                             with tempfile.TemporaryDirectory(
-                                prefix="cpip-metadata-wheel-"
+                                prefix="cpip-metadata-wheel-",
                             ) as wheel_directory:
                                 wheel_name = caller.build_wheel(wheel_directory)
                                 assert wheel_name is not None
@@ -633,12 +648,12 @@ class ProjectBuilder:
                                         if name.endswith(".dist-info/METADATA")
                                     )
                                     metadata = email.parser.BytesParser().parsebytes(
-                                        wheel.read(metadata_name)
+                                        wheel.read(metadata_name),
                                     )
                             dist_info = None
                 if not editable and dist_info is None and metadata is None:
                     with tempfile.TemporaryDirectory(
-                        prefix="cpip-metadata-wheel-"
+                        prefix="cpip-metadata-wheel-",
                     ) as wheel_directory:
                         wheel_name = caller.build_wheel(wheel_directory)
                         assert wheel_name is not None
@@ -650,26 +665,26 @@ class ProjectBuilder:
                                 if name.endswith(".dist-info/METADATA")
                             )
                             metadata = email.parser.BytesParser().parsebytes(
-                                wheel.read(metadata_name)
+                                wheel.read(metadata_name),
                             )
                 if dist_info is not None:
                     metadata = email.parser.Parser().parsestr(
                         (metadata_path / dist_info / "METADATA").read_text(
-                            encoding="utf-8"
-                        )
+                            encoding="utf-8",
+                        ),
                     )
                 if metadata is None:
                     raise BuildError("Build backend returned no metadata")
         except Exception as exc:
             raise BuildError(
                 "Failed to prepare metadata for "
-                f"{self.source_dir} with {backend_name}: {exc}"
+                f"{self.source_dir} with {backend_name}: {exc}",
             ) from exc
         name = metadata.get("Name")
         version = metadata.get("Version")
         if not name or not version:
             raise BuildError(
-                f"Build backend {backend_name} returned incomplete metadata"
+                f"Build backend {backend_name} returned incomplete metadata",
             )
         return ProjectMetadata(
             name=name,
@@ -717,7 +732,7 @@ def load_project_backend(source_dir: Path) -> object | None:
         return None
     backend_name = build_system.get("build-backend")
     if not isinstance(backend_name, str) or backend_name.startswith(
-        "setuptools.build_meta"
+        "setuptools.build_meta",
     ):
         return None
     if backend_name in {"cpip.build.build_backend", "uv_build"}:
@@ -810,7 +825,7 @@ class ProjectMetadataReader:
                         isinstance(item, str) for item in dependencies
                     ):
                         raise BuildError(
-                            f"Cannot build {source_dir}: project.dependencies is invalid"
+                            f"Cannot build {source_dir}: project.dependencies is invalid",
                         )
                     scripts = project.get("scripts", {})
                     if not isinstance(scripts, dict):
@@ -830,7 +845,8 @@ class ProjectMetadataReader:
                     if isinstance(optional_dependencies_raw, dict):
                         for extra, values in optional_dependencies_raw.items():
                             if not isinstance(extra, str) or not isinstance(
-                                values, list
+                                values,
+                                list,
                             ):
                                 continue
                             items = [
@@ -862,39 +878,38 @@ class ProjectMetadataReader:
                 if isinstance(project, dict):
                     if not isinstance(name, str) or not name:
                         raise BuildError(
-                            f"Cannot build {source_dir}: missing project.name"
+                            f"Cannot build {source_dir}: missing project.name",
                         )
                     raise BuildError(
-                        f"Cannot build {source_dir}: missing project.version"
+                        f"Cannot build {source_dir}: missing project.version",
                     )
                 raise BuildError(
-                    f"Cannot build {source_dir}: missing [project] metadata"
+                    f"Cannot build {source_dir}: missing [project] metadata",
                 )
             setup_cfg_metadata = read_setup_cfg_metadata(source_dir)
             if setup_cfg_metadata is not None:
                 return setup_cfg_metadata
             raise BuildError(
-                f"Cannot read metadata for {source_dir}: use the project's build backend"
+                f"Cannot read metadata for {source_dir}: use the project's build backend",
             )
-        else:
-            setup_py = source_dir / "setup.py"
-            if not setup_py.exists():
-                metadata = read_legacy_metadata(source_dir)
-                if metadata is not None:
-                    return metadata
-                metadata = read_setup_cfg_metadata(source_dir)
-                if metadata is not None:
-                    return metadata
-                metadata = infer_metadata_from_package_dir(source_dir)
-                if metadata is not None:
-                    return metadata
-                raise BuildError(f"Cannot build {source_dir}: missing pyproject.toml")
-            setup_cfg_metadata = read_setup_cfg_metadata(source_dir)
-            if setup_cfg_metadata is not None:
-                return setup_cfg_metadata
-            raise BuildError(
-                f"Cannot read metadata for {source_dir}: use the project's build backend"
-            )
+        setup_py = source_dir / "setup.py"
+        if not setup_py.exists():
+            metadata = read_legacy_metadata(source_dir)
+            if metadata is not None:
+                return metadata
+            metadata = read_setup_cfg_metadata(source_dir)
+            if metadata is not None:
+                return metadata
+            metadata = infer_metadata_from_package_dir(source_dir)
+            if metadata is not None:
+                return metadata
+            raise BuildError(f"Cannot build {source_dir}: missing pyproject.toml")
+        setup_cfg_metadata = read_setup_cfg_metadata(source_dir)
+        if setup_cfg_metadata is not None:
+            return setup_cfg_metadata
+        raise BuildError(
+            f"Cannot read metadata for {source_dir}: use the project's build backend",
+        )
 
 
 def read_setup_cfg_metadata(source_dir: Path) -> ProjectMetadata | None:
@@ -1035,7 +1050,7 @@ def read_legacy_metadata(source_dir: Path) -> ProjectMetadata | None:
         requires_python = fields.get("Requires-Python", [None])[0]
         dependencies = fields.get("Requires-Dist", [])
         if not dependencies and os.path.basename(os.path.dirname(candidate)).endswith(
-            ".egg-info"
+            ".egg-info",
         ):
             requires_path = os.path.join(os.path.dirname(candidate), "requires.txt")
             if os.path.isfile(requires_path):
@@ -1070,7 +1085,7 @@ def _read_legacy_requirements(path: Path) -> list[str]:
         if line.startswith("-"):
             continue
         dependencies.append(
-            f'{line}; extra == "{extra}"' if extra is not None else line
+            f'{line}; extra == "{extra}"' if extra is not None else line,
         )
     return dependencies
 
@@ -1111,14 +1126,15 @@ def iter_project_files(source_dir: Path) -> Iterable[tuple[str, bytes]]:
 
 
 def version_module_path(
-    project_name: str, project_files: list[tuple[str, bytes]]
+    project_name: str,
+    project_files: list[tuple[str, bytes]],
 ) -> str | None:
     package_names = sorted(
         {
             path.split("/", 1)[0]
             for path, _ in project_files
             if "/" in path and path.endswith("/__init__.py")
-        }
+        },
     )
     if not package_names:
         return None
@@ -1128,7 +1144,9 @@ def version_module_path(
 
 
 def iter_package_files(
-    base: Path, *, root: Path | None = None
+    base: Path,
+    *,
+    root: Path | None = None,
 ) -> Iterable[tuple[str, bytes]]:
     base_text = os.fspath(base)
     search_root = root or base
@@ -1136,7 +1154,9 @@ def iter_package_files(
     project_root = base.parent if base.name == "src" else base
     project_root_text = os.fspath(project_root)
     for current, directories, files in os.walk(
-        search_root_text, topdown=True, followlinks=False
+        search_root_text,
+        topdown=True,
+        followlinks=False,
     ):
         directories[:] = sorted(
             name
@@ -1169,7 +1189,7 @@ def _is_package_payload_text(path: str, project_root: str) -> bool:
     try:
         resolved = os.path.realpath(path)
         return os.path.exists(resolved) and os.path.commonpath(
-            (resolved, os.path.realpath(project_root))
+            (resolved, os.path.realpath(project_root)),
         ) == os.path.realpath(project_root)
     except (OSError, ValueError):
         return False
@@ -1197,7 +1217,7 @@ def metadata_text(project: ProjectMetadata) -> str:
             if "; " in dependency:
                 requirement, marker = dependency.split("; ", 1)
                 lines.append(
-                    f'Requires-Dist: {requirement}; ({marker}) and extra == "{extra}"'
+                    f'Requires-Dist: {requirement}; ({marker}) and extra == "{extra}"',
                 )
             else:
                 lines.append(f'Requires-Dist: {dependency}; extra == "{extra}"')
@@ -1212,7 +1232,7 @@ def wheel_text_internal() -> str:
             "Root-Is-Purelib: true",
             "Tag: py3-none-any",
             "",
-        ]
+        ],
     )
 
 

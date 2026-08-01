@@ -1,14 +1,13 @@
 import json
-from hashlib import sha256
 import textwrap
+from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
 import pytest
-from packaging.utils import canonicalize_name
 from cpip.core.urls import url_to_path
-
 from cpip_test_support import CpipTestEnvironment, TestData
+from packaging.utils import canonicalize_name
 
 
 def install_dict_internal(report: dict[str, Any]) -> dict[str, Any]:
@@ -16,7 +15,9 @@ def install_dict_internal(report: dict[str, Any]) -> dict[str, Any]:
 
 
 def test_install_report_basic(
-    script: CpipTestEnvironment, shared_data: TestData, tmp_path: Path
+    script: CpipTestEnvironment,
+    shared_data: TestData,
+    tmp_path: Path,
 ) -> None:
     report_path = tmp_path / "report.json"
     script.cpip(
@@ -51,7 +52,9 @@ def test_install_report_basic(
 
 
 def test_install_report_dep(
-    script: CpipTestEnvironment, shared_data: TestData, tmp_path: Path
+    script: CpipTestEnvironment,
+    shared_data: TestData,
+    tmp_path: Path,
 ) -> None:
     """Test dependencies are present in the install report with requested=False."""
     report_path = tmp_path / "report.json"
@@ -73,10 +76,11 @@ def test_install_report_dep(
 
 
 def test_yanked_version(
-    script: CpipTestEnvironment, data: TestData, tmp_path: Path
+    script: CpipTestEnvironment,
+    data: TestData,
+    tmp_path: Path,
 ) -> None:
-    """
-    Test is_yanked is True when explicitly requesting a yanked package.
+    """Test is_yanked is True when explicitly requesting a yanked package.
     Yanked files are always ignored, unless they are the only file that
     matches a version specifier that "pins" to an exact version (PEP 592).
     """
@@ -101,10 +105,11 @@ def test_yanked_version(
 
 
 def test_skipped_yanked_version(
-    script: CpipTestEnvironment, data: TestData, tmp_path: Path
+    script: CpipTestEnvironment,
+    data: TestData,
+    tmp_path: Path,
 ) -> None:
-    """
-    Test is_yanked is False when not explicitly requesting a yanked package.
+    """Test is_yanked is False when not explicitly requesting a yanked package.
     Yanked files are always ignored, unless they are the only file that
     matches a version specifier that "pins" to an exact version (PEP 592).
     """
@@ -139,7 +144,9 @@ def test_skipped_yanked_version(
     ],
 )
 def test_install_report_index(
-    script: CpipTestEnvironment, tmp_path: Path, specifiers: tuple[str, ...]
+    script: CpipTestEnvironment,
+    tmp_path: Path,
+    specifiers: tuple[str, ...],
 ) -> None:
     """Test report for sdist obtained from index."""
     report_path = tmp_path / "report.json"
@@ -161,7 +168,7 @@ def test_install_report_index(
     assert install_dict["python-openid"]["requested"] is False
     paste_report = install_dict["paste"]
     assert paste_report["download_info"]["url"].startswith(
-        "https://files.pythonhosted.org/"
+        "https://files.pythonhosted.org/",
     )
     assert paste_report["download_info"]["url"].endswith("/Paste-1.7.5.1.tar.gz")
     assert (
@@ -174,7 +181,8 @@ def test_install_report_index(
 
 @pytest.mark.network
 def test_install_report_index_multiple_extras(
-    script: CpipTestEnvironment, tmp_path: Path
+    script: CpipTestEnvironment,
+    tmp_path: Path,
 ) -> None:
     """Test report for sdist obtained from index, with multiple extras requested."""
     report_path = tmp_path / "report.json"
@@ -197,7 +205,9 @@ def test_install_report_index_multiple_extras(
 
 
 def test_install_report_direct_archive(
-    script: CpipTestEnvironment, tmp_path: Path, shared_data: TestData
+    script: CpipTestEnvironment,
+    tmp_path: Path,
+    shared_data: TestData,
 ) -> None:
     """Test report for direct URL archive."""
     report_path = tmp_path / "report.json"
@@ -224,13 +234,14 @@ def test_install_report_direct_archive(
         == "sha256=e63aa139caee941ec7f33f057a5b987708c2128238357cf905429846a2008718"
     )
     assert simplewheel_report["download_info"]["archive_info"]["hashes"] == {
-        "sha256": "e63aa139caee941ec7f33f057a5b987708c2128238357cf905429846a2008718"
+        "sha256": "e63aa139caee941ec7f33f057a5b987708c2128238357cf905429846a2008718",
     }
 
 
 @pytest.mark.network
 def test_install_report_vcs_and_wheel_cache(
-    script: CpipTestEnvironment, tmp_path: Path
+    script: CpipTestEnvironment,
+    tmp_path: Path,
 ) -> None:
     """Test report for VCS reference, and interactions with the wheel cache."""
     cache_dir = tmp_path / "cache"
@@ -290,7 +301,8 @@ def test_install_report_vcs_and_wheel_cache(
 
 @pytest.mark.network
 def test_install_report_vcs_editable(
-    script: CpipTestEnvironment, tmp_path: Path
+    script: CpipTestEnvironment,
+    tmp_path: Path,
 ) -> None:
     """Test report remote editable."""
     report_path = tmp_path / "report.json"
@@ -309,13 +321,15 @@ def test_install_report_vcs_editable(
     assert cpip_test_package_report["is_direct"] is True
     assert cpip_test_package_report["download_info"]["url"].startswith("file://")
     assert cpip_test_package_report["download_info"]["url"].endswith(
-        "/src/pip-test-package"
+        "/src/pip-test-package",
     )
     assert cpip_test_package_report["download_info"]["dir_info"]["editable"] is True
 
 
 def test_install_report_local_path_with_extras(
-    script: CpipTestEnvironment, tmp_path: Path, shared_data: TestData
+    script: CpipTestEnvironment,
+    tmp_path: Path,
+    shared_data: TestData,
 ) -> None:
     """Test report remote editable."""
     project_path = tmp_path / "pkga"
@@ -328,7 +342,7 @@ def test_install_report_local_path_with_extras(
 
             [project.optional-dependencies]
             test = ["simple"]
-            """)
+            """),
     )
     report_path = tmp_path / "report.json"
     script.cpip(
@@ -357,7 +371,9 @@ def test_install_report_local_path_with_extras(
 
 
 def test_install_report_editable_local_path_with_extras(
-    script: CpipTestEnvironment, tmp_path: Path, shared_data: TestData
+    script: CpipTestEnvironment,
+    tmp_path: Path,
+    shared_data: TestData,
 ) -> None:
     """Test report remote editable."""
     project_path = tmp_path / "pkga"
@@ -370,7 +386,7 @@ def test_install_report_editable_local_path_with_extras(
 
             [project.optional-dependencies]
             test = ["simple"]
-            """)
+            """),
     )
     report_path = tmp_path / "report.json"
     script.cpip(
@@ -400,7 +416,8 @@ def test_install_report_editable_local_path_with_extras(
 
 
 def test_install_report_to_stdout(
-    script: CpipTestEnvironment, shared_data: TestData
+    script: CpipTestEnvironment,
+    shared_data: TestData,
 ) -> None:
     result = script.cpip(
         "install",

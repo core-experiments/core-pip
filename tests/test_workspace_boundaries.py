@@ -5,8 +5,8 @@ from __future__ import annotations
 import ast
 import importlib
 from pathlib import Path
-import tomllib
 
+import tomllib
 
 WORKSPACE_ROOT = Path(__file__).parents[1]
 
@@ -27,16 +27,26 @@ def source_internal(domain: str) -> Path:
 def imports_internal(path: Path) -> set[str]:
     tree = ast.parse(path.read_text(encoding="utf-8"))
     imports: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
+
+    class RuntimeImportCollector(ast.NodeVisitor):
+        def visit_If(self, node: ast.If) -> None:
+            if isinstance(node.test, ast.Name) and node.test.id == "TYPE_CHECKING":
+                return
+            self.generic_visit(node)
+
+        def visit_Import(self, node: ast.Import) -> None:
             for alias in node.names:
                 parts = alias.name.split(".")
                 if len(parts) >= 2 and parts[:1] == ["cpip"]:
                     imports.add(".".join(parts[:2]))
-        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
-            parts = node.module.split(".")
-            if len(parts) >= 2 and parts[:1] == ["cpip"]:
-                imports.add(".".join(parts[:2]))
+
+        def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+            if node.level == 0 and node.module:
+                parts = node.module.split(".")
+                if len(parts) >= 2 and parts[:1] == ["cpip"]:
+                    imports.add(".".join(parts[:2]))
+
+    RuntimeImportCollector().visit(tree)
     return imports
 
 

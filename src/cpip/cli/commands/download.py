@@ -15,16 +15,27 @@ def create_parser() -> ArgumentParser:
     parser.add_argument("requirements", nargs="*")
     parser.add_argument("--group", dest="groups", action="append", default=[])
     parser.add_argument(
-        "-r", "--requirement", dest="requirement_files", action="append", default=[]
+        "-r",
+        "--requirement",
+        dest="requirement_files",
+        action="append",
+        default=[],
     )
     parser.add_argument(
-        "-c", "--constraint", dest="constraint_files", action="append", default=[]
+        "-c",
+        "--constraint",
+        dest="constraint_files",
+        action="append",
+        default=[],
     )
     parser.add_argument("-f", "--find-links", action="append", default=[])
     parser.add_argument("-i", "--index-url")
     parser.add_argument("--extra-index-url", action="append", default=[])
     parser.add_argument(
-        "--trusted-host", dest="trusted_hosts", action="append", default=[]
+        "--trusted-host",
+        dest="trusted_hosts",
+        action="append",
+        default=[],
     )
     parser.add_argument("--proxy")
     parser.add_argument("--cert")
@@ -48,7 +59,7 @@ def run_download(args: list[str]) -> int:
     from cpip.index.artifacts import ArtifactLocator
     from cpip.index.provider import CandidateProvider
     from cpip.install.editable import prepare_editable_source
-    from cpip.resolution.resolver import Resolver
+    from cpip.resolution.engine import ResolutionEngine
 
     options = create_parser().parse_args(args)
     if options.proxy is not None:
@@ -86,7 +97,7 @@ def run_download(args: list[str]) -> int:
         trusted_hosts=options.trusted_hosts,
         session=bundle.session,
     )
-    plan = Resolver(
+    plan = ResolutionEngine(
         provider=provider,
         constraints=bundle.constraints,
         ignore_installed=True,

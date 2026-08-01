@@ -1,6 +1,4 @@
-"""
-Contains functional tests of the Bazaar class.
-"""
+"""Contains functional tests of the Bazaar class."""
 
 import os
 import sys
@@ -8,10 +6,8 @@ import sysconfig
 from pathlib import Path
 
 import pytest
-
 from cpip.vcs.bazaar import Bazaar
 from cpip.vcs.versioncontrol import RemoteNotFoundError
-
 from cpip_test_support import CpipTestEnvironment, is_bzr_installed, need_bzr
 
 

@@ -8,7 +8,7 @@ from typing import TypeAlias
 MetadataHeaders: TypeAlias = dict[str, list[str]]
 
 RESOLUTION_METADATA_HEADERS = frozenset(
-    {"name", "version", "requires-dist", "provides-extra", "requires-python"}
+    {"name", "version", "requires-dist", "provides-extra", "requires-python"},
 )
 FAST_METADATA_NAMES = {
     "Name": "name",

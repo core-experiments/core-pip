@@ -14,7 +14,7 @@ class DirectUrlValidationError(ValueError):
 def expect_type(value: object, expected: type, field: str) -> object:
     if not isinstance(value, expected):
         raise DirectUrlValidationError(
-            f"Unexpected type {type(value).__name__} (expected {expected.__name__}) in '{field}'"
+            f"Unexpected type {type(value).__name__} (expected {expected.__name__}) in '{field}'",
         )
     return value
 
@@ -31,7 +31,9 @@ class ArchiveInfo:
     __slots__ = ("hash", "hashes")
 
     def __init__(
-        self, hash: str | None = None, hashes: dict[str, str] | None = None
+        self,
+        hash: str | None = None,
+        hashes: dict[str, str] | None = None,
     ) -> None:
         self.hash = hash
         self.hashes = hashes
@@ -48,7 +50,7 @@ class ArchiveInfo:
             hash_text = hash_value
             if "=" not in hash_text:
                 raise DirectUrlValidationError(
-                    "Invalid hash format (expected '<algorithm>=<hash>') in 'archive_info.hash'"
+                    "Invalid hash format (expected '<algorithm>=<hash>') in 'archive_info.hash'",
                 )
             algorithm, digest = hash_text.split("=", 1)
             normalized_hashes = {algorithm: digest}
@@ -56,7 +58,7 @@ class ArchiveInfo:
             if not isinstance(hashes, dict):
                 expect_type(hashes, dict, "archive_info.hashes")
                 raise AssertionError("unreachable")
-            hash_map = cast(dict[object, object], hashes)
+            hash_map = cast("dict[object, object]", hashes)
             normalized_hashes = {
                 str(name): str(value) for name, value in hash_map.items()
             }
@@ -87,7 +89,7 @@ class DirInfo:
             raise DirectUrlValidationError(
                 "Unexpected type str (expected bool) in 'dir_info.editable'"
                 if isinstance(editable, str)
-                else f"Unexpected type {type(editable).__name__} (expected bool) in 'dir_info.editable'"
+                else f"Unexpected type {type(editable).__name__} (expected bool) in 'dir_info.editable'",
             )
         return cls(editable=editable)
 
@@ -96,10 +98,13 @@ class DirInfo:
 
 
 class VcsInfo:
-    __slots__ = ("vcs", "commit_id", "requested_revision")
+    __slots__ = ("commit_id", "requested_revision", "vcs")
 
     def __init__(
-        self, vcs: str, commit_id: str, requested_revision: str | None = None
+        self,
+        vcs: str,
+        commit_id: str,
+        requested_revision: str | None = None,
     ) -> None:
         self.vcs = vcs
         self.commit_id = commit_id
@@ -110,10 +115,9 @@ class VcsInfo:
         vcs = expect_string(data, "vcs", "vcs_info.vcs")
         commit_id = expect_string(data, "commit_id", "vcs_info.commit_id")
         requested_revision = data.get("requested_revision")
-        if requested_revision is not None:
-            if not isinstance(requested_revision, str):
-                expect_type(requested_revision, str, "vcs_info.requested_revision")
-                raise AssertionError("unreachable")
+        if requested_revision is not None and not isinstance(requested_revision, str):
+            expect_type(requested_revision, str, "vcs_info.requested_revision")
+            raise AssertionError("unreachable")
         return cls(
             vcs=vcs,
             commit_id=commit_id,
@@ -130,7 +134,7 @@ class VcsInfo:
 
 
 class DirectUrl:
-    __slots__ = ("url", "info_subdir", "archive_info", "dir_info", "vcs_info")
+    __slots__ = ("archive_info", "dir_info", "info_subdir", "url", "vcs_info")
 
     def __init__(
         self,
@@ -157,7 +161,7 @@ class DirectUrl:
         infos = [self.vcs_info, self.archive_info, self.dir_info]
         if sum(item is not None for item in infos) != 1:
             raise DirectUrlValidationError(
-                "Exactly one of vcs_info, archive_info, dir_info must be present"
+                "Exactly one of vcs_info, archive_info, dir_info must be present",
             )
 
     @classmethod
@@ -173,21 +177,24 @@ class DirectUrl:
             if not isinstance(raw, dict):
                 expect_type(raw, dict, "archive_info")
                 raise AssertionError("unreachable")
-            archive_info = ArchiveInfo.from_dict(cast(dict[str, object], raw))
+            archive_info = ArchiveInfo.from_dict(cast("dict[str, object]", raw))
         if "dir_info" in data:
             raw = data["dir_info"]
             if not isinstance(raw, dict):
                 expect_type(raw, dict, "dir_info")
                 raise AssertionError("unreachable")
-            dir_info = DirInfo.from_dict(cast(dict[str, object], raw))
+            dir_info = DirInfo.from_dict(cast("dict[str, object]", raw))
         if "vcs_info" in data:
             raw = data["vcs_info"]
             if not isinstance(raw, dict):
                 expect_type(raw, dict, "vcs_info")
                 raise AssertionError("unreachable")
-            vcs_info = VcsInfo.from_dict(cast(dict[str, object], raw))
+            vcs_info = VcsInfo.from_dict(cast("dict[str, object]", raw))
         direct_url = cls(
-            url=url, archive_info=archive_info, dir_info=dir_info, vcs_info=vcs_info
+            url=url,
+            archive_info=archive_info,
+            dir_info=dir_info,
+            vcs_info=vcs_info,
         )
         direct_url.validate()
         return direct_url
@@ -216,7 +223,7 @@ class DirectUrl:
                                     parsed.path,
                                     parsed.query,
                                     parsed.fragment,
-                                )
+                                ),
                             )
                     else:
                         netloc = host if self.vcs_info is not None else parsed.netloc
@@ -227,7 +234,7 @@ class DirectUrl:
                                 parsed.path,
                                 parsed.query,
                                 parsed.fragment,
-                            )
+                            ),
                         )
                 elif not (auth.startswith("${") and auth.endswith("}")):
                     redacted_url = urllib.parse.urlunsplit(
@@ -237,7 +244,7 @@ class DirectUrl:
                             parsed.path,
                             parsed.query,
                             parsed.fragment,
-                        )
+                        ),
                     )
         data: dict[str, object] = {
             "url": redacted_url,
@@ -274,7 +281,7 @@ class DirectUrl:
         data = self.to_dict()
         archive_info = data.get("archive_info")
         if isinstance(archive_info, dict):
-            archive_info = cast(dict[str, object], archive_info)
+            archive_info = cast("dict[str, object]", archive_info)
             hashes = archive_info.get("hashes")
             if isinstance(hashes, dict) and hashes:
                 algorithm, digest = next(iter(hashes.items()))

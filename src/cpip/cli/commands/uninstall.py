@@ -13,7 +13,11 @@ def create_parser() -> ArgumentParser:
     parser = ArgumentParser(prog="cpip uninstall")
     parser.add_argument("packages", nargs="*")
     parser.add_argument(
-        "-r", "--requirement", dest="requirement_files", action="append", default=[]
+        "-r",
+        "--requirement",
+        dest="requirement_files",
+        action="append",
+        default=[],
     )
     parser.add_argument("-v", "--verbose", action="count", default=0)
     parser.add_argument("-y", "--yes", action="store_true")
@@ -43,7 +47,8 @@ def run_uninstall(args: list[str]) -> int:
     for package in packages:
         paths = target_paths()
         distribution = InstalledDistributionStore(
-            paths=paths, user_site=site.getusersitepackages()
+            paths=paths,
+            user_site=site.getusersitepackages(),
         ).find(package)
         if options.verbose and distribution is not None:
             location = Path(distribution.location)

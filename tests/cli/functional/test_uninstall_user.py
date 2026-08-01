@@ -1,34 +1,30 @@
-"""
-tests specific to uninstalling --user installs
-"""
+"""tests specific to uninstalling --user installs"""
 
 from os.path import isdir, isfile, normcase
 
 import pytest
-
-from .test_install_user import patch_dist_in_site_packages
 from cpip_test_support import CpipTestEnvironment, TestData, assert_all_changes
 from cpip_test_support.venv import VirtualEnvironment
 from cpip_test_support.wheel import make_wheel
+
+from .test_install_user import patch_dist_in_site_packages
 
 
 @pytest.mark.usefixtures("enable_user_site")
 class Tests_UninstallUserSite:
     @pytest.mark.network
     def test_uninstall_from_usersite(self, script: CpipTestEnvironment) -> None:
-        """
-        Test uninstall from usersite
-        """
+        """Test uninstall from usersite"""
         result1 = script.cpip("install", "--user", "INITools==0.3")
         result2 = script.cpip("uninstall", "-y", "INITools")
         assert_all_changes(result1, result2, [script.venv / "build", "cache"])
 
     def test_uninstall_from_usersite_with_dist_in_global_site(
-        self, virtualenv: VirtualEnvironment, script: CpipTestEnvironment
+        self,
+        virtualenv: VirtualEnvironment,
+        script: CpipTestEnvironment,
     ) -> None:
-        """
-        Test uninstall from usersite (with same dist in global site)
-        """
+        """Test uninstall from usersite (with same dist in global site)"""
         entry_points_txt = "[console_scripts]\nscript = pkg:func"
         make_wheel(
             "pkg",
@@ -75,17 +71,22 @@ class Tests_UninstallUserSite:
         assert isdir(dist_info_folder)
 
     def test_uninstall_editable_from_usersite(
-        self, script: CpipTestEnvironment, data: TestData
+        self,
+        script: CpipTestEnvironment,
+        data: TestData,
     ) -> None:
-        """
-        Test uninstall editable local user install
-        """
+        """Test uninstall editable local user install"""
         assert script.user_site_path.exists()
 
         # install
         to_install = data.packages.joinpath("FSPkg")
         result1 = script.run(
-            "python", "setup.py", "develop", "--user", "--prefix=", cwd=to_install
+            "python",
+            "setup.py",
+            "develop",
+            "--user",
+            "--prefix=",
+            cwd=to_install,
         )
         egg_link = script.user_site / "FSPkg.egg-link"
         result1.did_create(egg_link)

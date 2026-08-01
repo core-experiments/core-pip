@@ -1,15 +1,15 @@
 from __future__ import annotations
 
-from enum import Enum
 from collections.abc import Iterable, Mapping
+from enum import Enum
 from typing import TYPE_CHECKING, Callable, Protocol
 
 from cpip.core.packaging import Requirement, Version
 
 if TYPE_CHECKING:
+    from cpip.core.wheel import WheelFile
     from cpip.index.candidates import InstallationCandidate
     from cpip.index.links import Link
-    from cpip.core.wheel import WheelFile
 
 
 class ArtifactKind(Enum):
@@ -23,7 +23,7 @@ class ArtifactKind(Enum):
 
 SOURCE_ARTIFACT_KINDS = frozenset((ArtifactKind.SDIST, ArtifactKind.SOURCE_TREE))
 INSTALLABLE_ARTIFACT_KINDS = frozenset(
-    (ArtifactKind.WHEEL, ArtifactKind.SDIST, ArtifactKind.SOURCE_TREE)
+    (ArtifactKind.WHEEL, ArtifactKind.SDIST, ArtifactKind.SOURCE_TREE),
 )
 
 
@@ -50,7 +50,7 @@ class MetadataFile:
 
 
 class VcsReference:
-    __slots__ = ("vcs", "repo_url", "requested_revision")
+    __slots__ = ("repo_url", "requested_revision", "vcs")
 
     def __init__(self, vcs: str, repo_url: str, requested_revision: str | None) -> None:
         self.vcs = vcs
@@ -59,7 +59,7 @@ class VcsReference:
 
 
 class RejectedCandidate:
-    __slots__ = ("link", "reason", "detail")
+    __slots__ = ("detail", "link", "reason")
 
     def __init__(self, link: Link, reason: RejectionReason, detail: str) -> None:
         self.link = link
@@ -80,10 +80,13 @@ class CandidateSelection:
 
 
 class CandidateSummary:
-    __slots__ = ("version", "is_yanked", "yanked_reason")
+    __slots__ = ("is_yanked", "version", "yanked_reason")
 
     def __init__(
-        self, version: Version, is_yanked: bool, yanked_reason: str | None
+        self,
+        version: Version,
+        is_yanked: bool,
+        yanked_reason: str | None,
     ) -> None:
         self.version = version
         self.is_yanked = is_yanked
@@ -94,11 +97,11 @@ class CandidateMetadata:
     """Metadata needed by dependency resolution, separate from artifact state."""
 
     __slots__ = (
-        "name",
-        "version",
         "dependencies",
+        "name",
         "provided_extras",
         "requires_python",
+        "version",
     )
 
     def __init__(
@@ -136,7 +139,7 @@ class LazyCandidateMetadata:
 class CandidateRecord:
     """Immutable discovery result that does not imply artifact materialization."""
 
-    __slots__ = ("name", "version", "link", "wheel", "tag_rank", "metadata_loader")
+    __slots__ = ("link", "metadata_loader", "name", "tag_rank", "version", "wheel")
 
     def __init__(
         self,
@@ -207,10 +210,10 @@ class PackageCatalog:
 
     __slots__ = (
         "links",
-        "summaries",
-        "summary_versions",
-        "summaries_by_version",
         "links_by_version",
+        "summaries",
+        "summaries_by_version",
+        "summary_versions",
     )
 
     def __init__(

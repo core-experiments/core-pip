@@ -6,15 +6,15 @@ import zipfile
 from collections.abc import Iterable
 from typing import TYPE_CHECKING, cast
 
+from cpip.core.errors import InstallationError
+from cpip.core.filesystem import display_path
+from cpip.core.subprocess import call_subprocess
 from cpip.install.build_env.base import BuildIsolationMode
 from cpip.install.build_env.noop import NoOpBuildEnvironment
 from cpip.install.build_env.venv import VenvBuildEnvironment
-from cpip.core.filesystem import display_path
-from cpip.core.errors import InstallationError
-from cpip.core.subprocess import call_subprocess
 from cpip.resolution.req_install import InstallRequirement
-from cpip.vcs.versioncontrol import vcs
 from cpip.vcs.support import hide_url
+from cpip.vcs.versioncontrol import vcs
 
 if TYPE_CHECKING:
     from cpip.install.build_env.base import BuildEnvironmentInstaller
@@ -96,12 +96,12 @@ class SourceMetadataPreparation:
             pyproject_requires = self.req.pyproject_requires
             assert pyproject_requires is not None
             conflicting, missing = self.req.build_env.check_requirements(
-                pyproject_requires
+                pyproject_requires,
             )
             if conflicting:
                 self.raise_conflicts(
                     "the backend dependencies",
-                    cast(set[tuple[str, str]], conflicting),
+                    cast("set[tuple[str, str]]", conflicting),
                 )
             if missing:
                 self.raise_missing_reqs(missing)
@@ -131,12 +131,12 @@ class SourceMetadataPreparation:
                 for_req=self.req,
             )
         conflicting, missing = self.req.build_env.check_requirements(
-            self.req.requirements_to_check
+            self.req.requirements_to_check,
         )
         if conflicting:
             self.raise_conflicts(
                 "PEP 517/518 supported requirements",
-                cast(set[tuple[str, str]], conflicting),
+                cast("set[tuple[str, str]]", conflicting),
             )
         if missing:
             logger.warning(
@@ -159,7 +159,8 @@ class SourceMetadataPreparation:
                 return backend.get_requires_for_build_wheel()
 
     def install_build_reqs(
-        self, build_env_installer: BuildEnvironmentInstaller
+        self,
+        build_env_installer: BuildEnvironmentInstaller,
     ) -> None:
         # Install any extra build dependencies that the backend requests.
         # This must be done in a second pass, as the pyproject.toml
@@ -176,15 +177,20 @@ class SourceMetadataPreparation:
         if conflicting:
             self.raise_conflicts(
                 "the backend dependencies",
-                cast(set[tuple[str, str]], conflicting),
+                cast("set[tuple[str, str]]", conflicting),
             )
         with self.req.build_env:
             self.req.build_env.install_requirements(
-                missing, "normal", kind="backend dependencies", for_req=self.req
+                missing,
+                "normal",
+                kind="backend dependencies",
+                for_req=self.req,
             )
 
     def raise_conflicts(
-        self, conflicting_with: str, conflicting_reqs: set[tuple[str, str]]
+        self,
+        conflicting_with: str,
+        conflicting_reqs: set[tuple[str, str]],
     ) -> None:
         format_string = (
             "Some build dependencies for {requirement} "
@@ -205,6 +211,7 @@ class SourceMetadataPreparation:
             "Some build dependencies for {requirement} are missing: {missing}."
         )
         error_message = format_string.format(
-            requirement=self.req, missing=", ".join(map(repr, sorted(missing)))
+            requirement=self.req,
+            missing=", ".join(map(repr, sorted(missing))),
         )
         raise InstallationError(error_message)

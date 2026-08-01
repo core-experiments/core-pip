@@ -6,7 +6,6 @@ from unittest import mock
 import pytest
 from cpip.core.target_python import TargetPython
 from cpip.core.wheel import WheelTag
-
 from cpip_test_support import CURRENT_PY_VERSION_INFO, pyversion
 
 
@@ -28,9 +27,7 @@ class TestTargetPython:
         py_version_info: tuple[int, ...],
         expected: tuple[tuple[int, int, int], str],
     ) -> None:
-        """
-        Test passing the py_version_info argument.
-        """
+        """Test passing the py_version_info argument."""
         expected_py_version_info, expected_py_version = expected
 
         target_python = TargetPython(py_version_info=py_version_info)
@@ -42,9 +39,7 @@ class TestTargetPython:
         assert target_python.py_version == expected_py_version
 
     def test_init__py_version_info_none(self) -> None:
-        """
-        Test passing py_version_info=None.
-        """
+        """Test passing py_version_info=None."""
         target_python = TargetPython(py_version_info=None)
 
         assert target_python.given_py_version_info is None
@@ -117,9 +112,7 @@ class TestTargetPython:
         assert target_python.valid_tags == dummy_tags
 
     def test_get_unsorted_tags__uses_cached_value(self) -> None:
-        """
-        Test that get_unsorted_tags() uses the cached value.
-        """
+        """Test that get_unsorted_tags() uses the cached value."""
         target_python = TargetPython(py_version_info=None)
         target_python.valid_tags_set = {
             WheelTag("py2", "none", "any"),

@@ -9,13 +9,14 @@ from tempfile import NamedTemporaryFile
 from time import perf_counter, sleep
 from typing import Any, BinaryIO, Callable, ParamSpec, TypeVar, cast
 
-
 P = ParamSpec("P")
 R = TypeVar("R")
 
 
 def retry(
-    *, wait: float, stop_after_delay: float
+    *,
+    wait: float,
+    stop_after_delay: float,
 ) -> Callable[[Callable[P, R]], Callable[P, R]]:
     def decorate(func: Callable[P, R]) -> Callable[P, R]:
         @wraps(func)
@@ -32,7 +33,7 @@ def retry(
                     if wait:
                         sleep(wait)
 
-        return cast(Callable[P, R], wrapper)
+        return cast("Callable[P, R]", wrapper)
 
     return decorate
 
@@ -78,7 +79,7 @@ def adjacent_tmp_file(path: str, **kwargs: Any) -> Generator[BinaryIO, None, Non
         suffix=".tmp",
         **kwargs,
     ) as f:
-        result = cast(BinaryIO, f)
+        result = cast("BinaryIO", f)
         try:
             yield result
         finally:

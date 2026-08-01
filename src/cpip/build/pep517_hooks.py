@@ -9,12 +9,13 @@ from __future__ import annotations
 
 import json
 import os
-import sys
 import subprocess
+import sys
 import tempfile
+from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 
 class HookMissing(Exception):
@@ -87,7 +88,7 @@ class BuildBackendHookCaller:
             environment["CPIP_BUILD_BACKEND"] = self.backend
             if self.backend_path:
                 environment["CPIP_BUILD_BACKEND_PATH"] = os.pathsep.join(
-                    self.backend_path
+                    self.backend_path,
                 )
             try:
                 subprocess.run(
@@ -102,7 +103,7 @@ class BuildBackendHookCaller:
                 detail = (exc.stderr or exc.stdout or "").strip()
                 if detail:
                     raise RuntimeError(
-                        f"backend hook {hook!r} failed: {detail}"
+                        f"backend hook {hook!r} failed: {detail}",
                     ) from exc
                 raise
             result = json.loads((control / "output.json").read_text(encoding="utf-8"))

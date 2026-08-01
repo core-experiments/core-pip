@@ -28,7 +28,11 @@ def test_good_algo_option(script: CpipTestEnvironment, tmpdir: Path) -> None:
 def test_bad_algo_option(script: CpipTestEnvironment, tmpdir: Path) -> None:
     """Make sure the -a option raises an error when given a bad operand."""
     result = script.cpip(
-        "hash", "-a", "invalidname", hello_file(tmpdir), expect_error=True
+        "hash",
+        "-a",
+        "invalidname",
+        hello_file(tmpdir),
+        expect_error=True,
     )
     assert "invalid choice: 'invalidname'" in str(result)
 

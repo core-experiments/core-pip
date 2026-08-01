@@ -16,7 +16,10 @@ def create_parser() -> ArgumentParser:
     parser.add_argument("-i", "--index-url")
     parser.add_argument("--extra-index-url", action="append", default=[])
     parser.add_argument(
-        "--trusted-host", dest="trusted_hosts", action="append", default=[]
+        "--trusted-host",
+        dest="trusted_hosts",
+        action="append",
+        default=[],
     )
     parser.add_argument("--no-index", action="store_true")
     parser.add_argument("--pre", action="store_true")
@@ -50,8 +53,8 @@ def run_index(args: list[str]) -> int:
     if options.json:
         print(
             json.dumps(
-                {"name": requirement.name, "versions": available, "latest": latest}
-            )
+                {"name": requirement.name, "versions": available, "latest": latest},
+            ),
         )
         return 0
     print(f"{requirement.name} ({latest or 'none'})")

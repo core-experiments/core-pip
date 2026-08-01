@@ -12,15 +12,15 @@ import pytest
 from benchmark_support import (
     make_backtracking_graph,
     make_dependency_graph,
+    make_failing_source_tree,
+    make_isolated_source_tree,
+    make_source_tree,
+    make_stress_graph,
     make_wheel,
+    make_wrong_package_graph,
+    requirement_lines,
     simple_index_html,
     simple_index_json,
-    requirement_lines,
-    make_source_tree,
-    make_isolated_source_tree,
-    make_failing_source_tree,
-    make_stress_graph,
-    make_wrong_package_graph,
 )
 
 
@@ -103,7 +103,7 @@ def metadata_variation_wheels(tmp_path_factory: pytest.TempPathFactory) -> list[
                 f"1.{index}.0",
                 requires=requirements,
                 requires_python=f">={3 + index % 2}.9",
-            )
+            ),
         )
     return wheels
 
@@ -167,7 +167,7 @@ def extras_marker_wheelhouse(tmp_path_factory: pytest.TempPathFactory) -> Path:
                 f"extra-common-{index}>=1; extra == 'all'",
                 f"extra-dev-{index}>=1; extra == 'dev'",
                 f"extra-platform-{index}>=1; sys_platform == 'linux'",
-            )
+            ),
         )
     make_wheel(
         wheelhouse,

@@ -1,19 +1,16 @@
 from collections.abc import Iterator
 
 import pytest
-
-from packaging.utils import canonicalize_name
-from packaging.version import Version
-
 from cpip.network.exceptions import InvalidWheel
+from cpip.network.http import NetworkSession
 from cpip.network.lazy_wheel import (
     HTTPRangeRequestUnsupported,
     dist_from_wheel_url,
 )
-from cpip.network.http import NetworkSession
-
 from cpip_test_support import TestData
 from cpip_test_support.server import MockServer, file_response
+from packaging.utils import canonicalize_name
+from packaging.version import Version
 
 MYPY_0_782_WHL = (
     "https://files.pythonhosted.org/packages/9d/65/"
@@ -55,7 +52,8 @@ def test_dist_from_wheel_url(session: NetworkSession) -> None:
 
 
 def test_dist_from_wheel_url_no_range(
-    session: NetworkSession, mypy_whl_no_range: str
+    session: NetworkSession,
+    mypy_whl_no_range: str,
 ) -> None:
     """Test handling when HTTP range requests are not supported."""
     with pytest.raises(HTTPRangeRequestUnsupported):
@@ -67,5 +65,7 @@ def test_dist_from_wheel_url_not_zip(session: NetworkSession) -> None:
     """Test handling with the given URL does not point to a ZIP."""
     with pytest.raises(InvalidWheel):
         dist_from_wheel_url(
-            canonicalize_name("python"), "https://www.python.org/", session
+            canonicalize_name("python"),
+            "https://www.python.org/",
+            session,
         )

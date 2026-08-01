@@ -7,9 +7,10 @@ import re
 import urllib.parse
 from typing import Any
 
-from cpip.core.errors import InstallationError
 from cpip.core.contracts import AuthInfo
+from cpip.core.errors import InstallationError
 from cpip.core.filesystem import display_path
+
 from .errors import BadCommand
 from .subprocess import make_command
 from .support import HiddenText, hide_url
@@ -34,7 +35,7 @@ GIT_VERSION_REGEX = re.compile(
     r"(\d+)"  # Major.
     r"\.(\d+)"  # Dot, minor.
     r"(?:\.(\d+))?"  # Optional dot, patch.
-    r".*$"  # Suffix, including any pre- and post-release segments we don't care about.
+    r".*$",  # Suffix, including any pre- and post-release segments we don't care about.
 )
 
 HASH_REGEX = re.compile("^[a-fA-F0-9]{40}$")
@@ -117,8 +118,7 @@ class Git(VersionControl):
 
     @classmethod
     def get_current_branch(cls, location: str) -> str | None:
-        """
-        Return the current branch, or None if HEAD isn't at a branch
+        """Return the current branch, or None if HEAD isn't at a branch
         (e.g. detached HEAD).
         """
         # git-symbolic-ref exits with empty stdout if "HEAD" is a detached
@@ -142,13 +142,13 @@ class Git(VersionControl):
 
     @classmethod
     def get_revision_sha(cls, dest: str, rev: str) -> tuple[str | None, bool]:
-        """
-        Return (sha_or_none, is_branch), where sha_or_none is a commit hash
+        """Return (sha_or_none, is_branch), where sha_or_none is a commit hash
         if the revision names a remote branch or tag, otherwise None.
 
         Args:
           dest: the repository directory.
           rev: the revision name.
+
         """
         # Pass rev to pre-filter the list.
         output = cls.run_command(
@@ -188,8 +188,7 @@ class Git(VersionControl):
 
     @classmethod
     def should_fetch(cls, dest: str, rev: str) -> bool:
-        """
-        Return true if rev is a ref or is a commit that we don't have locally.
+        """Return true if rev is a ref or is a commit that we don't have locally.
 
         Branches and tags are not considered in this method because they are
         assumed to be always available locally (which is a normal outcome of
@@ -211,14 +210,17 @@ class Git(VersionControl):
 
     @classmethod
     def resolve_revision(
-        cls, dest: str, url: HiddenText, rev_options: RevOptions
+        cls,
+        dest: str,
+        url: HiddenText,
+        rev_options: RevOptions,
     ) -> RevOptions:
-        """
-        Resolve a revision to a new RevOptions object with the SHA1 of the
+        """Resolve a revision to a new RevOptions object with the SHA1 of the
         branch, tag, or ref if found.
 
         Args:
           rev_options: a RevOptions object.
+
         """
         rev = rev_options.arg_rev
         # The arg_rev property's implementation for Git ensures that the
@@ -230,7 +232,7 @@ class Git(VersionControl):
         if sha is not None:
             rev_options = rev_options.make_new(sha)
             rev_options = rev_options.copy_with(
-                branch_name=(rev if is_branch else None)
+                branch_name=(rev if is_branch else None),
             )
 
             return rev_options
@@ -259,12 +261,12 @@ class Git(VersionControl):
 
     @classmethod
     def is_commit_id_equal(cls, dest: str, name: str | None) -> bool:
-        """
-        Return whether the current commit hash equals the given name.
+        """Return whether the current commit hash equals the given name.
 
         Args:
           dest: the repository directory.
           name: a string name.
+
         """
         if not name:
             # Then avoid an unnecessary subprocess call.
@@ -273,7 +275,11 @@ class Git(VersionControl):
         return cls.get_revision(dest) == name
 
     def fetch_new(
-        self, dest: str, url: HiddenText, rev_options: RevOptions, verbosity: int
+        self,
+        dest: str,
+        url: HiddenText,
+        rev_options: RevOptions,
+        verbosity: int,
     ) -> None:
         rev_display = rev_options.to_display()
         logger.info("Cloning %s%s to %s", url, rev_display, display_path(dest))
@@ -284,7 +290,8 @@ class Git(VersionControl):
         else:
             flags = ("--verbose", "--progress")
         partial_clone_setting = os.environ.get(
-            "CPIP_NO_PARTIAL_CLONE_FOR_BROKEN_GIT_SERVER", "no"
+            "CPIP_NO_PARTIAL_CLONE_FOR_BROKEN_GIT_SERVER",
+            "no",
         ).lower()
         if partial_clone_setting in ("y", "yes", "t", "true", "on", "1"):
             partial_clone_disabled = True
@@ -303,7 +310,7 @@ class Git(VersionControl):
                     *flags,
                     url,
                     dest,
-                )
+                ),
             )
         else:
             self.run_command(make_command("clone", *flags, url, dest))
@@ -398,8 +405,7 @@ class Git(VersionControl):
 
     @classmethod
     def get_remote_url(cls, location: str) -> str:
-        """
-        Return URL of the first remote encountered.
+        """Return URL of the first remote encountered.
 
         Raises RemoteNotFoundError if the repository does not have a remote
         url configured.
@@ -428,8 +434,7 @@ class Git(VersionControl):
 
     @staticmethod
     def git_remote_to_cpip_url(url: str) -> str:
-        """
-        Convert a remote url from what git uses to what cpip accepts.
+        """Convert a remote url from what git uses to what cpip accepts.
 
         There are 3 legal forms **url** may take:
 
@@ -459,9 +464,7 @@ class Git(VersionControl):
 
     @classmethod
     def has_commit(cls, location: str, rev: str) -> bool:
-        """
-        Check if rev is a commit that is available in the local repository.
-        """
+        """Check if rev is a commit that is available in the local repository."""
         try:
             cls.run_command(
                 ["rev-parse", "-q", "--verify", rev + "^{commit}"],
@@ -487,8 +490,7 @@ class Git(VersionControl):
 
     @classmethod
     def get_subdirectory(cls, location: str) -> str | None:
-        """
-        Return the path to Python project root, relative to the repo root.
+        """Return the path to Python project root, relative to the repo root.
         Return None if the project root is in the repo root.
         """
         # find the repo root
@@ -505,8 +507,7 @@ class Git(VersionControl):
 
     @classmethod
     def get_url_rev_and_auth(cls, url: str) -> tuple[str, str | None, AuthInfo]:
-        """
-        Prefixes stub URLs like 'user@hostname:user/repo.git' with 'ssh://'.
+        """Prefixes stub URLs like 'user@hostname:user/repo.git' with 'ssh://'.
         That's required because although they use SSH they sometimes don't
         work with a ssh:// scheme (e.g. GitHub). But we need a scheme for
         parsing. Hence we remove it again afterwards and return it as a stub.
@@ -519,7 +520,8 @@ class Git(VersionControl):
         if scheme.endswith("file"):
             initial_slashes = path[: -len(path.lstrip("/"))]
             newpath = initial_slashes + urllib.request.url2pathname(path).replace(
-                "\\", "/"
+                "\\",
+                "/",
             ).lstrip("/")
             after_plus = scheme.find("+") + 1
             url = scheme[:after_plus] + urlunsplit(

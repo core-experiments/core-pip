@@ -8,7 +8,6 @@ from types import TracebackType
 from typing import TYPE_CHECKING, Literal, Protocol
 
 from cpip.build.metadata import InstalledDistributionStore
-
 from cpip.core.packaging import Version, marker_applies, parse_requirement
 from cpip.platform.locations.sysconfig import get_scheme
 
@@ -30,8 +29,7 @@ class Prefix:
 
 
 class BuildEnvironmentInstaller(Protocol):
-    """
-    Interface for installing build dependencies into an isolated build
+    """Interface for installing build dependencies into an isolated build
     environment.
     """
 
@@ -68,7 +66,8 @@ class BuildEnvironment(ContextManager[None], metaclass=abc.ABCMeta):
                 os.environ[varname] = old_value
 
     def check_requirements(
-        self, reqs: Iterable[str]
+        self,
+        reqs: Iterable[str],
     ) -> tuple[set[tuple[str, str]], set[str]]:
         """Return 2 sets:
         - conflicting requirements: set of (installed, wanted) reqs tuples

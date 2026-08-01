@@ -11,7 +11,7 @@ from cpip.core.wheel import WheelCandidate
 class CandidateStream(Sequence[WheelCandidate]):
     """A replayable sequence that materializes candidates on demand."""
 
-    __slots__ = ("source_internal", "items_internal", "exhausted", "error_internal")
+    __slots__ = ("error_internal", "exhausted", "items_internal", "source_internal")
 
     def __init__(self, source: Iterator[WheelCandidate]) -> None:
         self.source_internal = source
@@ -101,7 +101,6 @@ class CandidateStream(Sequence[WheelCandidate]):
         decisive: Callable[[WheelCandidate], bool] | None = None,
     ) -> CandidateStream:
         """Prefer matching candidates, falling back to the full stream if none do."""
-
         decisive = decisive or keep
 
         def generate() -> Iterator[WheelCandidate]:

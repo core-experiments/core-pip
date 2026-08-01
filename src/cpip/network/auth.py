@@ -6,12 +6,12 @@ providing credentials in the context of network requests.
 
 from __future__ import annotations
 
-import json
+import base64
 import getpass
 import importlib.util
+import json
 import logging
 import netrc
-import base64
 import os
 import shutil
 import subprocess
@@ -177,7 +177,7 @@ class KeyRingCliProvider(KeyRingBaseProvider):
         ):
             raise RuntimeError(
                 "Keyring util is outdated; must be at least version 25.2.1, "
-                "please upgrade it"
+                "please upgrade it",
             )
 
         if res.returncode:
@@ -187,11 +187,14 @@ class KeyRingCliProvider(KeyRingBaseProvider):
         return (data["username"], data["password"])
 
     def set_password_internal(
-        self, service_name: str, username: str, password: str
+        self,
+        service_name: str,
+        username: str,
+        password: str,
     ) -> None:
         """Mirror the implementation of keyring.set_password using cli"""
         if self.keyring is None:
-            return None
+            return
         env = os.environ.copy()
         env["PYTHONIOENCODING"] = "utf-8"
         subprocess.run(
@@ -200,7 +203,7 @@ class KeyRingCliProvider(KeyRingBaseProvider):
             env=env,
             check=True,
         )
-        return None
+        return
 
 
 @cache
@@ -225,7 +228,7 @@ def get_keyring_provider(provider: str) -> KeyRingBaseProvider:
                     Path(spec.origin).resolve().relative_to(Path(sys.prefix).resolve())
                 except ValueError as exc:
                     raise ImportError(
-                        "keyring is not installed in this environment"
+                        "keyring is not installed in this environment",
                     ) from exc
             impl = KeyRingPythonProvider()
             logger.debug("Keyring provider set: import")
@@ -387,8 +390,8 @@ class MultiDomainBasicAuth:
                     [
                         parsed_url.path,
                         candidate.path,
-                    ]
-                )
+                    ],
+                ),
             ),
         )
 
@@ -452,7 +455,8 @@ class MultiDomainBasicAuth:
         return username, password
 
     def get_url_and_credentials(
-        self, original_url: str
+        self,
+        original_url: str,
     ) -> tuple[str, str | None, str | None]:
         """Return the credentials to use for the provided URL.
 
@@ -522,7 +526,8 @@ class MultiDomainBasicAuth:
         return ask("Save credentials to keyring [y/N]: ", ["y", "n"]) == "y"
 
     def credentials_after_401(
-        self, url: str
+        self,
+        url: str,
     ) -> tuple[str | None, str | None, Credentials | None]:
         """Return credentials for a transport-managed 401 retry."""
         username, password = self.get_new_credentials(
@@ -533,7 +538,7 @@ class MultiDomainBasicAuth:
         save = False
         if not username and not password and self.prompting:
             username, password, save = self.prompt_for_password(
-                urllib.parse.urlsplit(url).netloc
+                urllib.parse.urlsplit(url).netloc,
             )
         if username is None or password is None:
             return username, password, None
@@ -626,7 +631,9 @@ class MultiDomainBasicAuth:
             try:
                 logger.info("Saving credentials to keyring")
                 self.keyring_provider.save_auth_info(
-                    creds.url, creds.username, creds.password
+                    creds.url,
+                    creds.username,
+                    creds.password,
                 )
             except Exception:
                 logger.exception("Failed to save credentials")

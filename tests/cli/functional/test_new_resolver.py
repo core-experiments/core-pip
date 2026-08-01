@@ -6,7 +6,6 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Protocol
 
 import pytest
-
 from cpip_test_support import (
     CpipTestEnvironment,
     ScriptFactory,
@@ -23,7 +22,9 @@ MakeFakeWheel = Callable[[str, str, str], pathlib.Path]
 @pytest.fixture
 def make_fake_wheel(script: CpipTestEnvironment) -> MakeFakeWheel:
     def make_fake_wheel_internal(
-        name: str, version: str, wheel_tag: str
+        name: str,
+        version: str,
+        wheel_tag: str,
     ) -> pathlib.Path:
         wheel_house = script.scratch_path.joinpath("wheelhouse")
         wheel_house.mkdir()
@@ -212,7 +213,9 @@ def test_new_resolver_ignore_dependencies(script: CpipTestEnvironment) -> None:
     ],
 )
 def test_new_resolver_installs_extras(
-    tmpdir: pathlib.Path, script: CpipTestEnvironment, root_dep: str
+    tmpdir: pathlib.Path,
+    script: CpipTestEnvironment,
+    root_dep: str,
 ) -> None:
     req_file = tmpdir.joinpath("requirements.txt")
     req_file.write_text(root_dep)
@@ -401,7 +404,7 @@ def test_new_resolver_requires_python_error(script: CpipTestEnvironment) -> None
     )
 
     message = "Package 'base' requires a different Python: {}.{}.{} not in '<2'".format(
-        *sys.version_info[:3]
+        *sys.version_info[:3],
     )
     assert message in result.stderr, str(result)
 
@@ -463,7 +466,8 @@ def test_new_resolver_installed(script: CpipTestEnvironment) -> None:
     )
     assert "Requirement already satisfied: base~=0.1.0" in result.stdout, str(result)
     result.did_not_update(
-        script.site_packages / "base", message="base 0.1.0 reinstalled"
+        script.site_packages / "base",
+        message="base 0.1.0 reinstalled",
     )
 
 
@@ -496,7 +500,8 @@ def test_new_resolver_ignore_installed(script: CpipTestEnvironment) -> None:
     )
     assert satisfied_output not in result.stdout, str(result)
     result.did_update(
-        script.site_packages / "base", message="base 0.1.0 not reinstalled"
+        script.site_packages / "base",
+        message="base 0.1.0 not reinstalled",
     )
 
 
@@ -648,7 +653,9 @@ def test_new_resolver_handles_prerelease(
     ],
 )
 def test_new_resolver_skips_marker(
-    script: CpipTestEnvironment, pkg_deps: list[str], root_deps: list[str]
+    script: CpipTestEnvironment,
+    pkg_deps: list[str],
+    root_deps: list[str],
 ) -> None:
     create_basic_wheel_for_package(script, "pkg", "1.0", depends=pkg_deps)
     create_basic_wheel_for_package(script, "dep", "1.0")
@@ -675,7 +682,8 @@ def test_new_resolver_skips_marker(
     ],
 )
 def test_new_resolver_constraints(
-    script: CpipTestEnvironment, constraints: list[str]
+    script: CpipTestEnvironment,
+    constraints: list[str],
 ) -> None:
     create_basic_wheel_for_package(script, "pkg", "1.0")
     create_basic_wheel_for_package(script, "pkg", "2.0")
@@ -697,7 +705,7 @@ def test_new_resolver_constraints(
 
 
 def test_new_resolver_constraint_no_specifier(script: CpipTestEnvironment) -> None:
-    "It's allowed (but useless...) for a constraint to have no specifier"
+    """It's allowed (but useless...) for a constraint to have no specifier"""
     create_basic_wheel_for_package(script, "pkg", "1.0")
     constraints_file = script.scratch_path / "constraints.txt"
     constraints_file.write_text("pkg")
@@ -732,7 +740,9 @@ def test_new_resolver_constraint_no_specifier(script: CpipTestEnvironment) -> No
     ],
 )
 def test_new_resolver_constraint_reject_invalid(
-    script: CpipTestEnvironment, constraint: str, error: str
+    script: CpipTestEnvironment,
+    constraint: str,
+    error: str,
 ) -> None:
     # Make sure CpipDeprecationWarnings don't turn into errors
     script.environ["_CPIP_TEST_ENV"] = ""
@@ -1002,8 +1012,7 @@ def wheel_from_index(
 
 
 class TestExtraMerge:
-    """
-    Test installing a package that depends the same package with different
+    """Test installing a package that depends the same package with different
     extras, one listed as required and the other as in extra.
     """
 
@@ -1016,7 +1025,9 @@ class TestExtraMerge:
         ],
     )
     def test_new_resolver_extra_merge_in_package(
-        self, script: CpipTestEnvironment, pkg_builder: "PackageBuilder"
+        self,
+        script: CpipTestEnvironment,
+        pkg_builder: "PackageBuilder",
     ) -> None:
         create_basic_wheel_for_package(script, "depdev", "1.0.0")
         create_basic_wheel_for_package(
@@ -1163,7 +1174,7 @@ def test_new_resolver_no_deps_checks_requires_python(
     )
 
     message = "Package 'base' requires a different Python: {}.{}.{} not in '<2'".format(
-        *sys.version_info[:3]
+        *sys.version_info[:3],
     )
     assert message in result.stderr
 
@@ -1199,7 +1210,8 @@ def test_new_resolver_prefers_installed_in_upgrade_if_latest(
 
 @pytest.mark.parametrize("N", [2, 10, 20])
 def test_new_resolver_presents_messages_when_backtracking_a_lot(
-    script: CpipTestEnvironment, N: int
+    script: CpipTestEnvironment,
+    N: int,
 ) -> None:
     # Generate a set of wheels that will definitely cause backtracking.
     for index in range(1, N + 1):
@@ -1424,7 +1436,8 @@ def test_new_resolver_inconsistent_metadata_keeps_extras(
     ids=["upgrade", "no-upgrade"],
 )
 def test_new_resolver_lazy_fetch_candidates(
-    script: CpipTestEnvironment, upgrade: bool
+    script: CpipTestEnvironment,
+    upgrade: bool,
 ) -> None:
     create_basic_wheel_for_package(script, "myuberpkg", "1")
     create_basic_wheel_for_package(script, "myuberpkg", "2")
@@ -1543,7 +1556,12 @@ def test_new_resolver_installs_packages_with_url_constraint(
     constraints_file.write_text(f"installed @ {installed_path.as_uri()}")
 
     script.cpip(
-        "install", "--no-cache-dir", "--no-index", "-c", constraints_file, "installed"
+        "install",
+        "--no-cache-dir",
+        "--no-index",
+        "-c",
+        constraints_file,
+        "installed",
     )
 
     script.assert_installed(installed="0.1.0")
@@ -1863,11 +1881,14 @@ def test_new_resolver_fails_on_conflicting_constraint_and_requirement(
 
 @pytest.mark.parametrize("editable", [False, True])
 def test_new_resolver_succeeds_on_matching_constraint_and_requirement(
-    script: CpipTestEnvironment, editable: bool
+    script: CpipTestEnvironment,
+    editable: bool,
 ) -> None:
     if editable:
         source_dir = create_test_package_with_setup(
-            script, name="test_pkg", version="0.1.0"
+            script,
+            name="test_pkg",
+            version="0.1.0",
         )
     else:
         source_dir = create_basic_wheel_for_package(
@@ -1940,7 +1961,8 @@ def test_new_resolver_applies_url_constraint_to_dep(
 
 
 def test_new_resolver_handles_compatible_wheel_tags_in_constraint_url(
-    script: CpipTestEnvironment, make_fake_wheel: MakeFakeWheel
+    script: CpipTestEnvironment,
+    make_fake_wheel: MakeFakeWheel,
 ) -> None:
     initial_path = make_fake_wheel("base", "0.1.0", "fakepy1-fakeabi-fakeplat")
 
@@ -1979,7 +2001,8 @@ def test_new_resolver_handles_compatible_wheel_tags_in_constraint_url(
 
 
 def test_new_resolver_handles_incompatible_wheel_tags_in_constraint_url(
-    script: CpipTestEnvironment, make_fake_wheel: MakeFakeWheel
+    script: CpipTestEnvironment,
+    make_fake_wheel: MakeFakeWheel,
 ) -> None:
     initial_path = make_fake_wheel("base", "0.1.0", "fakepy1-fakeabi-fakeplat")
 
@@ -2012,7 +2035,8 @@ def test_new_resolver_handles_incompatible_wheel_tags_in_constraint_url(
 
 
 def test_new_resolver_avoids_incompatible_wheel_tags_in_constraint_url(
-    script: CpipTestEnvironment, make_fake_wheel: MakeFakeWheel
+    script: CpipTestEnvironment,
+    make_fake_wheel: MakeFakeWheel,
 ) -> None:
     initial_path = make_fake_wheel("dep", "0.1.0", "fakepy1-fakeabi-fakeplat")
 
@@ -2147,7 +2171,8 @@ def test_new_resolver_direct_url_equivalent(
 
 
 def test_new_resolver_direct_url_with_extras(
-    tmp_path: pathlib.Path, script: CpipTestEnvironment
+    tmp_path: pathlib.Path,
+    script: CpipTestEnvironment,
 ) -> None:
     pkg1 = create_basic_wheel_for_package(script, name="pkg1", version="1")
     pkg2 = create_basic_wheel_for_package(
@@ -2333,10 +2358,11 @@ def test_new_resolver_dont_backtrack_on_extra_if_base_constrained(
 @pytest.mark.parametrize("swap_order", [True, False])
 @pytest.mark.parametrize("two_extras", [True, False])
 def test_new_resolver_dont_backtrack_on_extra_if_base_constrained_in_requirement(
-    script: CpipTestEnvironment, swap_order: bool, two_extras: bool
+    script: CpipTestEnvironment,
+    swap_order: bool,
+    two_extras: bool,
 ) -> None:
-    """
-    Verify that a requirement with a constraint on a package (either on the base
+    """Verify that a requirement with a constraint on a package (either on the base
     on the base with an extra) causes the resolver to infer the same constraint for
     any (other) extras with the same base.
 
@@ -2345,10 +2371,16 @@ def test_new_resolver_dont_backtrack_on_extra_if_base_constrained_in_requirement
     """
     create_basic_wheel_for_package(script, "dep", "1.0")
     create_basic_wheel_for_package(
-        script, "pkg", "1.0", extras={"ext1": ["dep"], "ext2": ["dep"]}
+        script,
+        "pkg",
+        "1.0",
+        extras={"ext1": ["dep"], "ext2": ["dep"]},
     )
     create_basic_wheel_for_package(
-        script, "pkg", "2.0", extras={"ext1": ["dep"], "ext2": ["dep"]}
+        script,
+        "pkg",
+        "2.0",
+        extras={"ext1": ["dep"], "ext2": ["dep"]},
     )
 
     to_install: tuple[str, str] = (
@@ -2377,8 +2409,7 @@ def test_new_resolver_dont_backtrack_on_conflicting_constraints_on_extras(
     swap_order: bool,
     two_extras: bool,
 ) -> None:
-    """
-    Verify that conflicting constraints on the same package with different
+    """Verify that conflicting constraints on the same package with different
     extras cause the resolver to trivially reject the request rather than
     trying any candidates.
 
@@ -2392,10 +2423,16 @@ def test_new_resolver_dont_backtrack_on_conflicting_constraints_on_extras(
     )
     create_basic_wheel_for_package(script, "dep", "1.0")
     create_basic_wheel_for_package(
-        script, "pkg", "1.0", extras={"ext1": ["dep"], "ext2": ["dep"]}
+        script,
+        "pkg",
+        "1.0",
+        extras={"ext1": ["dep"], "ext2": ["dep"]},
     )
     create_basic_wheel_for_package(
-        script, "pkg", "2.0", extras={"ext1": ["dep"], "ext2": ["dep"]}
+        script,
+        "pkg",
+        "2.0",
+        extras={"ext1": ["dep"], "ext2": ["dep"]},
     )
 
     to_install: tuple[str, str] = (
@@ -2465,11 +2502,12 @@ def test_new_resolver_respect_user_requested_if_extra_is_installed(
 def test_new_resolver_constraint_on_link_with_extra(
     script: CpipTestEnvironment,
 ) -> None:
-    """
-    Verify that installing works from a link with both an extra and a constraint.
-    """
+    """Verify that installing works from a link with both an extra and a constraint."""
     wheel: pathlib.Path = create_basic_wheel_for_package(
-        script, "pkg", "1.0", extras={"ext": []}
+        script,
+        "pkg",
+        "1.0",
+        extras={"ext": []},
     )
 
     script.cpip(
@@ -2486,15 +2524,20 @@ def test_new_resolver_constraint_on_link_with_extra(
 def test_new_resolver_constraint_on_link_with_extra_indirect(
     script: CpipTestEnvironment,
 ) -> None:
-    """
-    Verify that installing works from a link with an extra if there is an indirect
+    """Verify that installing works from a link with an extra if there is an indirect
     dependency on that same package with the same extra (#12372).
     """
     wheel_one: pathlib.Path = create_basic_wheel_for_package(
-        script, "pkg1", "1.0", extras={"ext": []}
+        script,
+        "pkg1",
+        "1.0",
+        extras={"ext": []},
     )
     wheel_two: pathlib.Path = create_basic_wheel_for_package(
-        script, "pkg2", "1.0", depends=["pkg1[ext]==1.0"]
+        script,
+        "pkg2",
+        "1.0",
+        depends=["pkg1[ext]==1.0"],
     )
 
     script.cpip(
@@ -2551,10 +2594,10 @@ def test_new_resolver_works_when_failing_package_builds_are_disallowed(
 
 @pytest.mark.parametrize("swap_order", [True, False])
 def test_new_resolver_comes_from_with_extra(
-    script: CpipTestEnvironment, swap_order: bool
+    script: CpipTestEnvironment,
+    swap_order: bool,
 ) -> None:
-    """
-    Verify that reporting where a dependency comes from is accurate when it comes
+    """Verify that reporting where a dependency comes from is accurate when it comes
     from a package with an extra.
 
     :param swap_order: swap the order the install specifiers appear in
