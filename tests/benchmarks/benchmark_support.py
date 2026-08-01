@@ -14,6 +14,38 @@ from cpip.core.packaging import canonicalize_name, parse_requirement
 SHA256_PLACEHOLDER = "a" * 64
 METADATA_PLACEHOLDER = "b" * 64
 
+# Frozen requirement excerpts model the large, repeatedly reported resolver
+# workloads without making the default benchmark suite depend on PyPI uptime.
+REAL_WORLD_CORPORA = {
+    "airflow": (
+        "apache-airflow[postgres,redis]>=2.8,<3",
+        "apache-airflow-providers-google>=10",
+        "pendulum>=2.1,<4",
+    ),
+    "scientific": (
+        "numpy>=1.23,<3",
+        "numba>=0.58",
+        "scipy>=1.10",
+        "pandas>=2",
+    ),
+    "web": (
+        "starlette>=0.27",
+        "fastapi>=0.100",
+        "httpx[http2]>=0.24",
+    ),
+    "data": (
+        "boto3>=1.28",
+        "botocore>=1.31",
+        "urllib3>=1.26,<3",
+        "selenium>=4",
+    ),
+    "docs": (
+        "sphinx>=7",
+        "sphinxcontrib-httpdomain>=1.8",
+        "docutils>=0.18,<0.22",
+    ),
+}
+
 
 def make_wheel(
     wheelhouse: Path,
@@ -22,6 +54,7 @@ def make_wheel(
     *,
     requires: list[str] | None = None,
     payload_files: int = 0,
+    requires_python: str = ">=3.9",
 ) -> Path:
     """Write a metadata-only wheel with an optional synthetic payload."""
     distribution = project.replace("-", "_")
@@ -36,7 +69,7 @@ def make_wheel(
             "Metadata-Version: 2.1\n"
             f"Name: {project}\n"
             f"Version: {version}\n"
-            "Requires-Python: >=3.9\n"
+            f"Requires-Python: {requires_python}\n"
             f"{requires_metadata}"
         ),
         f"{dist_info}/WHEEL": (
@@ -65,6 +98,56 @@ def make_wheel(
             "\n".join(",".join(row) for row in rows) + "\n",
         )
     return path
+
+
+def make_source_tree(root: Path, project: str = "bench-sdist") -> Path:
+    """Write a tiny PEP 517 source tree for metadata/build benchmarks."""
+    source = root / project
+    package = source / project.replace("-", "_")
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (source / "pyproject.toml").write_text(
+        "[build-system]\n"
+        "requires = []\n"
+        'build-backend = "cpip.build.build_backend"\n\n'
+        "[project]\n"
+        f'name = "{project}"\n'
+        'version = "1.0.0"\n',
+        encoding="utf-8",
+    )
+    return source
+
+
+def make_isolated_source_tree(root: Path) -> Path:
+    """Write a source tree with a local, dependency-free PEP 517 backend."""
+    source = make_source_tree(root, "bench-isolated")
+    (source / "backend.py").write_text(
+        "from pathlib import Path\n"
+        "\n"
+        "def prepare_metadata_for_build_wheel(metadata_directory, config_settings=None):\n"
+        "    dist_info = 'bench_isolated-1.0.0.dist-info'\n"
+        "    target = Path(metadata_directory) / dist_info\n"
+        "    target.mkdir(parents=True, exist_ok=True)\n"
+        "    (target / 'METADATA').write_text(\n"
+        "        'Metadata-Version: 2.1\\nName: bench-isolated\\nVersion: 1.0.0\\n'\n"
+        "    )\n"
+        "    (target / 'WHEEL').write_text(\n"
+        "        'Wheel-Version: 1.0\\nGenerator: benchmark\\n'\n"
+        "    )\n"
+        "    return dist_info\n",
+        encoding="utf-8",
+    )
+    (source / "pyproject.toml").write_text(
+        "[build-system]\n"
+        "requires = []\n"
+        'build-backend = "backend"\n'
+        'backend-path = ["."]\n\n'
+        "[project]\n"
+        'name = "bench-isolated"\n'
+        'version = "1.0.0"\n',
+        encoding="utf-8",
+    )
+    return source
 
 
 def make_dependency_graph(wheelhouse: Path) -> None:
@@ -116,6 +199,72 @@ def make_backtracking_graph(wheelhouse: Path) -> None:
         "1.0.0",
         requires=["left>=3.5.0", "right>=4.0.0"],
     )
+
+
+def make_wrong_package_graph(
+    wheelhouse: Path, prefix: str, *, versions: int = 64
+) -> None:
+    """Build a uv-style wrong-package/backtracking workload.
+
+    Each root release selects a matching ``left`` release and the preceding
+    ``right`` release.  Those releases disagree about ``shared`` until the
+    resolver reaches the oldest root, making candidate ordering significant.
+    """
+    for index in range(1, versions + 1):
+        make_wheel(wheelhouse, f"{prefix}-shared", f"1.{index}.0")
+        make_wheel(
+            wheelhouse,
+            f"{prefix}-left",
+            f"1.{index}.0",
+            requires=[f"{prefix}-shared==1.{index}.0"],
+        )
+        right_index = max(1, index - 1)
+        make_wheel(
+            wheelhouse,
+            f"{prefix}-right",
+            f"1.{right_index}.0",
+            requires=[f"{prefix}-shared>=1.{right_index}.0,<1.{right_index + 1}.0"],
+        )
+        make_wheel(
+            wheelhouse,
+            f"{prefix}-root",
+            f"1.{index}.0",
+            requires=[
+                f"{prefix}-left==1.{index}.0",
+                f"{prefix}-right==1.{right_index}.0",
+            ],
+        )
+
+
+def make_stress_graph(wheelhouse: Path, *, roots: int = 88) -> None:
+    """Build many independently resolvable roots, like a large requirements file."""
+    for index in range(roots):
+        for version in range(3):
+            make_wheel(
+                wheelhouse,
+                f"stress-{index}",
+                f"1.{version}.0",
+                requires=[f"stress-leaf-{index}>=1.1.0"],
+            )
+        make_wheel(wheelhouse, f"stress-leaf-{index}", "1.0.0")
+        make_wheel(wheelhouse, f"stress-leaf-{index}", "1.1.0")
+
+
+def make_failing_source_tree(root: Path) -> Path:
+    """Write a deterministic PEP 517 backend failure for error-path timing."""
+    source = root / "bench-failing"
+    source.mkdir()
+    (source / "backend.py").write_text(
+        "def prepare_metadata_for_build_wheel(metadata_directory, config_settings=None):\n"
+        "    raise RuntimeError('intentional benchmark build failure')\n",
+        encoding="utf-8",
+    )
+    (source / "pyproject.toml").write_text(
+        "[build-system]\nrequires = []\nbuild-backend = 'backend'\n"
+        "backend-path = ['.']\n\n[project]\nname = 'bench-failing'\nversion = '1.0.0'\n",
+        encoding="utf-8",
+    )
+    return source
 
 
 def requirement_lines(count: int = 300) -> list[str]:

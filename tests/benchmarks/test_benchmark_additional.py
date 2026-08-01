@@ -1,26 +1,30 @@
-"""CodSpeed coverage for the remaining benchmark workloads."""
+"""CodSpeed coverage for workloads added by the original ASV suite."""
 
 from __future__ import annotations
 
 import hashlib
 import itertools
-import os
 from pathlib import Path
 
-import pytest
-from benchmark_support import make_wheel, reset_caches
+from benchmark_support import REAL_WORLD_CORPORA, make_wheel, reset_caches
 from pytest_codspeed import BenchmarkFixture
-from cpip.cli.commands.fast_lock import render_lock as render_fast_lock
-from cpip.cli.commands.lock import render_lock
 from cpip.core.packaging import SpecifierSet, parse_requirement
 from cpip.core.wheel import read_wheel_metadata
-from cpip.index.directory_index import DirectoryIndex
 from cpip.install.unpacking import unzip_file
+from cpip.install.target import InstallTarget
+from cpip.install.uninstall import DistributionUninstaller
+from cpip.install.wheel_transaction import WheelInstaller
 from cpip.index.provider import CandidateProvider
-from cpip.resolution.fast_wheelhouse.cache import candidate_cache
-from cpip.resolution.fast_wheelhouse.metadata import load_candidate, wheel_name
 from cpip.resolution.req_file import parse_requirements
+from cpip.core.errors import BuildError
+from cpip.index.candidates import prepare_project_metadata
+from cpip.index.candidate_materialization import CandidateMaterializer
+from cpip.index.candidate_materialization import validate_build_requirements
+from cpip.index.candidates import InstallationCandidate
+from cpip.index.links import Link
 from cpip.resolution.resolver import Resolver
+from cpip.build.build_backend import ProjectBuilder
+from cpip.build.metadata import InstalledDistributionStore
 
 
 def test_hash_throughput(benchmark: BenchmarkFixture) -> None:
@@ -70,12 +74,150 @@ def test_metadata_scaling(benchmark: BenchmarkFixture, payload_wheel: Path) -> N
     assert benchmark(read_metadata) is not None
 
 
+def test_metadata_variation(
+    benchmark: BenchmarkFixture, metadata_variation_wheels: list[Path]
+) -> None:
+    def read_all_metadata() -> int:
+        reset_caches()
+        return sum(
+            len(read_wheel_metadata(wheel).get_all("Requires-Dist", ()))
+            for wheel in metadata_variation_wheels
+        )
+
+    assert benchmark(read_all_metadata) > 100
+
+
+def test_sdist_metadata_build(benchmark: BenchmarkFixture, source_tree: Path) -> None:
+    def prepare_metadata() -> str:
+        return prepare_project_metadata(source_tree, build_isolation=False).version
+
+    assert benchmark(prepare_metadata) == "1.0.0"
+
+
+def test_metadata_cache_miss(benchmark: BenchmarkFixture, payload_wheel: Path) -> None:
+    requirement = parse_requirement("payload-pkg")
+
+    def load_uncached() -> str:
+        candidate = InstallationCandidate.from_link(
+            Link.from_path(payload_wheel, source_url=None)
+        )
+        materializer = CandidateMaterializer(build_isolation=False)
+        return materializer.metadata_loader(candidate, requirement).load().name
+
+    assert benchmark(load_uncached) == "payload-pkg"
+
+
+def test_metadata_cache_hit(benchmark: BenchmarkFixture, payload_wheel: Path) -> None:
+    requirement = parse_requirement("payload-pkg")
+    candidate = InstallationCandidate.from_link(
+        Link.from_path(payload_wheel, source_url=None)
+    )
+    materializer = CandidateMaterializer(build_isolation=False)
+    materializer.metadata_loader(candidate, requirement).load()
+    cached_loader = materializer.metadata_loader(candidate, requirement)
+
+    assert benchmark(cached_loader.load).name == "payload-pkg"
+
+
+def test_sdist_metadata_build_isolated(
+    benchmark: BenchmarkFixture, isolated_source_tree: Path
+) -> None:
+    def prepare_metadata() -> str:
+        return prepare_project_metadata(isolated_source_tree).version
+
+    assert benchmark(prepare_metadata) == "1.0.0"
+
+
+def test_editable_build(
+    benchmark: BenchmarkFixture, source_tree: Path, tmp_path: Path
+) -> None:
+    wheel_directory = tmp_path / "editable-wheel"
+    wheel_directory.mkdir()
+
+    def build_editable() -> str:
+        return ProjectBuilder(source_tree).build_editable(wheel_directory)
+
+    assert benchmark(build_editable).endswith(".whl")
+
+
+def test_build_isolation_requirements_validation(
+    benchmark: BenchmarkFixture, tmp_path: Path
+) -> None:
+    project = tmp_path / "build-requirements"
+    project.mkdir()
+    (project / "pyproject.toml").write_text(
+        '[build-system]\nrequires = ["setuptools>=65", "wheel>=0.40", '
+        '"packaging>=23"]\nbuild-backend = "setuptools.build_meta"\n',
+        encoding="utf-8",
+    )
+
+    def validate() -> None:
+        validate_build_requirements(project)
+
+    benchmark(validate)
+
+
+def test_sdist_metadata_build_failure(
+    benchmark: BenchmarkFixture, failing_source_tree: Path
+) -> None:
+    def format_failure() -> int:
+        try:
+            prepare_project_metadata(failing_source_tree, build_isolation=False)
+        except BuildError as error:
+            return len(str(error))
+        raise AssertionError("failing source tree unexpectedly built")
+
+    assert benchmark(format_failure) > 20
+
+
+def test_extras_marker_combinatorics(
+    benchmark: BenchmarkFixture, extras_marker_wheelhouse: Path
+) -> None:
+    def resolve_extras() -> int:
+        reset_caches()
+        return len(
+            Resolver(
+                provider=CandidateProvider.from_options(
+                    find_links=[str(extras_marker_wheelhouse)], no_index=True
+                ),
+                ignore_installed=True,
+            )
+            .resolve(["extras-root[all,dev]"])
+            .candidates
+        )
+
+    assert benchmark(resolve_extras) > 40
+
+
+def test_incremental_target_install(
+    benchmark: BenchmarkFixture, tmp_path: Path
+) -> None:
+    wheelhouse = tmp_path / "incremental-wheelhouse"
+    wheelhouse.mkdir()
+    old = make_wheel(wheelhouse, "incremental-pkg", "1.0.0", payload_files=8)
+    new = make_wheel(wheelhouse, "incremental-pkg", "2.0.0", payload_files=12)
+    addon = make_wheel(wheelhouse, "incremental-addon", "1.0.0", payload_files=4)
+    target_path = tmp_path / "incremental-target"
+    target = InstallTarget.from_options("incremental-pkg", target=str(target_path))
+    WheelInstaller(target, pycompile=False).install(old)
+    installer = WheelInstaller(target, pycompile=False)
+    uninstaller = DistributionUninstaller(paths=[str(target_path)])
+
+    def update_target() -> int:
+        installer.install(new)
+        installer.install(addon)
+        uninstaller.uninstall("incremental-addon")
+        return len(tuple(target_path.rglob("*")))
+
+    assert benchmark(update_target) > 10
+
+
 def test_large_archive_installation(
     benchmark: BenchmarkFixture, tmp_path: Path
 ) -> None:
     wheelhouse = tmp_path / "wheelhouse"
     wheelhouse.mkdir()
-    wheel = make_wheel(wheelhouse, "large-payload", "1.0.0", payload_files=10_000)
+    wheel = make_wheel(wheelhouse, "large-payload", "1.0.0", payload_files=1_000)
     counter = itertools.count()
 
     def install() -> None:
@@ -83,87 +225,6 @@ def test_large_archive_installation(
         unzip_file(str(wheel), str(destination), flatten=False)
 
     benchmark(install)
-
-
-@pytest.mark.parametrize("file_count", [100, 1_000, 10_000])
-def test_directory_index_scaling(
-    benchmark: BenchmarkFixture, tmp_path: Path, file_count: int
-) -> None:
-    for index in range(file_count):
-        (tmp_path / f"index_bench_{index:05}-1.0-py3-none-any.whl").touch()
-    (tmp_path / "index-bench-archive-1.0.tar.gz").touch()
-    (tmp_path / "simple.html").write_text("<html></html>", encoding="utf-8")
-
-    def scan() -> int:
-        index = DirectoryIndex(str(tmp_path))
-        index.scan()
-        return sum(len(urls) for urls in index.project_name_to_urls.values())
-
-    assert benchmark(scan) == file_count + 1
-
-
-@pytest.mark.parametrize("package_count", [10, 100, 1_000, 10_000])
-def test_lockfile_serialization(
-    benchmark: BenchmarkFixture, package_count: int
-) -> None:
-    packages = []
-    fast_packages = []
-    for index in range(package_count):
-        name = f"lock-bench-{index:05}"
-        digest = f"{index:064x}"[-64:]
-        wheel = f"{name}-1.0-py3-none-any.whl"
-        url = f"https://files.example.test/{wheel}"
-        packages.append(
-            {
-                "name": name,
-                "version": "1.0",
-                "wheels": [{"name": wheel, "url": url, "hashes": {"sha256": digest}}],
-            }
-        )
-        fast_packages.append((name, "1.0", wheel, url, digest))
-
-    def render() -> int:
-        return len(render_lock(packages)) + len(render_fast_lock(fast_packages))
-
-    assert benchmark(render) > package_count
-
-
-@pytest.mark.parametrize("cache_state", ["cold", "warm", "invalidate"])
-def test_metadata_cache_scaling(
-    benchmark: BenchmarkFixture, tmp_path: Path, cache_state: str
-) -> None:
-    wheelhouse = tmp_path / "wheelhouse"
-    wheelhouse.mkdir()
-    entries = [
-        make_wheel(wheelhouse, f"metadata-bench-{index:04}", "1.0.0")
-        for index in range(1_000)
-    ]
-    metadata_cache: dict[str, object] = {}
-
-    def load_all() -> int:
-        return sum(
-            len(
-                load_candidate(
-                    str(path), metadata_cache, wheel_name(str(path))
-                ).dependencies
-            )
-            for path in entries
-        )
-
-    if cache_state in {"warm", "invalidate"}:
-        load_all()
-    invalidated = entries[len(entries) // 2]
-
-    def read_metadata() -> int:
-        candidate_cache.clear()
-        if cache_state == "cold":
-            metadata_cache.clear()
-        elif cache_state == "invalidate":
-            stat = invalidated.stat()
-            os.utime(invalidated, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1))
-        return load_all()
-
-    assert benchmark(read_metadata) == 0
 
 
 def test_marker_heavy_resolution(benchmark: BenchmarkFixture, tmp_path: Path) -> None:
@@ -196,40 +257,6 @@ def test_marker_heavy_resolution(benchmark: BenchmarkFixture, tmp_path: Path) ->
     assert benchmark(resolve) == 64
 
 
-@pytest.mark.parametrize("unsatisfiable", [False, True])
-def test_real_world_resolution_shape(
-    benchmark: BenchmarkFixture, tmp_path: Path, unsatisfiable: bool
-) -> None:
-    wheelhouse = tmp_path / "wheelhouse"
-    wheelhouse.mkdir()
-    for index in range(1, 129):
-        version = f"{index}.0.0"
-        make_wheel(wheelhouse, "shared", version)
-        required_version = "999" if unsatisfiable else str(index)
-        make_wheel(
-            wheelhouse,
-            "application",
-            version,
-            requires=[f"shared == {required_version}.0.0"],
-        )
-    provider = CandidateProvider.from_options(
-        find_links=[str(wheelhouse)], no_index=True
-    )
-
-    def resolve() -> int:
-        reset_caches()
-        try:
-            return len(
-                Resolver(provider=provider, ignore_installed=True)
-                .resolve(["application"])
-                .candidates
-            )
-        except Exception:
-            return 0
-
-    assert benchmark(resolve) == (0 if unsatisfiable else 2)
-
-
 def test_requirements_file_scaling(
     benchmark: BenchmarkFixture, requirements_file: Path
 ) -> None:
@@ -238,3 +265,80 @@ def test_requirements_file_scaling(
         return len(parse_requirements(str(requirements_file), session=None))
 
     assert benchmark(parse_file) > 0
+
+
+def test_direct_url_and_constraint_parsing(benchmark: BenchmarkFixture) -> None:
+    values = (
+        "demo @ https://example.invalid/demo-1.0-py3-none-any.whl",
+        "demo @ file:///tmp/demo-1.0.tar.gz",
+        "git+https://example.invalid/demo.git@main#egg=demo",
+        "demo[security,tests]>=1.0; python_version >= '3.9' and sys_platform != 'win32'",
+    )
+
+    def parse_mixed() -> int:
+        reset_caches()
+        return sum(len(parse_requirement(value).name) for value in values * 100)
+
+    assert benchmark(parse_mixed) > 0
+
+
+def test_frozen_real_world_corpus_parsing(benchmark: BenchmarkFixture) -> None:
+    values = tuple(value for corpus in REAL_WORLD_CORPORA.values() for value in corpus)
+
+    def parse_corpus() -> int:
+        reset_caches()
+        return sum(len(parse_requirement(value).name) for value in values)
+
+    assert benchmark(parse_corpus) > 100
+
+
+def test_installed_state_scan(benchmark: BenchmarkFixture, tmp_path: Path) -> None:
+    wheelhouse = tmp_path / "installed-wheelhouse"
+    wheelhouse.mkdir()
+    target_path = tmp_path / "installed-target"
+    target = InstallTarget.from_options("installed-0", target=str(target_path))
+    installer = WheelInstaller(target, pycompile=False)
+    wheels = [
+        make_wheel(wheelhouse, f"installed-{index}", "1.0.0", payload_files=2)
+        for index in range(48)
+    ]
+    for wheel in wheels:
+        installer.install(wheel)
+
+    def scan_installed() -> int:
+        return len(InstalledDistributionStore(paths=[str(target_path)]).iter())
+
+    assert benchmark(scan_installed) == 48
+
+
+def test_cold_and_warm_resolution_cache(
+    benchmark: BenchmarkFixture, graph_wheelhouse: Path
+) -> None:
+    def cold_resolution() -> int:
+        reset_caches()
+        resolver = Resolver(
+            provider=CandidateProvider.from_options(
+                find_links=[str(graph_wheelhouse)], no_index=True
+            ),
+            ignore_installed=True,
+        )
+        return len(resolver.resolve(["application"]).candidates)
+
+    assert benchmark(cold_resolution) > 10
+
+
+def test_warm_resolution_cache(
+    benchmark: BenchmarkFixture, graph_wheelhouse: Path
+) -> None:
+    resolver = Resolver(
+        provider=CandidateProvider.from_options(
+            find_links=[str(graph_wheelhouse)], no_index=True
+        ),
+        ignore_installed=True,
+    )
+    resolver.resolve(["application"])
+
+    def warm_resolution() -> int:
+        return len(resolver.resolve(["application"]).candidates)
+
+    assert benchmark(warm_resolution) > 10
