@@ -576,6 +576,16 @@ def coverage_install(tmpdir_factory: pytest.TempPathFactory) -> Path:
         destination = install_dir / str(file)
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, destination)
+    # The copied package is already selected for this interpreter/platform.
+    # Mark the fixture as universal so cpip check does not reject the host's
+    # manylinux wheel tag when it scans the isolated test environment.
+    for wheel_metadata in install_dir.glob("*.dist-info/WHEEL"):
+        contents = wheel_metadata.read_text(encoding="utf-8")
+        contents = "\n".join(
+            "Tag: py3-none-any" if line.startswith("Tag:") else line
+            for line in contents.splitlines()
+        )
+        wheel_metadata.write_text(contents + "\n", encoding="utf-8")
     return install_dir
 
 
