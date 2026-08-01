@@ -33,7 +33,11 @@ from cpip.install.wheel_archive import (
     zip_mode,
 )
 from cpip.install.wheel_archive_runtime import open_wheel_archive
-from cpip.install.wheel_state import compiled_files, existing_paths
+from cpip.install.wheel_state import (
+    InstalledTargetInventory,
+    compiled_files,
+    existing_paths,
+)
 from cpip.install.wheel_transaction_direct import (
     DIRECT_CONTENT_BATCH_LIMIT,
     direct_batch_preflight,
@@ -77,12 +81,14 @@ class WheelInstaller:
         force: bool = False,
         preserve_existing: bool = False,
         script_executable: str | None = None,
+        target_inventory: InstalledTargetInventory | None = None,
     ) -> None:
         self.target = target
         self.pycompile = pycompile
         self.force = force
         self.preserve_existing = preserve_existing
         self.script_executable = script_executable
+        self.target_inventory = target_inventory
 
     def install(
         self,
@@ -118,6 +124,7 @@ class WheelInstaller:
             stage_root=stage_root,
             transaction=transaction,
             direct=direct,
+            target_inventory=self.target_inventory,
         )
 
     def validate_batch(
@@ -154,11 +161,14 @@ def install_wheel_internal(
     stage_root: Path | None = None,
     transaction: InstallTransaction | None = None,
     direct: bool = False,
+    target_inventory: InstalledTargetInventory | None = None,
 ) -> WheelCandidate:
     if candidate is None:
         candidate = wheel_candidate(path)
     if lookup_existing:
-        if _target_has_distribution_metadata(target):
+        if target_inventory is not None:
+            existing = target_inventory.find(candidate.canonical_name)
+        elif _target_has_distribution_metadata(target):
             from cpip.build.metadata import InstalledDistributionStore
 
             existing = InstalledDistributionStore(
@@ -669,17 +679,18 @@ def install_wheels_transactionally(
     )
     if len(planned_candidates) != len(requests):
         raise ValueError("candidate count does not match wheel request count")
-    if lookup_existing and _target_has_distribution_metadata(target):
-        from cpip.build.metadata import InstalledDistributionStore
-
-        existing_distributions = {
-            distribution.canonical_name: distribution
-            for distribution in InstalledDistributionStore(
-                paths=[os.fspath(root) for root in target.library_roots],
-            ).iter(names={candidate.canonical_name for candidate in planned_candidates})
-        }
-    else:
-        existing_distributions = {}
+    target_inventory = (
+        InstalledTargetInventory.from_target(
+            target,
+            names={candidate.canonical_name for candidate in planned_candidates},
+        )
+        if lookup_existing
+        else None
+    )
+    existing_distributions = (
+        {} if target_inventory is None else target_inventory.distributions
+    )
+    installer.target_inventory = target_inventory
     direct_destination_cache = None
     if not pycompile and not force and not existing_distributions:
         direct_destination_cache = direct_batch_preflight(

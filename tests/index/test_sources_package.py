@@ -66,6 +66,35 @@ def test_local_source_files_uses_directory_entry_types(
     assert local_source_files(tmp_path) == (artifact,)
 
 
+def test_find_links_reuses_local_artifact_identity_until_refresh(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    artifact = tmp_path / "demo-1.0.tar.gz"
+    artifact.write_bytes(b"artifact")
+    source = FindLinksSource((str(tmp_path),))
+    import cpip.index.directory_index as directory_index
+
+    scan = directory_index.os.scandir
+    calls = 0
+
+    def counting_scan(path: str):
+        nonlocal calls
+        calls += 1
+        return scan(path)
+
+    monkeypatch.setattr(directory_index.os, "scandir", counting_scan)
+    first = source.links_from_local_path(tmp_path)
+    second = source.links_from_local_path(tmp_path)
+
+    assert first[0].local_identity_internal == second[0].local_identity_internal
+    assert calls == 1
+
+    source.refresh_local_sources(str(tmp_path))
+    source.links_from_local_path(tmp_path)
+    assert calls == 2
+
+
 @pytest.mark.parametrize(
     "url, repo_url, requested_revision",
     [

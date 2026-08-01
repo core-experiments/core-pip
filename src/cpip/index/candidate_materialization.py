@@ -85,6 +85,9 @@ def candidate_metadata_fingerprint(candidate: CandidateRecord) -> str:
     sha256 = candidate.link.hashes.get("sha256")
     if sha256 is not None:
         return f"sha256:{sha256}"
+    local_identity = candidate.link.local_identity_internal
+    if local_identity is not None:
+        return local_identity
     if candidate.link.is_file:
         try:
             stat = os.stat(candidate.link.file_path)
@@ -285,7 +288,10 @@ class CandidateMaterializer:
             tuple[str, int, int, frozenset[str]],
             WheelCandidate,
         ] = {}
-        self.metadata_cache: dict[tuple[str, frozenset[str]], CandidateMetadata] = {}
+        self.metadata_cache: dict[
+            tuple[str, str, frozenset[str]],
+            CandidateMetadata,
+        ] = {}
         self.release_metadata_cache: dict[
             tuple[str, str],
             tuple[
@@ -297,6 +303,7 @@ class CandidateMaterializer:
             ]
             | None,
         ] = {}
+        self.artifact_fingerprint_cache: dict[str, str] = {}
         self.local_artifacts: dict[str, Path] = {}
         self.vcs_revisions: dict[str, str] = {}
         self.metadata_prefetcher: Prefetcher[Any, str] | None = None
@@ -335,6 +342,14 @@ class CandidateMaterializer:
     def vcs_revision(self, url: str) -> str | None:
         """Return the revision observed while materializing a VCS candidate."""
         return self.vcs_revisions.get(url)
+
+    def artifact_fingerprint(self, candidate: CandidateRecord) -> str:
+        key = candidate.link.url
+        fingerprint = self.artifact_fingerprint_cache.get(key)
+        if fingerprint is None:
+            fingerprint = candidate_metadata_fingerprint(candidate)
+            self.artifact_fingerprint_cache[key] = fingerprint
+        return fingerprint
 
     def materialize(
         self,
@@ -428,7 +443,8 @@ class CandidateMaterializer:
         requirement: Requirement,
     ) -> LazyCandidateMetadata:
         requested_extras = frozenset(requirement.extras)
-        key = (candidate.link.url, requested_extras)
+        fingerprint = self.artifact_fingerprint(candidate)
+        key = (fingerprint, str(candidate.version), requested_extras)
 
         def load() -> CandidateMetadata:
             cached = self.metadata_cache.get(key)
@@ -438,7 +454,7 @@ class CandidateMaterializer:
                 candidate.link.url,
                 str(candidate.version),
                 tuple(sorted(requested_extras)),
-                candidate_metadata_fingerprint(candidate),
+                fingerprint,
             )
             if self.persistent_candidate_metadata_cache is not None:
                 cached = self.persistent_candidate_metadata_cache.get(persistent_key)

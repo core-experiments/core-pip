@@ -12,7 +12,8 @@ from typing import Any
 from cpip.core.packaging import Requirement, canonicalize_name
 from cpip.core.urls import path_to_url, url_to_path
 from cpip.index.directory_index import (
-    local_source_files,
+    LocalSourceSnapshot,
+    local_source_snapshot,
 )
 from cpip.index.links import Link
 from cpip.index.source_models import ArtifactKind
@@ -41,7 +42,7 @@ def resolve_source_location(location: str) -> tuple[str | None, str | None]:
 
 
 class FindLinksSource:
-    __slots__ = ("links", "session", "trusted_hosts")
+    __slots__ = ("local_snapshots", "links", "session", "trusted_hosts")
 
     def __init__(
         self,
@@ -52,12 +53,20 @@ class FindLinksSource:
         self.links = links
         self.trusted_hosts = trusted_hosts
         self.session = session
+        self.local_snapshots: dict[str, LocalSourceSnapshot] = {}
 
     def collect_links(self, requirement: Requirement) -> list[Link]:
         links: list[Link] = []
         for link in self.links:
             links.extend(self.links_from_find_link(link))
         return links
+
+    def refresh_local_sources(self, path: str | None = None) -> None:
+        """Explicitly invalidate local discovery state."""
+        if path is None:
+            self.local_snapshots.clear()
+        else:
+            self.local_snapshots.pop(os.fspath(Path(path)), None)
 
     def links_from_find_link(self, link: str) -> list[Link]:
         normalized, local = resolve_source_location(link)
@@ -88,11 +97,20 @@ class FindLinksSource:
                     session=self.session,
                 ).links_from_url(path.as_uri())
             return [Link.from_path(path, source_url=None)]
-        if not os.path.isdir(path_text):
-            return []
+        snapshot = self.local_snapshots.get(path_text)
+        if snapshot is None:
+            snapshot = local_source_snapshot(path)
+            if snapshot is None:
+                return []
+            self.local_snapshots[path_text] = snapshot
         return [
-            Link.from_path(item, source_url=str(path), is_dir=False)
-            for item in local_source_files(path)
+            Link.from_path(
+                item.path,
+                source_url=str(path),
+                is_dir=False,
+                local_identity=item.identity,
+            )
+            for item in snapshot.entries
         ]
 
 

@@ -124,6 +124,7 @@ class Link:
         "filename_internal",
         "hashes_internal",
         "kind",
+        "local_identity_internal",
         "metadata_file_data",
         "parsed_url_internal",
         "path_internal",
@@ -147,6 +148,7 @@ class Link:
         text: str = "",
         kind: ArtifactKind | None = None,
         local_path_internal: str | None = None,
+        local_identity_internal: str | None = None,
     ) -> None:
         if url.startswith("\\\\"):
             url = path_to_url(url)
@@ -180,6 +182,7 @@ class Link:
         self.egg_fragment = self.egg_fragment_internal()
         self.text = text
         self.kind = kind if kind is not None else self.artifact_kind()
+        self.local_identity_internal = local_identity_internal
 
     @property
     def scheme(self) -> str:
@@ -221,6 +224,7 @@ class Link:
         *,
         source_url: str | None,
         is_dir: bool | None = None,
+        local_identity: str | None = None,
     ) -> Link:
         if is_dir is None:
             is_dir = path.is_dir()
@@ -238,6 +242,7 @@ class Link:
                 else cls.artifact_kind_from_filename(path.name)
             ),
             local_path_internal=str(local_path),
+            local_identity_internal=local_identity,
         )
 
     @classmethod

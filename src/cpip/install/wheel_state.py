@@ -12,6 +12,7 @@ from cpip.core.errors import InstallationError
 
 if TYPE_CHECKING:
     from cpip.build.metadata import InstalledMetadataDistribution
+    from cpip.install.target import InstallTarget
 
 
 def compiled_files(
@@ -74,6 +75,36 @@ def existing_paths(
     paths = {Path(os.path.realpath(os.path.join(root, entry))) for entry in entries}
     existing = {path for path in paths if os.path.lexists(path)}
     return existing, existing
+
+
+class InstalledTargetInventory:
+    """Installed distributions discovered once for an install transaction."""
+
+    __slots__ = ("distributions",)
+
+    def __init__(
+        self,
+        distributions: dict[str, InstalledMetadataDistribution],
+    ) -> None:
+        self.distributions = distributions
+
+    @classmethod
+    def from_target(
+        cls,
+        target: InstallTarget,
+        names: set[str] | None = None,
+    ) -> InstalledTargetInventory:
+        from cpip.build.metadata import InstalledDistributionStore
+
+        distributions = InstalledDistributionStore(
+            paths=[os.fspath(root) for root in target.library_roots],
+        ).iter(names=names)
+        return cls(
+            {distribution.canonical_name: distribution for distribution in distributions},
+        )
+
+    def find(self, name: str) -> InstalledMetadataDistribution | None:
+        return self.distributions.get(name)
 
 
 def is_within(path: Path, root: Path) -> bool:
