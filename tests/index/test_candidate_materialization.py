@@ -2,9 +2,9 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from pip.core.packaging import Version
-from pip.core.wheel import WheelCandidate
-from pip.index.candidate_materialization import CandidateStream
+from cpip.core.packaging import Version
+from cpip.core.wheel import WheelCandidate
+from cpip.index.candidate_materialization import CandidateStream
 
 
 def make_candidate(version: str) -> WheelCandidate:

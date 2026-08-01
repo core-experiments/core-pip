@@ -1,11 +1,11 @@
 [project]
-name = "core-pip"
-version = "0.0.0"
+name = "cpip"
+version = "0.0.1"
 description = "The PyPA recommended tool for installing Python packages."
 license = "MIT"
 license-files = ["LICENSE.txt"]
 classifiers = [
-    "Development Status :: 5 - Production/Stable",
+    "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "Topic :: Software Development :: Build Tools",
     "Programming Language :: Python",
@@ -19,38 +19,31 @@ classifiers = [
     "Programming Language :: Python :: Implementation :: CPython",
     "Programming Language :: Python :: Implementation :: PyPy",
 ]
-authors = [{ name = "The pip developers", email = "distutils-sig@python.org" }]
+authors = [{ name = "turcioskevinr@gmail.com", email = "turcioskevinr@gmail.com" }]
 
-# NOTE: requires-python is duplicated in __pip-runner__.py.
+# NOTE: requires-python is duplicated in __cpip-runner__.py.
 # When changing this value, please change the other copy as well.
 requires-python = ">=3.9"
-dependencies = [
-    "msgpack",
-    "packaging",
-    "pyproject-hooks",
-]
+dependencies = []
 
 [project.scripts]
-pip = "pip.cli.main:main"
-pip3 = "pip.cli.main:main"
-pip-core = "pip.cli.main:main"
+cpip = "cpip.cli.main:main"
 
 [project.urls]
-Homepage = "https://pip.pypa.io/"
-Documentation = "https://pip.pypa.io"
-Source = "https://github.com/pypa/pip"
+Homepage = "https://cpip.pypa.io/"
+Documentation = "https://cpip.pypa.io"
+Source = "https://github.com/pypa/cpip"
 
 [build-system]
-requires = [
-    "uv>=0.11.16,<0.12",
-    "uv_build>=0.11.16,<0.12",
-]
-build-backend = "uv_build"
+requires = []
+build-backend = "cpip.build.build_backend"
+backend-path = ["src"]
 
 [dependency-groups]
 benchmark = [
-    "asv>=0.6.5",
     "pytest-codspeed>=5.0.3",
+    "tomli>=2",
+    "uv==0.12.1",
 ]
 typing = ["ruff", "ty"]
 test = [
@@ -59,7 +52,9 @@ test = [
     "installer",
     "keyring",
     "msgpack",
+    "packaging",
     "proxy.py",
+    "pyproject-hooks",
     "pytest",
     "pytest-cov",
     "pytest-rerunfailures",
@@ -78,12 +73,10 @@ test = [
 default-groups = ["typing"]
 
 [tool.uv.build-backend]
-module-name = "pip"
+module-name = "cpip"
 
 [tool.ruff]
-extend-exclude = [
-    "tests/cli/data",
-]
+extend-exclude = ["tests/cli/data"]
 
 [tool.pytest.ini_options]
 markers = [
@@ -94,7 +87,7 @@ markers = [
     "integration: integration test",
     "mercurial: tests requiring Mercurial",
     "network: test requiring network access",
-    "search: pip search test",
+    "search: cpip search test",
     "svn: tests requiring Subversion",
     "unit: unit test",
 ]
@@ -102,7 +95,7 @@ markers = [
 [tool.ty.environment]
 python-version = "3.14"
 
-[tool.pip.architecture]
+[tool.cpip.architecture]
 domains = [
     "core",
     "platform",
@@ -115,7 +108,7 @@ domains = [
     "cli",
 ]
 
-[tool.pip.architecture.dependencies]
+[tool.cpip.architecture.dependencies]
 core = []
 platform = ["core"]
 build = ["core", "platform"]
@@ -123,15 +116,7 @@ index = ["core", "build", "platform"]
 network = ["core", "platform", "build", "index"]
 vcs = ["core"]
 resolution = ["core", "index", "network", "vcs"]
-install = [
-    "core",
-    "platform",
-    "network",
-    "build",
-    "index",
-    "resolution",
-    "vcs",
-]
+install = ["core", "platform", "network", "build", "index", "resolution", "vcs"]
 cli = [
     "core",
     "platform",

@@ -4,8 +4,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from pip.cli.dependency_groups import parse_dependency_groups
-from pip.core.errors import InstallationError
+from cpip.cli.dependency_groups import parse_dependency_groups
+from cpip.core.errors import InstallationError
 
 
 def test_parse_simple_dependency_groups(
@@ -52,6 +52,23 @@ def test_parse_cyclic_dependency_groups(
     assert (
         "Cyclic dependency group include while resolving foo: foo -> bar, bar -> foo"
     ) in str(exception)
+
+
+def test_parse_deep_dependency_groups_without_recursion(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    count = 1_500
+    groups = ["[dependency-groups]"]
+    groups.extend(
+        f'group{index} = [{{include-group="group{index + 1}"}}]'
+        for index in range(count - 1)
+    )
+    groups.append(f'group{count - 1} = ["leaf"]')
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text("\n".join(groups), encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    assert parse_dependency_groups([("pyproject.toml", "group0")]) == ["leaf"]
 
 
 def test_parse_with_no_dependency_groups_defined(
@@ -110,7 +127,7 @@ def test_parse_gets_unexpected_oserror(
     def epipe_toml_load(*args: Any, **kwargs: Any) -> None:
         raise OSError(errno.EPIPE, "Broken pipe")
 
-    monkeypatch.setattr("pip.cli.dependency_groups.tomllib.load", epipe_toml_load)
+    monkeypatch.setattr("cpip.cli.dependency_groups.tomllib.load", epipe_toml_load)
 
     with pytest.raises(InstallationError, match=r"Error reading pyproject\.toml"):
         parse_dependency_groups([("pyproject.toml", "foo")])

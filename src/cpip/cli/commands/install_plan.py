@@ -1,0 +1,134 @@
+from __future__ import annotations
+
+import os
+import zipfile
+from pathlib import Path
+from typing import Any
+
+
+def try_local_wheelhouse_plan(
+    options: Any,
+    bundle: Any,
+    requirements: list[Any],
+    *,
+    cache_dir: str | None,
+) -> Any | None:
+    """Reuse the local resolver for the narrow pure-wheel install shape."""
+    if (
+        not bundle.no_index
+        or not bundle.find_links
+        or bundle.extra_index_urls
+        or bundle.constraints
+        or bundle.require_hashes
+        or bundle.format_control.no_binary
+        or bundle.format_control.only_binary
+        or bundle.release_control.all_releases
+        or bundle.release_control.only_final
+        or bundle.editables
+        or options.groups
+        or options.constraint_files
+        or options.no_deps
+        or options.upgrade
+        or options.pre
+        or options.all_releases
+        or options.only_final
+        or options.no_binary
+        or options.only_binary
+        or options.platform
+        or options.implementation
+        or options.abi
+        or options.dry_run
+        or options.report
+        or options.require_hashes
+        or options.ignore_requires_python
+        or options.user
+        or options.root
+        or options.prefix
+        or options.target is None
+        or not options.ignore_installed
+        or not options.no_compile
+    ):
+        return None
+    from cpip.index.source_locations import resolve_source_location
+
+    if any(resolve_source_location(value)[1] is None for value in bundle.find_links):
+        return None
+    values: list[str] = []
+    for requirement in requirements:
+        if (
+            requirement.req is None
+            or requirement.req.url is not None
+            or requirement.link is not None
+            or requirement.hash_options
+            or requirement.config_settings
+        ):
+            return None
+        values.append(requirement.req.raw)
+    from cpip.core.packaging import Requirement, SpecifierSet, Version
+    from cpip.core.wheel import WheelCandidate, parse_wheel, wheel_candidate
+    from cpip.resolution.fast_local_wheelhouse import resolve
+    from cpip.resolution.resolver_internals.state.plans import InstallPlan
+
+    local_plan = resolve(bundle.find_links, values, cache_dir=cache_dir)
+    if local_plan is None:
+        return None
+    candidates = []
+    graph: dict[str, set[str]] = {}
+    try:
+        for local_candidate in local_plan.candidates:
+            dependencies = []
+            for dependency in local_candidate.dependencies:
+                specifier = ",".join(
+                    operator + str(getattr(expected, "text", expected))
+                    for operator, expected in dependency.specifier.values
+                )
+                extras = (
+                    f"[{','.join(sorted(dependency.extras))}]"
+                    if dependency.extras
+                    else ""
+                )
+                marker = ""
+                if dependency.marker is not None:
+                    operator, value = dependency.marker
+                    marker = f"; extra {operator} '{value}'"
+                raw = f"{dependency.name}{extras}{specifier}{marker}"
+                parsed = Requirement(
+                    name=dependency.name,
+                    specifier=SpecifierSet(specifier),
+                    extras=frozenset(dependency.extras),
+                    marker=marker.removeprefix("; ") or None,
+                    raw=raw,
+                )
+                dependencies.append(parsed)
+            candidate = WheelCandidate(
+                name=local_candidate.name,
+                version=Version(str(local_candidate.version)),
+                path=Path(local_candidate.path),
+                dependencies=tuple(dependencies),
+                provided_extras=local_candidate.provided_extras,
+                requires_python=local_candidate.requires_python,
+                source_kind="wheel",
+            )
+            candidates.append(candidate)
+            graph[candidate.canonical_name] = {
+                dependency.canonical_name for dependency in candidate.dependencies
+            }
+    except (OSError, TypeError, ValueError):
+        return None
+    if (
+        sum(os.stat(candidate.path).st_size for candidate in candidates)
+        > 4 * 1024 * 1024
+    ):
+        for index, candidate in enumerate(candidates):
+            with zipfile.ZipFile(candidate.path) as archive:
+                dist_info, _ = parse_wheel(
+                    archive,
+                    candidate.path.name[:-4].split("-", 1)[0],
+                )
+                layout = wheel_candidate(
+                    candidate.path,
+                    archive=archive,
+                    dist_info_dir=dist_info,
+                ).wheel_layout
+            candidates[index] = candidate.copy_with(wheel_layout=layout)
+    return InstallPlan(candidates, graph=graph)

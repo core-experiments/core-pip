@@ -7,6 +7,8 @@ __pycache__/
 .mypy_cache/
 
 .venv/
-build/
+/build/
+# The package's build module is source code, not the root build output.
+!src/cpip/build/
 dist/
 *.egg-info/

@@ -8,12 +8,12 @@ from __future__ import annotations
 
 from benchmark_support import reset_caches, wheel_filenames
 from pytest_codspeed import BenchmarkFixture
-from pip.core.packaging import SpecifierSet, parse_requirement
-from pip.core.wheel import parse_wheel_file, supported_wheel_tags, wheel_tag_rank
-from pip.index.candidate_evaluators import CandidateEvaluator
-from pip.index.candidates import BestCandidateResult, InstallationCandidate
-from pip.index.links import Link
-from pip.index.page_parsing import IndexPageParser
+from cpip.core.packaging import SpecifierSet, parse_requirement
+from cpip.core.wheel import parse_wheel_file, supported_wheel_tags, wheel_tag_rank
+from cpip.index.candidate_evaluators import CandidateEvaluator
+from cpip.index.candidates import BestCandidateResult, InstallationCandidate
+from cpip.index.links import Link
+from cpip.index.page_parsing import IndexPageParser
 
 PAGE_URL = "https://example.invalid/simple/package/"
 WHEEL_FILENAMES = wheel_filenames()

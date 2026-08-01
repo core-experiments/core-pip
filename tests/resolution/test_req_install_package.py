@@ -8,12 +8,11 @@ from pathlib import Path
 from unittest import mock
 
 import pytest
-from pip.core.errors import InstallationError, InvalidWheelFilename
-from pip.core.packaging import Requirement, SpecifierSet
-from pip.resolution.req_install import (
+from cpip.core.errors import InstallationError, InvalidWheelFilename
+from cpip.core.packaging import Requirement, SpecifierSet
+from cpip.resolution.requirements.paths import get_url_from_path, looks_like_path
+from cpip.resolution.req_install import (
     InstallRequirement,
-    get_url_from_path,
-    looks_like_path,
     install_req_from_editable,
     install_req_from_line,
     parse_editable,
@@ -310,7 +309,7 @@ def test_unidentifiable_name() -> None:
 
 def test_requirement_file(tmp_path: Path) -> None:
     req_file_path = tmp_path / "test.txt"
-    req_file_path.write_text("pip\nsetuptools")
+    req_file_path.write_text("cpip\nsetuptools")
     with pytest.raises(InstallationError) as exc:
         install_req_from_line(os.fspath(req_file_path))
     error = str(exc.value)
@@ -339,9 +338,9 @@ def test_parse_editable_local(tmp_path: Path) -> None:
     assert parse_editable(".")[0] is None
     child = tmp_path / "foo"
     child.mkdir()
-    with mock.patch("pip.resolution.req_install.os.path.exists", return_value=True):
+    with mock.patch("cpip.resolution.req_install.os.path.exists", return_value=True):
         with mock.patch(
-            "pip.resolution.req_install.os.path.abspath", return_value=os.fspath(child)
+            "cpip.resolution.req_install.os.path.abspath", return_value=os.fspath(child)
         ):
             assert parse_editable("foo") == (None, child.resolve().as_uri(), set())
 
@@ -368,18 +367,22 @@ def test_parse_editable_local_extras(tmp_path: Path) -> None:
     child = root / "foo"
     child.mkdir()
     with mock.patch(
-        "pip.resolution.req_install.os.path.abspath", return_value=os.fspath(root)
+        "cpip.resolution.req_install.os.path.abspath", return_value=os.fspath(root)
     ):
-        with mock.patch("pip.resolution.req_install.os.path.exists", return_value=True):
+        with mock.patch(
+            "cpip.resolution.req_install.os.path.exists", return_value=True
+        ):
             assert parse_editable(".[extras]") == (
                 None,
                 root.resolve().as_uri(),
                 {"extras"},
             )
     with mock.patch(
-        "pip.resolution.req_install.os.path.abspath", return_value=os.fspath(child)
+        "cpip.resolution.req_install.os.path.abspath", return_value=os.fspath(child)
     ):
-        with mock.patch("pip.resolution.req_install.os.path.exists", return_value=True):
+        with mock.patch(
+            "cpip.resolution.req_install.os.path.exists", return_value=True
+        ):
             assert parse_editable("foo[bar,baz]") == (
                 None,
                 child.resolve().as_uri(),
@@ -469,10 +472,10 @@ def test_get_url_from_path(
     expected: None,
 ) -> None:
     with mock.patch(
-        "pip.resolution.req_install.os.path.isdir", return_value=mock_returns[0]
+        "cpip.resolution.req_install.os.path.isdir", return_value=mock_returns[0]
     ):
         with mock.patch(
-            "pip.resolution.req_install.os.path.isfile", return_value=mock_returns[1]
+            "cpip.resolution.req_install.os.path.isfile", return_value=mock_returns[1]
         ):
             assert get_url_from_path(*args) is expected
 
@@ -481,8 +484,10 @@ def test_get_url_from_path_archive_file() -> None:
     name = "simple-0.1-py2.py3-none-any.whl"
     path = f"/path/to/{name}"
     expected = Path(path).resolve(strict=False).as_uri()
-    with mock.patch("pip.resolution.req_install.os.path.isdir", return_value=False):
-        with mock.patch("pip.resolution.req_install.os.path.isfile", return_value=True):
+    with mock.patch("cpip.resolution.req_install.os.path.isdir", return_value=False):
+        with mock.patch(
+            "cpip.resolution.req_install.os.path.isfile", return_value=True
+        ):
             assert get_url_from_path(path, name) == expected
 
 
@@ -490,17 +495,19 @@ def test_get_url_from_path_installable_dir() -> None:
     name = "some/setuptools/project"
     path = f"/path/to/{name}"
     expected = Path(path).resolve(strict=False).as_uri()
-    with mock.patch("pip.resolution.req_install.os.path.isdir", return_value=True):
-        with mock.patch("pip.resolution.req_install.os.path.isfile", return_value=True):
+    with mock.patch("cpip.resolution.req_install.os.path.isdir", return_value=True):
+        with mock.patch(
+            "cpip.resolution.req_install.os.path.isfile", return_value=True
+        ):
             assert get_url_from_path(path, name) == expected
 
 
 def test_get_url_from_path_installable_error() -> None:
     name = "some/setuptools/project"
     path = f"/path/to/{name}"
-    with mock.patch("pip.resolution.req_install.os.path.isdir", return_value=True):
+    with mock.patch("cpip.resolution.req_install.os.path.isdir", return_value=True):
         with mock.patch(
-            "pip.resolution.req_install.os.path.isfile", return_value=False
+            "cpip.resolution.req_install.os.path.isfile", return_value=False
         ):
             with pytest.raises(InstallationError) as exc:
                 get_url_from_path(path, name)
@@ -512,7 +519,7 @@ def test_get_url_from_path_installable_error() -> None:
 )
 def test_tmp_build_directory() -> None:
     requirement = InstallRequirement(None, None)
-    tmp_dir = tempfile.mkdtemp("-build", "pip-")
+    tmp_dir = tempfile.mkdtemp("-build", "cpip-")
     try:
         tmp_build_dir = requirement.ensure_build_location(
             tmp_dir,

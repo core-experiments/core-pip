@@ -1,8 +1,4 @@
-"""Session fixtures for the CodSpeed benchmark suite.
-
-The fixtures build every workload once per session so that the benchmarked
-callables only measure pip's own work and not the cost of generating inputs.
-"""
+"""Session fixtures for the CodSpeed benchmark suite."""
 
 from __future__ import annotations
 
@@ -13,9 +9,9 @@ from benchmark_support import (
     make_backtracking_graph,
     make_dependency_graph,
     make_wheel,
+    requirement_lines,
     simple_index_html,
     simple_index_json,
-    requirement_lines,
 )
 
 

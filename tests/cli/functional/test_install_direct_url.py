@@ -1,18 +1,18 @@
 import pytest
 
-from pip_test_support import PipTestEnvironment, TestData, create_test_package
+from cpip_test_support import CpipTestEnvironment, TestData, create_test_package
 
 
-def test_install_find_links_no_direct_url(script: PipTestEnvironment) -> None:
-    result = script.pip_install_local("simple")
+def test_install_find_links_no_direct_url(script: CpipTestEnvironment) -> None:
+    result = script.cpip_install_local("simple")
     assert not result.get_created_direct_url("simple")
 
 
-def test_install_vcs_non_editable_direct_url(script: PipTestEnvironment) -> None:
+def test_install_vcs_non_editable_direct_url(script: CpipTestEnvironment) -> None:
     pkg_path = create_test_package(script.scratch_path, name="testpkg")
     url = pkg_path.as_uri()
     args = ["install", "--no-build-isolation", f"git+{url}#egg=testpkg"]
-    result = script.pip(*args)
+    result = script.cpip(*args)
     direct_url = result.get_created_direct_url("testpkg")
     assert direct_url
     assert direct_url.url == url
@@ -20,31 +20,33 @@ def test_install_vcs_non_editable_direct_url(script: PipTestEnvironment) -> None
     assert direct_url.vcs_info.vcs == "git"
 
 
-def test_install_archive_direct_url(script: PipTestEnvironment, data: TestData) -> None:
+def test_install_archive_direct_url(
+    script: CpipTestEnvironment, data: TestData
+) -> None:
     req = "simple @ " + data.packages.joinpath("simple-2.0.tar.gz").as_uri()
     assert req.startswith("simple @ file://")
-    result = script.pip("install", "--no-build-isolation", req)
+    result = script.cpip("install", "--no-build-isolation", req)
     assert result.get_created_direct_url("simple")
 
 
 @pytest.mark.network
-def test_install_vcs_constraint_direct_url(script: PipTestEnvironment) -> None:
+def test_install_vcs_constraint_direct_url(script: CpipTestEnvironment) -> None:
     constraints_file = script.scratch_path / "constraints.txt"
     constraints_file.write_text(
         "git+https://github.com/pypa/pip-test-package"
         "@5547fa909e83df8bd743d3978d6667497983a4b7"
         "#egg=pip-test-package"
     )
-    result = script.pip("install", "pip-test-package", "-c", constraints_file)
+    result = script.cpip("install", "pip-test-package", "-c", constraints_file)
     assert result.get_created_direct_url("pip_test_package")
 
 
-def test_install_vcs_constraint_direct_file_url(script: PipTestEnvironment) -> None:
+def test_install_vcs_constraint_direct_file_url(script: CpipTestEnvironment) -> None:
     pkg_path = create_test_package(script.scratch_path, name="testpkg")
     url = pkg_path.as_uri()
     constraints_file = script.scratch_path / "constraints.txt"
     constraints_file.write_text(f"git+{url}#egg=testpkg")
-    result = script.pip(
+    result = script.cpip(
         "install", "--no-build-isolation", "testpkg", "-c", constraints_file
     )
     assert result.get_created_direct_url("testpkg")

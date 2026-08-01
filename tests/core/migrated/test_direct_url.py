@@ -1,5 +1,5 @@
 import pytest
-from pip.core.direct_url import (
+from cpip.core.direct_url import (
     ArchiveInfo,
     DirectUrl,
     DirectUrlValidationError,
@@ -142,11 +142,11 @@ def test_redact_url() -> None:
     )
     assert redact_git("https://${USER}:password@g.c/u/p.git") == "https://g.c/u/p.git"
     assert (
-        redact_archive("file://${U}:${PIP_PASSWORD}@g.c/u/p.tgz")
-        == "file://${U}:${PIP_PASSWORD}@g.c/u/p.tgz"
+        redact_archive("file://${U}:${CPIP_PASSWORD}@g.c/u/p.tgz")
+        == "file://${U}:${CPIP_PASSWORD}@g.c/u/p.tgz"
     )
     assert (
-        redact_git("https://${PIP_TOKEN}@g.c/u/p.git")
-        == "https://${PIP_TOKEN}@g.c/u/p.git"
+        redact_git("https://${CPIP_TOKEN}@g.c/u/p.git")
+        == "https://${CPIP_TOKEN}@g.c/u/p.git"
     )
     assert redact_git("ssh://git@g.c/u/p.git") == "ssh://git@g.c/u/p.git"

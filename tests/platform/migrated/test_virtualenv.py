@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sys
 
-import pip.platform.virtualenv as virtual
+import cpip.platform.virtualenv as virtual
 import pytest
 
 

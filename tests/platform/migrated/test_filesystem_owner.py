@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 
 import pytest
-from pip.platform.filesystem import get_path_uid
+from cpip.platform.filesystem import get_path_uid
 
 
 def test_get_path_uid() -> None:

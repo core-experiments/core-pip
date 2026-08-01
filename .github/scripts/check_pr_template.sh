@@ -19,7 +19,7 @@ if [ "$PR_NUMBER" -le 14068 ]; then
 fi
 
 require "^[[:space:]]*- \[" \
-"Could not find the pip PR checklist in the pull request body. This probably means you've used a tool to submit your PR rather than the GitHub UI. Please add the required checklist from CONTRIBUTING.md."
+"Could not find the cpip PR checklist in the pull request body. This probably means you've used a tool to submit your PR rather than the GitHub UI. Please add the required checklist from CONTRIBUTING.md."
 
 require "^[[:space:]]*- \[\s*[xX]\s*\] I agree to follow the \[PSF Code of Conduct\]" \
 "The 'PSF Code of Conduct' checkbox in the PR checklist must be checked."

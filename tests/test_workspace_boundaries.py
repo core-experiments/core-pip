@@ -1,4 +1,4 @@
-"""Static architecture checks for the canonical pip source tree."""
+"""Static architecture checks for the canonical cpip source tree."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ WORKSPACE_ROOT = Path(__file__).parents[1]
 
 def policy_internal() -> tuple[tuple[str, ...], dict[str, set[str]]]:
     with (WORKSPACE_ROOT / "pyproject.toml").open("rb") as file:
-        config = tomllib.load(file)["tool"]["pip"]["architecture"]
+        config = tomllib.load(file)["tool"]["cpip"]["architecture"]
     return (
         tuple(config["domains"]),
         {domain: set(edges) for domain, edges in config["dependencies"].items()},
@@ -21,7 +21,7 @@ def policy_internal() -> tuple[tuple[str, ...], dict[str, set[str]]]:
 
 
 def source_internal(domain: str) -> Path:
-    return WORKSPACE_ROOT / "src" / "pip" / domain
+    return WORKSPACE_ROOT / "src" / "cpip" / domain
 
 
 def imports_internal(path: Path) -> set[str]:
@@ -31,11 +31,11 @@ def imports_internal(path: Path) -> set[str]:
         if isinstance(node, ast.Import):
             for alias in node.names:
                 parts = alias.name.split(".")
-                if len(parts) >= 2 and parts[:1] == ["pip"]:
+                if len(parts) >= 2 and parts[:1] == ["cpip"]:
                     imports.add(".".join(parts[:2]))
         elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
             parts = node.module.split(".")
-            if len(parts) >= 2 and parts[:1] == ["pip"]:
+            if len(parts) >= 2 and parts[:1] == ["cpip"]:
                 imports.add(".".join(parts[:2]))
     return imports
 
@@ -45,14 +45,14 @@ def graph_internal(domains: tuple[str, ...]) -> dict[str, set[str]]:
     for domain in domains:
         for path in source_internal(domain).rglob("*.py"):
             for imported in imports_internal(path):
-                dependency = imported.removeprefix("pip.")
+                dependency = imported.removeprefix("cpip.")
                 if dependency in graph and dependency != domain:
                     graph[domain].add(dependency)
     return graph
 
 
 def test_source_has_no_legacy_internal_tree() -> None:
-    assert not (WORKSPACE_ROOT / "src/pip/_internal").exists()
+    assert not (WORKSPACE_ROOT / "src/cpip/_internal").exists()
 
 
 def test_source_dependency_graph_is_declared_and_acyclic() -> None:
@@ -81,14 +81,14 @@ def test_source_dependency_graph_is_declared_and_acyclic() -> None:
 
 def test_source_domains_are_importable() -> None:
     for domain in policy_internal()[0]:
-        importlib.import_module(f"pip.{domain}")
+        importlib.import_module(f"cpip.{domain}")
 
 
-def test_source_has_no_standalone_or_legacy_pip_imports() -> None:
+def test_source_has_no_standalone_or_legacy_cpip_imports() -> None:
     violations = []
     for domain in policy_internal()[0]:
         for path in source_internal(domain).rglob("*.py"):
             source = path.read_text(encoding="utf-8")
-            if "pip._internal" in source or "pip_*" in source:
+            if "cpip._internal" in source or "cpip_*" in source:
                 violations.append(str(path.relative_to(WORKSPACE_ROOT)))
-    assert not violations, "legacy pip imports in source: " + ", ".join(violations)
+    assert not violations, "legacy cpip imports in source: " + ", ".join(violations)

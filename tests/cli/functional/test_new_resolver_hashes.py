@@ -3,8 +3,8 @@ import hashlib
 
 import pytest
 
-from pip_test_support import (
-    PipTestEnvironment,
+from cpip_test_support import (
+    CpipTestEnvironment,
     create_basic_sdist_for_package,
     create_basic_wheel_for_package,
 )
@@ -15,7 +15,7 @@ FindLinks = collections.namedtuple(
 )
 
 
-def create_find_links(script: PipTestEnvironment) -> FindLinks:
+def create_find_links(script: CpipTestEnvironment) -> FindLinks:
     sdist_path = create_basic_sdist_for_package(script, "base", "0.1.0")
     wheel_path = create_basic_wheel_for_package(script, "base", "0.1.0")
 
@@ -58,7 +58,7 @@ def create_find_links(script: PipTestEnvironment) -> FindLinks:
     ids=["identical", "intersect"],
 )
 def test_new_resolver_hash_intersect(
-    script: PipTestEnvironment, requirements_template: str, message: str
+    script: CpipTestEnvironment, requirements_template: str, message: str
 ) -> None:
     find_links = create_find_links(script)
 
@@ -70,7 +70,7 @@ def test_new_resolver_hash_intersect(
         ),
     )
 
-    result = script.pip(
+    result = script.cpip(
         "install",
         "--no-build-isolation",
         "--no-cache-dir",
@@ -87,7 +87,7 @@ def test_new_resolver_hash_intersect(
 
 
 def test_new_resolver_hash_intersect_from_constraint(
-    script: PipTestEnvironment,
+    script: CpipTestEnvironment,
 ) -> None:
     find_links = create_find_links(script)
     sdist_hash = find_links.sdist_hash
@@ -101,7 +101,7 @@ def test_new_resolver_hash_intersect_from_constraint(
         """,
     )
 
-    result = script.pip(
+    result = script.cpip(
         "install",
         "--no-build-isolation",
         "--no-cache-dir",
@@ -141,7 +141,7 @@ def test_new_resolver_hash_intersect_from_constraint(
     ids=["both-requirements", "one-each"],
 )
 def test_new_resolver_hash_intersect_empty(
-    script: PipTestEnvironment,
+    script: CpipTestEnvironment,
     requirements_template: str,
     constraints_template: str,
 ) -> None:
@@ -163,7 +163,7 @@ def test_new_resolver_hash_intersect_empty(
         ),
     )
 
-    result = script.pip(
+    result = script.cpip(
         "install",
         "--no-build-isolation",
         "--no-cache-dir",
@@ -184,7 +184,7 @@ def test_new_resolver_hash_intersect_empty(
 
 
 def test_new_resolver_hash_intersect_empty_from_constraint(
-    script: PipTestEnvironment,
+    script: CpipTestEnvironment,
 ) -> None:
     find_links = create_find_links(script)
 
@@ -196,7 +196,7 @@ def test_new_resolver_hash_intersect_empty_from_constraint(
         """,
     )
 
-    result = script.pip(
+    result = script.cpip(
         "install",
         "--no-cache-dir",
         "--no-deps",
@@ -218,7 +218,7 @@ def test_new_resolver_hash_intersect_empty_from_constraint(
 
 @pytest.mark.parametrize("constrain_by_hash", [False, True])
 def test_new_resolver_hash_requirement_and_url_constraint_can_succeed(
-    script: PipTestEnvironment,
+    script: CpipTestEnvironment,
     constrain_by_hash: bool,
 ) -> None:
     wheel_path = create_basic_wheel_for_package(script, "base", "0.1.0")
@@ -238,7 +238,7 @@ def test_new_resolver_hash_requirement_and_url_constraint_can_succeed(
         constraint_text += f"base==0.1.0 --hash=sha256:{wheel_hash}\n"
     constraints_txt.write_text(constraint_text)
 
-    script.pip(
+    script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -253,7 +253,7 @@ def test_new_resolver_hash_requirement_and_url_constraint_can_succeed(
 
 @pytest.mark.parametrize("constrain_by_hash", [False, True])
 def test_new_resolver_hash_requirement_and_url_constraint_can_fail(
-    script: PipTestEnvironment,
+    script: CpipTestEnvironment,
     constrain_by_hash: bool,
 ) -> None:
     wheel_path = create_basic_wheel_for_package(script, "base", "0.1.0")
@@ -274,7 +274,7 @@ def test_new_resolver_hash_requirement_and_url_constraint_can_fail(
         constraint_text += f"base==0.1.0 --hash=sha256:{other_hash}\n"
     constraints_txt.write_text(constraint_text)
 
-    result = script.pip(
+    result = script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",
@@ -293,9 +293,9 @@ def test_new_resolver_hash_requirement_and_url_constraint_can_fail(
 
 
 def test_new_resolver_unpinned_requirement_with_pinned_hash_constraint(
-    script: PipTestEnvironment,
+    script: CpipTestEnvironment,
 ) -> None:
-    """Regression test for https://github.com/pypa/pip/issues/9243.
+    """Regression test for https://github.com/pypa/cpip/issues/9243.
 
     An unpinned requirement combined with a constraints file that supplies both an
     ``==`` pin and ``--hash`` for that distribution used to fail with ``HashUnpinned``:
@@ -313,7 +313,7 @@ def test_new_resolver_unpinned_requirement_with_pinned_hash_constraint(
     constraints_txt = script.scratch_path / "constraints.txt"
     constraints_txt.write_text(f"base==0.1.0 --hash=sha256:{find_links.wheel_hash}\n")
 
-    script.pip(
+    script.cpip(
         "install",
         "--no-cache-dir",
         "--no-deps",
@@ -329,7 +329,7 @@ def test_new_resolver_unpinned_requirement_with_pinned_hash_constraint(
     script.assert_installed(base="0.1.0")
 
 
-def test_new_resolver_hash_with_extras(script: PipTestEnvironment) -> None:
+def test_new_resolver_hash_with_extras(script: CpipTestEnvironment) -> None:
     parent_with_extra_path = create_basic_wheel_for_package(
         script, "parent_with_extra", "0.1.0", depends=["child[extra]"]
     )
@@ -367,7 +367,7 @@ def test_new_resolver_hash_with_extras(script: PipTestEnvironment) -> None:
         """,
     )
 
-    script.pip(
+    script.cpip(
         "install",
         "--no-cache-dir",
         "--no-index",

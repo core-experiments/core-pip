@@ -5,8 +5,8 @@ from typing import Any
 
 import pytest
 import tomllib
-from pip.core.urls import path_to_url
-from pip_test_support import PipTestEnvironment, TestData
+from cpip.core.urls import path_to_url
+from cpip_test_support import CpipTestEnvironment, TestData
 
 
 def expected_simplewheel_lock(
@@ -22,10 +22,10 @@ def expected_simplewheel_lock(
 
 
 def test_lock_wheel_from_findlinks(
-    script: PipTestEnvironment, shared_data: TestData, tmp_path: Path
+    script: CpipTestEnvironment, shared_data: TestData, tmp_path: Path
 ) -> None:
     """Test locking a simple wheel package, to the default pylock.toml."""
-    result = script.pip(
+    result = script.cpip(
         "lock",
         "simplewheel==2.0",
         "--no-index",
@@ -37,7 +37,7 @@ def test_lock_wheel_from_findlinks(
     pylock = tomllib.loads(script.scratch_path.joinpath("pylock.toml").read_text())
     wheel_name = pylock["packages"][0]["wheels"][0]["name"]
     assert pylock == {
-        "created-by": "pip",
+        "created-by": "cpip",
         "lock-version": "1.0",
         "packages": [
             {
@@ -54,10 +54,10 @@ def test_lock_wheel_from_findlinks(
 
 
 def test_lock_sdist_from_findlinks(
-    script: PipTestEnvironment, shared_data: TestData
+    script: CpipTestEnvironment, shared_data: TestData
 ) -> None:
     """Test locking a simple wheel package, to the default pylock.toml."""
-    result = script.pip(
+    result = script.cpip(
         "lock",
         "--no-build-isolation",
         "simple==2.0",
@@ -91,7 +91,7 @@ def test_lock_sdist_from_findlinks(
 
 
 def test_lock_local_directory(
-    script: PipTestEnvironment, shared_data: TestData, tmp_path: Path
+    script: CpipTestEnvironment, shared_data: TestData, tmp_path: Path
 ) -> None:
     project_path = tmp_path / "pkga"
     project_path.mkdir()
@@ -102,7 +102,7 @@ def test_lock_local_directory(
             version = "1.0"
             """)
     )
-    result = script.pip(
+    result = script.cpip(
         "lock",
         ".",
         "--quiet",
@@ -124,7 +124,7 @@ def test_lock_local_directory(
 
 
 def test_lock_local_editable_with_dep(
-    script: PipTestEnvironment, shared_data: TestData, tmp_path: Path
+    script: CpipTestEnvironment, shared_data: TestData, tmp_path: Path
 ) -> None:
     project_path = tmp_path / "pkga"
     project_path.mkdir()
@@ -136,7 +136,7 @@ def test_lock_local_editable_with_dep(
             dependencies = ["simplewheel==2.0"]
             """)
     )
-    result = script.pip(
+    result = script.cpip(
         "lock",
         "-e",
         ".",
@@ -169,8 +169,8 @@ def test_lock_local_editable_with_dep(
 
 
 @pytest.mark.network
-def test_lock_vcs(script: PipTestEnvironment, shared_data: TestData) -> None:
-    result = script.pip(
+def test_lock_vcs(script: CpipTestEnvironment, shared_data: TestData) -> None:
+    result = script.cpip(
         "lock",
         "git+https://github.com/pypa/pip-test-package@0.1.2",
         "--quiet",
@@ -194,8 +194,8 @@ def test_lock_vcs(script: PipTestEnvironment, shared_data: TestData) -> None:
 
 
 @pytest.mark.network
-def test_lock_archive(script: PipTestEnvironment, shared_data: TestData) -> None:
-    result = script.pip(
+def test_lock_archive(script: CpipTestEnvironment, shared_data: TestData) -> None:
+    result = script.cpip(
         "lock",
         "https://github.com/pypa/pip-test-package/tarball/0.1.2",
         "--quiet",
@@ -221,10 +221,10 @@ def test_lock_archive(script: PipTestEnvironment, shared_data: TestData) -> None
     ]
 
 
-def test_lock_roundtrip(script: PipTestEnvironment, data: TestData) -> None:
+def test_lock_roundtrip(script: CpipTestEnvironment, data: TestData) -> None:
     pylock_path = data.lockfiles.joinpath("pylock.toml")
     pylock_result_path = pylock_path.parent / "pylock.result.toml"
-    script.pip(
+    script.cpip(
         "lock",
         "--quiet",
         "--no-build-isolation",  # to use the pre-installed setuptools

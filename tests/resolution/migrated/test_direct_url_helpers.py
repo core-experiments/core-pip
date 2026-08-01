@@ -3,15 +3,15 @@ from functools import partial
 from pathlib import Path
 from unittest import mock
 
-from pip.core.direct_url import (
+from cpip.core.direct_url import (
     ArchiveInfo,
     DirectUrl,
     DirInfo,
     VcsInfo,
 )
-from pip.index.links import Link
-from pip.resolution.direct_url_helpers import direct_url_from_link
-from pip.vcs.git import Git
+from cpip.index.links import Link
+from cpip.resolution.direct_url_helpers import direct_url_from_link
+from cpip.vcs.git import Git
 
 
 def test_as_pep440_requirement_archive() -> None:
@@ -99,7 +99,7 @@ def test_as_pep440_requirement_vcs() -> None:
     )
 
 
-@mock.patch("pip.vcs.git.Git.get_revision")
+@mock.patch("cpip.vcs.git.Git.get_revision")
 def test_from_link_vcs(mock_get_backend_for_scheme: mock.Mock) -> None:
     direct_url_from_link_internal = partial(direct_url_from_link, source_dir="...")
     direct_url = direct_url_from_link_internal(Link("git+https://g.c/u/p.git"))

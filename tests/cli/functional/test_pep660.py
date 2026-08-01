@@ -5,7 +5,7 @@ from typing import Any
 import pytest
 import tomli_w
 
-from pip_test_support import PipTestEnvironment
+from cpip_test_support import CpipTestEnvironment
 
 SETUP_PY = """
 from setuptools import setup
@@ -104,14 +104,14 @@ def assert_hook_not_called(project_dir: Path, hook: str) -> None:
     assert f":{hook} called" not in log, f"{hook} should not have been called"
 
 
-def test_install_pep517_basic(tmpdir: Path, script: PipTestEnvironment) -> None:
+def test_install_pep517_basic(tmpdir: Path, script: CpipTestEnvironment) -> None:
     """
     Check that the test harness we have in this file is sane.
     """
     project_dir = make_project_internal(
         tmpdir, BACKEND_WITHOUT_PEP660, with_setup_py=False
     )
-    script.pip(
+    script.cpip(
         "install",
         "--no-index",
         "--no-build-isolation",
@@ -121,14 +121,14 @@ def test_install_pep517_basic(tmpdir: Path, script: PipTestEnvironment) -> None:
     assert_hook_called(project_dir, "build_wheel")
 
 
-def test_install_pep660_basic(tmpdir: Path, script: PipTestEnvironment) -> None:
+def test_install_pep660_basic(tmpdir: Path, script: CpipTestEnvironment) -> None:
     """
     Test with backend that supports build_editable.
     """
     project_dir = make_project_internal(
         tmpdir, BACKEND_WITH_PEP660, with_setup_py=False
     )
-    result = script.pip(
+    result = script.cpip(
         "install",
         "--no-index",
         "--no-build-isolation",
@@ -146,7 +146,7 @@ def test_install_pep660_basic(tmpdir: Path, script: PipTestEnvironment) -> None:
 
 
 def test_install_pep660_from_reqs_file(
-    tmpdir: Path, script: PipTestEnvironment
+    tmpdir: Path, script: CpipTestEnvironment
 ) -> None:
     """
     Test with backend that supports build_editable.
@@ -156,7 +156,7 @@ def test_install_pep660_from_reqs_file(
     )
     reqs_file = tmpdir / "requirements.txt"
     reqs_file.write_text(f"-e {project_dir.as_uri()} --config-setting x=y\n")
-    result = script.pip(
+    result = script.cpip(
         "install",
         "--no-index",
         "--no-build-isolation",
@@ -175,7 +175,7 @@ def test_install_pep660_from_reqs_file(
 def test_install_no_pep660(
     isolation_arg: list[str],
     tmpdir: Path,
-    script: PipTestEnvironment,
+    script: CpipTestEnvironment,
     common_wheels: Path,
 ) -> None:
     """
@@ -186,7 +186,7 @@ def test_install_no_pep660(
     project_dir = make_project_internal(
         tmpdir, BACKEND_WITHOUT_PEP660, with_setup_py=True
     )
-    result = script.pip(
+    result = script.cpip(
         "install",
         "--no-index",
         "-f",
@@ -200,16 +200,16 @@ def test_install_no_pep660(
     assert "missing the 'build_editable' hook" in result.stderr
 
 
-def test_wheel_editable_pep660_basic(tmpdir: Path, script: PipTestEnvironment) -> None:
+def test_wheel_editable_pep660_basic(tmpdir: Path, script: CpipTestEnvironment) -> None:
     """
-    Test 'pip wheel' of an editable pep 660 project.
+    Test 'cpip wheel' of an editable pep 660 project.
     It must *not* call prepare_metadata_for_build_editable.
     """
     project_dir = make_project_internal(
         tmpdir, BACKEND_WITH_PEP660, with_setup_py=False
     )
     wheel_dir = tmpdir / "dist"
-    script.pip(
+    script.cpip(
         "wheel",
         "--no-index",
         "--no-build-isolation",
@@ -226,10 +226,10 @@ def test_wheel_editable_pep660_basic(tmpdir: Path, script: PipTestEnvironment) -
 
 
 def test_download_editable_pep660_basic(
-    tmpdir: Path, script: PipTestEnvironment
+    tmpdir: Path, script: CpipTestEnvironment
 ) -> None:
     """
-    Test 'pip download' of an editable pep 660 project.
+    Test 'cpip download' of an editable pep 660 project.
     It must *not* call prepare_metadata_for_build_editable.
     """
     project_dir = make_project_internal(
@@ -238,7 +238,7 @@ def test_download_editable_pep660_basic(
     reqs_file = tmpdir / "requirements.txt"
     reqs_file.write_text(f"-e {project_dir.as_uri()}\n")
     download_dir = tmpdir / "download"
-    script.pip(
+    script.cpip(
         "download",
         "--no-index",
         "--no-build-isolation",

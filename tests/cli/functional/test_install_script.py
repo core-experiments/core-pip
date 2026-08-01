@@ -1,10 +1,10 @@
 import sys
 import textwrap
 
-from pip_test_support import PipTestEnvironment
+from cpip_test_support import CpipTestEnvironment
 
 
-def test_script_file(script: PipTestEnvironment) -> None:
+def test_script_file(script: CpipTestEnvironment) -> None:
     """
     Test installing from a script with inline metadata (PEP 723).
     """
@@ -22,15 +22,15 @@ def test_script_file(script: PipTestEnvironment) -> None:
             print("Hello world from a dummy program")
             """)
     )
-    script.pip_install_local("--requirements-from-script", script_path)
+    script.cpip_install_local("--requirements-from-script", script_path)
     script.assert_installed(initools="0.2", simple="1.0")
 
 
-def test_multiple_scripts(script: PipTestEnvironment) -> None:
+def test_multiple_scripts(script: CpipTestEnvironment) -> None:
     """
     Test that --requirements-from-script can only be given once in an install command.
     """
-    result = script.pip(
+    result = script.cpip(
         "install",
         "--requirements-from-script",
         "does_not_exist.py",
@@ -45,7 +45,7 @@ def test_multiple_scripts(script: PipTestEnvironment) -> None:
     ), "multiple script did not fail as expected -- " + result.stderr
 
 
-def test_script_file_python_version(script: PipTestEnvironment) -> None:
+def test_script_file_python_version(script: CpipTestEnvironment) -> None:
     """
     Test installing from a script with an incompatible `requires-python`
     """
@@ -66,7 +66,7 @@ def test_script_file_python_version(script: PipTestEnvironment) -> None:
             """)
     )
 
-    result = script.pip_install_local(
+    result = script.cpip_install_local(
         "--requirements-from-script",
         script_path,
         expect_stderr=True,
@@ -79,7 +79,7 @@ def test_script_file_python_version(script: PipTestEnvironment) -> None:
     )
 
 
-def test_script_invalid_TOML(script: PipTestEnvironment) -> None:
+def test_script_invalid_TOML(script: CpipTestEnvironment) -> None:
     """
     Test installing from a script with invalid TOML in its 'script' metadata
     """
@@ -97,7 +97,7 @@ def test_script_invalid_TOML(script: PipTestEnvironment) -> None:
             """)
     )
 
-    result = script.pip_install_local(
+    result = script.cpip_install_local(
         "--requirements-from-script",
         script_path,
         expect_stderr=True,
@@ -109,7 +109,7 @@ def test_script_invalid_TOML(script: PipTestEnvironment) -> None:
     )
 
 
-def test_script_multiple_blocks(script: PipTestEnvironment) -> None:
+def test_script_multiple_blocks(script: CpipTestEnvironment) -> None:
     """
     Test installing from a script with multiple metadata blocks
     """
@@ -138,7 +138,7 @@ def test_script_multiple_blocks(script: PipTestEnvironment) -> None:
             """)
     )
 
-    result = script.pip_install_local(
+    result = script.cpip_install_local(
         "--requirements-from-script",
         script_path,
         expect_stderr=True,

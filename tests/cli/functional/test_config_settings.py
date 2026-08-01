@@ -7,9 +7,9 @@ from zipfile import ZipFile
 
 import pytest
 
-from pip.core.urls import path_to_url
+from cpip.core.urls import path_to_url
 
-from pip_test_support import PipTestEnvironment, create_basic_sdist_for_package
+from cpip_test_support import CpipTestEnvironment, create_basic_sdist_for_package
 
 PYPROJECT_TOML = """\
 [build-system]
@@ -111,9 +111,9 @@ def make_project(
     return name, version, project_dir
 
 
-def test_backend_sees_config(script: PipTestEnvironment) -> None:
+def test_backend_sees_config(script: CpipTestEnvironment) -> None:
     name, version, project_dir = make_project(script.scratch_path)
-    script.pip(
+    script.cpip(
         "wheel",
         "--config-settings",
         "FOO=Hello",
@@ -127,12 +127,12 @@ def test_backend_sees_config(script: PipTestEnvironment) -> None:
             assert json.loads(output) == {"FOO": "Hello"}
 
 
-def test_backend_sees_config_reqs(script: PipTestEnvironment) -> None:
+def test_backend_sees_config_reqs(script: CpipTestEnvironment) -> None:
     name, version, project_dir = make_project(script.scratch_path)
     script.scratch_path.joinpath("reqs.txt").write_text(
         f"{project_dir} --config-settings FOO=Hello"
     )
-    script.pip("wheel", "-r", "reqs.txt")
+    script.cpip("wheel", "-r", "reqs.txt")
     wheel_file_name = f"{name}-{version}-py3-none-any.whl"
     wheel_file_path = script.cwd / wheel_file_name
     with open(wheel_file_path, "rb") as f:
@@ -141,11 +141,11 @@ def test_backend_sees_config_reqs(script: PipTestEnvironment) -> None:
             assert json.loads(output) == {"FOO": "Hello"}
 
 
-def test_backend_sees_config_via_constraint(script: PipTestEnvironment) -> None:
+def test_backend_sees_config_via_constraint(script: CpipTestEnvironment) -> None:
     name, version, project_dir = make_project(script.scratch_path)
     constraints_file = script.scratch_path / "constraints.txt"
     constraints_file.write_text(f"{name} @ {path_to_url(str(project_dir))}")
-    script.pip(
+    script.cpip(
         "wheel",
         "--config-settings",
         "FOO=Hello",
@@ -162,13 +162,13 @@ def test_backend_sees_config_via_constraint(script: PipTestEnvironment) -> None:
 
 
 @pytest.mark.network
-def test_backend_sees_config_via_sdist(script: PipTestEnvironment) -> None:
+def test_backend_sees_config_via_sdist(script: CpipTestEnvironment) -> None:
     name, version, project_dir = make_project(script.scratch_path)
     dists_dir = script.scratch_path / "dists"
     dists_dir.mkdir()
     with tarfile.open(dists_dir / f"{name}-{version}.tar.gz", "w:gz") as dist_tar:
         dist_tar.add(project_dir, arcname=name)
-    script.pip(
+    script.cpip(
         "wheel",
         "--config-settings",
         "FOO=Hello",
@@ -184,12 +184,12 @@ def test_backend_sees_config_via_sdist(script: PipTestEnvironment) -> None:
             assert json.loads(output) == {"FOO": "Hello"}
 
 
-def test_req_file_does_not_see_config(script: PipTestEnvironment) -> None:
+def test_req_file_does_not_see_config(script: CpipTestEnvironment) -> None:
     """Test that CLI config settings do not propagate to requirement files."""
     name, _, project_dir = make_project(script.scratch_path)
     reqs_file = script.scratch_path / "reqs.txt"
     reqs_file.write_text(f"{project_dir}")
-    script.pip(
+    script.cpip(
         "install",
         "--config-settings",
         "FOO=Hello",
@@ -201,7 +201,7 @@ def test_req_file_does_not_see_config(script: PipTestEnvironment) -> None:
         assert json.load(f) == {}
 
 
-def test_dep_does_not_see_config(script: PipTestEnvironment) -> None:
+def test_dep_does_not_see_config(script: CpipTestEnvironment) -> None:
     """Test that CLI config settings do not propagate to dependencies."""
     _, _, bar_project_dir = make_project(script.scratch_path, name="bar")
     _, _, foo_project_dir = make_project(
@@ -209,7 +209,7 @@ def test_dep_does_not_see_config(script: PipTestEnvironment) -> None:
         name="foo",
         dependencies=[f"bar @ {path_to_url(str(bar_project_dir))}"],
     )
-    script.pip(
+    script.cpip(
         "install",
         "--config-settings",
         "FOO=Hello",
@@ -223,7 +223,7 @@ def test_dep_does_not_see_config(script: PipTestEnvironment) -> None:
         assert json.load(f) == {}
 
 
-def test_dep_in_req_file_does_not_see_config(script: PipTestEnvironment) -> None:
+def test_dep_in_req_file_does_not_see_config(script: CpipTestEnvironment) -> None:
     """Test that CLI config settings do not propagate to dependencies found in
     requirement files."""
     _, _, bar_project_dir = make_project(script.scratch_path, name="bar")
@@ -234,7 +234,7 @@ def test_dep_in_req_file_does_not_see_config(script: PipTestEnvironment) -> None
     )
     reqs_file = script.scratch_path / "reqs.txt"
     reqs_file.write_text(f"bar @ {path_to_url(str(bar_project_dir))}")
-    script.pip(
+    script.cpip(
         "install",
         "--config-settings",
         "FOO=Hello",
@@ -250,9 +250,9 @@ def test_dep_in_req_file_does_not_see_config(script: PipTestEnvironment) -> None
         assert json.load(f) == {}
 
 
-def test_install_sees_config(script: PipTestEnvironment) -> None:
+def test_install_sees_config(script: CpipTestEnvironment) -> None:
     name, _, project_dir = make_project(script.scratch_path)
-    script.pip(
+    script.cpip(
         "install",
         "--config-settings",
         "FOO=Hello",
@@ -263,20 +263,20 @@ def test_install_sees_config(script: PipTestEnvironment) -> None:
         assert json.load(f) == {"FOO": "Hello"}
 
 
-def test_install_sees_config_reqs(script: PipTestEnvironment) -> None:
+def test_install_sees_config_reqs(script: CpipTestEnvironment) -> None:
     name, _, project_dir = make_project(script.scratch_path)
     script.scratch_path.joinpath("reqs.txt").write_text(
         f"{project_dir} --config-settings FOO=Hello"
     )
-    script.pip("install", "-r", "reqs.txt")
+    script.cpip("install", "-r", "reqs.txt")
     config = script.site_packages_path / f"{name}-config.json"
     with open(config, "rb") as f:
         assert json.load(f) == {"FOO": "Hello"}
 
 
-def test_install_editable_sees_config(script: PipTestEnvironment) -> None:
+def test_install_editable_sees_config(script: CpipTestEnvironment) -> None:
     name, _, project_dir = make_project(script.scratch_path)
-    script.pip(
+    script.cpip(
         "install",
         "--config-settings",
         "FOO=Hello",
@@ -288,7 +288,7 @@ def test_install_editable_sees_config(script: PipTestEnvironment) -> None:
         assert json.load(f) == {"FOO": "Hello"}
 
 
-def test_install_config_reqs(script: PipTestEnvironment) -> None:
+def test_install_config_reqs(script: CpipTestEnvironment) -> None:
     name, _, project_dir = make_project(script.scratch_path)
     a_sdist = create_basic_sdist_for_package(
         script,
@@ -301,7 +301,7 @@ def test_install_config_reqs(script: PipTestEnvironment) -> None:
         '--config-settings "--build-option=--avx2" '
         "--config-settings FOO=BAR"
     )
-    script.pip("install", "--no-index", "-f", str(a_sdist.parent), "-r", "reqs.txt")
+    script.cpip("install", "--no-index", "-f", str(a_sdist.parent), "-r", "reqs.txt")
     script.assert_installed(foo="1.0")
     config = script.site_packages_path / f"{name}-config.json"
     with open(config, "rb") as f:

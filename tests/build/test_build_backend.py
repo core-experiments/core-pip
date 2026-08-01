@@ -4,13 +4,15 @@ import zipfile
 from pathlib import Path
 
 import pytest
-from pip.build import build as build_module
-from pip.build.build_backend import (
+from cpip.build import build as build_module
+from cpip.build.build_backend import (
+    BackendSpec,
     ProjectBuilder,
     prepare_project_metadata,
     ProjectMetadataReader,
 )
-from pip.core.errors import BuildError
+from cpip.core.errors import BuildError
+from cpip.index.candidate_materialization import validate_build_requirements
 
 
 def test_build_backend_builds_static_wheel_with_typed_marker(tmp_path: Path) -> None:
@@ -27,6 +29,31 @@ def test_build_backend_builds_static_wheel_with_typed_marker(tmp_path: Path) -> 
         metadata = archive.read("typed_pkg-1.0.dist-info/METADATA").decode()
     assert "Name: typed-pkg\n" in metadata
     assert "Version: 1.0\n" in metadata
+
+
+def test_legacy_metadata_reads_egg_info_requirements(tmp_path: Path) -> None:
+    project = tmp_path / "legacy-pkg"
+    egg_info = project / "legacy_pkg.egg-info"
+    egg_info.mkdir(parents=True)
+    (project / "PKG-INFO").write_text(
+        "Metadata-Version: 1.0\nName: legacy-pkg\nVersion: 1.0\n",
+        encoding="utf-8",
+    )
+    (egg_info / "PKG-INFO").write_text(
+        "Metadata-Version: 1.0\nName: legacy-pkg\nVersion: 1.0\n",
+        encoding="utf-8",
+    )
+    (egg_info / "requires.txt").write_text(
+        "dependency>=2\n[extra]\noptional>=1\n",
+        encoding="utf-8",
+    )
+
+    metadata = ProjectMetadataReader(project).read()
+
+    assert metadata.dependencies == (
+        "dependency>=2",
+        'optional>=1; extra == "extra"',
+    )
 
 
 def test_build_backend_includes_package_data(tmp_path: Path) -> None:
@@ -159,6 +186,87 @@ def test_build_backend_defaults_to_setuptools_when_backend_is_omitted(
     assert metadata.name == "default-backend-pkg"
     assert metadata.version == "2.3.4"
     assert wheel_name == "default_backend_pkg-2.3.4-py3-none-any.whl"
+
+
+def test_declared_setuptools_backend_keeps_pkg_resources_available(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "declared-backend-pkg"
+    project.mkdir()
+    project.joinpath("pyproject.toml").write_text(
+        "[build-system]\nrequires = ['setuptools>=40.8.0', 'wheel']\n"
+        "build-backend = 'setuptools.build_meta:__legacy__'\n",
+        encoding="utf-8",
+    )
+    project.joinpath("setup.py").write_text(
+        "from pkg_resources import parse_version\n"
+        "from setuptools import setup\n"
+        "setup(name='declared-backend-pkg', version=str(parse_version('1.0')))\n",
+        encoding="utf-8",
+    )
+
+    spec = BackendSpec.from_project(project)
+
+    assert spec is not None
+    assert spec.requirements == (
+        "setuptools>=40.8.0",
+        "wheel",
+        "setuptools<82",
+    )
+
+
+def test_newer_setuptools_build_requirement_is_valid(tmp_path: Path) -> None:
+    project = tmp_path / "new-setuptools-pkg"
+    project.mkdir()
+    project.joinpath("pyproject.toml").write_text(
+        "[build-system]\nrequires = ['setuptools>=64']\n",
+        encoding="utf-8",
+    )
+
+    validate_build_requirements(project)
+
+
+def test_static_source_metadata_precedes_backend_execution(tmp_path: Path) -> None:
+    project = tmp_path / "static-metadata-pkg"
+    project.mkdir()
+    project.joinpath("pyproject.toml").write_text(
+        "[build-system]\nrequires = ['setuptools']\n"
+        "build-backend = 'missing_backend'\n",
+        encoding="utf-8",
+    )
+    project.joinpath("setup.py").write_text(
+        "raise RuntimeError('backend should not execute for metadata')\n",
+        encoding="utf-8",
+    )
+    project.joinpath("PKG-INFO").write_text(
+        "Metadata-Version: 2.1\nName: static-metadata-pkg\nVersion: 1.2.3\n"
+        "Requires-Dist: dependency>=2\n",
+        encoding="utf-8",
+    )
+
+    metadata = prepare_project_metadata(project)
+
+    assert metadata.name == "static-metadata-pkg"
+    assert metadata.version == "1.2.3"
+    assert metadata.dependencies == ("dependency>=2",)
+
+
+def test_legacy_setup_projects_use_pkg_resources_compatible_setuptools(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "legacy-pkg"
+    project.mkdir()
+    project.joinpath("setup.py").write_text(
+        "from pkg_resources import parse_version\n"
+        "from setuptools import setup\n"
+        "setup(name='legacy-pkg', version=str(parse_version('1.0')))\n",
+        encoding="utf-8",
+    )
+
+    spec = BackendSpec.from_project(project)
+
+    assert spec is not None
+    assert spec.requirements == ("setuptools>=40.8.0,<82",)
 
 
 def test_build_backend_rejects_invalid_package_version(tmp_path: Path) -> None:

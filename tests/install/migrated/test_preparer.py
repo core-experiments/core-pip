@@ -7,21 +7,21 @@ from typing import Any
 from unittest.mock import Mock, patch
 
 import pytest
-from pip.build.metadata import MetadataDistribution
-from pip.core.errors import HashMismatch
-from pip.core.hashes import Hashes
-from pip.index.links import Link
-from pip.install.downloads import DownloadManager
-from pip.install.metadata import (
+from cpip.build.metadata import MetadataDistribution
+from cpip.core.errors import HashMismatch
+from cpip.core.hashes import Hashes
+from cpip.index.links import Link
+from cpip.install.downloads import DownloadManager
+from cpip.install.metadata import (
     MetadataInvalid,
     SidecarMetadataInconsistent,
     check_sidecar_matches_wheel,
 )
-from pip.network.download import Downloader
-from pip.network.http import NetworkSession
-from pip_test_support import TestData
-from pip_test_support.requests_mocks import MockResponse
-from pip.network.http import HttpResponse
+from cpip.network.download import Downloader
+from cpip.network.http import NetworkSession
+from cpip_test_support import TestData
+from cpip_test_support.requests_mocks import MockResponse
+from cpip.network.http import HttpResponse
 
 
 def test_unpack_url_with_urllib_response_without_content_type(data: TestData) -> None:
@@ -56,7 +56,7 @@ def test_unpack_url_with_urllib_response_without_content_type(data: TestData) ->
         rmtree(temp_dir)
 
 
-@patch("pip.network.download.raise_for_status")
+@patch("cpip.network.download.raise_for_status")
 def test_download_http_url__no_directory_traversal(
     mock_raise_for_status: Mock, tmp_path: Path
 ) -> None:

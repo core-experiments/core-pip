@@ -8,26 +8,25 @@ import os
 import subprocess
 import sys
 from collections.abc import Generator, Iterable
-from dataclasses import dataclass
 from typing import Any
 from unittest.mock import Mock
 
 import pytest
 
-import pip.network.auth
-from pip.network.auth import MultiDomainBasicAuth
+import cpip.network.auth
+from cpip.network.auth import MultiDomainBasicAuth
 
-from pip_test_support.requests_mocks import MockConnection, MockRequest, MockResponse
+from cpip_test_support.requests_mocks import MockConnection, MockRequest, MockResponse
 
 
 @pytest.fixture(autouse=True)
 def reset_keyring() -> Iterable[None]:
-    pip.network.auth.KEYRING_DISABLED = False
-    pip.network.auth.get_keyring_provider.cache_clear()
+    cpip.network.auth.KEYRING_DISABLED = False
+    cpip.network.auth.get_keyring_provider.cache_clear()
     yield None
     # Reset the state of the module between tests
-    pip.network.auth.KEYRING_DISABLED = False
-    pip.network.auth.get_keyring_provider.cache_clear()
+    cpip.network.auth.KEYRING_DISABLED = False
+    cpip.network.auth.get_keyring_provider.cache_clear()
 
 
 @pytest.mark.parametrize(
@@ -223,7 +222,7 @@ def test_keyring_get_password_after_prompt(monkeypatch: pytest.MonkeyPatch) -> N
         assert prompt == "User for example.com: "
         return "user"
 
-    monkeypatch.setattr("pip.network.auth.ask_input", ask_input)
+    monkeypatch.setattr("cpip.network.auth.ask_input", ask_input)
     actual = auth.prompt_for_password("example.com")
     assert actual == ("user", "user!netloc", False)
 
@@ -243,8 +242,8 @@ def test_keyring_get_password_after_prompt_when_none(
         assert prompt == "Password: "
         return "fake_password"
 
-    monkeypatch.setattr("pip.network.auth.ask_input", ask_input)
-    monkeypatch.setattr("pip.network.auth.ask_password", ask_password)
+    monkeypatch.setattr("cpip.network.auth.ask_input", ask_input)
+    monkeypatch.setattr("cpip.network.auth.ask_password", ask_password)
     actual = auth.prompt_for_password("unknown.com")
     assert actual == ("user", "fake_password", True)
 
@@ -345,10 +344,19 @@ class KeyringModuleV2:
             str, dict[str, KeyringModuleV2.Credential]
         ] = {}
 
-    @dataclass
     class Credential:
-        username: str
-        password: str
+        __slots__ = ("username", "password")
+
+        def __init__(self, username: str, password: str) -> None:
+            self.username = username
+            self.password = password
+
+        def __eq__(self, other: object) -> bool:
+            return (
+                isinstance(other, KeyringModuleV2.Credential)
+                and self.username == other.username
+                and self.password == other.password
+            )
 
     def get_password(self, system: str, username: str) -> None:
         pytest.fail("get_password should not ever be called")
@@ -601,8 +609,8 @@ def test_keyring_cli_get_password(
     expect: tuple[str | None, str | None],
 ) -> None:
     keyring_subprocess = KeyringSubprocessResult()
-    monkeypatch.setattr(pip.network.auth.shutil, "which", lambda x: "keyring")
-    monkeypatch.setattr(pip.network.auth.subprocess, "run", keyring_subprocess)
+    monkeypatch.setattr(cpip.network.auth.shutil, "which", lambda x: "keyring")
+    monkeypatch.setattr(cpip.network.auth.subprocess, "run", keyring_subprocess)
     auth = MultiDomainBasicAuth(
         index_urls=["http://example.com/path2", "http://example.com/path3"],
         keyring_provider="subprocess",
@@ -644,9 +652,9 @@ def test_keyring_cli_set_password(
     expect_save: bool,
 ) -> None:
     expected_username, expected_password, save = creds
-    monkeypatch.setattr(pip.network.auth.shutil, "which", lambda x: "keyring")
+    monkeypatch.setattr(cpip.network.auth.shutil, "which", lambda x: "keyring")
     keyring = KeyringSubprocessResult()
-    monkeypatch.setattr(pip.network.auth.subprocess, "run", keyring)
+    monkeypatch.setattr(cpip.network.auth.subprocess, "run", keyring)
     auth = MultiDomainBasicAuth(prompting=True, keyring_provider="subprocess")
     monkeypatch.setattr(auth, "get_url_and_credentials", lambda u: (u, None, None))
     monkeypatch.setattr(auth, "prompt_for_password", lambda *a: creds)
@@ -722,9 +730,9 @@ def test_keyring_cli_outdated_version(
     keyring_subprocess.old_version = True
     warning = Mock()
 
-    monkeypatch.setattr(pip.network.auth.shutil, "which", lambda x: "keyring")
-    monkeypatch.setattr(pip.network.auth.subprocess, "run", keyring_subprocess)
-    monkeypatch.setattr(pip.network.auth.logger, "warning", warning)
+    monkeypatch.setattr(cpip.network.auth.shutil, "which", lambda x: "keyring")
+    monkeypatch.setattr(cpip.network.auth.subprocess, "run", keyring_subprocess)
+    monkeypatch.setattr(cpip.network.auth.logger, "warning", warning)
     auth = MultiDomainBasicAuth(
         index_urls=["http://example.com/path2", "http://example.com/path3"],
         keyring_provider="subprocess",

@@ -1,4 +1,4 @@
-created-by = "pip"
+created-by = "cpip"
 
 [[packages]]
 name = "simple"

@@ -7,25 +7,25 @@ from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, call, patch
 
 import pytest
-from pip.index.links import Link
-from pip.network.download import (
+from cpip.index.links import Link
+from cpip.network.download import (
     Downloader,
     get_http_response_size,
     log_download,
     parse_content_disposition,
     sanitize_content_filename,
 )
-from pip.network.exceptions import (
+from cpip.network.exceptions import (
     ConnectionFailedError,
     ConnectionTimeoutError,
     IncompleteDownloadError,
     ProxyConnectionError,
     SSLMissingError,
 )
-from pip.network.http import NetworkSession
-from pip.network.utils import HEADERS
-from pip_test_support.requests_mocks import BrokenStream, MockResponse
-from pip_test_support.server import Body, MockServer
+from cpip.network.http import NetworkSession
+from cpip.network.utils import HEADERS
+from cpip_test_support.requests_mocks import BrokenStream, MockResponse
+from cpip_test_support.server import Body, MockServer
 
 if TYPE_CHECKING:
     from typeshed.wsgi import StartResponse, WSGIEnvironment

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from pip.core.packaging import parse_requirement
-from pip.install.requirements import RequirementInstaller
-from pip.resolution.req_install import InstallRequirement
+from cpip.core.packaging import parse_requirement
+from cpip.install.requirements import RequirementInstaller
+from cpip.resolution.req_install import InstallRequirement
 
 
 def test_install_requirements_replaces_in_transaction(monkeypatch) -> None:

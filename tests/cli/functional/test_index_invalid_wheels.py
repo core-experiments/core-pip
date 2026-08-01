@@ -1,15 +1,15 @@
-"""Test that pip index versions handles invalid (non-PEP 440) wheel filenames.
+"""Test that cpip index versions handles invalid (non-PEP 440) wheel filenames.
 
 This test was added for robustness after legacy wheel filename support
-was removed in pip 25.3.
+was removed in cpip 25.3.
 """
 
 import json
 import textwrap
 from pathlib import Path
 
-from pip_test_support import PipTestEnvironment
-from pip_test_support.wheel import make_wheel
+from cpip_test_support import CpipTestEnvironment
+from cpip_test_support.wheel import make_wheel
 
 
 def create_test_index_with_invalid_wheels(
@@ -72,14 +72,14 @@ def create_test_index_with_invalid_wheels(
 
 
 def test_index_versions_ignores_invalid_wheel_names(
-    script: PipTestEnvironment,
+    script: CpipTestEnvironment,
     tmpdir: Path,
 ) -> None:
-    """Test that pip index versions ignores invalid wheel names."""
+    """Test that cpip index versions ignores invalid wheel names."""
     index_dir = create_test_index_with_invalid_wheels(tmpdir)
 
-    # Run pip index versions with JSON output
-    result = script.pip(
+    # Run cpip index versions with JSON output
+    result = script.cpip(
         "index", "versions", "pkg", "--json", "--index-url", index_dir.as_uri()
     )
 
@@ -94,14 +94,14 @@ def test_index_versions_ignores_invalid_wheel_names(
 
 
 def test_install_ignores_invalid_wheel_names(
-    script: PipTestEnvironment,
+    script: CpipTestEnvironment,
     tmpdir: Path,
 ) -> None:
-    """Test that pip install ignores invalid wheel names and installs valid ones."""
+    """Test that cpip install ignores invalid wheel names and installs valid ones."""
     index_dir = create_test_index_with_invalid_wheels(tmpdir)
 
-    # Run pip install - should ignore invalid wheels and install the latest valid one
-    result = script.pip(
+    # Run cpip install - should ignore invalid wheels and install the latest valid one
+    result = script.cpip(
         "install", "pkg", "--no-cache-dir", "--index-url", index_dir.as_uri()
     )
 

@@ -5,15 +5,15 @@ import pytest
 from packaging.utils import canonicalize_name
 from packaging.version import Version
 
-from pip.network.exceptions import InvalidWheel
-from pip.network.lazy_wheel import (
+from cpip.network.exceptions import InvalidWheel
+from cpip.network.lazy_wheel import (
     HTTPRangeRequestUnsupported,
     dist_from_wheel_url,
 )
-from pip.network.http import NetworkSession
+from cpip.network.http import NetworkSession
 
-from pip_test_support import TestData
-from pip_test_support.server import MockServer, file_response
+from cpip_test_support import TestData
+from cpip_test_support.server import MockServer, file_response
 
 MYPY_0_782_WHL = (
     "https://files.pythonhosted.org/packages/9d/65/"

@@ -1,12 +1,12 @@
 import shutil
 import textwrap
 
-from pip_test_support import PipTestEnvironment, TestData
+from cpip_test_support import CpipTestEnvironment, TestData
 
 
-def test_find_links_relative_path(script: PipTestEnvironment, data: TestData) -> None:
+def test_find_links_relative_path(script: CpipTestEnvironment, data: TestData) -> None:
     """Test find-links as a relative path."""
-    result = script.pip(
+    result = script.cpip(
         "install",
         "parent==0.1",
         "--no-build-isolation",
@@ -21,11 +21,11 @@ def test_find_links_relative_path(script: PipTestEnvironment, data: TestData) ->
     result.did_create(initools_folder)
 
 
-def test_find_links_no_doctype(script: PipTestEnvironment, data: TestData) -> None:
+def test_find_links_no_doctype(script: CpipTestEnvironment, data: TestData) -> None:
     shutil.copy(data.packages / "simple-1.0.tar.gz", script.scratch_path)
     html = script.scratch_path.joinpath("index.html")
     html.write_text('<a href="simple-1.0.tar.gz"></a>')
-    result = script.pip(
+    result = script.cpip(
         "install",
         "simple==1.0",
         "--no-build-isolation",
@@ -38,7 +38,7 @@ def test_find_links_no_doctype(script: PipTestEnvironment, data: TestData) -> No
 
 
 def test_find_links_requirements_file_relative_path(
-    script: PipTestEnvironment, data: TestData
+    script: CpipTestEnvironment, data: TestData
 ) -> None:
     """Test find-links as a relative path to a reqs file."""
     script.scratch_path.joinpath("test-req.txt").write_text(
@@ -48,7 +48,7 @@ def test_find_links_requirements_file_relative_path(
         parent==0.1
         """)
     )
-    result = script.pip(
+    result = script.cpip(
         "install",
         "--no-build-isolation",
         "-r",
@@ -62,25 +62,25 @@ def test_find_links_requirements_file_relative_path(
 
 
 def test_install_from_file_index_hash_link(
-    script: PipTestEnvironment, data: TestData
+    script: CpipTestEnvironment, data: TestData
 ) -> None:
     """
     Test that a pkg can be installed from a file:// index using a link with a
     hash
     """
-    result = script.pip(
+    result = script.cpip(
         "install", "--no-build-isolation", "-i", data.index_url(), "simple==1.0"
     )
     dist_info_folder = script.site_packages / "simple-1.0.dist-info"
     result.did_create(dist_info_folder)
 
 
-def test_file_index_url_quoting(script: PipTestEnvironment, data: TestData) -> None:
+def test_file_index_url_quoting(script: CpipTestEnvironment, data: TestData) -> None:
     """
     Test url quoting of file index url with a space
     """
     index_url = data.index_url("in dex")
-    result = script.pip(
+    result = script.cpip(
         "install", "--no-build-isolation", "-vvv", "--index-url", index_url, "simple"
     )
     result.did_create(script.site_packages / "simple")

@@ -8,8 +8,8 @@ import json
 import zipfile
 from pathlib import Path
 
-from pip.core import wheel as wheel_module
-from pip.core.packaging import canonicalize_name, parse_requirement
+from cpip.core import wheel as wheel_module
+from cpip.core.packaging import canonicalize_name, parse_requirement
 
 SHA256_PLACEHOLDER = "a" * 64
 METADATA_PLACEHOLDER = "b" * 64

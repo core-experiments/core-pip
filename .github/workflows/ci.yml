@@ -45,8 +45,9 @@ jobs:
             python: "3.10"
           - os: ubuntu
             python: "3.14"
-          - os: macos
-            python: "3.10"
+          # Temporarily disabled while the macOS runner issue is investigated.
+          # - os: macos
+          #   python: "3.10"
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -66,7 +67,18 @@ jobs:
         run: brew install breezy mercurial subversion
       - run: uv sync --locked --all-groups
       - name: Run full test suite
-        run: uv run pytest tests/ -n auto
+        run: >-
+          uv run pytest tests/ -n auto
+          --cov=cpip.install.wheel_transaction
+          --cov=cpip.install.wheel_archive
+          --cov=cpip.install.wheel_scripts
+          --cov=cpip.install.wheel_state
+          --cov=cpip.resolution.resolver
+          --cov=cpip.resolution.resolver_internals.conflicts
+          --cov=cpip.resolution.resolver_internals.search
+          --cov=cpip.resolution.resolver_internals.selection
+          --cov-report=term-missing
+          --cov-fail-under=70
 
   packaging:
     name: packaging / ${{ matrix.os }}

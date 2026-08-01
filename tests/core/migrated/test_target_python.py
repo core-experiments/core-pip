@@ -4,10 +4,10 @@ from typing import Any
 from unittest import mock
 
 import pytest
-from pip.core.target_python import TargetPython
-from pip.core.wheel import WheelTag
+from cpip.core.target_python import TargetPython
+from cpip.core.wheel import WheelTag
 
-from pip_test_support import CURRENT_PY_VERSION_INFO, pyversion
+from cpip_test_support import CURRENT_PY_VERSION_INFO, pyversion
 
 
 class TestTargetPython:
@@ -94,7 +94,7 @@ class TestTargetPython:
             (None, None),
         ],
     )
-    @mock.patch("pip.core.target_python.get_supported")
+    @mock.patch("cpip.core.target_python.get_supported")
     def test_get_sorted_tags(
         self,
         mock_get_supported: mock.Mock,

@@ -7,7 +7,7 @@ import zipfile
 from pathlib import Path
 
 import pytest
-from pip.core.errors import (
+from cpip.core.errors import (
     DirectoryUrlHashUnsupported,
     DistributionNotFound,
     HashMismatch,
@@ -16,28 +16,31 @@ from pip.core.errors import (
     ResolutionError,
     VcsHashUnsupported,
 )
-from pip.core.format_control import FormatControl
-from pip.core.packaging import parse_requirement, Requirement, Version
-from pip.core.wheel import WheelCandidate
-from pip.index.cache import wheel_cache_path
-from pip.index.candidate_materialization import CandidateStream
-from pip.index.provider import CandidateProvider
-from pip.index.source_models import CandidateSummary
-from pip.resolution.req_install import (
+from cpip.core.format_control import FormatControl
+from cpip.core.packaging import parse_requirement, Requirement, Version
+from cpip.core.wheel import WheelCandidate
+from cpip.index.cache import wheel_cache_path
+from cpip.index.candidate_materialization import CandidateStream, LazyWheelCandidate
+from cpip.index.provider import CandidateProvider
+from cpip.index.source_models import CandidateSummary
+from cpip.resolution.algorithms import is_pypi_hosted_url
+from cpip.resolution.req_install import (
     file_hashes,
     install_req_from_editable,
     install_req_from_line,
 )
-from pip.resolution.requirement_set import RequirementSet
-from pip.resolution.resolver import (
-    is_pypi_hosted_url,
+from cpip.resolution.requirement_set import RequirementSet
+from cpip.resolution.resolver import Resolver
+from cpip.resolution.resolver_internals.state.agenda import PendingAgenda
+from cpip.resolution.resolver_internals.state.domains import (
+    LearnedIncompatibility,
     PackageDomain,
-    PendingAgenda,
+)
+from cpip.resolution.resolver_internals.state.requests import (
     SearchFrame,
     SearchRequest,
-    Resolver,
 )
-from wheel_helpers import make_sdist, make_wheel
+from .wheel_helpers import make_sdist, make_wheel
 
 
 class CountingFailedResolver(Resolver):
@@ -80,6 +83,19 @@ def test_pending_agenda_rolls_back_nested_mutations() -> None:
     assert agenda.state_key() == original_state
     assert len(agenda.entries_internal) == len(original)
     assert set(agenda.by_name) == {"first", "second", "third"}
+
+
+def test_resolver_metrics_are_opt_in(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("CPIP_RESOLVER_METRICS", raising=False)
+    disabled = Resolver(no_index=True)
+    assert not disabled.metrics.enabled
+
+    monkeypatch.setenv("CPIP_RESOLVER_METRICS", "1")
+    enabled = Resolver(no_index=True)
+    assert enabled.metrics.enabled
+    snapshot = enabled.metrics_snapshot()
+    assert snapshot["search_frames"] == 0
+    assert snapshot["candidates_considered"] == 0
 
 
 def test_pending_agenda_maintains_wide_state_key_incrementally() -> None:
@@ -164,7 +180,9 @@ def test_non_http_source_skips_pypi_host_parsing(
     def fail_url_parse(url: str) -> None:
         raise AssertionError(f"parsed non-HTTP package URL: {url}")
 
-    monkeypatch.setattr("pip.resolution.resolver.urllib.parse.urlparse", fail_url_parse)
+    monkeypatch.setattr(
+        "cpip.resolution.resolver.urllib.parse.urlparse", fail_url_parse
+    )
 
     assert not is_pypi_hosted_url("file:///packages/demo-1.0.whl")
 
@@ -181,7 +199,7 @@ def test_resolver_caches_prerelease_policy(
         raise AssertionError(f"recomputed prerelease policy: {requirement}")
 
     monkeypatch.setattr(
-        "pip.resolution.resolver.is_direct_requirement", fail_direct_check
+        "cpip.resolution.resolver.is_direct_requirement", fail_direct_check
     )
 
     assert not resolver.allow_prereleases_internal(parse_requirement("demo-pkg>=1"))
@@ -198,7 +216,7 @@ def test_resolver_indexes_installed_distributions_once(
         return []
 
     monkeypatch.setattr(
-        "pip.resolution.resolver.iter_installed_distributions",
+        "cpip.resolution.resolver_internals.selection.iter_installed_distributions",
         installed_distributions,
     )
     resolver = Resolver(no_index=True)
@@ -283,22 +301,71 @@ def test_resolver_caches_candidate_counts_per_requirement(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     resolver = Resolver(no_index=True)
+    calls = 0
+    matching_versions = resolver.provider.matching_versions
+
+    def counted_matching_versions(
+        requirement: Requirement, *, allow_prereleases: bool
+    ) -> tuple[object, ...]:
+        nonlocal calls
+        calls += 1
+        return matching_versions(requirement, allow_prereleases=allow_prereleases)
+
+    monkeypatch.setattr(
+        resolver.provider, "matching_versions", counted_matching_versions
+    )
     pending = PendingAgenda(
         [parse_requirement("first>=1"), parse_requirement("second>=1")]
     )
-    calls = 0
-
-    def candidate_count(requirement: Requirement) -> int:
-        nonlocal calls
-        calls += 1
-        return 1
-
-    monkeypatch.setattr(resolver, "candidate_count_internal", candidate_count)
 
     resolver.choose_requirement(pending, {})
     resolver.choose_requirement(pending, {})
 
     assert calls == 2
+
+
+def test_resolver_prefers_last_successful_candidate_seed() -> None:
+    resolver = Resolver(no_index=True)
+    resolver.resolution_seed["demo"] = ("2", "https://example.test/demo-2.whl")
+    first = WheelCandidate(
+        name="demo",
+        version=Version("1"),
+        path=Path("demo-1.whl"),
+        dependencies=(),
+        source_url="https://example.test/demo-1.whl",
+    )
+    second = WheelCandidate(
+        name="demo",
+        version=Version("2"),
+        path=Path("demo-2.whl"),
+        dependencies=(),
+        source_url="https://example.test/demo-2.whl",
+    )
+
+    preferred = CandidateStream(iter((first, second))).prefer(
+        lambda candidate: resolver.candidate_matches_seed(
+            candidate, resolver.resolution_seed["demo"]
+        )
+    )
+
+    assert preferred[0] is second
+
+
+def test_resolver_retains_successful_candidate_seed(tmp_path: Path) -> None:
+    wheelhouse = tmp_path / "packages"
+    wheelhouse.mkdir()
+    make_wheel(wheelhouse, "demo", "demo", "1.0")
+    resolver = Resolver(
+        provider=CandidateProvider.from_options(
+            find_links=[str(wheelhouse)], no_index=True
+        ),
+        ignore_installed=True,
+    )
+
+    resolver.resolve(["demo"])
+
+    assert resolver.resolution_seed["demo"][0] == "1.0"
+    assert resolver.resolution_seed["demo"][1].startswith("file:")
 
 
 def test_resolver_interns_canonical_package_ids() -> None:
@@ -321,6 +388,48 @@ def test_resolver_uses_conflict_activity_to_break_domain_ties(
 
     _, chosen = resolver.choose_requirement(PendingAgenda([first, active]), {})
     assert chosen is active
+
+
+def test_resolver_conflict_activity_is_monotonic() -> None:
+    resolver = Resolver(no_index=True)
+    resolver.bump_conflict_activity("active")
+    resolver.bump_conflict_activity("active")
+
+    assert resolver.conflict_activity[resolver.package_id_internal("active")] == 2
+
+
+def test_resolver_compacts_learned_incompatibilities() -> None:
+    resolver = Resolver(no_index=True)
+    resolver.metrics.enabled = True
+    resolver.learned_clause_limit = 1
+    first = LearnedIncompatibility(
+        frozenset(
+            (
+                (resolver.package_id_internal("first"), 1, frozenset()),
+                (resolver.package_id_internal("fourth"), 1, frozenset()),
+                (resolver.package_id_internal("fifth"), 1, frozenset()),
+            )
+        ),
+        (resolver.package_id_internal("first"),) * 2,
+    )
+    second = LearnedIncompatibility(
+        frozenset(
+            (
+                (resolver.package_id_internal("second"), 1, frozenset()),
+                (resolver.package_id_internal("third"), 1, frozenset()),
+                (resolver.package_id_internal("sixth"), 1, frozenset()),
+            )
+        ),
+        (
+            resolver.package_id_internal("second"),
+            resolver.package_id_internal("third"),
+        ),
+    )
+    resolver.record_learned_incompatibility(first)
+    resolver.record_learned_incompatibility(second)
+
+    assert len(resolver.learned_incompatibilities) == 1
+    assert resolver.metrics_snapshot()["learned_clause_evictions"] == 1
 
 
 def test_resolver_ranks_each_pending_package_once(
@@ -486,6 +595,60 @@ def test_resolver_minimizes_watched_incompatibility_sources() -> None:
     )
 
 
+def test_resolver_learns_direct_selected_candidate_conflicts() -> None:
+    resolver = Resolver(no_index=True)
+    child = WheelCandidate(
+        name="child",
+        version=Version("1"),
+        path=Path("child-1-py3-none-any.whl"),
+        dependencies=(parse_requirement("shared>=2"),),
+    )
+    selected = WheelCandidate(
+        name="shared",
+        version=Version("1"),
+        path=Path("shared-1-py3-none-any.whl"),
+        dependencies=(),
+    )
+
+    assert (
+        resolver.candidate_dependencies_conflict(
+            child,
+            extras=frozenset(),
+            selected={"shared": selected},
+            selected_extras={},
+        )
+        is False
+    )
+    assert len(resolver.learned_incompatibilities) == 1
+    assert {
+        level for _, level in resolver.learned_incompatibilities[0].decision_levels
+    } == {
+        0,
+        1,
+    }
+    assert resolver.violates_watched_incompatibility(
+        child, frozenset(), {"shared": selected}, {}
+    )
+
+
+def test_resolver_failure_result_carries_second_highest_level() -> None:
+    resolver = Resolver(no_index=True)
+    first = (0, 0, frozenset())
+    second = (1, 0, frozenset())
+    conflict = LearnedIncompatibility(
+        frozenset((first, second)),
+        (0, 1),
+        ((first, 1), (second, 4)),
+    )
+    resolver.backjump_conflict = conflict
+
+    failure = resolver.should_backjump_after_failure(0, 4)
+
+    assert failure is not None
+    assert failure.conflict is conflict
+    assert failure.target_level == 1
+
+
 def test_resolver_minimizes_repeated_exact_conflict_sources() -> None:
     dependency = parse_requirement("shared==8")
     requirements = {
@@ -544,7 +707,37 @@ def test_resolver_skips_memoization_for_linear_search_states(
     plan = resolver.resolve(["chain-0"])
 
     assert len(plan.candidates) == 4
-    assert calls == 1
+    assert calls == 0
+
+
+def test_search_state_key_does_not_materialize_url_candidates(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    wheelhouse = tmp_path / "packages"
+    wheelhouse.mkdir()
+    make_wheel(wheelhouse, "demo-pkg", "demo_pkg", "1.0")
+    resolver = Resolver(
+        provider=CandidateProvider.from_options(
+            find_links=[wheelhouse.as_posix()], no_index=True
+        ),
+        ignore_installed=True,
+    )
+    candidate = next(
+        iter(resolver.provider.find_candidates(parse_requirement("demo-pkg")))
+    )
+
+    def fail_materialize(self: LazyWheelCandidate) -> WheelCandidate:
+        raise AssertionError("search state key materialized a lazy candidate")
+
+    monkeypatch.setattr(LazyWheelCandidate, "materialize", fail_materialize)
+
+    resolver.search_state_key_internal(
+        PendingAgenda(()),
+        {"demo-pkg": candidate},
+        {},
+        {},
+        {},
+    )
 
 
 def test_resolver_caches_viable_candidate_counts(
@@ -626,7 +819,9 @@ def test_resolver_defers_local_wheel_hashing_until_selection(
         hashed_paths.append(path)
         return finalize_hashes(path)
 
-    monkeypatch.setattr("pip.resolution.resolver.file_hashes", counting_hashes)
+    monkeypatch.setattr(
+        "cpip.resolution.resolver_internals.outputs.file_hashes", counting_hashes
+    )
     provider = CandidateProvider.from_options(
         find_links=[str(wheelhouse)], no_index=True
     )
@@ -636,6 +831,32 @@ def test_resolver_defers_local_wheel_hashing_until_selection(
     assert [candidate.path for candidate in plan.candidates] == [selected_wheel]
     assert hashed_paths == [selected_wheel]
     assert plan.candidates[0].source_hashes == file_hashes(selected_wheel)
+
+
+def test_resolver_can_skip_source_hashing_for_install(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    wheelhouse = tmp_path / "packages"
+    wheelhouse.mkdir()
+    selected_wheel = make_wheel(wheelhouse, "demo-pkg", "demo_pkg", "1.0")
+
+    def fail_hashing(path: Path) -> dict[str, str]:
+        raise AssertionError(f"hashed install candidate: {path}")
+
+    monkeypatch.setattr(
+        "cpip.resolution.resolver_internals.outputs.file_hashes", fail_hashing
+    )
+    provider = CandidateProvider.from_options(
+        find_links=[str(wheelhouse)], no_index=True
+    )
+
+    plan = Resolver(
+        provider=provider,
+        ignore_installed=True,
+        compute_source_hashes=False,
+    ).resolve(["demo-pkg"])
+
+    assert [candidate.path for candidate in plan.candidates] == [selected_wheel]
 
 
 def test_resolver_reuses_cataloged_wheel_filename(
@@ -649,7 +870,7 @@ def test_resolver_reuses_cataloged_wheel_filename(
         raise AssertionError(f"reparsed cataloged wheel filename: {path}")
 
     monkeypatch.setattr(
-        "pip.core.wheel.parse_wheel_filename",
+        "cpip.core.wheel.parse_wheel_filename",
         fail_filename_parse,
     )
     provider = CandidateProvider.from_options(
@@ -693,10 +914,10 @@ def test_resolver_reuses_link_vcs_classification(
     def fail_vcs_parse(url: str) -> None:
         raise AssertionError(f"reparsed classified wheel URL for VCS: {url}")
 
-    monkeypatch.setattr("pip.index.vcs.vcs_scheme", fail_vcs_parse)
-    monkeypatch.setattr("pip.index.artifacts.vcs_scheme", fail_vcs_parse)
+    monkeypatch.setattr("cpip.index.vcs.vcs_scheme", fail_vcs_parse)
+    monkeypatch.setattr("cpip.index.artifacts.vcs_scheme", fail_vcs_parse)
     monkeypatch.setattr(
-        "pip.index.candidate_materialization.vcs_scheme", fail_vcs_parse
+        "cpip.index.candidate_materialization.vcs_scheme", fail_vcs_parse
     )
     provider = CandidateProvider.from_options(
         find_links=[str(wheelhouse)], no_index=True
@@ -718,7 +939,7 @@ def test_resolver_reuses_link_local_path(
         raise AssertionError(f"reparsed classified local URL: {url}")
 
     monkeypatch.setattr(
-        "pip.index.artifacts.ArtifactLocator.local_path", fail_url_parse
+        "cpip.index.artifacts.ArtifactLocator.local_path", fail_url_parse
     )
     provider = CandidateProvider.from_options(
         find_links=[str(wheelhouse)], no_index=True
@@ -766,7 +987,7 @@ def test_resolver_reads_only_required_core_metadata_headers(
     def fail_parser() -> None:
         raise AssertionError("constructed a general-purpose email parser")
 
-    monkeypatch.setattr("pip.core.wheel.Parser", fail_parser)
+    monkeypatch.setattr("cpip.core.wheel.Parser", fail_parser)
     provider = CandidateProvider.from_options(
         find_links=[str(wheelhouse)], no_index=True
     )

@@ -10,8 +10,8 @@ import pytest
 
 from packaging.utils import canonicalize_name
 
-from pip_test_support import (
-    PipTestEnvironment,
+from cpip_test_support import (
+    CpipTestEnvironment,
     TestData,
     create_test_package,
     create_test_package_with_srcdir,
@@ -23,7 +23,7 @@ from pip_test_support import (
     need_svn,
     wheel,
 )
-from pip_test_support.venv import VirtualEnvironment
+from cpip_test_support.venv import VirtualEnvironment
 
 distribute_re = re.compile("^distribute==[0-9.]+\n", re.MULTILINE)
 
@@ -55,12 +55,12 @@ def check_output_internal(result: str, expected: str) -> None:
     )
 
 
-def test_basic_freeze(script: PipTestEnvironment) -> None:
+def test_basic_freeze(script: CpipTestEnvironment) -> None:
     """
     Some tests of freeze, first we have to install some stuff.  Note that
     the test is a little crude at the end because Python 2.5+ adds egg
     info to the standard library, so stuff like wsgiref will show up in
-    the freezing.  (Probably that should be accounted for in pip, but
+    the freezing.  (Probably that should be accounted for in cpip, but
     currently it is not).
 
     """
@@ -71,11 +71,11 @@ def test_basic_freeze(script: PipTestEnvironment) -> None:
         simple2<=3.0
         """)
     )
-    script.pip_install_local(
+    script.cpip_install_local(
         "-r",
         script.scratch_path / "initools-req.txt",
     )
-    result = script.pip("freeze", expect_stderr=True)
+    result = script.cpip("freeze", expect_stderr=True)
     expected = textwrap.dedent("""\
         ...simple==2.0
         simple2==3.0...
@@ -83,25 +83,25 @@ def test_basic_freeze(script: PipTestEnvironment) -> None:
     check_output_internal(result.stdout, expected)
 
 
-def test_freeze_with_pip(script: PipTestEnvironment) -> None:
-    """Test that pip shows itself only when --all is used"""
-    result = script.pip("freeze")
-    assert "core-pip==" not in result.stdout
-    result = script.pip("freeze", "--all")
-    assert "core-pip==" in result.stdout
+def test_freeze_with_pip(script: CpipTestEnvironment) -> None:
+    """Test that cpip shows itself only when --all is used"""
+    result = script.cpip("freeze")
+    assert "cpip==" not in result.stdout
+    result = script.cpip("freeze", "--all")
+    assert "cpip==" in result.stdout
 
 
-def test_freeze_with_setuptools(script: PipTestEnvironment) -> None:
+def test_freeze_with_setuptools(script: CpipTestEnvironment) -> None:
     """
-    Test that pip shows setuptools only when --all is used on Python < 3.12,
+    Test that cpip shows setuptools only when --all is used on Python < 3.12,
     otherwise it should be shown in default freeze output.
     """
 
-    result = script.pip("freeze", "--all")
+    result = script.cpip("freeze", "--all")
     assert "setuptools==" in result.stdout
 
     # Test the default behavior (without --all)
-    result = script.pip("freeze")
+    result = script.cpip("freeze")
 
     should_suppress = sys.version_info < (3, 12)
     if should_suppress:
@@ -118,33 +118,33 @@ def test_freeze_with_setuptools(script: PipTestEnvironment) -> None:
         )
 
     # --all should always show setuptools regardless of version
-    result_all = script.pip("freeze", "--all")
+    result_all = script.cpip("freeze", "--all")
     assert "setuptools==" in result_all.stdout
 
 
-def test_exclude_and_normalization(script: PipTestEnvironment, tmpdir: Path) -> None:
+def test_exclude_and_normalization(script: CpipTestEnvironment, tmpdir: Path) -> None:
     req_path = wheel.make_wheel(name="Normalizable_Name", version="1.0").save_to_dir(
         tmpdir
     )
-    script.pip("install", "--no-index", req_path)
-    result = script.pip("freeze")
+    script.cpip("install", "--no-index", req_path)
+    result = script.cpip("freeze")
     assert "Normalizable_Name" in result.stdout
-    result = script.pip("freeze", "--exclude", "normalizablE-namE")
+    result = script.cpip("freeze", "--exclude", "normalizablE-namE")
     assert "Normalizable_Name" not in result.stdout
 
 
-def test_freeze_multiple_exclude_with_all(script: PipTestEnvironment) -> None:
-    result = script.pip("freeze", "--all")
-    assert "core-pip==" in result.stdout
+def test_freeze_multiple_exclude_with_all(script: CpipTestEnvironment) -> None:
+    result = script.cpip("freeze", "--all")
+    assert "cpip==" in result.stdout
     assert "setuptools==" in result.stdout
-    result = script.pip(
-        "freeze", "--all", "--exclude", "core-pip", "--exclude", "setuptools"
+    result = script.cpip(
+        "freeze", "--all", "--exclude", "cpip", "--exclude", "setuptools"
     )
-    assert "core-pip==" not in result.stdout
+    assert "cpip==" not in result.stdout
     assert "setuptools==" not in result.stdout
 
 
-def test_freeze_with_invalid_names(script: PipTestEnvironment) -> None:
+def test_freeze_with_invalid_names(script: CpipTestEnvironment) -> None:
     """
     Test that invalid names produce warnings and are passed over gracefully.
     """
@@ -177,7 +177,7 @@ def test_freeze_with_invalid_names(script: PipTestEnvironment) -> None:
     for pkgname in valid_pkgnames + invalid_pkgnames:
         fake_install(pkgname, os.fspath(script.site_packages_path))
 
-    result = script.pip("freeze", expect_stderr=True)
+    result = script.cpip("freeze", expect_stderr=True)
 
     # Check all valid names are in the output.
     output_lines = {line.strip() for line in result.stdout.splitlines()}
@@ -196,7 +196,7 @@ def test_freeze_with_invalid_names(script: PipTestEnvironment) -> None:
 
 
 @pytest.mark.git
-def test_freeze_editable_not_vcs(script: PipTestEnvironment) -> None:
+def test_freeze_editable_not_vcs(script: CpipTestEnvironment) -> None:
     """
     Test an editable install that is not version controlled.
     """
@@ -204,8 +204,8 @@ def test_freeze_editable_not_vcs(script: PipTestEnvironment) -> None:
     # Rename the .git directory so the directory is no longer recognized
     # as a VCS directory.
     os.rename(os.path.join(pkg_path, ".git"), os.path.join(pkg_path, ".bak"))
-    script.pip("install", "--no-build-isolation", "-e", pkg_path)
-    result = script.pip("freeze")
+    script.cpip("install", "--no-build-isolation", "-e", pkg_path)
+    result = script.cpip("freeze")
 
     # We need to apply os.path.normcase() to the path since that is what
     # the freeze code does.
@@ -218,14 +218,14 @@ def test_freeze_editable_not_vcs(script: PipTestEnvironment) -> None:
 
 @pytest.mark.git
 def test_freeze_editable_git_with_no_remote(
-    script: PipTestEnvironment, deprecated_python: bool
+    script: CpipTestEnvironment, deprecated_python: bool
 ) -> None:
     """
     Test an editable Git install with no remote url.
     """
     pkg_path = create_test_package(script.scratch_path)
-    script.pip("install", "--no-build-isolation", "-e", pkg_path)
-    result = script.pip("freeze")
+    script.cpip("install", "--no-build-isolation", "-e", pkg_path)
+    result = script.cpip("freeze")
 
     if not deprecated_python:
         assert result.stderr == ""
@@ -240,14 +240,14 @@ def test_freeze_editable_git_with_no_remote(
 
 
 @need_svn
-def test_freeze_svn(script: PipTestEnvironment) -> None:
+def test_freeze_svn(script: CpipTestEnvironment) -> None:
     """Test freezing a svn checkout"""
 
     checkout_path = create_test_package(script.scratch_path, vcs="svn")
 
     # Install with develop
     script.run("python", "setup.py", "develop", cwd=checkout_path, expect_stderr=True)
-    result = script.pip("freeze", expect_stderr=True)
+    result = script.cpip("freeze", expect_stderr=True)
     expected = textwrap.dedent("""\
         ...-e svn+...#egg=version_pkg
         ...""")
@@ -261,7 +261,7 @@ def test_freeze_svn(script: PipTestEnvironment) -> None:
     run=True,
     strict=True,
 )
-def test_freeze_exclude_editable(script: PipTestEnvironment) -> None:
+def test_freeze_exclude_editable(script: CpipTestEnvironment) -> None:
     """
     Test excluding editable from freezing list.
     """
@@ -272,10 +272,10 @@ def test_freeze_exclude_editable(script: PipTestEnvironment) -> None:
         "git",
         "clone",
         os.fspath(pkg_version),
-        "pip-test-package",
+        "cpip-test-package",
         expect_stderr=True,
     )
-    repo_dir = script.scratch_path / "pip-test-package"
+    repo_dir = script.scratch_path / "cpip-test-package"
     result = script.run(
         "python",
         "setup.py",
@@ -283,7 +283,7 @@ def test_freeze_exclude_editable(script: PipTestEnvironment) -> None:
         cwd=repo_dir,
         expect_stderr=True,
     )
-    result = script.pip("freeze", "--exclude-editable", expect_stderr=True)
+    result = script.cpip("freeze", "--exclude-editable", expect_stderr=True)
     expected = textwrap.dedent("""
             ...-e git+...#egg=version_pkg
             ...
@@ -292,7 +292,7 @@ def test_freeze_exclude_editable(script: PipTestEnvironment) -> None:
 
 
 @pytest.mark.git
-def test_freeze_git_clone(script: PipTestEnvironment) -> None:
+def test_freeze_git_clone(script: CpipTestEnvironment) -> None:
     """
     Test freezing a Git clone.
     """
@@ -303,10 +303,10 @@ def test_freeze_git_clone(script: PipTestEnvironment) -> None:
         "git",
         "clone",
         os.fspath(pkg_version),
-        "pip-test-package",
+        "cpip-test-package",
         expect_stderr=True,
     )
-    repo_dir = script.scratch_path / "pip-test-package"
+    repo_dir = script.scratch_path / "cpip-test-package"
     result = script.run(
         "python",
         "setup.py",
@@ -314,7 +314,7 @@ def test_freeze_git_clone(script: PipTestEnvironment) -> None:
         cwd=repo_dir,
         expect_stderr=True,
     )
-    result = script.pip("freeze", expect_stderr=True)
+    result = script.cpip("freeze", expect_stderr=True)
     expected = textwrap.dedent("""
             ...-e git+...#egg=version_pkg
             ...
@@ -322,7 +322,7 @@ def test_freeze_git_clone(script: PipTestEnvironment) -> None:
     check_output_internal(result.stdout, expected)
 
     # Check that slashes in branch or tag names are translated.
-    # See also issue #1083: https://github.com/pypa/pip/issues/1083
+    # See also issue #1083: https://github.com/pypa/cpip/issues/1083
     script.run(
         "git",
         "checkout",
@@ -337,7 +337,7 @@ def test_freeze_git_clone(script: PipTestEnvironment) -> None:
     (repo_dir / "newfile").touch()
     script.run("git", "add", "newfile", cwd=repo_dir)
     git_commit(repo_dir, message="...")
-    result = script.pip("freeze", expect_stderr=True)
+    result = script.cpip("freeze", expect_stderr=True)
     expected = textwrap.dedent("""
             ...-e ...@...#egg=version_pkg
             ...
@@ -346,7 +346,7 @@ def test_freeze_git_clone(script: PipTestEnvironment) -> None:
 
 
 @pytest.mark.git
-def test_freeze_git_clone_srcdir(script: PipTestEnvironment) -> None:
+def test_freeze_git_clone_srcdir(script: CpipTestEnvironment) -> None:
     """
     Test freezing a Git clone where setup.py is in a subdirectory
     relative the repo root and the source code is in a subdirectory
@@ -359,10 +359,10 @@ def test_freeze_git_clone_srcdir(script: PipTestEnvironment) -> None:
         "git",
         "clone",
         os.fspath(pkg_version),
-        "pip-test-package",
+        "cpip-test-package",
         expect_stderr=True,
     )
-    repo_dir = script.scratch_path / "pip-test-package"
+    repo_dir = script.scratch_path / "cpip-test-package"
     result = script.run(
         "python",
         "setup.py",
@@ -370,7 +370,7 @@ def test_freeze_git_clone_srcdir(script: PipTestEnvironment) -> None:
         cwd=repo_dir / "subdir",
         expect_stderr=True,
     )
-    result = script.pip("freeze", expect_stderr=True)
+    result = script.cpip("freeze", expect_stderr=True)
     expected = textwrap.dedent("""
             ...-e git+...#egg=version_pkg&subdirectory=subdir
             ...
@@ -379,7 +379,7 @@ def test_freeze_git_clone_srcdir(script: PipTestEnvironment) -> None:
 
 
 @need_mercurial
-def test_freeze_mercurial_clone_srcdir(script: PipTestEnvironment) -> None:
+def test_freeze_mercurial_clone_srcdir(script: CpipTestEnvironment) -> None:
     """
     Test freezing a Mercurial clone where setup.py is in a subdirectory
     relative to the repo root and the source code is in a subdirectory
@@ -388,10 +388,10 @@ def test_freeze_mercurial_clone_srcdir(script: PipTestEnvironment) -> None:
     # Returns path to a generated package called "version_pkg"
     pkg_version = create_test_package_with_srcdir(script.scratch_path, vcs="hg")
 
-    result = script.run("hg", "clone", os.fspath(pkg_version), "pip-test-package")
-    repo_dir = script.scratch_path / "pip-test-package"
+    result = script.run("hg", "clone", os.fspath(pkg_version), "cpip-test-package")
+    repo_dir = script.scratch_path / "cpip-test-package"
     result = script.run("python", "setup.py", "develop", cwd=repo_dir / "subdir")
-    result = script.pip("freeze")
+    result = script.cpip("freeze")
     expected = textwrap.dedent("""
             ...-e hg+...#egg=version_pkg&subdirectory=subdir
             ...
@@ -400,7 +400,7 @@ def test_freeze_mercurial_clone_srcdir(script: PipTestEnvironment) -> None:
 
 
 @pytest.mark.git
-def test_freeze_git_remote(script: PipTestEnvironment) -> None:
+def test_freeze_git_remote(script: CpipTestEnvironment) -> None:
     """
     Test freezing a Git clone.
     """
@@ -411,10 +411,10 @@ def test_freeze_git_remote(script: PipTestEnvironment) -> None:
         "git",
         "clone",
         os.fspath(pkg_version),
-        "pip-test-package",
+        "cpip-test-package",
         expect_stderr=True,
     )
-    repo_dir = script.scratch_path / "pip-test-package"
+    repo_dir = script.scratch_path / "cpip-test-package"
     result = script.run(
         "python",
         "setup.py",
@@ -424,7 +424,7 @@ def test_freeze_git_remote(script: PipTestEnvironment) -> None:
     )
     origin_remote = pkg_version
     # check frozen remote after clone
-    result = script.pip("freeze", expect_stderr=True)
+    result = script.cpip("freeze", expect_stderr=True)
     expected = (
         textwrap.dedent("""
             ...-e git+{remote}@...#egg=version_pkg
@@ -436,7 +436,7 @@ def test_freeze_git_remote(script: PipTestEnvironment) -> None:
     check_output_internal(result.stdout, expected)
     # check frozen remote when there is no remote named origin
     script.run("git", "remote", "rename", "origin", "other", cwd=repo_dir)
-    result = script.pip("freeze", expect_stderr=True)
+    result = script.cpip("freeze", expect_stderr=True)
     expected = (
         textwrap.dedent("""
             ...-e git+{remote}@...#egg=version_pkg
@@ -450,7 +450,7 @@ def test_freeze_git_remote(script: PipTestEnvironment) -> None:
     # If it doesn't, it gets flagged as invalid.
     other_remote = f"{pkg_version}-other"
     script.run("git", "remote", "set-url", "other", other_remote, cwd=repo_dir)
-    result = script.pip("freeze", expect_stderr=True)
+    result = script.cpip("freeze", expect_stderr=True)
     expected = os.path.normcase(
         textwrap.dedent(f"""
             ...# Editable Git...(version...pkg...)...
@@ -462,7 +462,7 @@ def test_freeze_git_remote(script: PipTestEnvironment) -> None:
     # when there are more than one origin, priority is given to the
     # remote named origin
     script.run("git", "remote", "add", "origin", os.fspath(origin_remote), cwd=repo_dir)
-    result = script.pip("freeze", expect_stderr=True)
+    result = script.cpip("freeze", expect_stderr=True)
     expected = (
         textwrap.dedent("""
             ...-e git+{remote}@...#egg=version_pkg
@@ -475,7 +475,7 @@ def test_freeze_git_remote(script: PipTestEnvironment) -> None:
 
 
 @need_mercurial
-def test_freeze_mercurial_clone(script: PipTestEnvironment) -> None:
+def test_freeze_mercurial_clone(script: CpipTestEnvironment) -> None:
     """
     Test freezing a Mercurial clone.
 
@@ -487,10 +487,10 @@ def test_freeze_mercurial_clone(script: PipTestEnvironment) -> None:
         "hg",
         "clone",
         os.fspath(pkg_version),
-        "pip-test-package",
+        "cpip-test-package",
         expect_stderr=True,
     )
-    repo_dir = script.scratch_path / "pip-test-package"
+    repo_dir = script.scratch_path / "cpip-test-package"
     result = script.run(
         "python",
         "setup.py",
@@ -498,7 +498,7 @@ def test_freeze_mercurial_clone(script: PipTestEnvironment) -> None:
         cwd=repo_dir,
         expect_stderr=True,
     )
-    result = script.pip("freeze", expect_stderr=True)
+    result = script.cpip("freeze", expect_stderr=True)
     expected = textwrap.dedent("""
             ...-e hg+...#egg=version_pkg
             ...
@@ -507,7 +507,7 @@ def test_freeze_mercurial_clone(script: PipTestEnvironment) -> None:
 
 
 @need_bzr
-def test_freeze_bazaar_clone(script: PipTestEnvironment) -> None:
+def test_freeze_bazaar_clone(script: CpipTestEnvironment) -> None:
     """
     Test freezing a Bazaar clone.
 
@@ -525,7 +525,7 @@ def test_freeze_bazaar_clone(script: PipTestEnvironment) -> None:
         cwd=script.scratch_path / "bzr-package",
         expect_stderr=True,
     )
-    result = script.pip("freeze", expect_stderr=True)
+    result = script.cpip("freeze", expect_stderr=True)
     expected = textwrap.dedent("""\
         ...-e bzr+file://...@1#egg=version_pkg
         ...""")
@@ -539,7 +539,7 @@ def test_freeze_bazaar_clone(script: PipTestEnvironment) -> None:
     [("hg", "git"), ("git", "hg")],
 )
 def test_freeze_nested_vcs(
-    script: PipTestEnvironment, outer_vcs: str, inner_vcs: str
+    script: CpipTestEnvironment, outer_vcs: str, inner_vcs: str
 ) -> None:
     """Test VCS can be correctly freezed when resides inside another VCS repo."""
     # Create Python package.
@@ -562,10 +562,10 @@ def test_freeze_nested_vcs(
         os.fspath(src_path),
         expect_stderr=True,
     )
-    script.pip("install", "--no-build-isolation", "-e", src_path, expect_stderr=True)
+    script.cpip("install", "--no-build-isolation", "-e", src_path, expect_stderr=True)
 
     # Check the freeze output recognizes the inner VCS.
-    result = script.pip("freeze", expect_stderr=True)
+    result = script.cpip("freeze", expect_stderr=True)
     check_output_internal(
         result.stdout,
         f"...-e {inner_vcs}+...#egg=version_pkg\n...",
@@ -590,7 +590,7 @@ freeze_req_opts = textwrap.dedent("""\
 
 
 def test_freeze_with_requirement_option_file_url_egg_not_installed(
-    script: PipTestEnvironment, deprecated_python: bool
+    script: CpipTestEnvironment, deprecated_python: bool
 ) -> None:
     """
     Test "freeze -r requirements.txt" with a local file URL whose egg name
@@ -601,7 +601,7 @@ def test_freeze_with_requirement_option_file_url_egg_not_installed(
     requirements_path = script.scratch_path.joinpath("requirements.txt")
     requirements_path.write_text(url + "\n")
 
-    result = script.pip(
+    result = script.cpip(
         "freeze",
         "--requirement",
         "requirements.txt",
@@ -617,7 +617,7 @@ def test_freeze_with_requirement_option_file_url_egg_not_installed(
         assert expected_err == result.stderr
 
 
-def test_freeze_with_requirement_option(script: PipTestEnvironment) -> None:
+def test_freeze_with_requirement_option(script: CpipTestEnvironment) -> None:
     """
     Test that new requirements are created correctly with --requirement hints
 
@@ -639,9 +639,9 @@ def test_freeze_with_requirement_option(script: PipTestEnvironment) -> None:
         """)
         + freeze_req_opts
     )
-    result = script.pip_install_local("initools==0.2")
-    result = script.pip_install_local("simple")
-    result = script.pip(
+    result = script.cpip_install_local("initools==0.2")
+    result = script.cpip_install_local("simple")
+    result = script.cpip(
         "freeze",
         "--requirement",
         "hint1.txt",
@@ -652,13 +652,13 @@ def test_freeze_with_requirement_option(script: PipTestEnvironment) -> None:
         simple==3.0
     """)
     expected += freeze_req_opts
-    expected += "## The following requirements were added by pip freeze:..."
+    expected += "## The following requirements were added by cpip freeze:..."
     check_output_internal(result.stdout, expected)
     assert (
         "Requirement file [hint1.txt] contains NoExist==4.2, but package "
         "'NoExist' is not installed"
     ) in result.stderr
-    result = script.pip(
+    result = script.cpip(
         "freeze",
         "--requirement",
         "hint2.txt",
@@ -671,7 +671,7 @@ def test_freeze_with_requirement_option(script: PipTestEnvironment) -> None:
     ) in result.stderr
 
 
-def test_freeze_with_requirement_option_multiple(script: PipTestEnvironment) -> None:
+def test_freeze_with_requirement_option_multiple(script: CpipTestEnvironment) -> None:
     """
     Test that new requirements are created correctly with multiple
     --requirement hints
@@ -692,11 +692,11 @@ def test_freeze_with_requirement_option_multiple(script: PipTestEnvironment) -> 
     """)
         + freeze_req_opts
     )
-    result = script.pip_install_local("initools==0.2")
-    result = script.pip_install_local("simple")
-    result = script.pip_install_local("simple2==1.0")
-    result = script.pip_install_local("meta")
-    result = script.pip(
+    result = script.cpip_install_local("initools==0.2")
+    result = script.cpip_install_local("simple")
+    result = script.cpip_install_local("simple2==1.0")
+    result = script.cpip_install_local("meta")
+    result = script.cpip(
         "freeze",
         "--requirement",
         "hint1.txt",
@@ -712,7 +712,7 @@ def test_freeze_with_requirement_option_multiple(script: PipTestEnvironment) -> 
     expected += textwrap.dedent("""\
         simple2==1.0
     """)
-    expected += "## The following requirements were added by pip freeze:"
+    expected += "## The following requirements were added by cpip freeze:"
     expected += "\n" + textwrap.dedent("""\
         ...meta==1.0...
     """)
@@ -731,7 +731,7 @@ def test_freeze_with_requirement_option_multiple(script: PipTestEnvironment) -> 
 
 
 def test_freeze_with_requirement_option_package_repeated_one_file(
-    script: PipTestEnvironment,
+    script: CpipTestEnvironment,
 ) -> None:
     """
     Test freezing with single requirements file that contains a package
@@ -745,9 +745,9 @@ def test_freeze_with_requirement_option_package_repeated_one_file(
     """)
         + freeze_req_opts
     )
-    result = script.pip_install_local("simple2==1.0")
-    result = script.pip_install_local("meta")
-    result = script.pip(
+    result = script.cpip_install_local("simple2==1.0")
+    result = script.cpip_install_local("meta")
+    result = script.cpip(
         "freeze",
         "--requirement",
         "hint1.txt",
@@ -757,7 +757,7 @@ def test_freeze_with_requirement_option_package_repeated_one_file(
         simple2==1.0
     """)
     expected_out += freeze_req_opts
-    expected_out += "## The following requirements were added by pip freeze:"
+    expected_out += "## The following requirements were added by cpip freeze:"
     expected_out += "\n" + textwrap.dedent("""\
         ...meta==1.0...
     """)
@@ -774,7 +774,7 @@ def test_freeze_with_requirement_option_package_repeated_one_file(
 
 
 def test_freeze_with_requirement_option_package_repeated_multi_file(
-    script: PipTestEnvironment,
+    script: CpipTestEnvironment,
 ) -> None:
     """
     Test freezing with multiple requirements file that contain a package
@@ -792,9 +792,9 @@ def test_freeze_with_requirement_option_package_repeated_multi_file(
     """)
         + freeze_req_opts
     )
-    result = script.pip_install_local("simple==1.0")
-    result = script.pip_install_local("meta")
-    result = script.pip(
+    result = script.cpip_install_local("simple==1.0")
+    result = script.cpip_install_local("meta")
+    result = script.cpip(
         "freeze",
         "--requirement",
         "hint1.txt",
@@ -806,7 +806,7 @@ def test_freeze_with_requirement_option_package_repeated_multi_file(
         simple==1.0
     """)
     expected_out += freeze_req_opts
-    expected_out += "## The following requirements were added by pip freeze:"
+    expected_out += "## The following requirements were added by cpip freeze:"
     expected_out += "\n" + textwrap.dedent("""\
         ...meta==1.0...
     """)
@@ -825,14 +825,14 @@ def test_freeze_with_requirement_option_package_repeated_multi_file(
 
 @pytest.mark.usefixtures("enable_user_site")
 def test_freeze_user(
-    script: PipTestEnvironment, virtualenv: VirtualEnvironment, data: TestData
+    script: CpipTestEnvironment, virtualenv: VirtualEnvironment, data: TestData
 ) -> None:
     """
     Testing freeze with --user, first we have to install some stuff.
     """
-    script.pip_install_local("--find-links", data.find_links, "--user", "simple==2.0")
-    script.pip_install_local("--find-links", data.find_links, "simple2==3.0")
-    result = script.pip("freeze", "--user", expect_stderr=True)
+    script.cpip_install_local("--find-links", data.find_links, "--user", "simple==2.0")
+    script.cpip_install_local("--find-links", data.find_links, "simple2==3.0")
+    result = script.cpip("freeze", "--user", expect_stderr=True)
     expected = textwrap.dedent("""\
         simple==2.0
         <BLANKLINE>""")
@@ -840,12 +840,12 @@ def test_freeze_user(
     assert "simple2" not in result.stdout
 
 
-def test_freeze_path(tmpdir: Path, script: PipTestEnvironment, data: TestData) -> None:
+def test_freeze_path(tmpdir: Path, script: CpipTestEnvironment, data: TestData) -> None:
     """
     Test freeze with --path.
     """
-    script.pip_install_local("--target", tmpdir, "simple==2.0")
-    result = script.pip("freeze", "--path", tmpdir)
+    script.cpip_install_local("--target", tmpdir, "simple==2.0")
+    result = script.cpip("freeze", "--path", tmpdir)
     expected = textwrap.dedent("""\
         simple==2.0
         <BLANKLINE>""")
@@ -854,20 +854,20 @@ def test_freeze_path(tmpdir: Path, script: PipTestEnvironment, data: TestData) -
 
 @pytest.mark.usefixtures("enable_user_site")
 def test_freeze_path_exclude_user(
-    tmpdir: Path, script: PipTestEnvironment, data: TestData
+    tmpdir: Path, script: CpipTestEnvironment, data: TestData
 ) -> None:
     """
     Test freeze with --path and make sure packages from --user are not picked
     up.
     """
-    script.pip_install_local("--find-links", data.find_links, "--user", "simple2")
-    script.pip_install_local("--target", tmpdir, "simple==1.0")
-    result = script.pip("freeze", "--user")
+    script.cpip_install_local("--find-links", data.find_links, "--user", "simple2")
+    script.cpip_install_local("--target", tmpdir, "simple==1.0")
+    result = script.cpip("freeze", "--user")
     expected = textwrap.dedent("""\
         simple2==3.0
         <BLANKLINE>""")
     check_output_internal(result.stdout, expected)
-    result = script.pip("freeze", "--path", tmpdir)
+    result = script.cpip("freeze", "--path", tmpdir)
     expected = textwrap.dedent("""\
         simple==1.0
         <BLANKLINE>""")
@@ -875,7 +875,7 @@ def test_freeze_path_exclude_user(
 
 
 def test_freeze_path_multiple(
-    tmpdir: Path, script: PipTestEnvironment, data: TestData
+    tmpdir: Path, script: CpipTestEnvironment, data: TestData
 ) -> None:
     """
     Test freeze with multiple --path arguments.
@@ -884,14 +884,14 @@ def test_freeze_path_multiple(
     os.mkdir(path1)
     path2 = tmpdir / "path2"
     os.mkdir(path2)
-    script.pip_install_local("--target", path1, "simple==2.0")
-    script.pip_install_local("--target", path2, "simple2==3.0")
-    result = script.pip("freeze", "--path", path1)
+    script.cpip_install_local("--target", path1, "simple==2.0")
+    script.cpip_install_local("--target", path2, "simple2==3.0")
+    result = script.cpip("freeze", "--path", path1)
     expected = textwrap.dedent("""\
         simple==2.0
         <BLANKLINE>""")
     check_output_internal(result.stdout, expected)
-    result = script.pip("freeze", "--path", path1, "--path", path2)
+    result = script.cpip("freeze", "--path", path1, "--path", path2)
     expected = textwrap.dedent("""\
         simple==2.0
         simple2==3.0
@@ -900,15 +900,15 @@ def test_freeze_path_multiple(
 
 
 def test_freeze_direct_url_archive(
-    script: PipTestEnvironment, shared_data: TestData
+    script: CpipTestEnvironment, shared_data: TestData
 ) -> None:
     req = "simple @ " + shared_data.packages.joinpath("simple-2.0.tar.gz").as_uri()
-    script.pip("install", "--no-build-isolation", req)
-    result = script.pip("freeze")
+    script.cpip("install", "--no-build-isolation", req)
+    result = script.cpip("freeze")
     assert req in result.stdout
 
 
-def test_freeze_skip_work_dir_pkg(script: PipTestEnvironment) -> None:
+def test_freeze_skip_work_dir_pkg(script: CpipTestEnvironment) -> None:
     """
     Test that freeze should not include package
     present in working directory
@@ -919,11 +919,11 @@ def test_freeze_skip_work_dir_pkg(script: PipTestEnvironment) -> None:
     script.run("python", "setup.py", "egg_info", expect_stderr=True, cwd=pkg_path)
 
     # Freeze should not include package simple when run from package directory
-    result = script.pip("freeze", cwd=pkg_path)
+    result = script.cpip("freeze", cwd=pkg_path)
     assert "simple" not in result.stdout
 
 
-def test_freeze_include_work_dir_pkg(script: PipTestEnvironment) -> None:
+def test_freeze_include_work_dir_pkg(script: CpipTestEnvironment) -> None:
     """
     Test that freeze should include package in working directory
     if working directory is added in PYTHONPATH
@@ -937,17 +937,17 @@ def test_freeze_include_work_dir_pkg(script: PipTestEnvironment) -> None:
 
     # Freeze should include package simple when run from package directory,
     # when package directory is in PYTHONPATH
-    result = script.pip("freeze", cwd=pkg_path)
+    result = script.cpip("freeze", cwd=pkg_path)
     assert "simple==1.0" in result.stdout
 
 
-def test_freeze_pep610_editable(script: PipTestEnvironment) -> None:
+def test_freeze_pep610_editable(script: CpipTestEnvironment) -> None:
     """
     Test that a package installed with a direct_url.json with editable=true
     is correctly frozen as editable.
     """
     pkg_path = create_test_package(script.scratch_path, name="testpkg")
-    result = script.pip("install", "--no-build-isolation", pkg_path)
+    result = script.cpip("install", "--no-build-isolation", pkg_path)
     direct_url_path = result.get_created_direct_url_path("testpkg")
     assert direct_url_path
     # patch direct_url.json to simulate an editable install
@@ -957,5 +957,5 @@ def test_freeze_pep610_editable(script: PipTestEnvironment) -> None:
     direct_url_dict["dir_info"]["editable"] = True
     with open(direct_url_path, "w") as f:
         json.dump(direct_url_dict, f)
-    result = script.pip("freeze")
+    result = script.cpip("freeze")
     assert "# Editable Git install with no remote (testpkg==0.1)" in result.stdout

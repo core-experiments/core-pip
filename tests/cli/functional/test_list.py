@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from pip_test_support import (
-    PipTestEnvironment,
+from cpip_test_support import (
+    CpipTestEnvironment,
     ScriptFactory,
     TestData,
     create_test_package,
@@ -21,10 +21,10 @@ def simple_script(
     tmpdir_factory: pytest.TempPathFactory,
     script_factory: ScriptFactory,
     shared_data: TestData,
-) -> PipTestEnvironment:
-    tmpdir = tmpdir_factory.mktemp("pip_test_package")
+) -> CpipTestEnvironment:
+    tmpdir = tmpdir_factory.mktemp("cpip_test_package")
     script = script_factory(tmpdir.joinpath("workspace"))
-    script.pip(
+    script.cpip(
         "install",
         "--no-build-isolation",
         "-f",
@@ -36,21 +36,21 @@ def simple_script(
     return script
 
 
-def test_basic_list(simple_script: PipTestEnvironment) -> None:
+def test_basic_list(simple_script: CpipTestEnvironment) -> None:
     """
     Test default behavior of list command without format specifier.
 
     """
-    result = simple_script.pip("list")
+    result = simple_script.cpip("list")
     assert "simple     1.0" in result.stdout, str(result)
     assert "simple2    3.0" in result.stdout, str(result)
 
 
-def test_verbose_flag(simple_script: PipTestEnvironment) -> None:
+def test_verbose_flag(simple_script: CpipTestEnvironment) -> None:
     """
     Test the list command with the '-v' option
     """
-    result = simple_script.pip("list", "-v", "--format=columns")
+    result = simple_script.cpip("list", "-v", "--format=columns")
     assert "Package" in result.stdout, str(result)
     assert "Version" in result.stdout, str(result)
     assert "Location" in result.stdout, str(result)
@@ -59,11 +59,11 @@ def test_verbose_flag(simple_script: PipTestEnvironment) -> None:
     assert "simple2    3.0" in result.stdout, str(result)
 
 
-def test_columns_flag(simple_script: PipTestEnvironment) -> None:
+def test_columns_flag(simple_script: CpipTestEnvironment) -> None:
     """
     Test the list command with the '--format=columns' option
     """
-    result = simple_script.pip("list", "--format=columns")
+    result = simple_script.cpip("list", "--format=columns")
     assert "Package" in result.stdout, str(result)
     assert "Version" in result.stdout, str(result)
     assert "simple (1.0)" not in result.stdout, str(result)
@@ -71,11 +71,11 @@ def test_columns_flag(simple_script: PipTestEnvironment) -> None:
     assert "simple2    3.0" in result.stdout, str(result)
 
 
-def test_format_priority(simple_script: PipTestEnvironment) -> None:
+def test_format_priority(simple_script: CpipTestEnvironment) -> None:
     """
     Test that latest format has priority over previous ones.
     """
-    result = simple_script.pip(
+    result = simple_script.cpip(
         "list", "--format=columns", "--format=freeze", expect_stderr=True
     )
     assert "simple==1.0" in result.stdout, str(result)
@@ -83,7 +83,7 @@ def test_format_priority(simple_script: PipTestEnvironment) -> None:
     assert "simple     1.0" not in result.stdout, str(result)
     assert "simple2    3.0" not in result.stdout, str(result)
 
-    result = simple_script.pip("list", "--format=freeze", "--format=columns")
+    result = simple_script.cpip("list", "--format=freeze", "--format=columns")
     assert "Package" in result.stdout, str(result)
     assert "Version" in result.stdout, str(result)
     assert "simple==1.0" not in result.stdout, str(result)
@@ -92,21 +92,21 @@ def test_format_priority(simple_script: PipTestEnvironment) -> None:
     assert "simple2    3.0" in result.stdout, str(result)
 
 
-def test_local_flag(simple_script: PipTestEnvironment) -> None:
+def test_local_flag(simple_script: CpipTestEnvironment) -> None:
     """
     Test the behavior of --local flag in the list command
 
     """
-    result = simple_script.pip("list", "--local", "--format=json")
+    result = simple_script.cpip("list", "--local", "--format=json")
     assert {"name": "simple", "version": "1.0"} in json.loads(result.stdout)
 
 
-def test_local_columns_flag(simple_script: PipTestEnvironment) -> None:
+def test_local_columns_flag(simple_script: CpipTestEnvironment) -> None:
     """
     Test the behavior of --local --format=columns flags in the list command
 
     """
-    result = simple_script.pip("list", "--local", "--format=columns")
+    result = simple_script.cpip("list", "--local", "--format=columns")
     assert "Package" in result.stdout
     assert "Version" in result.stdout
     assert "simple (1.0)" not in result.stdout
@@ -114,43 +114,43 @@ def test_local_columns_flag(simple_script: PipTestEnvironment) -> None:
 
 
 def test_multiple_exclude_and_normalization(
-    script: PipTestEnvironment, tmpdir: Path
+    script: CpipTestEnvironment, tmpdir: Path
 ) -> None:
     req_path = wheel.make_wheel(name="Normalizable_Name", version="1.0").save_to_dir(
         tmpdir
     )
-    script.pip("install", "--no-index", req_path)
-    result = script.pip("list")
+    script.cpip("install", "--no-index", req_path)
+    result = script.cpip("list")
     print(result.stdout)
     assert "Normalizable_Name" in result.stdout
-    assert "core-pip" in result.stdout
-    result = script.pip("list", "--exclude", "normalizablE-namE", "--exclude", "pIp")
+    assert "cpip" in result.stdout
+    result = script.cpip("list", "--exclude", "normalizablE-namE", "--exclude", "pIp")
     assert "Normalizable_Name" not in result.stdout
-    assert "core-pip" not in result.stdout
+    assert "cpip" not in result.stdout
 
 
 @pytest.mark.usefixtures("enable_user_site")
-def test_user_flag(script: PipTestEnvironment, data: TestData) -> None:
+def test_user_flag(script: CpipTestEnvironment, data: TestData) -> None:
     """
     Test the behavior of --user flag in the list command
 
     """
-    script.pip_install_local("simplewheel==1.0")
-    script.pip_install_local("--user", "simple.dist==0.1")
-    result = script.pip("list", "--user", "--format=json")
+    script.cpip_install_local("simplewheel==1.0")
+    script.cpip_install_local("--user", "simple.dist==0.1")
+    result = script.cpip("list", "--user", "--format=json")
     assert {"name": "simplewheel", "version": "1.0"} not in json.loads(result.stdout)
     assert {"name": "simple.dist", "version": "0.1"} in json.loads(result.stdout)
 
 
 @pytest.mark.usefixtures("enable_user_site")
-def test_user_columns_flag(script: PipTestEnvironment, data: TestData) -> None:
+def test_user_columns_flag(script: CpipTestEnvironment, data: TestData) -> None:
     """
     Test the behavior of --user --format=columns flags in the list command
 
     """
-    script.pip_install_local("simplewheel==1.0")
-    script.pip_install_local("--user", "simple.dist==0.1")
-    result = script.pip("list", "--user", "--format=columns")
+    script.cpip_install_local("simplewheel==1.0")
+    script.cpip_install_local("--user", "simple.dist==0.1")
+    result = script.cpip("list", "--user", "--format=columns")
     assert "Package" in result.stdout
     assert "Version" in result.stdout
     assert "simple.dist (2.0)" not in result.stdout
@@ -158,12 +158,12 @@ def test_user_columns_flag(script: PipTestEnvironment, data: TestData) -> None:
 
 
 @pytest.mark.network
-def test_uptodate_flag(script: PipTestEnvironment, data: TestData) -> None:
+def test_uptodate_flag(script: CpipTestEnvironment, data: TestData) -> None:
     """
     Test the behavior of --uptodate flag in the list command
 
     """
-    script.pip(
+    script.cpip(
         "install",
         "--no-build-isolation",
         "-f",
@@ -172,12 +172,12 @@ def test_uptodate_flag(script: PipTestEnvironment, data: TestData) -> None:
         "simple==1.0",
         "simple2==3.0",
     )
-    script.pip(
+    script.cpip(
         "install",
         "-e",
         "git+https://github.com/pypa/pip-test-package.git#egg=pip-test-package",
     )
-    result = script.pip(
+    result = script.cpip(
         "list",
         "-f",
         data.find_links,
@@ -199,12 +199,12 @@ def test_uptodate_flag(script: PipTestEnvironment, data: TestData) -> None:
 
 
 @pytest.mark.network
-def test_uptodate_columns_flag(script: PipTestEnvironment, data: TestData) -> None:
+def test_uptodate_columns_flag(script: CpipTestEnvironment, data: TestData) -> None:
     """
     Test the behavior of --uptodate --format=columns flag in the list command
 
     """
-    script.pip(
+    script.cpip(
         "install",
         "--no-build-isolation",
         "-f",
@@ -213,12 +213,12 @@ def test_uptodate_columns_flag(script: PipTestEnvironment, data: TestData) -> No
         "simple==1.0",
         "simple2==3.0",
     )
-    script.pip(
+    script.cpip(
         "install",
         "-e",
         "git+https://github.com/pypa/pip-test-package.git#egg=pip-test-package",
     )
-    result = script.pip(
+    result = script.cpip(
         "list",
         "-f",
         data.find_links,
@@ -235,12 +235,12 @@ def test_uptodate_columns_flag(script: PipTestEnvironment, data: TestData) -> No
 
 
 @pytest.mark.network
-def test_outdated_flag(script: PipTestEnvironment, data: TestData) -> None:
+def test_outdated_flag(script: CpipTestEnvironment, data: TestData) -> None:
     """
     Test the behavior of --outdated flag in the list command
 
     """
-    script.pip(
+    script.cpip(
         "install",
         "--no-build-isolation",
         "-f",
@@ -250,12 +250,12 @@ def test_outdated_flag(script: PipTestEnvironment, data: TestData) -> None:
         "simple2==3.0",
         "simplewheel==1.0",
     )
-    script.pip(
+    script.cpip(
         "install",
         "-e",
         "git+https://github.com/pypa/pip-test-package.git@0.1#egg=pip-test-package",
     )
-    result = script.pip(
+    result = script.cpip(
         "list",
         "-f",
         data.find_links,
@@ -290,12 +290,12 @@ def test_outdated_flag(script: PipTestEnvironment, data: TestData) -> None:
 
 
 @pytest.mark.network
-def test_outdated_columns_flag(script: PipTestEnvironment, data: TestData) -> None:
+def test_outdated_columns_flag(script: CpipTestEnvironment, data: TestData) -> None:
     """
     Test the behavior of --outdated --format=columns flag in the list command
 
     """
-    script.pip(
+    script.cpip(
         "install",
         "--no-build-isolation",
         "-f",
@@ -305,12 +305,12 @@ def test_outdated_columns_flag(script: PipTestEnvironment, data: TestData) -> No
         "simple2==3.0",
         "simplewheel==1.0",
     )
-    script.pip(
+    script.cpip(
         "install",
         "-e",
         "git+https://github.com/pypa/pip-test-package.git@0.1#egg=pip-test-package",
     )
-    result = script.pip(
+    result = script.cpip(
         "list",
         "-f",
         data.find_links,
@@ -330,14 +330,14 @@ def test_outdated_columns_flag(script: PipTestEnvironment, data: TestData) -> No
 
 
 @pytest.fixture(scope="session")
-def pip_test_package_script(
+def cpip_test_package_script(
     tmpdir_factory: pytest.TempPathFactory,
     script_factory: ScriptFactory,
     shared_data: TestData,
-) -> PipTestEnvironment:
-    tmpdir = tmpdir_factory.mktemp("pip_test_package")
+) -> CpipTestEnvironment:
+    tmpdir = tmpdir_factory.mktemp("cpip_test_package")
     script = script_factory(tmpdir.joinpath("workspace"))
-    script.pip(
+    script.cpip(
         "install",
         "--no-build-isolation",
         "-f",
@@ -345,7 +345,7 @@ def pip_test_package_script(
         "--no-index",
         "simple==1.0",
     )
-    script.pip(
+    script.cpip(
         "install",
         "--no-build-isolation",
         "-e",
@@ -355,32 +355,34 @@ def pip_test_package_script(
 
 
 @pytest.mark.network
-def test_editables_flag(pip_test_package_script: PipTestEnvironment) -> None:
+def test_editables_flag(cpip_test_package_script: CpipTestEnvironment) -> None:
     """
     Test the behavior of --editables flag in the list command
     """
-    result = pip_test_package_script.pip("list", "--editable", "--format=json")
-    result2 = pip_test_package_script.pip("list", "--editable")
+    result = cpip_test_package_script.cpip("list", "--editable", "--format=json")
+    result2 = cpip_test_package_script.cpip("list", "--editable")
     assert {"name": "simple", "version": "1.0"} not in json.loads(result.stdout)
     assert os.path.join("src", "pip-test-package") in result2.stdout
 
 
 @pytest.mark.network
-def test_exclude_editable_flag(pip_test_package_script: PipTestEnvironment) -> None:
+def test_exclude_editable_flag(cpip_test_package_script: CpipTestEnvironment) -> None:
     """
     Test the behavior of --editables flag in the list command
     """
-    result = pip_test_package_script.pip("list", "--exclude-editable", "--format=json")
+    result = cpip_test_package_script.cpip(
+        "list", "--exclude-editable", "--format=json"
+    )
     assert {"name": "simple", "version": "1.0"} in json.loads(result.stdout)
     assert "pip-test-package" not in {p["name"] for p in json.loads(result.stdout)}
 
 
 @pytest.mark.network
-def test_editables_columns_flag(pip_test_package_script: PipTestEnvironment) -> None:
+def test_editables_columns_flag(cpip_test_package_script: CpipTestEnvironment) -> None:
     """
     Test the behavior of --editables flag in the list command
     """
-    result = pip_test_package_script.pip("list", "--editable", "--format=columns")
+    result = cpip_test_package_script.cpip("list", "--editable", "--format=columns")
     assert "Package" in result.stdout
     assert "Version" in result.stdout
     assert "Editable project location" in result.stdout
@@ -389,12 +391,12 @@ def test_editables_columns_flag(pip_test_package_script: PipTestEnvironment) -> 
 
 @pytest.mark.network
 def test_uptodate_editables_flag(
-    pip_test_package_script: PipTestEnvironment, data: TestData
+    cpip_test_package_script: CpipTestEnvironment, data: TestData
 ) -> None:
     """
     test the behavior of --editable --uptodate flag in the list command
     """
-    result = pip_test_package_script.pip(
+    result = cpip_test_package_script.cpip(
         "list",
         "-f",
         data.find_links,
@@ -408,13 +410,13 @@ def test_uptodate_editables_flag(
 
 @pytest.mark.network
 def test_uptodate_editables_columns_flag(
-    pip_test_package_script: PipTestEnvironment, data: TestData
+    cpip_test_package_script: CpipTestEnvironment, data: TestData
 ) -> None:
     """
     test the behavior of --editable --uptodate --format=columns flag in the
     list command
     """
-    result = pip_test_package_script.pip(
+    result = cpip_test_package_script.cpip(
         "list",
         "-f",
         data.find_links,
@@ -430,11 +432,11 @@ def test_uptodate_editables_columns_flag(
 
 
 @pytest.mark.network
-def test_outdated_editables_flag(script: PipTestEnvironment, data: TestData) -> None:
+def test_outdated_editables_flag(script: CpipTestEnvironment, data: TestData) -> None:
     """
     test the behavior of --editable --outdated flag in the list command
     """
-    script.pip(
+    script.cpip(
         "install",
         "--no-build-isolation",
         "-f",
@@ -442,13 +444,13 @@ def test_outdated_editables_flag(script: PipTestEnvironment, data: TestData) -> 
         "--no-index",
         "simple==1.0",
     )
-    result = script.pip(
+    result = script.cpip(
         "install",
         "--no-build-isolation",
         "-e",
         "git+https://github.com/pypa/pip-test-package.git@0.1#egg=pip-test-package",
     )
-    result = script.pip(
+    result = script.cpip(
         "list",
         "-f",
         data.find_links,
@@ -462,12 +464,12 @@ def test_outdated_editables_flag(script: PipTestEnvironment, data: TestData) -> 
 
 @pytest.mark.network
 def test_outdated_editables_columns_flag(
-    script: PipTestEnvironment, data: TestData
+    script: CpipTestEnvironment, data: TestData
 ) -> None:
     """
     test the behavior of --editable --outdated flag in the list command
     """
-    script.pip(
+    script.cpip(
         "install",
         "--no-build-isolation",
         "-f",
@@ -475,13 +477,13 @@ def test_outdated_editables_columns_flag(
         "--no-index",
         "simple==1.0",
     )
-    result = script.pip(
+    result = script.cpip(
         "install",
         "--no-build-isolation",
         "-e",
         "git+https://github.com/pypa/pip-test-package.git@0.1#egg=pip-test-package",
     )
-    result = script.pip(
+    result = script.cpip(
         "list",
         "-f",
         data.find_links,
@@ -496,11 +498,13 @@ def test_outdated_editables_columns_flag(
     assert os.path.join("src", "pip-test-package") in result.stdout, str(result)
 
 
-def test_outdated_not_required_flag(script: PipTestEnvironment, data: TestData) -> None:
+def test_outdated_not_required_flag(
+    script: CpipTestEnvironment, data: TestData
+) -> None:
     """
     test the behavior of --outdated --not-required flag in the list command
     """
-    script.pip(
+    script.cpip(
         "install",
         "--no-build-isolation",
         "-f",
@@ -509,7 +513,7 @@ def test_outdated_not_required_flag(script: PipTestEnvironment, data: TestData) 
         "simple==2.0",
         "require_simple==1.0",
     )
-    result = script.pip(
+    result = script.cpip(
         "list",
         "-f",
         data.find_links,
@@ -521,8 +525,8 @@ def test_outdated_not_required_flag(script: PipTestEnvironment, data: TestData) 
     assert [] == json.loads(result.stdout)
 
 
-def test_outdated_pre(script: PipTestEnvironment, data: TestData) -> None:
-    script.pip(
+def test_outdated_pre(script: CpipTestEnvironment, data: TestData) -> None:
+    script.cpip(
         "install",
         "--no-build-isolation",
         "-f",
@@ -536,7 +540,7 @@ def test_outdated_pre(script: PipTestEnvironment, data: TestData) -> None:
     wheelhouse_path = script.scratch_path / "wheelhouse"
     wheelhouse_path.joinpath("simple-1.1-py2.py3-none-any.whl").write_text("")
     wheelhouse_path.joinpath("simple-2.0.dev0-py2.py3-none-any.whl").write_text("")
-    result = script.pip(
+    result = script.cpip(
         "list",
         "--no-index",
         "--find-links",
@@ -544,7 +548,7 @@ def test_outdated_pre(script: PipTestEnvironment, data: TestData) -> None:
         "--format=json",
     )
     assert {"name": "simple", "version": "1.0"} in json.loads(result.stdout)
-    result = script.pip(
+    result = script.cpip(
         "list",
         "--no-index",
         "--find-links",
@@ -558,7 +562,7 @@ def test_outdated_pre(script: PipTestEnvironment, data: TestData) -> None:
         "latest_version": "1.1",
         "latest_filetype": "wheel",
     } in json.loads(result.stdout)
-    result_pre = script.pip(
+    result_pre = script.cpip(
         "list",
         "--no-index",
         "--find-links",
@@ -575,9 +579,9 @@ def test_outdated_pre(script: PipTestEnvironment, data: TestData) -> None:
     } in json.loads(result_pre.stdout)
 
 
-def test_outdated_formats(script: PipTestEnvironment, data: TestData) -> None:
+def test_outdated_formats(script: CpipTestEnvironment, data: TestData) -> None:
     """Test of different outdated formats"""
-    script.pip(
+    script.cpip(
         "install",
         "--no-build-isolation",
         "-f",
@@ -590,7 +594,7 @@ def test_outdated_formats(script: PipTestEnvironment, data: TestData) -> None:
     script.scratch_path.joinpath("wheelhouse").mkdir()
     wheelhouse_path = script.scratch_path / "wheelhouse"
     wheelhouse_path.joinpath("simple-1.1-py2.py3-none-any.whl").write_text("")
-    result = script.pip(
+    result = script.cpip(
         "list",
         "--no-index",
         "--find-links",
@@ -600,7 +604,7 @@ def test_outdated_formats(script: PipTestEnvironment, data: TestData) -> None:
     assert "simple==1.0" in result.stdout
 
     # Check columns
-    result = script.pip(
+    result = script.cpip(
         "list",
         "--no-index",
         "--find-links",
@@ -612,7 +616,7 @@ def test_outdated_formats(script: PipTestEnvironment, data: TestData) -> None:
     assert "simple  1.0     1.1    wheel" in result.stdout
 
     # Check that freeze is not allowed
-    result = script.pip(
+    result = script.cpip(
         "list",
         "--no-index",
         "--find-links",
@@ -627,7 +631,7 @@ def test_outdated_formats(script: PipTestEnvironment, data: TestData) -> None:
     )
 
     # Check json
-    result = script.pip(
+    result = script.cpip(
         "list",
         "--no-index",
         "--find-links",
@@ -645,8 +649,8 @@ def test_outdated_formats(script: PipTestEnvironment, data: TestData) -> None:
     ]
 
 
-def test_not_required_flag(script: PipTestEnvironment, data: TestData) -> None:
-    script.pip(
+def test_not_required_flag(script: CpipTestEnvironment, data: TestData) -> None:
+    script.cpip(
         "install",
         "--no-build-isolation",
         "-f",
@@ -654,7 +658,7 @@ def test_not_required_flag(script: PipTestEnvironment, data: TestData) -> None:
         "--no-index",
         "TopoRequires4",
     )
-    result = script.pip("list", "--not-required", expect_stderr=True)
+    result = script.cpip("list", "--not-required", expect_stderr=True)
     assert "TopoRequires4 " in result.stdout, str(result)
     assert "TopoRequires " not in result.stdout
     assert "TopoRequires2 " not in result.stdout
@@ -662,9 +666,9 @@ def test_not_required_flag(script: PipTestEnvironment, data: TestData) -> None:
 
 
 def test_not_required_with_exclude_does_not_list_dependencies(
-    script: PipTestEnvironment, data: TestData
+    script: CpipTestEnvironment, data: TestData
 ) -> None:
-    script.pip(
+    script.cpip(
         "install",
         "--no-build-isolation",
         "-f",
@@ -673,7 +677,7 @@ def test_not_required_with_exclude_does_not_list_dependencies(
         "TopoRequires4",
     )
 
-    result = script.pip(
+    result = script.cpip(
         "list",
         "--not-required",
         "--exclude",
@@ -687,63 +691,63 @@ def test_not_required_with_exclude_does_not_list_dependencies(
     assert not listed_dependencies
 
 
-def test_list_freeze(simple_script: PipTestEnvironment) -> None:
+def test_list_freeze(simple_script: CpipTestEnvironment) -> None:
     """
     Test freeze formatting of list command
 
     """
-    result = simple_script.pip("list", "--format=freeze")
+    result = simple_script.cpip("list", "--format=freeze")
     assert "simple==1.0" in result.stdout, str(result)
     assert "simple2==3.0" in result.stdout, str(result)
 
 
-def test_list_json(simple_script: PipTestEnvironment) -> None:
+def test_list_json(simple_script: CpipTestEnvironment) -> None:
     """
     Test json formatting of list command
 
     """
-    result = simple_script.pip("list", "--format=json")
+    result = simple_script.cpip("list", "--format=json")
     data = json.loads(result.stdout)
     assert {"name": "simple", "version": "1.0"} in data
     assert {"name": "simple2", "version": "3.0"} in data
 
 
-def test_list_path(tmpdir: Path, script: PipTestEnvironment, data: TestData) -> None:
+def test_list_path(tmpdir: Path, script: CpipTestEnvironment, data: TestData) -> None:
     """
     Test list with --path.
     """
-    result = script.pip("list", "--path", tmpdir, "--format=json")
+    result = script.cpip("list", "--path", tmpdir, "--format=json")
     json_result = json.loads(result.stdout)
     assert {"name": "simple", "version": "2.0"} not in json_result
 
-    script.pip_install_local("--target", tmpdir, "simple==2.0")
-    result = script.pip("list", "--path", tmpdir, "--format=json")
+    script.cpip_install_local("--target", tmpdir, "simple==2.0")
+    result = script.cpip("list", "--path", tmpdir, "--format=json")
     json_result = json.loads(result.stdout)
     assert {"name": "simple", "version": "2.0"} in json_result
 
 
 @pytest.mark.usefixtures("enable_user_site")
 def test_list_path_exclude_user(
-    tmpdir: Path, script: PipTestEnvironment, data: TestData
+    tmpdir: Path, script: CpipTestEnvironment, data: TestData
 ) -> None:
     """
     Test list with --path and make sure packages from --user are not picked
     up.
     """
-    script.pip_install_local("--user", "simple2")
-    script.pip_install_local("--target", tmpdir, "simple==1.0")
+    script.cpip_install_local("--user", "simple2")
+    script.cpip_install_local("--target", tmpdir, "simple==1.0")
 
-    result = script.pip("list", "--user", "--format=json")
+    result = script.cpip("list", "--user", "--format=json")
     json_result = json.loads(result.stdout)
     assert {"name": "simple2", "version": "3.0"} in json_result
 
-    result = script.pip("list", "--path", tmpdir, "--format=json")
+    result = script.cpip("list", "--path", tmpdir, "--format=json")
     json_result = json.loads(result.stdout)
     assert {"name": "simple", "version": "1.0"} in json_result
 
 
 def test_list_path_multiple(
-    tmpdir: Path, script: PipTestEnvironment, data: TestData
+    tmpdir: Path, script: CpipTestEnvironment, data: TestData
 ) -> None:
     """
     Test list with multiple --path arguments.
@@ -753,20 +757,20 @@ def test_list_path_multiple(
     path2 = tmpdir / "path2"
     os.mkdir(path2)
 
-    script.pip_install_local("--target", path1, "simple==2.0")
-    script.pip_install_local("--target", path2, "simple2==3.0")
+    script.cpip_install_local("--target", path1, "simple==2.0")
+    script.cpip_install_local("--target", path2, "simple2==3.0")
 
-    result = script.pip("list", "--path", path1, "--format=json")
+    result = script.cpip("list", "--path", path1, "--format=json")
     json_result = json.loads(result.stdout)
     assert {"name": "simple", "version": "2.0"} in json_result
 
-    result = script.pip("list", "--path", path1, "--path", path2, "--format=json")
+    result = script.cpip("list", "--path", path1, "--path", path2, "--format=json")
     json_result = json.loads(result.stdout)
     assert {"name": "simple", "version": "2.0"} in json_result
     assert {"name": "simple2", "version": "3.0"} in json_result
 
 
-def test_list_skip_work_dir_pkg(script: PipTestEnvironment) -> None:
+def test_list_skip_work_dir_pkg(script: CpipTestEnvironment) -> None:
     """
     Test that list should not include package in working directory
     """
@@ -776,12 +780,12 @@ def test_list_skip_work_dir_pkg(script: PipTestEnvironment) -> None:
     script.run("python", "setup.py", "egg_info", expect_stderr=True, cwd=pkg_path)
 
     # List should not include package simple when run from package directory
-    result = script.pip("list", "--format=json", cwd=pkg_path)
+    result = script.cpip("list", "--format=json", cwd=pkg_path)
     json_result = json.loads(result.stdout)
     assert {"name": "simple", "version": "1.0"} not in json_result
 
 
-def test_list_include_work_dir_pkg(script: PipTestEnvironment) -> None:
+def test_list_include_work_dir_pkg(script: CpipTestEnvironment) -> None:
     """
     Test that list should include package in working directory
     if working directory is added in PYTHONPATH
@@ -795,18 +799,18 @@ def test_list_include_work_dir_pkg(script: PipTestEnvironment) -> None:
 
     # List should include package simple when run from package directory
     # when the package directory is in PYTHONPATH
-    result = script.pip("list", "--format=json", cwd=pkg_path)
+    result = script.cpip("list", "--format=json", cwd=pkg_path)
     json_result = json.loads(result.stdout)
     assert {"name": "simple", "version": "1.0"} in json_result
 
 
-def test_list_pep610_editable(script: PipTestEnvironment) -> None:
+def test_list_pep610_editable(script: CpipTestEnvironment) -> None:
     """
     Test that a package installed with a direct_url.json with editable=true
     is correctly listed as editable.
     """
     pkg_path = create_test_package(script.scratch_path, name="testpkg")
-    result = script.pip("install", "--no-build-isolation", pkg_path)
+    result = script.cpip("install", "--no-build-isolation", pkg_path)
     direct_url_path = result.get_created_direct_url_path("testpkg")
     assert direct_url_path
     # patch direct_url.json to simulate an editable install
@@ -816,33 +820,33 @@ def test_list_pep610_editable(script: PipTestEnvironment) -> None:
     direct_url_dict["dir_info"]["editable"] = True
     with open(direct_url_path, "w") as f:
         json.dump(direct_url_dict, f)
-    result = script.pip("list", "--format=json")
+    result = script.cpip("list", "--format=json")
     for item in json.loads(result.stdout):
         if item["name"] == "testpkg":
             assert item["editable_project_location"]
             break
     else:
-        pytest.fail("package 'testpkg' not found in pip list result")
+        pytest.fail("package 'testpkg' not found in cpip list result")
 
 
-def test_list_wheel_build(script: PipTestEnvironment) -> None:
+def test_list_wheel_build(script: CpipTestEnvironment) -> None:
     package = make_wheel(
         name="package",
         version="3.0",
         wheel_metadata_updates={"Build": "123"},
     ).save_to_dir(script.scratch_path)
-    script.pip("install", package, "--no-index")
+    script.cpip("install", package, "--no-index")
 
-    result = script.pip("list")
+    result = script.cpip("list")
     assert "Build" in result.stdout, str(result)
     assert "123" in result.stdout, str(result)
 
 
 def test_outdated_only_final_for_specific_package(
-    script: PipTestEnvironment, data: TestData
+    script: CpipTestEnvironment, data: TestData
 ) -> None:
     """Test that --only-final filters prereleases for specific package."""
-    script.pip_install_local("simple==1.0")
+    script.cpip_install_local("simple==1.0")
 
     # Create fake wheelhouse with prerelease
     wheelhouse_path = script.scratch_path / "wheelhouse"
@@ -851,7 +855,7 @@ def test_outdated_only_final_for_specific_package(
     make_wheel("simple", "2.0a1").save_to_dir(wheelhouse_path)
 
     # Without --only-final, should show 1.1 (highest stable)
-    result = script.pip(
+    result = script.cpip(
         "list",
         "--no-index",
         "--find-links",
@@ -865,7 +869,7 @@ def test_outdated_only_final_for_specific_package(
     assert outdated[0]["latest_version"] == "1.1"
 
     # With --only-final for simple, should still show 1.1
-    result = script.pip(
+    result = script.cpip(
         "list",
         "--no-index",
         "--find-links",
@@ -881,10 +885,10 @@ def test_outdated_only_final_for_specific_package(
 
 
 def test_outdated_all_releases_for_specific_package(
-    script: PipTestEnvironment, data: TestData
+    script: CpipTestEnvironment, data: TestData
 ) -> None:
     """Test that --all-releases allows prereleases for specific package."""
-    script.pip_install_local("simple==1.0")
+    script.cpip_install_local("simple==1.0")
 
     # Create fake wheelhouse with prerelease
     wheelhouse_path = script.scratch_path / "wheelhouse"
@@ -893,7 +897,7 @@ def test_outdated_all_releases_for_specific_package(
     make_wheel("simple", "2.0a1").save_to_dir(wheelhouse_path)
 
     # With --all-releases for simple, should show 2.0a1 (highest including prereleases)
-    result = script.pip(
+    result = script.cpip(
         "list",
         "--no-index",
         "--find-links",

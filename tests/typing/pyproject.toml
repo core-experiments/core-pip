@@ -1,7 +1,7 @@
-# Mypy configuration for pip type checking
+# Mypy configuration for cpip type checking
 #
 # This configuration is used by `nox -s typecheck` and represents the target
-# mypy configuration once the pip codebase has proper type annotations.
+# mypy configuration once the cpip codebase has proper type annotations.
 # Eventually, this configuration should be moved to the main pyproject.toml
 # to replace the current [tool.mypy] section.
 

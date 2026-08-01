@@ -6,12 +6,16 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from pip.core.errors import InstallationError
-from pip.core.metadata import default_lib_path
-from pip.install.requirements import RequirementInstaller
-from pip.install.target import InstallTarget
-from pip.install.wheel_transaction import (
+from cpip.build.metadata import InstalledDistributionStore
+from cpip.core.errors import InstallationError
+from cpip.core.metadata import default_lib_path
+from cpip.core.wheel import wheel_candidate
+from cpip.install.requirements import RequirementInstaller
+from cpip.install.target import InstallTarget
+from cpip.install.transaction import InstallTransaction
+from cpip.install.wheel_transaction import (
     WheelInstaller,
+    install_wheels_transactionally,
 )
 
 
@@ -76,7 +80,28 @@ def make_wheel_internal(
     return wheel
 
 
-def test_install_and_uninstall_are_owned_by_pip_install(tmp_path: Path) -> None:
+def test_installed_distribution_store_can_filter_names(tmp_path: Path) -> None:
+    wanted = tmp_path / "wanted-1.0.dist-info"
+    wanted.mkdir()
+    (wanted / "METADATA").write_text(
+        "Metadata-Version: 2.1\nName: wanted\nVersion: 1.0\n"
+    )
+    (wanted / "RECORD").write_text("")
+    unrelated = tmp_path / "unrelated-1.0.dist-info"
+    unrelated.mkdir()
+    (unrelated / "METADATA").write_text(
+        "Metadata-Version: 2.1\nName: unrelated\nVersion: 1.0\n"
+    )
+    (unrelated / "RECORD").write_text("")
+
+    distributions = InstalledDistributionStore(paths=[str(tmp_path)]).iter(
+        names={"Wanted"}
+    )
+
+    assert [distribution.canonical_name for distribution in distributions] == ["wanted"]
+
+
+def test_install_and_uninstall_are_owned_by_cpip_install(tmp_path: Path) -> None:
     wheel = make_wheel_internal(tmp_path)
     target = tmp_path / "site-packages"
 
@@ -85,7 +110,7 @@ def test_install_and_uninstall_are_owned_by_pip_install(tmp_path: Path) -> None:
     assert candidate.name == "owner-demo"
     assert target.joinpath("owner_demo", "__init__.py").read_text() == "VALUE = '1.0'\n"
     assert (
-        target.joinpath("owner_demo-1.0.dist-info", "INSTALLER").read_text() == "pip\n"
+        target.joinpath("owner_demo-1.0.dist-info", "INSTALLER").read_text() == "cpip\n"
     )
     assert RequirementInstaller().uninstall("owner-demo", paths=[str(target)])
     assert not target.joinpath("owner_demo").exists()
@@ -237,6 +262,120 @@ def test_install_upgrade_uninstalls_previous_version(tmp_path: Path) -> None:
     assert not (target / "owner_demo-1.0.dist-info").exists()
     assert (target / "owner_demo-2.0.dist-info").exists()
     assert (target / "owner_demo" / "__init__.py").read_text() == "VALUE = '2.0'\n"
+
+
+def test_batch_install_rolls_back_when_destinations_overlap(tmp_path: Path) -> None:
+    wheel = make_wheel_internal(tmp_path)
+    target = tmp_path / "target"
+
+    with pytest.raises(InstallationError, match="duplicate installation destination"):
+        install_wheels_transactionally(
+            [
+                (wheel, True, None),
+                (wheel, False, None),
+                (wheel, False, None),
+                (wheel, False, None),
+            ],
+            target=InstallTarget.from_options("owner-demo", target=str(target)),
+            pycompile=False,
+            lookup_existing=False,
+        )
+
+    assert not target.exists()
+
+
+def test_large_fresh_batch_writes_without_staging(tmp_path: Path, monkeypatch) -> None:
+    wheel = make_wheel_internal(
+        tmp_path,
+        extra_files={
+            f"owner_demo/{index}.bin": "x" * (128 * 1024) for index in range(40)
+        },
+    )
+    target = tmp_path / "target"
+    target.mkdir()
+    (target / ".existing").touch()
+    with zipfile.ZipFile(wheel) as archive:
+        candidate = wheel_candidate(
+            wheel,
+            archive=archive,
+            dist_info_dir="owner_demo-1.0.dist-info",
+        )
+
+    def fail_commit(*args: object, **kwargs: object) -> None:
+        raise AssertionError("direct fresh installation should not commit staged files")
+
+    monkeypatch.setattr(InstallTransaction, "commit", fail_commit)
+    install_wheels_transactionally(
+        [(wheel, True, None)],
+        target=InstallTarget.from_options("owner-demo", target=str(target)),
+        pycompile=False,
+        lookup_existing=False,
+        candidates=[candidate],
+    )
+
+    assert (target / ".existing").exists()
+    assert (target / "owner_demo" / "0.bin").read_text() == "x" * (128 * 1024)
+
+
+def test_direct_batch_rolls_back_final_writes_on_later_failure(
+    tmp_path: Path, monkeypatch
+) -> None:
+    wheel = make_wheel_internal(
+        tmp_path,
+        extra_files={
+            f"owner_demo/{index}.bin": "x" * (128 * 1024) for index in range(40)
+        },
+    )
+    other = tmp_path / "other_demo-1.0-py3-none-any.whl"
+    with zipfile.ZipFile(other, "w") as archive:
+        archive.writestr(
+            "other_demo-1.0.dist-info/METADATA",
+            "Metadata-Version: 2.1\nName: other-demo\nVersion: 1.0\n",
+        )
+        archive.writestr(
+            "other_demo-1.0.dist-info/WHEEL",
+            "Wheel-Version: 1.0\nRoot-Is-Purelib: true\nTag: py3-none-any\n",
+        )
+        archive.writestr("other_demo/__init__.py", "\n")
+        archive.writestr("other_demo-1.0.dist-info/RECORD", "")
+    with zipfile.ZipFile(wheel) as archive:
+        first = wheel_candidate(
+            wheel,
+            archive=archive,
+            dist_info_dir="owner_demo-1.0.dist-info",
+        )
+    with zipfile.ZipFile(other) as archive:
+        second = wheel_candidate(
+            other,
+            archive=archive,
+            dist_info_dir="other_demo-1.0.dist-info",
+        )
+    target = tmp_path / "target"
+    target.mkdir()
+    (target / ".existing").touch()
+    original_install = WheelInstaller.install
+    calls = 0
+
+    def fail_second(self, path, *args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise RuntimeError("injected direct-install failure")
+        return original_install(self, path, *args, **kwargs)
+
+    monkeypatch.setattr(WheelInstaller, "install", fail_second)
+    with pytest.raises(RuntimeError, match="injected direct-install failure"):
+        install_wheels_transactionally(
+            [(wheel, True, None), (other, False, None)],
+            target=InstallTarget.from_options("owner-demo", target=str(target)),
+            pycompile=False,
+            lookup_existing=False,
+            candidates=[first, second],
+        )
+
+    assert (target / ".existing").exists()
+    assert list(target.rglob("*.bin")) == []
+    assert not (target / "owner_demo-1.0.dist-info" / "INSTALLER").exists()
 
 
 def test_install_rejects_wheel_member_path_traversal(tmp_path: Path) -> None:

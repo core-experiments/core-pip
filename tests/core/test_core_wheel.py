@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import platform
+import sys
 import zipfile
 from pathlib import Path
 
 import pytest
-from pip.core.errors import InstallationError
-from pip.core.wheel import (
+from cpip.core.errors import InstallationError
+from cpip.core.python import CURRENT_PYTHON_VERSION_DIGITS
+from cpip.core.wheel import (
     TargetContext,
     WheelTag,
     parse_wheel_file,
@@ -138,6 +141,18 @@ def test_parse_wheel_filename_rejects_invalid_oracle(filename: str) -> None:
     assert parse_wheel_filename(filename) is None
 
 
+def test_current_macos_accepts_newer_arm64_wheel() -> None:
+    if sys.platform != "darwin" or platform.machine() != "arm64":
+        pytest.skip("macOS arm64 wheel compatibility test")
+    wheel = parse_wheel_file(
+        "demo-1.0-cp"
+        f"{CURRENT_PYTHON_VERSION_DIGITS}-cp{CURRENT_PYTHON_VERSION_DIGITS}"
+        "-macosx_12_0_arm64.whl"
+    )
+    assert wheel is not None
+    assert wheel_tag_rank(wheel.tags) is not None
+
+
 def test_wheel_candidate_rejects_invalid_filename_oracle(tmp_path: Path) -> None:
     wheel = tmp_path / "invalid.whl"
     wheel.write_bytes(b"not a wheel")
@@ -166,7 +181,7 @@ def test_wheel_candidate_reuses_metadata_across_extras(
         )
     base = wheel_candidate(wheel)
     monkeypatch.setattr(
-        "pip.core.wheel.read_wheel_metadata_internal",
+        "cpip.core.wheel.read_wheel_metadata_internal",
         lambda *args_internal, **kwargs_internal: pytest.fail("metadata was reparsed"),
     )
 

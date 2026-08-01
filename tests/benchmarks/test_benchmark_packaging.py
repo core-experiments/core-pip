@@ -13,7 +13,7 @@ from benchmark_support import (
     version_strings,
 )
 from pytest_codspeed import BenchmarkFixture
-from pip.core.packaging import (
+from cpip.core.packaging import (
     SpecifierSet,
     Version,
     canonicalize_name,
