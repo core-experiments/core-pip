@@ -114,9 +114,7 @@ class Resolver(
         self.provider.compute_source_hashes = require_hashes
         self.upgrade_strategy = upgrade_strategy
         self.ignore_requires_python = ignore_requires_python
-        self.python_version = python_version or ".".join(
-            CURRENT_PYTHON_VERSION_FULL
-        )
+        self.python_version = python_version or ".".join(CURRENT_PYTHON_VERSION_FULL)
         self.root_requirements: list[Requirement] = []
         self.root_requirement_names: set[str] = set()
         self.conflicts: list[str] = []

@@ -46,6 +46,8 @@ if TYPE_CHECKING:
 SMALL_WHEEL_SIZE = 64 * 1024
 SPECIFIER_OPERATORS = ("===", "==", "!=", "~=", "<=", ">=", "<", ">")
 MARKER_OPERATORS = ("not in", "==", "!=", "in")
+
+
 def cached_candidate_parts(cached: CachedMetadata) -> CachedCandidateParts | None:
     name, version_text, cached_dependencies, provided_extras, requires_python = cached
     version = parse_version(version_text)
@@ -277,10 +279,7 @@ def parse_wheel_filename(filename: str) -> tuple[str, LocalWheelVersion] | None:
         and python_tags != CURRENT_PYTHON_FULL_TAG
     ):
         tags = python_tags.split(".")
-        if (
-            CURRENT_PYTHON_MAJOR_TAG not in tags
-            and CURRENT_PYTHON_FULL_TAG not in tags
-        ):
+        if CURRENT_PYTHON_MAJOR_TAG not in tags and CURRENT_PYTHON_FULL_TAG not in tags:
             return None
     parsed = parse_version(version)
     return (canonicalize_name(name), parsed) if parsed else None

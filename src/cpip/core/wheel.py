@@ -379,9 +379,7 @@ def supported_wheel_tags(target: TargetContext | None = None) -> tuple[WheelTag,
         platform_tags = (current_platform_tag(),)
         abi_tags = ()
     else:
-        version = (
-            target.python_version or CURRENT_PYTHON_VERSION_DIGITS
-        )
+        version = target.python_version or CURRENT_PYTHON_VERSION_DIGITS
         version_digits = version.replace(".", "")
         implementation = target.implementation or "cp"
         platform_tags = target.platforms or (current_platform_tag(),)
