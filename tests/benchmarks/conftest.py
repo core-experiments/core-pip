@@ -18,6 +18,9 @@ from benchmark_support import (
     requirement_lines,
     make_source_tree,
     make_isolated_source_tree,
+    make_failing_source_tree,
+    make_stress_graph,
+    make_wrong_package_graph,
 )
 
 
@@ -42,6 +45,23 @@ def graph_wheelhouse(tmp_path_factory: pytest.TempPathFactory) -> Path:
 def backtracking_wheelhouse(tmp_path_factory: pytest.TempPathFactory) -> Path:
     wheelhouse = tmp_path_factory.mktemp("backtracking-wheelhouse")
     make_backtracking_graph(wheelhouse)
+    return wheelhouse
+
+
+@pytest.fixture(scope="session")
+def wrong_package_wheelhouses(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
+    cases = {}
+    for name in ("boto3-urllib3", "numpy-numba", "sentry-rapidjson", "starlette-fastapi", "apache-beam-dill"):
+        wheelhouse = tmp_path_factory.mktemp(f"{name}-wheelhouse")
+        make_wrong_package_graph(wheelhouse, name, versions=64)
+        cases[name] = wheelhouse
+    return cases
+
+
+@pytest.fixture(scope="session")
+def stress_wheelhouse(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    wheelhouse = tmp_path_factory.mktemp("stress-wheelhouse")
+    make_stress_graph(wheelhouse)
     return wheelhouse
 
 
@@ -88,6 +108,11 @@ def source_tree(tmp_path_factory: pytest.TempPathFactory) -> Path:
 @pytest.fixture(scope="session")
 def isolated_source_tree(tmp_path_factory: pytest.TempPathFactory) -> Path:
     return make_isolated_source_tree(tmp_path_factory.mktemp("isolated-build"))
+
+
+@pytest.fixture(scope="session")
+def failing_source_tree(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    return make_failing_source_tree(tmp_path_factory.mktemp("failing-build"))
 
 
 @pytest.fixture(scope="session")

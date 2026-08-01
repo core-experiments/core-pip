@@ -77,7 +77,7 @@ def make_source_tree(root: Path, project: str = "bench-sdist") -> Path:
     (source / "pyproject.toml").write_text(
         "[build-system]\n"
         "requires = []\n"
-        'build-backend = "pip.build.build_backend"\n\n'
+        'build-backend = "cpip.build.build_backend"\n\n'
         "[project]\n"
         f'name = "{project}"\n'
         'version = "1.0.0"\n',
@@ -167,6 +167,72 @@ def make_backtracking_graph(wheelhouse: Path) -> None:
         "1.0.0",
         requires=["left>=3.5.0", "right>=4.0.0"],
     )
+
+
+def make_wrong_package_graph(
+    wheelhouse: Path, prefix: str, *, versions: int = 64
+) -> None:
+    """Build a uv-style wrong-package/backtracking workload.
+
+    Each root release selects a matching ``left`` release and the preceding
+    ``right`` release.  Those releases disagree about ``shared`` until the
+    resolver reaches the oldest root, making candidate ordering significant.
+    """
+    for index in range(1, versions + 1):
+        make_wheel(wheelhouse, f"{prefix}-shared", f"1.{index}.0")
+        make_wheel(
+            wheelhouse,
+            f"{prefix}-left",
+            f"1.{index}.0",
+            requires=[f"{prefix}-shared==1.{index}.0"],
+        )
+        right_index = max(1, index - 1)
+        make_wheel(
+            wheelhouse,
+            f"{prefix}-right",
+            f"1.{right_index}.0",
+            requires=[f"{prefix}-shared>=1.{right_index}.0,<1.{right_index + 1}.0"],
+        )
+        make_wheel(
+            wheelhouse,
+            f"{prefix}-root",
+            f"1.{index}.0",
+            requires=[
+                f"{prefix}-left==1.{index}.0",
+                f"{prefix}-right==1.{right_index}.0",
+            ],
+        )
+
+
+def make_stress_graph(wheelhouse: Path, *, roots: int = 88) -> None:
+    """Build many independently resolvable roots, like a large requirements file."""
+    for index in range(roots):
+        for version in range(3):
+            make_wheel(
+                wheelhouse,
+                f"stress-{index}",
+                f"1.{version}.0",
+                requires=[f"stress-leaf-{index}>=1.1.0"],
+            )
+        make_wheel(wheelhouse, f"stress-leaf-{index}", "1.0.0")
+        make_wheel(wheelhouse, f"stress-leaf-{index}", "1.1.0")
+
+
+def make_failing_source_tree(root: Path) -> Path:
+    """Write a deterministic PEP 517 backend failure for error-path timing."""
+    source = root / "bench-failing"
+    source.mkdir()
+    (source / "backend.py").write_text(
+        "def prepare_metadata_for_build_wheel(metadata_directory, config_settings=None):\n"
+        "    raise RuntimeError('intentional benchmark build failure')\n",
+        encoding="utf-8",
+    )
+    (source / "pyproject.toml").write_text(
+        "[build-system]\nrequires = []\nbuild-backend = 'backend'\n"
+        "backend-path = ['.']\n\n[project]\nname = 'bench-failing'\nversion = '1.0.0'\n",
+        encoding="utf-8",
+    )
+    return source
 
 
 def requirement_lines(count: int = 300) -> list[str]:

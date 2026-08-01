@@ -4,24 +4,24 @@ from __future__ import annotations
 
 import hashlib
 import itertools
-import shutil
 from pathlib import Path
 
 from benchmark_support import make_wheel, reset_caches
 from pytest_codspeed import BenchmarkFixture
-from pip.core.packaging import SpecifierSet, parse_requirement
-from pip.core.wheel import read_wheel_metadata
-from pip.install.unpacking import unzip_file
-from pip.install.target import InstallTarget
-from pip.install.wheel_transaction import DistributionUninstaller, WheelInstaller
-from pip.index.provider import CandidateProvider
-from pip.resolution.req_file import parse_requirements
-from pip.core.errors import ResolutionError
-from pip.index.candidates import prepare_project_metadata
-from pip.index.candidate_materialization import CandidateMaterializer
-from pip.index.candidates import InstallationCandidate
-from pip.index.links import Link
-from pip.resolution.resolver import Resolver
+from cpip.core.packaging import SpecifierSet, parse_requirement
+from cpip.core.wheel import read_wheel_metadata
+from cpip.install.unpacking import unzip_file
+from cpip.install.target import InstallTarget
+from cpip.install.uninstall import DistributionUninstaller
+from cpip.install.wheel_transaction import WheelInstaller
+from cpip.index.provider import CandidateProvider
+from cpip.resolution.req_file import parse_requirements
+from cpip.core.errors import BuildError, ResolutionError
+from cpip.index.candidates import prepare_project_metadata
+from cpip.index.candidate_materialization import CandidateMaterializer
+from cpip.index.candidates import InstallationCandidate
+from cpip.index.links import Link
+from cpip.resolution.resolver import Resolver
 
 
 def test_hash_throughput(benchmark: BenchmarkFixture) -> None:
@@ -125,6 +125,19 @@ def test_sdist_metadata_build_isolated(
     assert benchmark(prepare_metadata) == "1.0.0"
 
 
+def test_sdist_metadata_build_failure(
+    benchmark: BenchmarkFixture, failing_source_tree: Path
+) -> None:
+    def format_failure() -> int:
+        try:
+            prepare_project_metadata(failing_source_tree, build_isolation=False)
+        except BuildError as error:
+            return len(str(error))
+        raise AssertionError("failing source tree unexpectedly built")
+
+    assert benchmark(format_failure) > 20
+
+
 def test_extras_marker_combinatorics(
     benchmark: BenchmarkFixture, extras_marker_wheelhouse: Path
 ) -> None:
@@ -220,3 +233,18 @@ def test_requirements_file_scaling(
         return len(parse_requirements(str(requirements_file), session=None))
 
     assert benchmark(parse_file) > 0
+
+
+def test_direct_url_and_constraint_parsing(benchmark: BenchmarkFixture) -> None:
+    values = (
+        "demo @ https://example.invalid/demo-1.0-py3-none-any.whl",
+        "demo @ file:///tmp/demo-1.0.tar.gz",
+        "git+https://example.invalid/demo.git@main#egg=demo",
+        "demo[security,tests]>=1.0; python_version >= '3.9' and sys_platform != 'win32'",
+    )
+
+    def parse_mixed() -> int:
+        reset_caches()
+        return sum(len(parse_requirement(value).name) for value in values * 100)
+
+    assert benchmark(parse_mixed) > 0

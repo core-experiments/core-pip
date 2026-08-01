@@ -11,10 +11,10 @@ from pathlib import Path
 
 from benchmark_support import reset_caches
 from pytest_codspeed import BenchmarkFixture
-from pip.index.provider import CandidateProvider
-from pip.resolution.req_file import parse_requirements
-from pip.resolution.resolver import Resolver
-from pip.core.errors import ResolutionError
+from cpip.index.provider import CandidateProvider
+from cpip.resolution.req_file import parse_requirements
+from cpip.resolution.resolver import Resolver
+from cpip.core.errors import ResolutionError
 
 
 def resolve(wheelhouse: Path, requirements: list[str]) -> int:
@@ -74,6 +74,30 @@ def test_resolve_with_backtracking(
         return resolve(backtracking_wheelhouse, ["conflicting"])
 
     assert benchmark(resolve_conflicting) > 0
+
+
+def test_uv_wrong_package_backtracking_families(
+    benchmark: BenchmarkFixture, wrong_package_wheelhouses: dict[str, Path]
+) -> None:
+    """Exercise the uv issue corpus' large wrong-package candidate shapes."""
+    def resolve_cases() -> int:
+        total = 0
+        for name, wheelhouse in wrong_package_wheelhouses.items():
+            total += resolve(wheelhouse, [f"{name}-root"])
+        return total
+
+    assert benchmark(resolve_cases) == 20
+
+
+def test_top88_requirements_stress(
+    benchmark: BenchmarkFixture, stress_wheelhouse: Path
+) -> None:
+    requirements = [f"stress-{index}" for index in range(88)]
+
+    def resolve_stress() -> int:
+        return resolve(stress_wheelhouse, requirements)
+
+    assert benchmark(resolve_stress) == 176
 
 
 def test_candidate_scan_scaling(

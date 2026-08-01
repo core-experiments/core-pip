@@ -13,17 +13,17 @@ from benchmark_support import (
     wheel_filenames,
 )
 from pytest_codspeed import BenchmarkFixture
-from pip.core.packaging import SpecifierSet, parse_requirement
-from pip.core.wheel import (
+from cpip.core.packaging import SpecifierSet, parse_requirement
+from cpip.core.wheel import (
     TargetContext,
     parse_wheel_file,
     supported_wheel_tags,
     wheel_tag_rank,
 )
-from pip.index.candidate_evaluators import CandidateEvaluator
-from pip.index.candidates import BestCandidateResult, InstallationCandidate
-from pip.index.links import Link
-from pip.index.page_parsing import IndexPageParser
+from cpip.index.candidate_evaluators import CandidateEvaluator
+from cpip.index.candidates import BestCandidateResult, InstallationCandidate
+from cpip.index.links import Link
+from cpip.index.page_parsing import IndexPageParser
 PAGE_URL = "https://example.invalid/simple/package/"
 WHEEL_FILENAMES = wheel_filenames()
 CANDIDATE_URLS = [
@@ -104,6 +104,10 @@ def test_target_environment_filtering(benchmark: BenchmarkFixture) -> None:
         TargetContext(platforms=("manylinux_2_17_x86_64",), python_version="3.12"),
         TargetContext(platforms=("win_amd64",), python_version="3.11"),
         TargetContext(platforms=("macosx_11_0_arm64",), python_version="3.12"),
+    ) + tuple(
+        TargetContext(platforms=(platform,), python_version=f"3.{version}")
+        for platform in ("manylinux_2_17_x86_64", "win_amd64", "macosx_11_0_arm64")
+        for version in (8, 9, 10, 11, 12, 13, 14)
     )
 
     def filter_targets() -> int:
