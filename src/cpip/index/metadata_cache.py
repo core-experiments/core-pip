@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import atexit
 import os
-from pathlib import Path
 from typing import TypeAlias, cast
 
 from cpip.core.marshal_cache import load_snapshot, save_snapshot
@@ -24,7 +23,7 @@ class WheelMetadataCache:
     __slots__ = ("dirty", "entries", "path")
 
     def __init__(self, cache_dir: str | os.PathLike[str]) -> None:
-        self.path = Path(cache_dir) / _CACHE_NAME
+        self.path = os.path.join(os.fspath(cache_dir), _CACHE_NAME)
         self.entries: dict[MetadataIdentity, MetadataHeaders] = {}
         self.dirty = False
         self.load()

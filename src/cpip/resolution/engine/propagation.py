@@ -212,7 +212,13 @@ class FiniteDomainKernel:
             return False
         if isinstance(candidate, LazyWheelCandidate):
             return candidate.record_internal.link.is_file
-        return candidate.path.is_file()
+        if candidate.source_url is not None:
+            return candidate.source_url.startswith("file:")
+        # Non-lazy candidates with no source URL are already materialized wheel
+        # records.  Their ``source_kind`` was assigned by wheel discovery, so
+        # probing the path again only repeats I/O that candidate construction
+        # has already made authoritative.
+        return True
 
     def select(self, decision: _Decision) -> bool:
         candidate = self.domains[decision.name].candidates[

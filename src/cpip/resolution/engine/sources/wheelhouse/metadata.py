@@ -29,6 +29,7 @@ from cpip.resolution.engine.sources.wheelhouse.cache import (
     cache_candidate,
     cache_metadata,
     candidate_cache,
+    artifact_identity_cache,
     metadata_cache_dirty,
     metadata_cache_paths,
 )
@@ -299,18 +300,41 @@ def read_wheel_metadata(
             if len(filename_parts) >= 2
             else None
         )
+        file_descriptor: int | None = None
+        file_object = None
         if file_size is None:
-            file_size = os.stat(path).st_size
-        if target is not None and file_size <= SMALL_WHEEL_SIZE:
             file_descriptor = os.open(path, os.O_RDONLY)
             try:
-                contents = os.read(file_descriptor, file_size)
-            finally:
+                file_size = os.fstat(file_descriptor).st_size
+            except BaseException:
                 os.close(file_descriptor)
-            metadata = read_small_wheel_metadata(contents, target)
-            if metadata is not None:
-                return metadata
-        with open(path, "rb") as file:
+                file_descriptor = None
+                raise
+        elif target is not None and file_size <= SMALL_WHEEL_SIZE:
+            file_descriptor = os.open(path, os.O_RDONLY)
+        if target is not None and file_size <= SMALL_WHEEL_SIZE:
+            assert file_descriptor is not None
+            descriptor = file_descriptor
+            try:
+                contents = os.read(descriptor, file_size)
+                metadata = read_small_wheel_metadata(contents, target)
+                if metadata is not None:
+                    os.close(descriptor)
+                    file_descriptor = None
+                    return metadata
+                os.lseek(descriptor, 0, os.SEEK_SET)
+                file_object = os.fdopen(descriptor, "rb")
+                file_descriptor = None
+            except BaseException:
+                os.close(descriptor)
+                file_descriptor = None
+                raise
+        elif file_descriptor is not None:
+            file_object = os.fdopen(file_descriptor, "rb")
+            file_descriptor = None
+        if file_object is None:
+            file_object = open(path, "rb")
+        with file_object as file:
             archive = WheelArchive(file, target=target)
             if target is not None and target in archive.members:
                 metadata = parse_headers(archive, target)
@@ -456,18 +480,23 @@ def load_candidate(
     cache_key = (
         path if path_is_absolute or os.path.isabs(path) else os.path.abspath(path)
     )
-    stat = None
+    file_identity = artifact_identity_cache.get(cache_key)
     identity = None
     if metadata_cache is not None or persistent_cache is not None:
-        try:
-            stat = os.stat(path)
-            identity = (cache_key, stat.st_size, stat.st_mtime_ns)
-        except OSError as exc:
-            if metadata_cache is not None:
-                raise WheelhouseUnavailable from exc
+        if file_identity is None:
+            try:
+                stat = os.stat(path)
+            except OSError as exc:
+                if metadata_cache is not None:
+                    raise WheelhouseUnavailable from exc
+            else:
+                file_identity = (stat.st_ino, stat.st_size, stat.st_mtime_ns)
+                artifact_identity_cache[cache_key] = file_identity
+        if file_identity is not None:
+            identity = (cache_key, file_identity[1], file_identity[2])
     candidate_key = None
-    if stat is not None:
-        candidate_key = (cache_key, stat.st_ino, stat.st_size, stat.st_mtime_ns)
+    if file_identity is not None:
+        candidate_key = (cache_key, *file_identity)
         cached_candidate = candidate_cache.get(candidate_key)
         if (
             cached_candidate is not None
@@ -476,13 +505,13 @@ def load_candidate(
         ):
             return cached_candidate
 
-    if metadata_cache is not None and stat is not None:
+    if metadata_cache is not None and file_identity is not None:
         entry = metadata_cache.get(cache_key)
         if (
             isinstance(entry, tuple)
             and len(entry) == 3
-            and entry[0] == stat.st_mtime_ns
-            and entry[1] == stat.st_size
+            and entry[0] == file_identity[2]
+            and entry[1] == file_identity[1]
         ):
             cached = entry[2]
             if isinstance(cached, tuple):
@@ -503,7 +532,7 @@ def load_candidate(
     if metadata is None:
         metadata = read_wheel_metadata(
             path,
-            file_size=stat.st_size if stat is not None else None,
+            file_size=file_identity[1] if file_identity is not None else None,
         )
         if persistent_cache is not None and identity is not None:
             persistent_cache.put_reference(identity, metadata)
@@ -538,10 +567,10 @@ def load_candidate(
         provided_extras=frozenset(provided_extras),
         requires_python=(requires_python_values[0] if requires_python_values else None),
     )
-    if metadata_cache is not None and stat is not None:
+    if metadata_cache is not None and file_identity is not None:
         metadata_cache[cache_key] = (
-            stat.st_mtime_ns,
-            stat.st_size,
+            file_identity[2],
+            file_identity[1],
             cache_metadata(candidate),
         )
         owner_path = metadata_cache_paths.get(id(metadata_cache))

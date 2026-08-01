@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ntpath
 import os
+import stat
 import urllib.parse
 
 from cpip.core.errors import InstallationError
@@ -22,31 +23,60 @@ def looks_like_path(value: str) -> bool:
 
 
 def get_url_from_path(path: str, name: str) -> str | None:
+    url, _ = get_url_from_path_with_mode(path, name)
+    return url
+
+
+def get_url_from_path_with_mode(
+    path: str,
+    name: str,
+) -> tuple[str | None, int | None]:
+    """Return a normalized path URL and the mode observed while resolving it."""
     parsed = urllib.parse.urlparse(path)
     if parsed.scheme == "file":
         local_path = path_from_file_url(parsed)
-        if os.path.isfile(local_path):
-            return file_url_with_fragment(local_path, parsed.fragment)
-        if os.path.isdir(local_path):
-            setup_py = os.path.join(local_path, "setup.py")
-            pyproject = os.path.join(local_path, "pyproject.toml")
-            if not os.path.isfile(setup_py) and not os.path.isfile(pyproject):
+        mode = _stat_mode(local_path)
+        if mode is None:
+            return None, None
+        if stat.S_ISREG(mode):
+            return file_url_with_fragment(local_path, parsed.fragment), mode
+        if stat.S_ISDIR(mode):
+            if not _has_project_file(local_path):
                 raise InstallationError(
                     "Neither 'setup.py' nor 'pyproject.toml' found.",
                 )
-            return file_url_with_fragment(local_path, parsed.fragment)
-        return None
-    if " @ " in path or "@git+" in path or ("://" in path and not os.path.exists(path)):
-        return None
-    if os.path.isfile(path):
-        return path_to_url(os.path.realpath(path))
-    if os.path.isdir(path):
-        setup_py = os.path.join(path, "setup.py")
-        pyproject = os.path.join(path, "pyproject.toml")
-        if not os.path.isfile(setup_py) and not os.path.isfile(pyproject):
+            return file_url_with_fragment(local_path, parsed.fragment), mode
+        return None, mode
+    if " @ " in path or "@git+" in path:
+        return None, None
+    mode = _stat_mode(path)
+    if mode is None:
+        return None, None
+    if stat.S_ISREG(mode):
+        return path_to_url(os.path.realpath(path)), mode
+    if stat.S_ISDIR(mode):
+        if not _has_project_file(path):
             raise InstallationError("Neither 'setup.py' nor 'pyproject.toml' found.")
-        return path_to_url(os.path.realpath(path))
-    return None
+        return path_to_url(os.path.realpath(path)), mode
+    return None, mode
+
+
+def _stat_mode(path: str) -> int | None:
+    try:
+        return os.stat(path).st_mode
+    except OSError:
+        return None
+
+
+def _has_project_file(path: str) -> bool:
+    try:
+        with os.scandir(path) as entries:
+            return any(
+                entry.name in {"setup.py", "pyproject.toml"} and entry.is_file()
+                for entry in entries
+            )
+    except OSError:
+        return False
 
 
 def normalize_file_url_reference(value: str) -> str | None:

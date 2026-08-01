@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import stat
 import urllib.parse
 
 from cpip.core.errors import InstallationError, InvalidWheelFilename
@@ -11,7 +12,7 @@ from cpip.core.packaging import parse_requirement
 from cpip.core.urls import path_to_url
 from cpip.index.links import Link
 from cpip.resolution.engine.input.paths import (
-    get_url_from_path,
+    get_url_from_path_with_mode,
     looks_like_path,
     normalize_file_url_reference,
 )
@@ -37,11 +38,7 @@ def install_req_from_line(
         extras = frozenset(
             item.strip() for item in extras_text.split(",") if item.strip()
         )
-        if extras and (
-            looks_like_path(maybe_path)
-            or os.path.isdir(maybe_path)
-            or os.path.exists(maybe_path)
-        ):
+        if extras and (looks_like_path(maybe_path) or os.path.exists(maybe_path)):
             path_text = maybe_path
             path_extras = extras
     if "@" in text and "://" in text:
@@ -98,12 +95,18 @@ def install_req_from_line(
             permit_editable_wheels=permit_editable_wheels,
         )
     if looks_like_path(path_text):
-        url = get_url_from_path(path_text, path_text)
+        url, path_mode = get_url_from_path_with_mode(path_text, path_text)
         if url is None:
             raise InstallationError(
                 f"Invalid requirement: {text!r}. It looks like a path.",
             )
-        if os.path.isfile(path_text) and path_text.endswith(".txt"):
+        if (
+            path_mode is not None
+            and stat.S_ISREG(path_mode)
+            and path_text.endswith(
+                ".txt",
+            )
+        ):
             raise InstallationError(
                 f"Invalid requirement: {text!r}. It looks like a path. The path does exist. "
                 "The argument appears to be a requirements file. If that is the case, use the '-r' flag to install",
@@ -276,11 +279,7 @@ def parse_editable(value: str) -> tuple[str | None, str, set[str]]:
     if "[" in stripped and stripped.endswith("]"):
         path_part, extras_text = stripped[:-1].split("[", 1)
         extras = {item.strip() for item in extras_text.split(",") if item.strip()}
-    if (
-        looks_like_path(path_part)
-        or os.path.isdir(path_part)
-        or os.path.exists(path_part)
-    ):
+    if looks_like_path(path_part) or os.path.exists(path_part):
         normalized = normalize_file_url_reference(path_part)
         if normalized is not None:
             return None, normalized, extras

@@ -63,7 +63,63 @@ def test_local_source_files_uses_directory_entry_types(
 
     monkeypatch.setattr(Path, "iterdir", fail_iterdir)
 
-    assert local_source_files(tmp_path) == (artifact,)
+    assert local_source_files(os.fspath(tmp_path)) == (os.fspath(artifact),)
+
+
+def test_find_links_reuses_local_artifact_identity_until_refresh(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    artifact = tmp_path / "demo-1.0.tar.gz"
+    artifact.write_bytes(b"artifact")
+    source = FindLinksSource((str(tmp_path),))
+    import cpip.index.directory_index as directory_index
+
+    scan = directory_index.os.scandir
+    calls = 0
+
+    def counting_scan(path: str):
+        nonlocal calls
+        calls += 1
+        return scan(path)
+
+    monkeypatch.setattr(directory_index.os, "scandir", counting_scan)
+    first = source.links_from_local_path(tmp_path)
+    second = source.links_from_local_path(tmp_path)
+
+    assert first[0].local_identity_internal == second[0].local_identity_internal
+    assert calls == 1
+
+    source.refresh_local_sources(str(tmp_path))
+    source.links_from_local_path(tmp_path)
+    assert calls == 2
+
+
+def test_find_links_caches_local_file_discovery(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    artifact = tmp_path / "demo-1.0.tar.gz"
+    artifact.write_bytes(b"artifact")
+    source = FindLinksSource((str(artifact),))
+    import cpip.index.source_locations as source_locations
+
+    stat = source_locations.os.stat
+    calls = 0
+
+    def counting_stat(path: str):
+        nonlocal calls
+        calls += 1
+        return stat(path)
+
+    monkeypatch.setattr(source_locations.os, "stat", counting_stat)
+    assert source.links_from_local_path(artifact)
+    assert source.links_from_local_path(artifact)
+    assert calls == 0
+
+    source.refresh_local_sources(str(artifact))
+    source.links_from_local_path(artifact)
+    assert calls == 0
 
 
 @pytest.mark.parametrize(
@@ -162,7 +218,7 @@ def test_candidate_provider_prunes_versions_before_materialization(
 
     assert [candidate.version for candidate in candidates] == [Version("1.0")]
     assert materialized == []
-    assert candidates[0].path.is_file()
+    assert Path(candidates[0].path).is_file()
     assert materialized == [Version("1.0")]
 
 
@@ -355,8 +411,8 @@ def test_candidate_materializer_reuses_stable_wheel_metadata(
     assert len(second) == 1
     assert materialized == []
 
-    assert first[0].path == wheel_path
-    assert second[0].path == wheel_path
+    assert first[0].path == os.fspath(wheel_path)
+    assert second[0].path == os.fspath(wheel_path)
     assert materialized == [wheel_path, wheel_path]
     assert provider.materializer_internal is not None
     assert len(provider.materializer_internal.wheel_candidates) == 1
@@ -564,7 +620,7 @@ def test_candidate_provider_skips_release_filter_for_stable_candidates(
 
     candidates = provider.find_candidates(parse_requirement("demo-pkg>=1"))
 
-    assert [candidate.path for candidate in candidates] == [wheel]
+    assert [candidate.path for candidate in candidates] == [os.fspath(wheel)]
 
 
 def test_candidate_provider_filters_wheels_for_download_target(tmp_path: Path) -> None:
@@ -587,7 +643,7 @@ def test_candidate_provider_filters_wheels_for_download_target(tmp_path: Path) -
     )
     candidates = provider.find_candidates(parse_requirement("demo-pkg"))
 
-    assert [candidate.path.name for candidate in candidates] == [
+    assert [os.path.basename(candidate.path) for candidate in candidates] == [
         "demo_pkg-2.0-py3-none-linux_x86_64.whl",
         "demo_pkg-1.0-py3-none-any.whl",
     ]
@@ -769,7 +825,7 @@ def test_candidate_provider_normalizes_project_names_on_all_indexes(
     )
     candidates = provider.find_candidates(parse_requirement("Complex_Name"))
 
-    assert [candidate.path for candidate in candidates] == [wheel]
+    assert [candidate.path for candidate in candidates] == [os.fspath(wheel)]
 
 
 def test_candidate_provider_reads_direct_file_url(tmp_path: Path) -> None:
@@ -782,7 +838,7 @@ def test_candidate_provider_reads_direct_file_url(tmp_path: Path) -> None:
         parse_requirement(f"demo-pkg @ {wheel.as_uri()}"),
     )
 
-    assert [candidate.path for candidate in candidates] == [wheel]
+    assert [candidate.path for candidate in candidates] == [os.fspath(wheel)]
 
 
 def test_candidate_provider_reads_direct_project_directory(tmp_path: Path) -> None:
@@ -951,7 +1007,7 @@ def test_candidate_provider_builds_sdist_candidate(tmp_path: Path) -> None:
 
     assert [candidate.name for candidate in candidates] == ["source-pkg"]
     assert [str(candidate.version) for candidate in candidates] == ["1.0"]
-    assert candidates[0].path.name == "source_pkg-1.0-py3-none-any.whl"
+    assert os.path.basename(candidates[0].path) == "source_pkg-1.0-py3-none-any.whl"
     assert [dependency.raw for dependency in candidates[0].dependencies] == [
         "dep-pkg>=1",
     ]
@@ -976,7 +1032,7 @@ def test_candidate_provider_defers_sdist_build_when_matching_wheel_exists(
     provider = CandidateProvider.from_options(index_url=index.as_uri())
     candidates = provider.find_candidates(parse_requirement("demo-pkg"))
 
-    assert candidates[0].path.name == wheel.name
+    assert os.path.basename(candidates[0].path) == wheel.name
 
 
 def test_candidate_provider_only_builds_highest_ranked_source_candidate(
@@ -1012,7 +1068,7 @@ def test_candidate_provider_only_builds_highest_ranked_source_candidate(
     assert built == []
     preferred = candidates[:2]
 
-    assert preferred[0].path.is_file()
+    assert Path(preferred[0].path).is_file()
     assert built == [newest.name]
     assert [str(candidate.version) for candidate in preferred] == ["3.0", "1.0"]
 
@@ -1033,7 +1089,7 @@ def test_candidate_provider_runs_project_build_backend(tmp_path: Path) -> None:
     provider = CandidateProvider.from_options(index_url=index.as_uri())
     candidates = provider.find_candidates(parse_requirement("backend-pkg"))
 
-    assert [candidate.path.name for candidate in candidates] == [
+    assert [os.path.basename(candidate.path) for candidate in candidates] == [
         "backend_pkg-1.0-py3-none-any.whl",
     ]
 
@@ -1049,7 +1105,7 @@ def test_candidate_provider_prefers_wheel_over_matching_sdist(tmp_path: Path) ->
     provider = CandidateProvider.from_options(index_url=index.as_uri())
     candidates = provider.find_candidates(parse_requirement("priority-pkg"))
 
-    assert candidates[0].path == wheel
+    assert candidates[0].path == os.fspath(wheel)
 
 
 def test_core_download_uses_index_and_extra_index_url(tmp_path: Path, capsys) -> None:

@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import os
 from collections.abc import Iterable, Mapping
-from pathlib import Path
 from typing import Any, BinaryIO, NoReturn
 
 from cpip.core.errors import HashMismatch, HashMissing, InstallationError
@@ -13,7 +12,7 @@ from cpip.core.errors import HashMismatch, HashMissing, InstallationError
 Hash = Any
 
 
-def file_hashes(path: str | Path) -> dict[str, str]:
+def file_hashes(path: str) -> dict[str, str]:
     digest = hashlib.sha256()
     with open(path, "rb") as stream:
         size = os.fstat(stream.fileno()).st_size

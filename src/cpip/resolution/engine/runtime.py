@@ -4,7 +4,7 @@ import logging
 import os
 import sys
 import urllib.parse  # noqa: F401 - compatibility monkeypatch seam
-from collections.abc import Iterable
+from collections.abc import Collection, Iterable
 from typing import TYPE_CHECKING, cast
 
 from cpip.core.errors import (
@@ -428,7 +428,7 @@ class ResolutionRuntime(
 
     def installation_order(
         self,
-        selected: dict[str, WheelCandidate],
+        selected: Collection[str],
         graph: dict[str, set[str]],
     ) -> list[str]:
         from cpip.resolution.engine.output import installation_order

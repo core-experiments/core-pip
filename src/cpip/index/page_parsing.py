@@ -67,12 +67,14 @@ class IndexPageParser:
             local_text = os.fspath(local)
             if os.path.isdir(local_text):
                 json_path = os.path.join(local_text, "index.json")
-                if os.path.exists(json_path):
+                try:
                     with open(json_path, encoding="utf-8") as file:
                         return IndexContent(
                             file.read(),
                             "application/vnd.pypi.simple.v1+json",
                         )
+                except FileNotFoundError:
+                    pass
                 local_text = os.path.join(local_text, "index.html")
             with open(local_text, encoding="utf-8") as file:
                 return IndexContent(file.read(), "text/html")

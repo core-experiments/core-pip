@@ -3,7 +3,6 @@ from __future__ import annotations
 import os
 
 from cpip.core.direct_url import ArchiveInfo, DirectUrl, DirInfo, VcsInfo
-from cpip.core.urls import url_to_path
 from cpip.index.links import Link
 from cpip.vcs.versioncontrol import vcs
 
@@ -39,6 +38,6 @@ def direct_url_from_link(
                 requested_revision=requested_revision,
             ),
         )
-    if link.is_file and os.path.isdir(url_to_path(link.url)):
+    if link.is_existing_dir:
         return DirectUrl(url=link.url, dir_info=DirInfo())
     return DirectUrl(url=link.url, archive_info=ArchiveInfo(hashes=link.hashes or None))

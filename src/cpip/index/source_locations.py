@@ -6,15 +6,15 @@ import ntpath
 import os
 import urllib.parse
 from functools import lru_cache
-from pathlib import Path
 from typing import Any
 
 from cpip.core.packaging import Requirement, canonicalize_name
 from cpip.core.urls import path_to_url, url_to_path
 from cpip.index.directory_index import (
-    local_source_files,
+    LocalSourceSnapshot,
+    local_source_snapshot,
 )
-from cpip.index.links import Link
+from cpip.index.links import Link, SUPPORTED_EXTENSIONS
 from cpip.index.source_models import ArtifactKind
 
 SUPPORTED_SCHEMES = frozenset(("http", "https", "file", "ftp"))
@@ -28,20 +28,32 @@ def is_supported_location(value: str) -> bool:
     return scheme in SUPPORTED_SCHEMES or vcs_scheme in VCS_SCHEMES
 
 
+def is_remote_source_location(value: str) -> bool:
+    """Return whether a find-links value can require network prefetching."""
+    scheme = urllib.parse.urlsplit(value).scheme
+    return bool(scheme and scheme != "file")
+
+
 def resolve_source_location(location: str) -> tuple[str | None, str | None]:
     """Return the normalized URL and local path represented by a source option."""
-    if os.path.exists(location):
-        absolute_location = os.path.abspath(location)
-        return path_to_url(absolute_location), absolute_location
     if location.startswith("file:"):
         return location, url_to_path(location)
     if is_supported_location(location):
         return location, None
+    if os.path.exists(location):
+        absolute_location = os.path.abspath(location)
+        return path_to_url(absolute_location), absolute_location
     return None, None
 
 
 class FindLinksSource:
-    __slots__ = ("links", "session", "trusted_hosts")
+    __slots__ = (
+        "local_file_links",
+        "local_snapshots",
+        "links",
+        "session",
+        "trusted_hosts",
+    )
 
     def __init__(
         self,
@@ -52,6 +64,8 @@ class FindLinksSource:
         self.links = links
         self.trusted_hosts = trusted_hosts
         self.session = session
+        self.local_snapshots: dict[str, LocalSourceSnapshot | None] = {}
+        self.local_file_links: dict[str, tuple[Link, ...]] = {}
 
     def collect_links(self, requirement: Requirement) -> list[Link]:
         links: list[Link] = []
@@ -59,10 +73,23 @@ class FindLinksSource:
             links.extend(self.links_from_find_link(link))
         return links
 
+    def refresh_local_sources(self, path: str | None = None) -> None:
+        """Explicitly invalidate local discovery state."""
+        if path is None:
+            self.local_snapshots.clear()
+            self.local_file_links.clear()
+        else:
+            path_text = os.fspath(path)
+            self.local_snapshots.pop(path_text, None)
+            self.local_file_links.pop(path_text, None)
+
     def links_from_find_link(self, link: str) -> list[Link]:
+        parsed_link = urllib.parse.urlsplit(link)
+        if not parsed_link.scheme and "://" not in link:
+            return self.links_from_local_path(link)
         normalized, local = resolve_source_location(link)
         if local is not None:
-            return self.links_from_local_path(Path(local))
+            return self.links_from_local_path(local)
         if normalized is None:
             return []
         candidate = Link.from_url(normalized, source_url=None)
@@ -77,23 +104,51 @@ class FindLinksSource:
             session=self.session,
         ).links_from_url(normalized)
 
-    def links_from_local_path(self, path: Path) -> list[Link]:
+    def links_from_local_path(self, path: str | os.PathLike[str]) -> list[Link]:
         path_text = os.fspath(path)
-        if os.path.isfile(path_text):
+        cached_file_links = self.local_file_links.get(path_text)
+        if cached_file_links is not None or path_text in self.local_file_links:
+            return list(cached_file_links or ())
+        if path_text in self.local_snapshots:
+            snapshot = self.local_snapshots[path_text]
+        else:
+            snapshot = local_source_snapshot(
+                path_text,
+                suffixes=(
+                    ".html",
+                    ".htm",
+                    ".html.gz",
+                    ".htm.gz",
+                    *SUPPORTED_EXTENSIONS,
+                ),
+            )
+            self.local_snapshots[path_text] = snapshot
+        if snapshot is not None and snapshot.is_directory:
+            return [
+                Link.from_path(
+                    item.path,
+                    source_url=path_text,
+                    is_dir=False,
+                    local_identity=item.identity,
+                )
+                for item in snapshot.entries
+            ]
+        if snapshot is not None or os.path.isfile(path_text):
             if os.path.splitext(path_text)[1].lower() in HTML_SUFFIXES:
                 from cpip.index.page_parsing import IndexPageParser
 
-                return IndexPageParser(
+                links = IndexPageParser(
                     trusted_hosts=self.trusted_hosts,
                     session=self.session,
-                ).links_from_url(path.as_uri())
-            return [Link.from_path(path, source_url=None)]
-        if not os.path.isdir(path_text):
-            return []
-        return [
-            Link.from_path(item, source_url=str(path), is_dir=False)
-            for item in local_source_files(path)
-        ]
+                ).links_from_url(path_to_url(os.path.abspath(path_text)))
+            else:
+                links = [
+                    Link.from_path(path_text, source_url=None, is_dir=False),
+                ]
+            self.local_file_links[path_text] = tuple(links)
+            return links
+        self.local_file_links[path_text] = ()
+        return []
 
 
 class SimpleIndexSource:

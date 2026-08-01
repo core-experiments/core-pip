@@ -8,7 +8,6 @@ import sysconfig
 import zipfile
 from collections.abc import Collection
 from functools import cache, lru_cache
-from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
 from .errors import InstallationError, InvalidWheelFilename, UnsupportedWheel
@@ -86,7 +85,7 @@ class WheelCandidate:
         self,
         name: str,
         version: Version,
-        path: Path,
+        path: str,
         dependencies: tuple[Requirement, ...],
         provided_extras: frozenset[str] = frozenset(),
         requires_python: str | None = None,
@@ -100,7 +99,7 @@ class WheelCandidate:
     ) -> None:
         self.name = name
         self.version = version
-        self.path = path
+        self.path = os.fspath(path)
         self.dependencies = dependencies
         self.provided_extras = provided_extras
         self.requires_python = requires_python
@@ -208,14 +207,14 @@ class WheelFile:
         return canonicalize_name(self.name)
 
     @classmethod
-    def open(cls, path: str | Path) -> zipfile.ZipFile:
+    def open(cls, path: str) -> zipfile.ZipFile:
         return zipfile.ZipFile(path)
 
 
 class Wheel:
     __slots__ = ("build_tag", "file_tags", "filename", "name", "version")
 
-    def __init__(self, filename: str | Path) -> None:
+    def __init__(self, filename: str) -> None:
         self.filename = str(filename)
         wheel = parse_wheel_file(filename)
         if wheel is None:
@@ -321,7 +320,7 @@ wheel_dependency_cache: dict[
 ] = {}
 
 
-def parse_wheel_file(path: str | Path) -> WheelFile | None:
+def parse_wheel_file(path: str) -> WheelFile | None:
     return _parse_wheel_filename(os.path.basename(os.fspath(path)))
 
 
@@ -374,7 +373,7 @@ def parsed_wheel_tags(
     )
 
 
-def parse_wheel_filename(path: str | Path) -> tuple[str, str] | None:
+def parse_wheel_filename(path: str) -> tuple[str, str] | None:
     wheel = parse_wheel_file(path)
     if wheel is None:
         return None
@@ -434,17 +433,20 @@ def wheel_tag_rank(
 
 
 def wheel_archive_identity(
-    path: Path,
+    path: str,
     archive: zipfile.ZipFile | None,
     dist_info_dir: str | None,
 ) -> tuple[str, int, int] | None:
+    path_text = os.fspath(path)
     try:
         if archive is not None and dist_info_dir is not None:
             metadata = archive.getinfo(f"{dist_info_dir}/METADATA")
-            path_key = str(path) if path.is_absolute() else os.path.abspath(path)
+            path_key = (
+                path_text if os.path.isabs(path_text) else os.path.abspath(path_text)
+            )
             return path_key, metadata.CRC, metadata.file_size
-        stat = os.stat(path)
-        path_key = str(path) if path.is_absolute() else os.path.abspath(path)
+        stat = os.stat(path_text)
+        path_key = path_text if os.path.isabs(path_text) else os.path.abspath(path_text)
         return path_key, stat.st_size, stat.st_mtime_ns
     except (KeyError, OSError):
         return None
@@ -476,7 +478,7 @@ def project_wheel_dependencies(
 
 
 def wheel_candidate(
-    path: str | Path,
+    path: str,
     extras: Collection[str] | None = None,
     *,
     archive: zipfile.ZipFile | None = None,
@@ -486,7 +488,7 @@ def wheel_candidate(
     include_layout: bool = True,
     metadata_cache: MetadataCache | None = None,
 ) -> WheelCandidate:
-    wheel_path = path if isinstance(path, Path) else Path(path)
+    wheel_path = os.fspath(path)
     parsed = filename_info or parse_wheel_filename(wheel_path)
     if parsed is None:
         raise InvalidWheelFilename(f"Invalid wheel filename: {wheel_path}")
@@ -579,7 +581,7 @@ def wheel_candidate(
     return WheelCandidate(
         name=metadata.name,
         version=metadata.version,
-        path=wheel_path,
+        path=os.fspath(wheel_path),
         dependencies=dependencies,
         provided_extras=metadata.provided_extras,
         requires_python=metadata.requires_python,
@@ -589,7 +591,7 @@ def wheel_candidate(
 
 def read_core_metadata_headers(
     archive: zipfile.ZipFile,
-    path: str | Path,
+    path: str,
     dist_info_dir: str,
 ) -> dict[str, list[str]]:
     """Read core metadata headers needed during candidate resolution."""
@@ -604,14 +606,14 @@ def read_core_metadata_headers(
         ) from exc
 
 
-def read_wheel_metadata(path: str | Path):
+def read_wheel_metadata(path: str):
     with zipfile.ZipFile(path) as archive:
         return read_wheel_metadata_internal(archive, path)
 
 
 def read_wheel_metadata_internal(
     archive: zipfile.ZipFile,
-    path: str | Path,
+    path: str,
     *,
     expected_name: str | None = None,
     dist_info_dir: str | None = None,

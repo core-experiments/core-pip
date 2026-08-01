@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 import shutil
 import sys
-from pathlib import Path
 
 from cpip.cli.parser import ArgumentParser
 
@@ -102,8 +101,8 @@ def run_download(args: list[str]) -> int:
         constraints=bundle.constraints,
         ignore_installed=True,
     ).resolve(bundle_install_requirements(bundle))
-    destination = Path(options.dest)
-    os.makedirs(os.fspath(destination), exist_ok=True)
+    destination = os.fspath(options.dest)
+    os.makedirs(destination, exist_ok=True)
     names: list[str] = []
     for editable in bundle.editables:
         source_path, _, _ = prepare_editable_source(editable, prepare_metadata=False)
@@ -112,7 +111,7 @@ def run_download(args: list[str]) -> int:
             wheel_dir=destination,
             build_isolation=not options.no_build_isolation,
         )
-        names.append(wheel.stem.split("-", 1)[0])
+        names.append(os.path.basename(wheel).split("-", 1)[0])
     for candidate in plan.candidates:
         source = candidate.path
         if candidate.source_kind == "sdist" and candidate.source_url is not None:
@@ -122,7 +121,10 @@ def run_download(args: list[str]) -> int:
             # dependency when the index did not offer a compatible wheel URL.
             if candidate.canonical_name == "setuptools":
                 source = candidate.path
-        shutil.copy2(source, destination / source.name)
+        source_text = os.fspath(source)
+        shutil.copy2(
+            source_text, os.path.join(destination, os.path.basename(source_text))
+        )
         names.append(candidate.name)
     if names:
         message = f"Successfully downloaded {' '.join(sorted(names))}"

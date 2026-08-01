@@ -1194,9 +1194,9 @@ def test_resolver_defers_local_wheel_hashing_until_selection(
     selected_wheel = make_wheel(wheelhouse, "demo-pkg", "demo_pkg", "2.0")
 
     finalize_hashes = file_hashes
-    hashed_paths: list[Path] = []
+    hashed_paths: list[str] = []
 
-    def counting_hashes(path: Path) -> dict[str, str]:
+    def counting_hashes(path: str) -> dict[str, str]:
         hashed_paths.append(path)
         return finalize_hashes(path)
 
@@ -1210,8 +1210,10 @@ def test_resolver_defers_local_wheel_hashing_until_selection(
         ["demo-pkg"],
     )
 
-    assert [candidate.path for candidate in plan.candidates] == [selected_wheel]
-    assert hashed_paths == [selected_wheel]
+    assert [candidate.path for candidate in plan.candidates] == [
+        os.fspath(selected_wheel),
+    ]
+    assert hashed_paths == [os.fspath(selected_wheel)]
     assert plan.candidates[0].source_hashes == file_hashes(selected_wheel)
 
 
@@ -1238,7 +1240,9 @@ def test_resolver_can_skip_source_hashing_for_install(
         compute_source_hashes=False,
     ).resolve(["demo-pkg"])
 
-    assert [candidate.path for candidate in plan.candidates] == [selected_wheel]
+    assert [candidate.path for candidate in plan.candidates] == [
+        os.fspath(selected_wheel),
+    ]
 
 
 def test_resolver_reuses_cataloged_wheel_filename(
@@ -1265,7 +1269,7 @@ def test_resolver_reuses_cataloged_wheel_filename(
         ["demo-pkg"],
     )
 
-    assert [candidate.path for candidate in plan.candidates] == [wheel]
+    assert [candidate.path for candidate in plan.candidates] == [os.fspath(wheel)]
 
 
 def test_resolver_reuses_cataloged_wheel_version(
@@ -1289,7 +1293,7 @@ def test_resolver_reuses_cataloged_wheel_version(
 
     candidates = list(provider.find_candidates(requirement))
 
-    assert [candidate.path for candidate in candidates] == [wheel]
+    assert [candidate.path for candidate in candidates] == [os.fspath(wheel)]
 
 
 def test_resolver_reuses_link_vcs_classification(
@@ -1318,7 +1322,7 @@ def test_resolver_reuses_link_vcs_classification(
         ["demo-pkg"],
     )
 
-    assert [candidate.path for candidate in plan.candidates] == [wheel]
+    assert [candidate.path for candidate in plan.candidates] == [os.fspath(wheel)]
 
 
 def test_resolver_reuses_link_local_path(
@@ -1345,7 +1349,7 @@ def test_resolver_reuses_link_local_path(
         ["demo-pkg"],
     )
 
-    assert [candidate.path for candidate in plan.candidates] == [wheel]
+    assert [candidate.path for candidate in plan.candidates] == [os.fspath(wheel)]
 
 
 def test_resolver_reuses_validated_wheel_dist_info_directory(
@@ -1369,7 +1373,7 @@ def test_resolver_reuses_validated_wheel_dist_info_directory(
         ["demo-pkg"],
     )
 
-    assert [candidate.path for candidate in plan.candidates] == [wheel]
+    assert [candidate.path for candidate in plan.candidates] == [os.fspath(wheel)]
 
 
 def test_resolver_reads_only_required_core_metadata_headers(
@@ -1404,7 +1408,7 @@ def test_resolver_reads_only_required_core_metadata_headers(
         candidate.path
         for candidate in plan.candidates
         if candidate.canonical_name == "demo-pkg"
-    ] == [wheel]
+    ] == [os.fspath(wheel)]
 
 
 def test_resolver_ignores_metadata_body_headers(tmp_path: Path) -> None:
@@ -1429,7 +1433,7 @@ def test_resolver_ignores_metadata_body_headers(tmp_path: Path) -> None:
         ["demo-pkg"],
     )
 
-    assert [candidate.path for candidate in plan.candidates] == [wheel]
+    assert [candidate.path for candidate in plan.candidates] == [os.fspath(wheel)]
 
 
 def test_resolver_ignores_unneeded_core_metadata_headers(tmp_path: Path) -> None:
@@ -1454,7 +1458,7 @@ def test_resolver_ignores_unneeded_core_metadata_headers(tmp_path: Path) -> None
         ["demo-pkg"],
     )
 
-    assert [candidate.path for candidate in plan.candidates] == [wheel]
+    assert [candidate.path for candidate in plan.candidates] == [os.fspath(wheel)]
 
 
 def test_resolver_propagates_contradictory_exact_dependencies(
@@ -1776,7 +1780,7 @@ def test_resolver_prefer_binary_prefers_older_wheel_over_newer_source(
     preferred_plan = ResolutionEngine(provider=preferred_provider).resolve(["demo-pkg"])
 
     assert [str(candidate.version) for candidate in default_plan.candidates] == ["2.0"]
-    assert preferred_plan.candidates[0].path == wheel
+    assert preferred_plan.candidates[0].path == os.fspath(wheel)
 
 
 def test_resolver_applies_version_constraints(tmp_path: Path) -> None:
@@ -1884,7 +1888,7 @@ def test_resolver_applies_direct_url_constraint(tmp_path: Path) -> None:
     ).resolve(["demo-pkg"])
 
     assert len(plan.candidates) == 1
-    assert plan.candidates[0].path == direct
+    assert plan.candidates[0].path == os.fspath(direct)
 
 
 def test_resolver_prefers_direct_requirement_over_index_candidates(
@@ -1903,7 +1907,7 @@ def test_resolver_prefers_direct_requirement_over_index_candidates(
     )
 
     assert len(plan.candidates) == 1
-    assert plan.candidates[0].path == direct
+    assert plan.candidates[0].path == os.fspath(direct)
 
 
 def test_resolver_accepts_requirement_set_input(tmp_path: Path) -> None:
@@ -2128,8 +2132,9 @@ def test_resolved_requirement_set_marks_cached_wheel_for_direct_archive(
     archive_url = archive.as_uri()
     cache_dir = tmp_path / "cache"
     entry_dir = wheel_cache_path(cache_dir, archive_url)
-    entry_dir.mkdir(parents=True)
-    cached_wheel = make_wheel(entry_dir, "demo-pkg", "demo_pkg", "1.0")
+    entry_dir_path = Path(entry_dir)
+    entry_dir_path.mkdir(parents=True)
+    cached_wheel = make_wheel(entry_dir_path, "demo-pkg", "demo_pkg", "1.0")
 
     provider = CandidateProvider.from_options(no_index=True, wheel_cache_dir=cache_dir)
     resolved = ResolutionEngine(provider=provider).resolve_requirement_set(
@@ -2157,9 +2162,10 @@ def test_resolved_requirement_set_reads_origin_hashes_from_cache(
     archive_url = archive.as_uri()
     cache_dir = tmp_path / "cache"
     entry_dir = wheel_cache_path(cache_dir, archive_url)
-    entry_dir.mkdir(parents=True)
-    make_wheel(entry_dir, "demo-pkg", "demo_pkg", "1.0")
-    entry_dir.joinpath("origin.json").write_text(
+    entry_dir_path = Path(entry_dir)
+    entry_dir_path.mkdir(parents=True)
+    make_wheel(entry_dir_path, "demo-pkg", "demo_pkg", "1.0")
+    entry_dir_path.joinpath("origin.json").write_text(
         f'{{"url": "{archive_url}", '
         '"archive_info": {"hashes": {"sha256": "abc123"}}}',
         encoding="utf-8",
@@ -2187,9 +2193,10 @@ def test_invalid_cache_origin_file_is_ignored(
     archive_url = archive.as_uri()
     cache_dir = tmp_path / "cache"
     entry_dir = wheel_cache_path(cache_dir, archive_url)
-    entry_dir.mkdir(parents=True)
-    make_wheel(entry_dir, "demo-pkg", "demo_pkg", "1.0")
-    entry_dir.joinpath("origin.json").write_text("{", encoding="utf-8")
+    entry_dir_path = Path(entry_dir)
+    entry_dir_path.mkdir(parents=True)
+    make_wheel(entry_dir_path, "demo-pkg", "demo_pkg", "1.0")
+    entry_dir_path.joinpath("origin.json").write_text("{", encoding="utf-8")
 
     provider = CandidateProvider.from_options(no_index=True, wheel_cache_dir=cache_dir)
     resolved = ResolutionEngine(provider=provider).resolve_requirement_set(

@@ -45,8 +45,6 @@ class SourceManager:
             return
         version = self.requirement.metadata.get("version", "unknown")
         archive = os.path.join(build_dir, f"{name}-{version}.zip")
-        if os.path.exists(archive):
-            os.remove(archive)
         root = os.path.normcase(os.path.abspath(source_dir))
         with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as output:
             for directory, _, filenames in os.walk(root):

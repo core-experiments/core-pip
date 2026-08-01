@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import io
 import zipfile
-from pathlib import Path
 from typing import Any
 
 from cpip.core.wheel import WheelCandidate
@@ -66,7 +65,7 @@ class RawWheelArchive:
 
 
 def open_wheel_archive(
-    path: str | Path,
+    path: str,
     candidate: WheelCandidate,
 ) -> zipfile.ZipFile | RawWheelArchive:
     """Open a fast raw archive when its members fit the streaming contract."""

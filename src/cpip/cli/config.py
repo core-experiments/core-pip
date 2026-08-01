@@ -4,7 +4,6 @@ import configparser
 import os
 import sys
 import sysconfig
-from pathlib import Path
 
 from cpip.core.errors import ConfigurationError
 
@@ -22,7 +21,7 @@ class RawConfigParser_internal(configparser.RawConfigParser):
 class ConfigLocation:
     __slots__ = ("kind", "path")
 
-    def __init__(self, kind: str, path: Path) -> None:
+    def __init__(self, kind: str, path: str) -> None:
         self.kind = kind
         self.path = path
 
@@ -138,42 +137,46 @@ class ConfigurationStore:
             values=tuple(values),
         )
 
-    def read_single(self, path: Path) -> RawConfigParser_internal:
+    def read_single(self, path: str) -> RawConfigParser_internal:
         parser = new_parser()
-        path_text = os.fspath(path)
-        if os.path.isfile(path_text):
-            parser.read(path_text, encoding="utf-8")
+        parser.read(path, encoding="utf-8")
         return parser
 
 
 def config_locations() -> list[ConfigLocation]:
     config_dirs = os.environ.get("XDG_CONFIG_DIRS")
     if config_dirs and config_dirs.split(os.pathsep)[0]:
-        global_path = Path(config_dirs.split(os.pathsep)[0]) / "cpip" / CONFIG_BASENAME
+        global_path = os.path.join(
+            config_dirs.split(os.pathsep)[0],
+            "cpip",
+            CONFIG_BASENAME,
+        )
     else:
-        global_path = Path("/etc") / "cpip.conf"
+        global_path = os.path.join("/etc", "cpip.conf")
     locations = [ConfigLocation("global", global_path)]
     env_config = os.environ.get("CPIP_CONFIG_FILE")
     locations.append(ConfigLocation("user", user_config_path()))
     prefix = os.environ.get("VIRTUAL_ENV") or sys.prefix
-    executable_prefix = Path(sys.executable).parent.parent
-    if os.path.isfile(os.fspath(executable_prefix / "pyvenv.cfg")):
+    executable_prefix = os.path.dirname(os.path.dirname(sys.executable))
+    if os.path.isfile(os.path.join(executable_prefix, "pyvenv.cfg")):
         # Relocated virtualenv launchers can retain the template's
         # ``sys.prefix``.  The executable's environment is the one whose
         # site-level cpip.conf should apply.
-        prefix = os.fspath(executable_prefix)
-    purelib = Path(
+        prefix = executable_prefix
+    purelib = os.path.normpath(
         sysconfig.get_path("purelib", vars={"base": prefix, "platbase": prefix}),
     )
-    site_path = Path(prefix) / CONFIG_BASENAME
-    for parent in purelib.parents:
-        candidate = parent / CONFIG_BASENAME
-        if candidate.parent == Path(prefix):
+    site_path = os.path.join(prefix, CONFIG_BASENAME)
+    parent = os.path.dirname(purelib)
+    while parent and parent != os.path.dirname(parent):
+        candidate = os.path.join(parent, CONFIG_BASENAME)
+        if parent == prefix:
             site_path = candidate
             break
+        parent = os.path.dirname(parent)
     locations.append(ConfigLocation("site", site_path))
     if env_config:
-        locations.append(ConfigLocation("env", Path(env_config).expanduser()))
+        locations.append(ConfigLocation("env", os.path.expanduser(env_config)))
     return locations
 
 
@@ -197,9 +200,9 @@ def option_spellings(option: str) -> tuple[str, ...]:
     return (dotted, underscored)
 
 
-def write_parser(path: Path, parser: RawConfigParser_internal) -> None:
-    os.makedirs(os.fspath(path.parent), exist_ok=True)
-    with open(os.fspath(path), "w", encoding="utf-8") as file:
+def write_parser(path: str, parser: RawConfigParser_internal) -> None:
+    os.makedirs(os.path.dirname(path) or os.curdir, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as file:
         parser.write(file)
 
 
@@ -207,8 +210,8 @@ def new_parser() -> RawConfigParser_internal:
     return RawConfigParser_internal()
 
 
-def user_config_path() -> Path:
+def user_config_path() -> str:
     xdg = os.environ.get("XDG_CONFIG_HOME")
     if xdg:
-        return Path(xdg) / "cpip" / CONFIG_BASENAME
-    return Path.home() / ".config" / "cpip" / CONFIG_BASENAME
+        return os.path.join(xdg, "cpip", CONFIG_BASENAME)
+    return os.path.join(os.path.expanduser("~"), ".config", CONFIG_BASENAME)

@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
-from pathlib import Path
 
 from cpip.core.packaging import canonicalize_name
 from cpip.core.urls import url_to_path
@@ -51,7 +49,7 @@ class ReportItem:
 
 
 def write_install_report(
-    path: Path,
+    path: str,
     items: list[ReportItem],
     network_stats: dict[str, int] | None = None,
 ) -> None:
@@ -110,7 +108,8 @@ def write_install_report(
     if network_stats is not None:
         report_values["cpip_network"] = network_stats
     report = json.dumps(report_values)
-    if os.fspath(path) == "-":
+    if path == "-":
         print(report)
     else:
-        path.write_text(report, encoding="utf-8")
+        with open(path, "w", encoding="utf-8") as file:
+            file.write(report)

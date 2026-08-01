@@ -7,7 +7,6 @@ import hashlib
 import os
 import stat
 import zipfile
-from pathlib import Path, PurePosixPath
 
 from cpip.core.errors import InstallationError
 from cpip.install.target import InstallTarget
@@ -35,20 +34,20 @@ def validate_member_parts(name: str) -> tuple[str, ...]:
     return parts
 
 
-def validate_member(name: str) -> PurePosixPath:
-    return PurePosixPath(*validate_member_parts(name))
+def validate_member(name: str) -> tuple[str, ...]:
+    return validate_member_parts(name)
 
 
 def destination_internal(
     target: InstallTarget,
-    relative: PurePosixPath,
+    relative: tuple[str, ...],
     *,
     resolved_directories: DestinationCache | None = None,
     resolved_roots: ResolvedRoots | None = None,
-) -> Path:
+) -> str:
     return destination_internal_parts(
         target,
-        relative.parts,
+        relative,
         relative,
         resolved_directories=resolved_directories,
         resolved_roots=resolved_roots,
@@ -58,28 +57,46 @@ def destination_internal(
 def destination_internal_parts(
     target: InstallTarget,
     parts: tuple[str, ...],
-    display_relative: PurePosixPath | str,
+    display_relative: tuple[str, ...] | str,
     *,
     resolved_directories: DestinationCache | None = None,
     resolved_roots: ResolvedRoots | None = None,
-) -> Path:
-    return destination_internal_parts_with_text(
+) -> str:
+    return destination_internal_parts_text(
         target,
         parts,
         display_relative,
         resolved_directories=resolved_directories,
         resolved_roots=resolved_roots,
-    )[0]
+    )
 
 
 def destination_internal_parts_with_text(
     target: InstallTarget,
     parts: tuple[str, ...],
-    display_relative: PurePosixPath | str,
+    display_relative: tuple[str, ...] | str,
     *,
     resolved_directories: DestinationCache | None = None,
     resolved_roots: ResolvedRoots | None = None,
-) -> tuple[Path, str]:
+) -> tuple[str, str]:
+    destination_text = destination_internal_parts_text(
+        target,
+        parts,
+        display_relative,
+        resolved_directories=resolved_directories,
+        resolved_roots=resolved_roots,
+    )
+    return destination_text, destination_text
+
+
+def destination_internal_parts_text(
+    target: InstallTarget,
+    parts: tuple[str, ...],
+    display_relative: tuple[str, ...] | str,
+    *,
+    resolved_directories: DestinationCache | None = None,
+    resolved_roots: ResolvedRoots | None = None,
+) -> str:
     if not parts or not parts[0].endswith(".data"):
         return _safe_destination_parts_with_text(
             target.purelib,
@@ -107,47 +124,48 @@ def destination_internal_parts_with_text(
 
 
 def safe_destination(
-    root: Path,
-    relative: PurePosixPath,
+    root: str,
+    relative: tuple[str, ...],
     *,
     resolved_directories: DestinationCache | None = None,
     resolved_roots: ResolvedRoots | None = None,
-) -> Path:
+) -> str:
     return _safe_destination_parts_with_text(
         root,
-        relative.parts,
+        relative,
         relative,
         resolved_directories=resolved_directories,
         resolved_roots=resolved_roots,
-    )[0]
+    )
 
 
 def _safe_destination_parts(
-    root: Path,
+    root: str,
     parts: tuple[str, ...],
-    display_relative: PurePosixPath,
+    display_relative: tuple[str, ...] | str,
     *,
     resolved_directories: DestinationCache | None = None,
     resolved_roots: ResolvedRoots | None = None,
-) -> Path:
-    return _safe_destination_parts_with_text(
+) -> str:
+    destination_text = _safe_destination_parts_with_text(
         root,
         parts,
         display_relative,
         resolved_directories=resolved_directories,
         resolved_roots=resolved_roots,
-    )[0]
+    )
+    return destination_text
 
 
 def _safe_destination_parts_with_text(
-    root: Path,
+    root: str,
     parts: tuple[str, ...],
-    display_relative: PurePosixPath | str,
+    display_relative: tuple[str, ...] | str,
     *,
     resolved_directories: DestinationCache | None = None,
     resolved_roots: ResolvedRoots | None = None,
-) -> tuple[Path, str]:
-    root_text = os.fspath(root)
+) -> str:
+    root_text = root
     parent_parts = parts[:-1]
     parent_text = os.path.join(*parent_parts) if parent_parts else ""
     cache_key = (root_text, parent_text)
@@ -164,7 +182,11 @@ def _safe_destination_parts_with_text(
             resolved_root = os.path.realpath(root_text)
             if resolved_roots is not None:
                 resolved_roots[root_text] = resolved_root
-        resolved_parent_text = os.path.realpath(os.path.join(root_text, *parent_parts))
+        resolved_parent_text = (
+            resolved_root
+            if not parent_parts
+            else os.path.realpath(os.path.join(root_text, *parent_parts))
+        )
         try:
             if (
                 os.path.commonpath((resolved_parent_text, resolved_root))
@@ -180,7 +202,7 @@ def _safe_destination_parts_with_text(
         resolved_parent = resolved_parent_text
     name = parts[-1] if parts else ""
     destination_text = os.path.join(resolved_parent, name)
-    return Path(destination_text), destination_text
+    return destination_text
 
 
 def zip_mode(info: zipfile.ZipInfo) -> int | None:
@@ -198,7 +220,7 @@ def record_metadata_internal(contents: bytes) -> tuple[str, str]:
 def copy_member_with_metadata(
     archive: zipfile.ZipFile,
     member: zipfile.ZipInfo,
-    destination: Path,
+    destination: str,
     *,
     metadata: tuple[str, str] | None = None,
 ) -> tuple[str, str]:
@@ -226,5 +248,5 @@ def copy_member_with_metadata(
     return f"sha256={encoded.rstrip(b'=').decode('ascii')}", str(size)
 
 
-def is_script_member(relative: PurePosixPath) -> bool:
-    return len(relative.parts) >= 2 and relative.parts[-2] == "scripts"
+def is_script_member(relative: tuple[str, ...]) -> bool:
+    return len(relative) >= 2 and relative[-2] == "scripts"

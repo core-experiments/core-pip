@@ -14,7 +14,6 @@ import sys
 import tempfile
 from collections.abc import Iterator
 from contextlib import contextmanager
-from pathlib import Path
 from typing import Any
 
 
@@ -82,8 +81,10 @@ class BuildBackendHookCaller:
 
     def _call(self, hook: str, **kwargs: Any) -> Any:
         with tempfile.TemporaryDirectory(prefix="cpip-pep517-") as directory:
-            control = Path(directory)
-            (control / "input.json").write_text(json.dumps(kwargs), encoding="utf-8")
+            input_path = os.path.join(directory, "input.json")
+            output_path = os.path.join(directory, "output.json")
+            with open(input_path, "w", encoding="utf-8") as stream:
+                json.dump(kwargs, stream)
             environment = os.environ.copy()
             environment["CPIP_BUILD_BACKEND"] = self.backend
             if self.backend_path:
@@ -92,7 +93,7 @@ class BuildBackendHookCaller:
                 )
             try:
                 subprocess.run(
-                    [self.python_executable, "-c", _CALLER, hook, os.fspath(control)],
+                    [self.python_executable, "-c", _CALLER, hook, directory],
                     check=True,
                     cwd=self.source_dir,
                     env=environment,
@@ -106,7 +107,8 @@ class BuildBackendHookCaller:
                         f"backend hook {hook!r} failed: {detail}",
                     ) from exc
                 raise
-            result = json.loads((control / "output.json").read_text(encoding="utf-8"))
+            with open(output_path, encoding="utf-8") as stream:
+                result = json.load(stream)
         if result.get("missing"):
             raise HookMissing(hook)
         if "error" in result:

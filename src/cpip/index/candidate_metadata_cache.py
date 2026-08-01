@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import atexit
 import os
-from pathlib import Path
 from typing import cast
 
 from cpip.core.marshal_cache import load_snapshot, save_snapshot
@@ -25,7 +24,7 @@ class CandidateMetadataCache:
     __slots__ = ("decoded", "dirty", "entries", "path")
 
     def __init__(self, cache_dir: str | os.PathLike[str]) -> None:
-        self.path = Path(cache_dir) / NAME
+        self.path = os.path.join(os.fspath(cache_dir), NAME)
         self.entries: dict[CacheKey, CacheValue] = {}
         self.decoded: dict[CacheKey, CandidateMetadata] = {}
         self.dirty = False

@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 import urllib.parse
 from collections.abc import Iterable, Mapping
-from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
 from cpip.core.packaging import Requirement, Version
@@ -28,7 +27,7 @@ PYPI_HOSTS = frozenset(
 SOURCE_KINDS = frozenset(("source-tree", "sdist", "vcs"))
 
 
-def file_hashes(path: Path) -> dict[str, str]:
+def file_hashes(path: str) -> dict[str, str]:
     from cpip.core.hashes import file_hashes as compute_file_hashes
 
     return compute_file_hashes(path)
@@ -173,7 +172,7 @@ def hash_sets(hashes: Mapping[str, str | list[str]]) -> dict[str, set[str]]:
 
 def actual_hashes_for_candidate(
     candidate: WheelCandidate,
-    hash_file: Callable[[Path], dict[str, str]] = file_hashes,
+    hash_file: Callable[[str], dict[str, str]] = file_hashes,
 ) -> dict[str, str]:
     if candidate.source_kind in SOURCE_KINDS and candidate.source_hashes:
         return dict(candidate.source_hashes)
@@ -184,16 +183,13 @@ def actual_hashes_for_candidate(
     if parsed_url is not None and parsed_url.scheme == "file":
         try:
             path_text = url_to_path(candidate.source_url or "")
-            if os.path.isfile(path_text):
-                return hash_file(Path(path_text))
+            return hash_file(path_text)
         except OSError:
             return {}
     try:
-        if os.path.isfile(candidate.path):
-            return hash_file(candidate.path)
+        return hash_file(candidate.path)
     except OSError:
         return {}
-    return {}
 
 
 def hashes_match(

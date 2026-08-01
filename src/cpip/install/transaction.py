@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import errno
 import os
+import stat
 import shutil
 import tempfile
 from collections.abc import Iterable
-from pathlib import Path
 
 from cpip.core.errors import InstallationError
 
@@ -45,7 +45,7 @@ class StagedFile:
 class InstallTransaction:
     """Validate, apply, and roll back a set of filesystem replacements."""
 
-    def __init__(self, *, owned_paths: Iterable[str | Path] = ()) -> None:
+    def __init__(self, *, owned_paths: Iterable[str] = ()) -> None:
         self.owned = {normalized_internal(path) for path in owned_paths}
         self.staged_internal: list[StagedFile] = []
         self.staged_destinations: set[str] = set()
@@ -58,8 +58,8 @@ class InstallTransaction:
 
     def add(
         self,
-        source: str | Path,
-        destination: str | Path,
+        source: str,
+        destination: str,
         *,
         mode: int | None = None,
     ) -> None:
@@ -76,7 +76,7 @@ class InstallTransaction:
 
     def add_contents(
         self,
-        destination: str | Path,
+        destination: str,
         contents: bytes,
         *,
         mode: int | None = None,
@@ -94,7 +94,7 @@ class InstallTransaction:
         )
         self.staged_destinations.add(destination_text)
 
-    def delete(self, path: str | Path) -> None:
+    def delete(self, path: str) -> None:
         self.deletions.add(os.fspath(path))
 
     def adopt(self, other: InstallTransaction) -> None:
@@ -109,7 +109,7 @@ class InstallTransaction:
                 self.add_contents(item.destination_text, item.contents, mode=item.mode)
         self.deletions.update(other.deletions)
 
-    def record_created(self, destination: str | Path) -> None:
+    def record_created(self, destination: str) -> None:
         """Record a path written directly for rollback by the caller."""
         self.created_internal.append(os.fspath(destination))
 
@@ -120,14 +120,23 @@ class InstallTransaction:
                     f"staged file does not exist: {item.source_text}",
                 )
             destination_text = item.destination_text
-            destination_exists = os.path.lexists(destination_text)
+            try:
+                destination_stat = os.stat(destination_text)
+            except OSError:
+                destination_exists = os.path.lexists(destination_text)
+                destination_visible = False
+                destination_is_file = False
+            else:
+                destination_exists = True
+                destination_visible = True
+                destination_is_file = stat.S_ISREG(destination_stat.st_mode)
             self.destination_presence[destination_text] = destination_exists
             if (
                 destination_exists
-                and os.path.exists(destination_text)
+                and destination_visible
                 and normalized_internal(item.destination_text) not in self.owned
             ):
-                if os.path.isfile(destination_text):
+                if destination_is_file:
                     with open(destination_text, "rb") as destination_file:
                         destination_contents = destination_file.read()
                     source_contents = (
@@ -185,8 +194,7 @@ class InstallTransaction:
                 if item.contents is None:
                     append_created(item.destination_text)
             for path in sorted(self.deletions):
-                if os.path.lexists(path):
-                    self.backup_if_needed(path)
+                self.backup_if_needed(path)
                 self.remove_empty_parents(os.path.dirname(path))
             if finalize:
                 self.finish_successfully()
@@ -196,11 +204,16 @@ class InstallTransaction:
 
     def rollback(self) -> None:
         for path in reversed(self.created_internal):
-            if os.path.lexists(path):
-                if os.path.isdir(path) and not os.path.islink(path):
-                    shutil.rmtree(path)
-                else:
-                    os.unlink(path)
+            try:
+                path_stat = os.lstat(path)
+            except OSError:
+                continue
+            if stat.S_ISDIR(path_stat.st_mode) and not stat.S_ISLNK(
+                path_stat.st_mode,
+            ):
+                shutil.rmtree(path)
+            else:
+                os.unlink(path)
         for original, backup in reversed(self.backups):
             if os.path.exists(backup):
                 os.makedirs(os.path.dirname(original) or os.curdir, exist_ok=True)
@@ -214,7 +227,7 @@ class InstallTransaction:
         if not self.finished:
             self.finish_successfully()
 
-    def backup_if_needed(self, path: str | Path) -> None:
+    def backup_if_needed(self, path: str) -> None:
         path_text = path if isinstance(path, str) else os.fspath(path)
         if path_text in self.destination_presence:
             if not self.destination_presence[path_text]:
@@ -247,5 +260,5 @@ class InstallTransaction:
             self.rollback()
 
 
-def normalized_internal(path: str | Path) -> str:
+def normalized_internal(path: str) -> str:
     return os.path.normcase(os.path.realpath(os.fspath(path)))

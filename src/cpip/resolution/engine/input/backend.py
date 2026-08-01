@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 from typing import Any
 
 from cpip.core.errors import InstallationError
@@ -13,10 +12,10 @@ class ConfiguredBuildBackend:
     def __init__(
         self,
         *,
-        source_dir: Path,
+        source_dir: str | os.PathLike[str],
         backend: str,
         backend_path: tuple[str, ...],
-        python_executable: Path,
+        python_executable: str | os.PathLike[str],
     ) -> None:
         self.source_dir = source_dir
         self.backend = backend

@@ -359,7 +359,9 @@ def parse_line(
             elif option in FIND_LINKS_OPTIONS:
                 if provider is not None:
                     normalized = normalize_reference(value, filename, as_path=True)
-                    if os.path.exists(normalized):
+                    if not urllib.parse.urlsplit(normalized).scheme and os.path.isabs(
+                        normalized,
+                    ):
                         provider.find_links.append(normalized)
                     else:
                         provider.find_links.append(value)

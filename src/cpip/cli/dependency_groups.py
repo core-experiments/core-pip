@@ -4,7 +4,7 @@ try:
     import tomllib
 except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility
     from cpip._vendor import tomli as tomllib
-from pathlib import Path
+import os
 from typing import Any, cast
 
 from cpip.core.errors import InstallationError
@@ -14,32 +14,32 @@ from cpip.core.packaging import canonicalize_name
 def parse_dependency_groups(items: list[tuple[str, str]]) -> list[str]:
     requirements: list[str] = []
     for file_name, group_name in items:
-        requirements.extend(resolve_group_file(Path(file_name), group_name))
+        requirements.extend(resolve_group_file(file_name, group_name))
     return requirements
 
 
-def resolve_group_file(path: Path, group_name: str) -> list[str]:
+def resolve_group_file(path: str, group_name: str) -> list[str]:
     try:
-        with path.open("rb") as handle:
+        with open(path, "rb") as handle:
             data = tomllib.load(handle)
     except FileNotFoundError as exc:
-        raise InstallationError(f"{path.name} not found.") from exc
+        raise InstallationError(f"{os.path.basename(path)} not found.") from exc
     except tomllib.TOMLDecodeError as exc:
-        raise InstallationError(f"Error parsing {path.name}") from exc
+        raise InstallationError(f"Error parsing {os.path.basename(path)}") from exc
     except OSError as exc:
-        raise InstallationError(f"Error reading {path.name}") from exc
+        raise InstallationError(f"Error reading {os.path.basename(path)}") from exc
 
     groups = data.get("dependency-groups")
     if not isinstance(groups, dict):
         raise InstallationError(
-            f"[dependency-groups] table was missing from {path.name!r}.",
+            f"[dependency-groups] table was missing from {os.path.basename(path)!r}.",
         )
 
     try:
         return resolve_group(groups, group_name, stack=[])
     except InstallationError as exc:
         raise InstallationError(
-            f"[dependency-groups] resolution failed for {group_name!r} from {path.name!r}: {exc}",
+            f"[dependency-groups] resolution failed for {group_name!r} from {os.path.basename(path)!r}: {exc}",
         ) from exc
 
 

@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import os
 import shutil
-from pathlib import Path
-
 from cpip.cli.parser import ArgumentParser
 
 
@@ -156,8 +154,8 @@ def run_wheel(args: list[str]) -> int:
         no_deps=options.no_deps,
         constraints=bundle.constraints,
     ).resolve(requirements)
-    wheel_dir = Path(options.wheel_dir)
-    os.makedirs(os.fspath(wheel_dir), exist_ok=True)
+    wheel_dir = os.fspath(options.wheel_dir)
+    os.makedirs(wheel_dir, exist_ok=True)
     built_names: list[str] = []
     for candidate in plan.candidates:
         source = candidate.path
@@ -170,9 +168,9 @@ def run_wheel(args: list[str]) -> int:
                 build_isolation=not options.no_build_isolation,
             )
         else:
-            destination = wheel_dir / source.name
-            if os.path.realpath(os.fspath(source)) != os.path.realpath(
-                os.fspath(destination),
+            destination = os.path.join(wheel_dir, os.path.basename(source))
+            if os.path.realpath(source) != os.path.realpath(
+                destination,
             ):
                 shutil.copy2(source, destination)
             source = destination

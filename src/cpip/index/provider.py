@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import datetime
 import os
+import stat
 import time
 import urllib.parse
 from bisect import bisect_left, bisect_right
 from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
 from threading import RLock
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
@@ -23,7 +23,7 @@ from cpip.index.source_locations import (
     FindLinksSource,
     SimpleIndexSource,
     looks_like_path_requirement,
-    resolve_source_location,
+    is_remote_source_location,
 )
 from cpip.index.source_models import (
     INSTALLABLE_ARTIFACT_KINDS,
@@ -64,7 +64,7 @@ class CandidateProvider:
         target: TargetContext | None = None,
         build_options: dict[str, dict[str, object]] | None = None,
         build_constraints: list[str] | None = None,
-        wheel_cache_dir: Path | None = None,
+        wheel_cache_dir: str | os.PathLike[str] | None = None,
         trusted_hosts: tuple[str, ...] = (),
         build_isolation: bool = True,
         dry_run: bool = False,
@@ -79,7 +79,7 @@ class CandidateProvider:
         self.index_urls = index_urls
         self.no_index = no_index
         self.prefetch_remote_sources = bool(index_urls) or any(
-            resolve_source_location(value)[1] is None for value in find_links
+            is_remote_source_location(value) for value in find_links
         )
         self.allow_yanked = allow_yanked
         self.release_control = release_control
@@ -127,7 +127,7 @@ class CandidateProvider:
         target: TargetContext | None = None,
         build_options: dict[str, dict[str, object]] | None = None,
         build_constraints: list[str] | None = None,
-        wheel_cache_dir: str | Path | None = None,
+        wheel_cache_dir: str | os.PathLike[str] | None = None,
         trusted_hosts: list[str] | tuple[str, ...] = (),
         build_isolation: bool = True,
         dry_run: bool = False,
@@ -165,7 +165,7 @@ class CandidateProvider:
             target=target,
             build_options=build_options,
             build_constraints=build_constraints,
-            wheel_cache_dir=Path(wheel_cache_dir)
+            wheel_cache_dir=os.fspath(wheel_cache_dir)
             if wheel_cache_dir is not None
             else None,
             trusted_hosts=tuple(trusted_hosts),
@@ -183,12 +183,23 @@ class CandidateProvider:
         if requirement.url is not None or looks_like_path_requirement(requirement.raw):
             if requirement.url is not None:
                 return [Link.from_url(requirement.url, source_url=None)]
-            path = Path(requirement.raw)
-            return (
-                [Link.from_path(path, source_url=None)]
-                if os.path.exists(os.fspath(path))
-                else []
+            path = requirement.raw
+            try:
+                path_stat = os.stat(path)
+            except OSError:
+                return []
+            identity = (
+                f"stat:{path_stat.st_dev}:{path_stat.st_ino}:"
+                f"{path_stat.st_size}:{path_stat.st_mtime_ns}"
             )
+            return [
+                Link.from_path(
+                    path,
+                    source_url=None,
+                    is_dir=stat.S_ISDIR(path_stat.st_mode),
+                    local_identity=identity,
+                ),
+            ]
         links: list[Link] = []
         cache_key = requirement.canonical_name
         cached = self.link_cache.get(cache_key)

@@ -1,10 +1,18 @@
 from collections.abc import Iterator
+import os
 from pathlib import Path
+from typing import Any
 
 import pytest
 from cpip.core.packaging import Version
 from cpip.core.wheel import WheelCandidate
-from cpip.index.candidate_materialization import CandidateStream
+from cpip.index.candidate_materialization import (
+    CandidateMaterializer,
+    CandidateStream,
+    candidate_metadata_fingerprint,
+)
+from cpip.index.links import Link
+from cpip.index.source_models import CandidateRecord
 
 
 def make_candidate(version: str) -> WheelCandidate:
@@ -67,3 +75,57 @@ def test_candidate_stream_preference_is_lazy_and_has_fallback() -> None:
 
     assert [candidate.version for candidate in preferred] == [Version("2")]
     assert [candidate.version for candidate in fallback] == [Version("3"), Version("2")]
+
+
+def test_source_hashes_reuse_the_local_artifact_read(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    artifact = tmp_path / "demo-1.0.tar.gz"
+    artifact.write_bytes(b"artifact")
+    record = CandidateRecord(
+        name="demo",
+        version=Version("1.0"),
+        link=Link.from_path(artifact, source_url=None),
+    )
+    materializer = CandidateMaterializer()
+    original_open = open
+    reads = 0
+
+    def counting_open(*args: Any, **kwargs: Any) -> Any:
+        nonlocal reads
+        if args and os.fspath(args[0]) == os.fspath(artifact):
+            reads += 1
+        return original_open(*args, **kwargs)
+
+    monkeypatch.setattr("builtins.open", counting_open)
+
+    assert materializer.source_hashes_for(record) == materializer.source_hashes_for(
+        record
+    )
+    assert reads == 1
+
+
+def test_file_url_identity_stat_is_reused(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    artifact = tmp_path / "demo-1.0-py3-none-any.whl"
+    artifact.write_bytes(b"artifact")
+    original_stat = os.stat
+    stats = 0
+
+    def counting_stat(*args: Any, **kwargs: Any) -> Any:
+        nonlocal stats
+        stats += 1
+        return original_stat(*args, **kwargs)
+
+    monkeypatch.setattr("cpip.index.links.os.stat", counting_stat)
+    record = CandidateRecord(
+        name="demo",
+        version=Version("1.0"),
+        link=Link.from_url(artifact.as_uri(), source_url=None),
+    )
+
+    assert candidate_metadata_fingerprint(record).startswith("stat:")
+    assert stats == 1

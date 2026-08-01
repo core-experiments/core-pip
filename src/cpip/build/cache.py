@@ -7,7 +7,6 @@ import json
 import logging
 import os
 import sys
-from pathlib import Path
 from typing import Any
 
 from cpip.core.direct_url import DirectUrl
@@ -71,10 +70,22 @@ class WheelCache:
 
     @staticmethod
     def record_download_origin(cache_dir: str, download_info: DirectUrl) -> None:
-        origin_path = Path(cache_dir) / ORIGIN_JSON_NAME
-        if origin_path.exists():
+        origin_path = os.path.join(cache_dir, ORIGIN_JSON_NAME)
+        try:
+            with open(origin_path, encoding="utf-8") as file:
+                origin_json = file.read()
+        except FileNotFoundError:
+            pass
+        except Exception as e:
+            logger.warning(
+                "Could not read origin file %s in cache entry (%s). "
+                "Will attempt to overwrite it.",
+                origin_path,
+                e,
+            )
+        else:
             try:
-                origin = DirectUrl.from_json(origin_path.read_text(encoding="utf-8"))
+                origin = DirectUrl.from_json(origin_json)
             except Exception as e:
                 logger.warning(
                     "Could not read origin file %s in cache entry (%s). "
@@ -92,4 +103,5 @@ class WheelCache:
                         cache_dir,
                         download_info.url,
                     )
-        origin_path.write_text(download_info.to_json(), encoding="utf-8")
+        with open(origin_path, "w", encoding="utf-8") as file:
+            file.write(download_info.to_json())

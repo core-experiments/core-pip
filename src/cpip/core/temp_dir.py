@@ -9,7 +9,6 @@ import tempfile
 import traceback
 from collections.abc import Callable, Generator
 from contextlib import ExitStack, contextmanager
-from pathlib import Path
 from typing import Any, TypeVar
 
 from cpip.core.misc import enum
@@ -52,12 +51,13 @@ def rmtree(path: str, ignore_errors: bool = False, onexc=None) -> None:
 
 def remove_temp_directory(path: str | os.PathLike[str]) -> None:
     """Remove a temporary directory, including read-only VCS files."""
-    if not os.path.exists(path):
-        return
+    path_text = os.fspath(path)
     try:
-        rmtree(os.fspath(path))
+        rmtree(path_text)
+    except FileNotFoundError:
+        return
     except OSError:
-        rmtree(os.fspath(path), ignore_errors=True)
+        rmtree(path_text, ignore_errors=True)
 
 
 tempdir_kinds = enum(
@@ -132,13 +132,19 @@ class TempDirectory:
 
     def cleanup(self) -> None:
         self.deleted_internal = True
-        if not os.path.exists(self.path_internal):
+        try:
+            rmtree(self.path_internal)
+        except FileNotFoundError:
+            return
+        except OSError:
+            pass
+        else:
             return
         errors: list[BaseException] = []
 
         def onerror(
             func: Callable[..., Any],
-            path: Path,
+            path: str,
             exc_val: BaseException,
         ) -> None:
             formatted = "".join(

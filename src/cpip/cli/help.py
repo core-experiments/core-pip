@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import os
 
 from cpip.cli.commands.registry import COMMAND_SPECS, get_command, parser_for_command
 from cpip.core.cpip_version import get_cpip_distribution, get_cpip_version
@@ -10,12 +11,10 @@ from cpip.core.python import CURRENT_PYTHON_VERSION
 
 
 def print_version(location: str | None = None) -> None:
-    from pathlib import Path
-
     if location is None:
         location = str(get_cpip_distribution().locate_file("cpip"))
     print(
-        f"cpip {get_cpip_version()} from {Path(location).resolve()} "
+        f"cpip {get_cpip_version()} from {os.path.realpath(location)} "
         f"(python {CURRENT_PYTHON_VERSION})",
     )
 

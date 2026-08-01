@@ -7,10 +7,9 @@ import os
 import sys
 import zipfile
 from importlib.resources import files
-from pathlib import Path
 
 
-def rewrite_shebang(path: Path, executable: str | None) -> None:
+def rewrite_shebang(path: str, executable: str | None) -> None:
     with open(path, "rb") as file:
         contents = file.read()
     if contents.startswith(b"#!python\n"):
@@ -21,14 +20,15 @@ def rewrite_shebang(path: Path, executable: str | None) -> None:
             )
 
 
-def entry_point_scripts(path: Path) -> dict[str, tuple[str, bool]]:
-    if not os.path.isfile(path):
+def entry_point_scripts(path: str) -> dict[str, tuple[str, bool]]:
+    try:
+        with open(path, encoding="utf-8") as file:
+            lines = file.read().splitlines()
+    except (FileNotFoundError, IsADirectoryError):
         return {}
     active = False
     result: dict[str, tuple[str, bool]] = {}
     gui = False
-    with open(path, encoding="utf-8") as file:
-        lines = file.read().splitlines()
     for raw_line in lines:
         line = raw_line.strip()
         if line.startswith("[") and line.endswith("]"):
@@ -54,7 +54,7 @@ def script_text(target_ref: str, executable: str | None) -> str:
     )
 
 
-def write_windows_script(path: Path, script: str, *, gui: bool) -> None:
+def write_windows_script(path: str, script: str, *, gui: bool) -> None:
     """Create a distlib-compatible Windows launcher without importing distlib."""
     machine = os.environ.get("PROCESSOR_ARCHITECTURE", "").lower()
     suffix = "-arm" if "arm" in machine else ""
@@ -64,12 +64,18 @@ def write_windows_script(path: Path, script: str, *, gui: bool) -> None:
     archive = io.BytesIO()
     with zipfile.ZipFile(archive, "w") as package:
         package.writestr("__main__.py", script.encode("utf-8"))
-    path.write_bytes(launcher + archive.getvalue())
+    with open(path, "wb") as file:
+        file.write(launcher + archive.getvalue())
 
 
-def script_matches(path: Path, scripts: dict[str, tuple[str, bool]]) -> bool:
-    is_executable = path.suffix.lower() == ".exe"
-    name = path.stem if is_executable else path.name
+def script_matches(
+    path: str,
+    scripts: dict[str, tuple[str, bool]],
+) -> bool:
+    path_text = os.fspath(path)
+    basename = os.path.basename(path_text)
+    is_executable = basename.lower().endswith(".exe")
+    name = os.path.splitext(basename)[0] if is_executable else basename
     script = scripts.get(name)
     if script is None:
         return False

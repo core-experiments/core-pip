@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sys
-from pathlib import Path
+import os
 
 from cpip.cli.parser import ArgumentParser
 
@@ -34,7 +34,7 @@ def run_freeze(args: list[str]) -> int:
         skip.update(CPIP_DISTRIBUTION_NAMES)
         if sys.version_info < (3, 12):
             skip.add("setuptools")
-    paths = [str(Path(path)) for path in options.path] if options.path else None
+    paths = [os.path.normpath(path) for path in options.path] if options.path else None
     for line in freeze(
         requirement=options.requirement,
         user_only=options.user,
