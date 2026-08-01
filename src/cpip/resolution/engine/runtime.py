@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import sys
 import urllib.parse  # noqa: F401 - compatibility monkeypatch seam
 from collections.abc import Iterable
@@ -181,7 +182,7 @@ class ResolutionRuntime(
         self.binary_incompatibility_watches: dict[Assignment, set[int]] = {}
         self.learned_non_binary_count = 0
         self.installed_by_name_internal: dict[str, InstalledDistribution] | None = None
-        self.debug_internal = False
+        self.debug_internal = bool(os.environ.get("CPIP_RESOLVER_DEBUG"))
 
     def resolve_plan(
         self,

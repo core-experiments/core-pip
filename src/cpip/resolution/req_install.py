@@ -24,11 +24,12 @@ from cpip.core.packaging import (
     parse_requirement,
 )
 from cpip.index.links import Link
-from cpip.install.build_env.backend import ConfiguredBuildBackend
 from cpip.resolution.engine.input.paths import looks_like_path
 
 if TYPE_CHECKING:
     import email.message
+
+    from cpip.resolution.engine.input.backend import ConfiguredBuildBackend
 
 
 def file_hashes(path: str | Path) -> dict[str, str]:
@@ -502,6 +503,8 @@ class InstallRequirement:
         return data
 
     def configure_backend(self, python_executable: str | Path) -> None:
+        from cpip.resolution.engine.input.backend import ConfiguredBuildBackend
+
         if self.source_dir is None:
             raise InstallationError("Install requirement has no source directory")
         data = self.pyproject_data or self.load_pyproject_toml()
