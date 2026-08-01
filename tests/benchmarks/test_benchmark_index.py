@@ -6,15 +6,24 @@ ranks all of its links, so these paths scale with the size of the index.
 
 from __future__ import annotations
 
-from benchmark_support import reset_caches, wheel_filenames
+from benchmark_support import (
+    reset_caches,
+    simple_index_html,
+    simple_index_json,
+    wheel_filenames,
+)
 from pytest_codspeed import BenchmarkFixture
-from cpip.core.packaging import SpecifierSet, parse_requirement
-from cpip.core.wheel import parse_wheel_file, supported_wheel_tags, wheel_tag_rank
-from cpip.index.candidate_evaluators import CandidateEvaluator
-from cpip.index.candidates import BestCandidateResult, InstallationCandidate
-from cpip.index.links import Link
-from cpip.index.page_parsing import IndexPageParser
-
+from pip.core.packaging import SpecifierSet, parse_requirement
+from pip.core.wheel import (
+    TargetContext,
+    parse_wheel_file,
+    supported_wheel_tags,
+    wheel_tag_rank,
+)
+from pip.index.candidate_evaluators import CandidateEvaluator
+from pip.index.candidates import BestCandidateResult, InstallationCandidate
+from pip.index.links import Link
+from pip.index.page_parsing import IndexPageParser
 PAGE_URL = "https://example.invalid/simple/package/"
 WHEEL_FILENAMES = wheel_filenames()
 CANDIDATE_URLS = [
@@ -53,6 +62,69 @@ def test_parse_json_index_page(benchmark: BenchmarkFixture, index_json: str) -> 
         return len(parser.links_from_json(index_json, PAGE_URL))
 
     assert benchmark(parse_page) > 0
+
+
+def test_parse_index_fanout(benchmark: BenchmarkFixture) -> None:
+    pages = tuple(
+        (f"https://example.invalid/simple/package-{index}/", simple_index_html(200))
+        for index in range(32)
+    )
+    parser = IndexPageParser()
+
+    def parse_pages() -> int:
+        reset_caches()
+        return sum(len(parser.links_from_html(body, url)) for url, body in pages)
+
+    assert benchmark(parse_pages) == 12_800
+
+
+def test_parse_metadata_only_index(benchmark: BenchmarkFixture) -> None:
+    body = simple_index_json(400)
+    parser = IndexPageParser()
+
+    def parse_page() -> int:
+        reset_caches()
+        links = parser.links_from_json(body, PAGE_URL)
+        return sum(link.metadata_file is not None for link in links)
+
+    assert benchmark(parse_page) == 400
+
+
+def test_target_environment_filtering(benchmark: BenchmarkFixture) -> None:
+    requirement = parse_requirement("package")
+    links = [
+        Link.from_url(
+            f"https://example.invalid/packages/{filename}",
+            source_url=PAGE_URL,
+            requires_python=">=3.9",
+        )
+        for filename in WHEEL_FILENAMES
+    ]
+    targets = (
+        TargetContext(platforms=("manylinux_2_17_x86_64",), python_version="3.12"),
+        TargetContext(platforms=("win_amd64",), python_version="3.11"),
+        TargetContext(platforms=("macosx_11_0_arm64",), python_version="3.12"),
+    )
+
+    def filter_targets() -> int:
+        reset_caches()
+        return sum(
+            isinstance(
+                CandidateEvaluator.evaluate_link(
+                    link,
+                    requirement,
+                    allow_yanked=False,
+                    allow_binary=True,
+                    allow_source=True,
+                    target=target,
+                ),
+                InstallationCandidate,
+            )
+            for target in targets
+            for link in links
+        )
+
+    assert benchmark(filter_targets) > 0
 
 
 def test_build_links(benchmark: BenchmarkFixture) -> None:

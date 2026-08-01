@@ -22,6 +22,7 @@ def make_wheel(
     *,
     requires: list[str] | None = None,
     payload_files: int = 0,
+    requires_python: str = ">=3.9",
 ) -> Path:
     """Write a metadata-only wheel with an optional synthetic payload."""
     distribution = project.replace("-", "_")
@@ -36,7 +37,7 @@ def make_wheel(
             "Metadata-Version: 2.1\n"
             f"Name: {project}\n"
             f"Version: {version}\n"
-            "Requires-Python: >=3.9\n"
+            f"Requires-Python: {requires_python}\n"
             f"{requires_metadata}"
         ),
         f"{dist_info}/WHEEL": (
@@ -65,6 +66,24 @@ def make_wheel(
             "\n".join(",".join(row) for row in rows) + "\n",
         )
     return path
+
+
+def make_source_tree(root: Path, project: str = "bench-sdist") -> Path:
+    """Write a tiny PEP 517 source tree for metadata/build benchmarks."""
+    source = root / project
+    package = source / project.replace("-", "_")
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (source / "pyproject.toml").write_text(
+        "[build-system]\n"
+        "requires = []\n"
+        'build-backend = "pip.build.build_backend"\n\n'
+        "[project]\n"
+        f'name = "{project}"\n'
+        'version = "1.0.0"\n',
+        encoding="utf-8",
+    )
+    return source
 
 
 def make_dependency_graph(wheelhouse: Path) -> None:

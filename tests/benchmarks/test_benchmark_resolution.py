@@ -11,9 +11,10 @@ from pathlib import Path
 
 from benchmark_support import reset_caches
 from pytest_codspeed import BenchmarkFixture
-from cpip.index.provider import CandidateProvider
-from cpip.resolution.req_file import parse_requirements
-from cpip.resolution.resolver import Resolver
+from pip.index.provider import CandidateProvider
+from pip.resolution.req_file import parse_requirements
+from pip.resolution.resolver import Resolver
+from pip.core.errors import ResolutionError
 
 
 def resolve(wheelhouse: Path, requirements: list[str]) -> int:
@@ -73,3 +74,32 @@ def test_resolve_with_backtracking(
         return resolve(backtracking_wheelhouse, ["conflicting"])
 
     assert benchmark(resolve_conflicting) > 0
+
+
+def test_candidate_scan_scaling(
+    benchmark: BenchmarkFixture, candidate_scan_wheelhouse: Path
+) -> None:
+    """Scan many releases while rejecting a Requires-Python-heavy tail."""
+
+    def resolve_candidate_scan() -> int:
+        return resolve(candidate_scan_wheelhouse, ["candidate-scan"])
+
+    assert benchmark(resolve_candidate_scan) == 1
+
+
+def test_resolvelib_backjump_pattern(
+    benchmark: BenchmarkFixture, backjump_wheelhouse: Path
+) -> None:
+    def resolve_conflict() -> int:
+        reset_caches()
+        try:
+            resolve(backjump_wheelhouse, [
+                "python>=3.12",
+                "lz4==4.3.3",
+                "clickhouse-driver>=0.2.9",
+            ])
+        except ResolutionError as error:
+            return len(str(error))
+        raise AssertionError("backjump workload unexpectedly resolved")
+
+    assert benchmark(resolve_conflict) > 0
