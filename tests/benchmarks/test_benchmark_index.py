@@ -127,6 +127,77 @@ def test_target_environment_filtering(benchmark: BenchmarkFixture) -> None:
     assert benchmark(filter_targets) > 0
 
 
+def test_distribution_diversity(benchmark: BenchmarkFixture) -> None:
+    names = (
+        "package-2.0.0-py3-none-any.whl",
+        "package-1.9.0rc1-py3-none-any.whl",
+        "package-1.8.0+local.1-py3-none-any.whl",
+        "package-1.7.0-cp312-cp312-manylinux_2_17_x86_64.whl",
+        "package-1.6.0.tar.gz",
+        "not-a-wheel.whl",
+    )
+    links = [
+        Link.from_url(
+            f"https://example.invalid/packages/{name}",
+            source_url=PAGE_URL,
+            yanked_reason="bad release" if index == 1 else None,
+            requires_python=">=99" if index == 2 else ">=3.9",
+        )
+        for index, name in enumerate(names)
+    ]
+    requirement = parse_requirement("package>=1")
+
+    def evaluate_diverse() -> int:
+        reset_caches()
+        return sum(
+            isinstance(
+                CandidateEvaluator.evaluate_link(
+                    link,
+                    requirement,
+                    allow_yanked=False,
+                    allow_binary=True,
+                    allow_source=True,
+                    target=None,
+                ),
+                InstallationCandidate,
+            )
+            for link in links
+        )
+
+    assert benchmark(evaluate_diverse) > 0
+
+
+def test_index_topology_ranking(benchmark: BenchmarkFixture) -> None:
+    filenames = (
+        "package-2.0.0.tar.gz",
+        "package-2.0.0-py3-none-any.whl",
+        "package-1.9.0-py3-none-any.whl",
+    )
+    candidates = [
+        InstallationCandidate(
+            "package",
+            filename.split("-", 2)[1].removesuffix(".tar.gz"),
+            Link.from_url(
+                f"https://example.invalid/{source}/{filename}", source_url=source
+            ),
+        )
+        for source in ("find-links", "index")
+        for filename in filenames
+    ]
+    default = CandidateEvaluator.create("package", specifier=SpecifierSet(">=1"))
+    binary = CandidateEvaluator.create(
+        "package", specifier=SpecifierSet(">=1"), prefer_binary=True
+    )
+
+    def rank_sources() -> str:
+        best_default = default.compute_best_candidate(candidates).best_candidate
+        best_binary = binary.compute_best_candidate(candidates).best_candidate
+        assert best_default is not None and best_binary is not None
+        return f"{best_default.version}:{best_binary.version}"
+
+    assert benchmark(rank_sources) == "2.0.0:2.0.0"
+
+
 def test_build_links(benchmark: BenchmarkFixture) -> None:
     def build_all() -> int:
         reset_caches()

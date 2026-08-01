@@ -17,6 +17,7 @@ from benchmark_support import (
     simple_index_json,
     requirement_lines,
     make_source_tree,
+    make_isolated_source_tree,
 )
 
 
@@ -85,6 +86,11 @@ def source_tree(tmp_path_factory: pytest.TempPathFactory) -> Path:
 
 
 @pytest.fixture(scope="session")
+def isolated_source_tree(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    return make_isolated_source_tree(tmp_path_factory.mktemp("isolated-build"))
+
+
+@pytest.fixture(scope="session")
 def backjump_wheelhouse(tmp_path_factory: pytest.TempPathFactory) -> Path:
     wheelhouse = tmp_path_factory.mktemp("backjump-wheelhouse")
     make_wheel(wheelhouse, "python", "3.12")
@@ -95,6 +101,46 @@ def backjump_wheelhouse(tmp_path_factory: pytest.TempPathFactory) -> Path:
         "clickhouse-driver",
         "0.2.9",
         requires=["lz4", "lz4<=3.0.1"],
+    )
+    return wheelhouse
+
+
+@pytest.fixture(scope="session")
+def unsatisfiable_wheelhouse(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    wheelhouse = tmp_path_factory.mktemp("unsatisfiable-wheelhouse")
+    requirements = []
+    for index in range(24):
+        shared = f"unsat-shared-{index}"
+        branch = f"unsat-branch-{index}"
+        make_wheel(wheelhouse, shared, "1.0.0")
+        make_wheel(wheelhouse, shared, "2.0.0")
+        make_wheel(wheelhouse, branch, "1.0.0", requires=[f"{shared}==1.0.0"])
+        requirements.extend((f"{branch}==1.0.0", f"{shared}==2.0.0"))
+    make_wheel(wheelhouse, "unsatisfiable-root", "1.0.0", requires=requirements)
+    return wheelhouse
+
+
+@pytest.fixture(scope="session")
+def extras_marker_wheelhouse(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    wheelhouse = tmp_path_factory.mktemp("extras-marker-wheelhouse")
+    for index in range(24):
+        make_wheel(wheelhouse, f"extra-common-{index}", "1.0.0")
+        make_wheel(wheelhouse, f"extra-dev-{index}", "1.0.0")
+        make_wheel(wheelhouse, f"extra-platform-{index}", "1.0.0")
+    dependencies = []
+    for index in range(24):
+        dependencies.extend(
+            (
+                f"extra-common-{index}>=1; extra == 'all'",
+                f"extra-dev-{index}>=1; extra == 'dev'",
+                f"extra-platform-{index}>=1; sys_platform == 'linux'",
+            )
+        )
+    make_wheel(
+        wheelhouse,
+        "extras-root",
+        "1.0.0",
+        requires=dependencies,
     )
     return wheelhouse
 

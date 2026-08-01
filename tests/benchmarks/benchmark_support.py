@@ -86,6 +86,38 @@ def make_source_tree(root: Path, project: str = "bench-sdist") -> Path:
     return source
 
 
+def make_isolated_source_tree(root: Path) -> Path:
+    """Write a source tree with a local, dependency-free PEP 517 backend."""
+    source = make_source_tree(root, "bench-isolated")
+    (source / "backend.py").write_text(
+        "from pathlib import Path\n"
+        "\n"
+        "def prepare_metadata_for_build_wheel(metadata_directory, config_settings=None):\n"
+        "    dist_info = 'bench_isolated-1.0.0.dist-info'\n"
+        "    target = Path(metadata_directory) / dist_info\n"
+        "    target.mkdir(parents=True, exist_ok=True)\n"
+        "    (target / 'METADATA').write_text(\n"
+        "        'Metadata-Version: 2.1\\nName: bench-isolated\\nVersion: 1.0.0\\n'\n"
+        "    )\n"
+        "    (target / 'WHEEL').write_text(\n"
+        "        'Wheel-Version: 1.0\\nGenerator: benchmark\\n'\n"
+        "    )\n"
+        "    return dist_info\n",
+        encoding="utf-8",
+    )
+    (source / "pyproject.toml").write_text(
+        "[build-system]\n"
+        "requires = []\n"
+        'build-backend = "backend"\n'
+        'backend-path = ["."]\n\n'
+        "[project]\n"
+        'name = "bench-isolated"\n'
+        'version = "1.0.0"\n',
+        encoding="utf-8",
+    )
+    return source
+
+
 def make_dependency_graph(wheelhouse: Path) -> None:
     """Build a wheelhouse shaped like a small application dependency tree."""
     for leaf in range(20):

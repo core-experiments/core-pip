@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import itertools
+import shutil
 from pathlib import Path
 
 from benchmark_support import make_wheel, reset_caches
@@ -11,10 +12,15 @@ from pytest_codspeed import BenchmarkFixture
 from pip.core.packaging import SpecifierSet, parse_requirement
 from pip.core.wheel import read_wheel_metadata
 from pip.install.unpacking import unzip_file
+from pip.install.target import InstallTarget
+from pip.install.wheel_transaction import DistributionUninstaller, WheelInstaller
 from pip.index.provider import CandidateProvider
 from pip.resolution.req_file import parse_requirements
 from pip.core.errors import ResolutionError
 from pip.index.candidates import prepare_project_metadata
+from pip.index.candidate_materialization import CandidateMaterializer
+from pip.index.candidates import InstallationCandidate
+from pip.index.links import Link
 from pip.resolution.resolver import Resolver
 
 
@@ -83,6 +89,82 @@ def test_sdist_metadata_build(benchmark: BenchmarkFixture, source_tree: Path) ->
         return prepare_project_metadata(source_tree, build_isolation=False).version
 
     assert benchmark(prepare_metadata) == "1.0.0"
+
+
+def test_metadata_cache_miss(benchmark: BenchmarkFixture, payload_wheel: Path) -> None:
+    requirement = parse_requirement("payload-pkg")
+
+    def load_uncached() -> str:
+        candidate = InstallationCandidate.from_link(
+            Link.from_path(payload_wheel, source_url=None)
+        )
+        materializer = CandidateMaterializer(build_isolation=False)
+        return materializer.metadata_loader(candidate, requirement).load().name
+
+    assert benchmark(load_uncached) == "payload-pkg"
+
+
+def test_metadata_cache_hit(benchmark: BenchmarkFixture, payload_wheel: Path) -> None:
+    requirement = parse_requirement("payload-pkg")
+    candidate = InstallationCandidate.from_link(
+        Link.from_path(payload_wheel, source_url=None)
+    )
+    materializer = CandidateMaterializer(build_isolation=False)
+    materializer.metadata_loader(candidate, requirement).load()
+    cached_loader = materializer.metadata_loader(candidate, requirement)
+
+    assert benchmark(cached_loader.load).name == "payload-pkg"
+
+
+def test_sdist_metadata_build_isolated(
+    benchmark: BenchmarkFixture, isolated_source_tree: Path
+) -> None:
+    def prepare_metadata() -> str:
+        return prepare_project_metadata(isolated_source_tree).version
+
+    assert benchmark(prepare_metadata) == "1.0.0"
+
+
+def test_extras_marker_combinatorics(
+    benchmark: BenchmarkFixture, extras_marker_wheelhouse: Path
+) -> None:
+    def resolve_extras() -> int:
+        reset_caches()
+        return len(
+            Resolver(
+                provider=CandidateProvider.from_options(
+                    find_links=[str(extras_marker_wheelhouse)], no_index=True
+                ),
+                ignore_installed=True,
+            )
+            .resolve(["extras-root[all,dev]"])
+            .candidates
+        )
+
+    assert benchmark(resolve_extras) > 40
+
+
+def test_incremental_target_install(
+    benchmark: BenchmarkFixture, tmp_path: Path
+) -> None:
+    wheelhouse = tmp_path / "incremental-wheelhouse"
+    wheelhouse.mkdir()
+    old = make_wheel(wheelhouse, "incremental-pkg", "1.0.0", payload_files=8)
+    new = make_wheel(wheelhouse, "incremental-pkg", "2.0.0", payload_files=12)
+    addon = make_wheel(wheelhouse, "incremental-addon", "1.0.0", payload_files=4)
+    target_path = tmp_path / "incremental-target"
+    target = InstallTarget.from_options("incremental-pkg", target=str(target_path))
+    WheelInstaller(target, pycompile=False).install(old)
+    installer = WheelInstaller(target, pycompile=False)
+    uninstaller = DistributionUninstaller(paths=[str(target_path)])
+
+    def update_target() -> int:
+        installer.install(new)
+        installer.install(addon)
+        uninstaller.uninstall("incremental-addon")
+        return len(tuple(target_path.rglob("*")))
+
+    assert benchmark(update_target) > 10
 
 
 def test_large_archive_installation(

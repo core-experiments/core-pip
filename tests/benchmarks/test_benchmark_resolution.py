@@ -103,3 +103,55 @@ def test_resolvelib_backjump_pattern(
         raise AssertionError("backjump workload unexpectedly resolved")
 
     assert benchmark(resolve_conflict) > 0
+
+
+def test_unsatisfiable_error_reporting(
+    benchmark: BenchmarkFixture, unsatisfiable_wheelhouse: Path
+) -> None:
+    requirements = ["unsatisfiable-root"]
+
+    def resolve_and_format_error() -> int:
+        reset_caches()
+        try:
+            resolve(unsatisfiable_wheelhouse, requirements)
+        except ResolutionError as error:
+            return len(str(error))
+        raise AssertionError("unsatisfiable workload unexpectedly resolved")
+
+    assert benchmark(resolve_and_format_error) > 100
+
+
+def test_constraints_and_pins(
+    benchmark: BenchmarkFixture, graph_wheelhouse: Path
+) -> None:
+    requirements = [f"middle-{index}>=2.0.0" for index in range(10)]
+    constraints = [f"middle-{index}==2.2.0" for index in range(10)]
+
+    def resolve_constrained() -> int:
+        reset_caches()
+        resolver = Resolver(
+            provider=CandidateProvider.from_options(
+                find_links=[str(graph_wheelhouse)], no_index=True
+            ),
+            ignore_installed=True,
+            constraints=constraints,
+        )
+        return len(resolver.resolve(requirements).candidates)
+
+    assert benchmark(resolve_constrained) > 10
+
+
+def test_conflicting_direct_requirements(
+    benchmark: BenchmarkFixture, graph_wheelhouse: Path
+) -> None:
+    requirements = ["middle-0==2.1.0", "middle-0==2.2.0"]
+
+    def resolve_conflicting_direct() -> int:
+        reset_caches()
+        try:
+            resolve(graph_wheelhouse, requirements)
+        except ResolutionError as error:
+            return len(str(error))
+        raise AssertionError("conflicting direct requirements unexpectedly resolved")
+
+    assert benchmark(resolve_conflicting_direct) > 0
