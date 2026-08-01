@@ -1,7 +1,4 @@
-"""
-locations.py tests
-
-"""
+"""locations.py tests"""
 
 import getpass
 import os
@@ -37,7 +34,7 @@ class TestScheme:
         shutil.rmtree(self.tempdir, ignore_errors=True)
 
     def patch(self) -> None:
-        """first store and then patch python methods pythons"""
+        """First store and then patch python methods pythons"""
         self.tempfile_gettempdir = tempfile.gettempdir
         self.old_os_fstat = os.fstat
         if sys.platform != "win32":
@@ -55,7 +52,7 @@ class TestScheme:
             pwd.getpwuid = self.get_mock_getpwuid
 
     def revert_patch(self) -> None:
-        """revert the patches to python methods"""
+        """Revert the patches to python methods"""
         tempfile.gettempdir = self.tempfile_gettempdir
         getpass.getuser = self.old_getpass_getuser
         if sys.platform != "win32":
@@ -65,7 +62,7 @@ class TestScheme:
         os.fstat = self.old_os_fstat
 
     def get_mock_fstat(self, fd: int) -> os.stat_result:
-        """returns a basic mock fstat call result.
+        """Returns a basic mock fstat call result.
         Currently only the st_uid attribute has been set.
         """
         result = Mock()
@@ -73,7 +70,7 @@ class TestScheme:
         return result
 
     def get_mock_getpwuid(self, uid: int) -> Any:
-        """returns a basic mock pwd.getpwuid call result.
+        """Returns a basic mock pwd.getpwuid call result.
         Currently only the pw_name attribute has been set.
         """
         result = Mock()
@@ -86,7 +83,7 @@ class TestLocations:
         # This deals with nt/posix path differences
         # root is c:\somewhere\else or /somewhere/else
         root = os.path.normcase(
-            os.path.abspath(os.path.join(os.path.sep, "somewhere", "else"))
+            os.path.abspath(os.path.join(os.path.sep, "somewhere", "else")),
         )
         norm_scheme = get_scheme_dict("example")
         root_scheme = get_scheme_dict("example", root=root)

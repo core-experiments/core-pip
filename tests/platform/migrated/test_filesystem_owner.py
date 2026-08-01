@@ -33,7 +33,8 @@ def test_get_path_uid_symlink(tmp_path: Path) -> None:
 @pytest.mark.skipif("not hasattr(os, 'O_NOFOLLOW')")
 @pytest.mark.skipif("not hasattr(os, 'symlink')")
 def test_get_path_uid_symlink_without_NOFOLLOW(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delattr("os.O_NOFOLLOW")
     f = tmp_path / "symlink" / "somefile"

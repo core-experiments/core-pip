@@ -8,14 +8,12 @@ from cpip.core.appdirs import user_cache_dir
 from cpip.core.errors import InstallationError
 from cpip.core.python import CURRENT_PYTHON_VERSION
 
-
 # Application Directories
 USER_CACHE_DIR = user_cache_dir("cpip")
 
 
 def get_major_minor_version() -> str:
-    """
-    Return the major-minor version of the current Python as a string, e.g.
+    """Return the major-minor version of the current Python as a string, e.g.
     "3.7" or "3.10".
     """
     return CURRENT_PYTHON_VERSION
@@ -33,20 +31,18 @@ def change_root(new_root: str, pathname: str) -> str:
     if os.name == "posix":
         if not os.path.isabs(pathname):
             return os.path.join(new_root, pathname)
-        else:
-            return os.path.join(new_root, pathname[1:])
+        return os.path.join(new_root, pathname[1:])
 
-    elif os.name == "nt":
+    if os.name == "nt":
         drive, path = os.path.splitdrive(pathname)
         if path[0] == "\\":
             path = path[1:]
         return os.path.join(new_root, path)
 
-    else:
-        raise InstallationError(
-            f"Unknown platform: {os.name}\n"
-            "Can not change root path prefix on unknown platform."
-        )
+    raise InstallationError(
+        f"Unknown platform: {os.name}\n"
+        "Can not change root path prefix on unknown platform.",
+    )
 
 
 @functools.cache

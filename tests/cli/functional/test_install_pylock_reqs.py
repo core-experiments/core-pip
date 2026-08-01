@@ -59,7 +59,10 @@ def test_install_pylock_wheel_cache(
     result = script.cpip("install", *args, allow_stderr_warning=True)
     assert "Requirement already satisfied: simple==2.0" in result.stdout
     result = script.cpip(
-        "install", *args, "--ignore-installed", allow_stderr_warning=True
+        "install",
+        *args,
+        "--ignore-installed",
+        allow_stderr_warning=True,
     )
     assert "Successfully installed simple-2.0" in result.stdout
 
@@ -92,7 +95,12 @@ def test_install_pylock_invalid_hash(
 ) -> None:
     pylock_path = data.lockfiles.joinpath("pylock.invalidhash.toml")
     result = script.cpip(
-        "install", "--no-index", "--dry-run", "-r", pylock_path, expect_error=True
+        "install",
+        "--no-index",
+        "--dry-run",
+        "-r",
+        pylock_path,
+        expect_error=True,
     )
     assert (
         "Expected sha256 "
@@ -111,7 +119,12 @@ def test_install_pylock_not_found(
 ) -> None:
     pylock_path = tmp_path / "pylock.doesnotexist.toml"
     result = script.cpip(
-        "install", "--no-index", "--dry-run", "-r", pylock_path, expect_error=True
+        "install",
+        "--no-index",
+        "--dry-run",
+        "-r",
+        pylock_path,
+        expect_error=True,
     )
     assert "Error reading pylock file" in result.stderr
 
@@ -141,7 +154,12 @@ def test_install_pylock_invalid_lockfile(
 ) -> None:
     pylock_path = data.lockfiles.joinpath("pylock.invalid.toml")
     result = script.cpip(
-        "install", "--no-index", "--dry-run", "-r", pylock_path, expect_error=True
+        "install",
+        "--no-index",
+        "--dry-run",
+        "-r",
+        pylock_path,
+        expect_error=True,
     )
     assert "Invalid pylock file" in result.stderr
 
@@ -152,7 +170,12 @@ def test_install_pylock_select_error(
 ) -> None:
     pylock_path = data.lockfiles.joinpath("pylock.oldpython.toml")
     result = script.cpip(
-        "install", "--no-index", "--dry-run", "-r", pylock_path, expect_error=True
+        "install",
+        "--no-index",
+        "--dry-run",
+        "-r",
+        pylock_path,
+        expect_error=True,
     )
     assert "Cannot select requirements from pylock file" in result.stderr
 

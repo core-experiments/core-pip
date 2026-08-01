@@ -10,7 +10,8 @@ from cpip_test_support.wheel import make_wheel
 
 
 def test_new_resolver_conflict_requirements_file(
-    tmpdir: pathlib.Path, script: CpipTestEnvironment
+    tmpdir: pathlib.Path,
+    script: CpipTestEnvironment,
 ) -> None:
     create_basic_wheel_for_package(script, "base", "1.0")
     create_basic_wheel_for_package(script, "base", "2.0")
@@ -46,7 +47,8 @@ def test_new_resolver_conflict_requirements_file(
 
 
 def test_new_resolver_conflict_constraints_file(
-    tmpdir: pathlib.Path, script: CpipTestEnvironment
+    tmpdir: pathlib.Path,
+    script: CpipTestEnvironment,
 ) -> None:
     create_basic_wheel_for_package(script, "pkg", "1.0")
 
@@ -90,7 +92,12 @@ def test_new_resolver_requires_python_error(script: CpipTestEnvironment) -> None
 
     # This always fails because pkgb can never be satisfied.
     result = script.cpip(
-        "install", "--no-build-isolation", "--no-index", pkga, pkgb, expect_error=True
+        "install",
+        "--no-build-isolation",
+        "--no-index",
+        pkga,
+        pkgb,
+        expect_error=True,
     )
 
     # The error message should mention the Requires-Python: value causing the
@@ -138,8 +145,7 @@ def test_new_resolver_checks_requires_python_before_dependencies(
 
 
 def test_new_resolver_no_versions_available_hint(script: CpipTestEnvironment) -> None:
-    """
-    Test hint that no package candidate is available at all,
+    """Test hint that no package candidate is available at all,
     when ResolutionImpossible occurs.
     """
     wheel_house = script.scratch_path.joinpath("wheelhouse")
@@ -151,7 +157,7 @@ def test_new_resolver_no_versions_available_hint(script: CpipTestEnvironment) ->
         wheel_metadata_updates={"Tag": ["py3-none-fakeplat"]},
     )
     incompatible_dep_wheel.save_to(
-        wheel_house.joinpath("incompatible_dep-1.0.0-py3-none-fakeplat.whl")
+        wheel_house.joinpath("incompatible_dep-1.0.0-py3-none-fakeplat.whl"),
     )
 
     # Create multiple versions of a package that depend on the incompatible dependency
@@ -161,7 +167,7 @@ def test_new_resolver_no_versions_available_hint(script: CpipTestEnvironment) ->
         metadata_updates={"Requires-Dist": ["incompatible-dep==1.0.0"]},
     )
     requesting_pkg_v1.save_to(
-        wheel_house.joinpath("requesting_pkg-1.0.0-py2.py3-none-any.whl")
+        wheel_house.joinpath("requesting_pkg-1.0.0-py2.py3-none-any.whl"),
     )
 
     requesting_pkg_v2 = make_wheel(
@@ -170,7 +176,7 @@ def test_new_resolver_no_versions_available_hint(script: CpipTestEnvironment) ->
         metadata_updates={"Requires-Dist": ["incompatible-dep==1.0.0"]},
     )
     requesting_pkg_v2.save_to(
-        wheel_house.joinpath("requesting_pkg-2.0.0-py2.py3-none-any.whl")
+        wheel_house.joinpath("requesting_pkg-2.0.0-py2.py3-none-any.whl"),
     )
 
     # Attempt to install the requesting package

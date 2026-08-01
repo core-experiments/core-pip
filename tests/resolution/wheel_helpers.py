@@ -14,11 +14,15 @@ def make_wheel(
     version: str,
     *,
     requires: list[str] | None = None,
+    provides_extra: list[str] | None = None,
 ) -> Path:
     dist = project.replace("-", "_")
     wheel = wheelhouse / f"{dist}-{version}-py3-none-any.whl"
     requires_metadata = "".join(
         f"Requires-Dist: {requirement}\n" for requirement in requires or []
+    )
+    extras_metadata = "".join(
+        f"Provides-Extra: {extra}\n" for extra in provides_extra or []
     )
     files = {
         f"{import_name}/__init__.py": f"NAME = {project!r}\n",
@@ -26,6 +30,7 @@ def make_wheel(
             "Metadata-Version: 2.1\n"
             f"Name: {project}\n"
             f"Version: {version}\n"
+            f"{extras_metadata}"
             f"{requires_metadata}"
         ),
         f"{dist}-{version}.dist-info/WHEEL": (
@@ -85,7 +90,7 @@ def make_sdist(
                 'build-backend = "local_backend"',
                 'backend-path = ["backend"]',
                 "",
-            ]
+            ],
         )
     pyproject_lines.extend(
         [
@@ -96,7 +101,7 @@ def make_sdist(
             dependencies,
             "]",
             "",
-        ]
+        ],
     )
     root.joinpath("pyproject.toml").write_text(
         "\n".join(pyproject_lines),

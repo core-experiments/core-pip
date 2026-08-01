@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import configparser
 import email.message
 import email.parser
-import configparser
 import os
 import re
 import sys
@@ -13,6 +13,12 @@ from collections.abc import Collection
 from types import SimpleNamespace
 from typing import cast
 
+from cpip.core.direct_url import DirectUrl
+from cpip.core.metadata import (
+    InstalledDistribution,
+    find_installed,
+    iter_installed_distributions,
+)
 from cpip.core.packaging import (
     Requirement,
     SpecifierSet,
@@ -21,12 +27,6 @@ from cpip.core.packaging import (
     marker_applies,
     parse_requirement,
 )
-from cpip.core.metadata import (
-    InstalledDistribution,
-    find_installed,
-    iter_installed_distributions,
-)
-from cpip.core.direct_url import DirectUrl
 from cpip.core.urls import url_to_path
 from cpip.core.wheel import parse_wheel, read_wheel_metadata_file
 
@@ -127,7 +127,8 @@ class MetadataDistribution:
             info_location=f"{location}/{info_dir}",
             entry_points_text=(
                 read_wheel_metadata_file(
-                    archive, f"{info_dir}/entry_points.txt"
+                    archive,
+                    f"{info_dir}/entry_points.txt",
                 ).decode()
                 if f"{info_dir}/entry_points.txt" in archive.namelist()
                 else None
@@ -246,7 +247,7 @@ class InstalledMetadataDistribution:
 
     @property
     def metadata(self) -> email.message.Message:
-        return cast(email.message.Message, self.distribution_internal.raw.metadata)
+        return cast("email.message.Message", self.distribution_internal.raw.metadata)
 
     @property
     def metadata_dict(self) -> dict[str, object]:
@@ -389,7 +390,7 @@ class InstalledMetadataDistribution:
     @property
     def in_usersite(self) -> bool:
         return self.user_site_internal is not None and self.location.startswith(
-            self.user_site_internal
+            self.user_site_internal,
         )
 
     @property

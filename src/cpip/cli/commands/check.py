@@ -57,7 +57,7 @@ def run_check(args: list[str]) -> int:
         for _, requirement in requirements:
             print(
                 f"{name} {distribution.version} requires "
-                f"{canonicalize_name(requirement.name)}, which is not installed."
+                f"{canonicalize_name(requirement.name)}, which is not installed.",
             )
     for name, requirements in sorted(conflicting.items()):
         distribution = next(
@@ -68,6 +68,6 @@ def run_check(args: list[str]) -> int:
         for conflict_name, version, requirement in requirements:
             print(
                 f"{name} {distribution.version} has requirement {requirement}, "
-                f"but you have {conflict_name} {version}."
+                f"but you have {conflict_name} {version}.",
             )
     return 1

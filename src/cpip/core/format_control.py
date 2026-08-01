@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from .packaging import canonicalize_name
 from .errors import CommandError
+from .packaging import canonicalize_name
 
 FORMAT_CONTROL_KINDS = frozenset(
-    ("no_binary", "only_binary", "no-binary", "only-binary")
+    ("no_binary", "only_binary", "no-binary", "only-binary"),
 )
 ONLY_BINARY_KINDS = frozenset(("only_binary", "only-binary"))
 FORMAT_CONTROL_SENTINELS = frozenset((":all:", ":none:"))
@@ -56,7 +56,7 @@ class FormatControl:
     def handle_mutual_excludes(value: str, target: set[str], other: set[str]) -> None:
         if value.startswith("-"):
             raise CommandError(
-                "--no-binary / --only-binary option requires 1 argument."
+                "--no-binary / --only-binary option requires 1 argument.",
             )
         entries = [item.strip() for item in value.split(",") if item.strip()]
         for entry in entries:

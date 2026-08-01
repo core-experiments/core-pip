@@ -6,7 +6,6 @@ import marshal
 import os
 from typing import TypeAlias
 
-
 Marshallable: TypeAlias = (
     None
     | bool

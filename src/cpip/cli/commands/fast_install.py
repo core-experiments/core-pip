@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import os
-from contextlib import ExitStack
 from collections.abc import Iterable
+from contextlib import ExitStack
 from typing import Protocol
 
 
@@ -18,14 +18,14 @@ class ResolvedCandidate(Protocol):
 
 class InstallOptions:
     __slots__ = (
-        "requirements",
-        "find_links",
-        "no_index",
-        "target",
         "cache_dir",
+        "find_links",
         "ignore_installed",
         "no_compile",
+        "no_index",
         "quiet",
+        "requirements",
+        "target",
     )
 
     def __init__(self) -> None:
@@ -127,7 +127,7 @@ def install_resolved_pure_wheels(
     requested_roots: set[str],
 ) -> bool:
     """Install an already-resolved pure-wheel plan into an empty target."""
-    from cpip.resolution.fast_local_wheelhouse import (
+    from cpip.resolution.engine.sources.wheelhouse.archive import (
         WheelArchive,
         WheelhouseUnavailable,
     )
@@ -226,7 +226,7 @@ def install_resolved_pure_wheels(
                     candidate.canonical_name in requested_roots,
                     preloaded_wheel,
                     wheel_index,
-                )
+                ),
             )
 
         os.makedirs(target, exist_ok=True)
@@ -318,6 +318,8 @@ def _target_is_empty(target: str) -> bool:
 
 def run(args: list[str]) -> int | None:
     """Install pure local wheels, or return ``None`` for normal cpip install."""
+    from cpip.resolution.engine import ResolutionEngine
+
     options = parse_arguments(args)
     if (
         options is None
@@ -334,11 +336,8 @@ def run(args: list[str]) -> int | None:
     # wheelhouse a second time just to reject the plan.
     if not _target_is_empty(options.target):
         return None
-    from cpip.resolution.fast_local_wheelhouse import (
-        resolve as resolve_local_wheelhouse,
-    )
 
-    plan = resolve_local_wheelhouse(
+    plan = ResolutionEngine.resolve_wheelhouse(
         options.find_links,
         options.requirements,
         cache_dir=options.cache_dir,
@@ -362,7 +361,7 @@ def run(args: list[str]) -> int | None:
         if plan.candidates:
             print(
                 "Installing collected packages: "
-                + ", ".join(candidate.name for candidate in plan.candidates)
+                + ", ".join(candidate.name for candidate in plan.candidates),
             )
     if not install_resolved_pure_wheels(plan.candidates, options.target, roots):
         return None
@@ -371,7 +370,7 @@ def run(args: list[str]) -> int | None:
             "Successfully installed "
             + " ".join(
                 f"{candidate.name}-{candidate.version}" for candidate in plan.candidates
-            )
+            ),
         )
     return 0
 
@@ -392,14 +391,15 @@ def run_local_fallback(args: list[str]) -> int | None:
     ):
         return None
 
+    from pathlib import Path
+
     from cpip.core.packaging import Version
     from cpip.core.wheel import WheelCandidate, parse_wheel, wheel_candidate
     from cpip.install.target import InstallTarget
     from cpip.install.wheel_transaction import install_wheels_transactionally
-    from pathlib import Path
-    from cpip.resolution.fast_local_wheelhouse import resolve
+    from cpip.resolution.engine import ResolutionEngine
 
-    plan = resolve(
+    plan = ResolutionEngine.resolve_wheelhouse(
         options.find_links,
         options.requirements,
         cache_dir=options.cache_dir,
@@ -419,7 +419,7 @@ def run_local_fallback(args: list[str]) -> int | None:
                     provided_extras=local_candidate.provided_extras,
                     requires_python=local_candidate.requires_python,
                     source_kind="wheel",
-                )
+                ),
             )
     except (OSError, TypeError, ValueError):
         return None
@@ -459,7 +459,7 @@ def run_local_fallback(args: list[str]) -> int | None:
         if candidates:
             print(
                 "Installing collected packages: "
-                + ", ".join(candidate.name for candidate in candidates)
+                + ", ".join(candidate.name for candidate in candidates),
             )
     install_wheels_transactionally(
         [
@@ -476,6 +476,6 @@ def run_local_fallback(args: list[str]) -> int | None:
             "Successfully installed "
             + " ".join(
                 f"{candidate.name}-{candidate.version}" for candidate in candidates
-            )
+            ),
         )
     return 0

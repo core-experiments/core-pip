@@ -12,12 +12,12 @@ import zipfile
 from pathlib import Path
 
 from benchmark_support import reset_caches
-from pytest_codspeed import BenchmarkFixture
 from cpip.core.hashes import Hashes, hash_file
 from cpip.core.wheel import read_wheel_metadata, validate_wheel
 from cpip.install.target import InstallTarget
 from cpip.install.unpacking import unzip_file
 from cpip.install.wheel_transaction import WheelInstaller
+from pytest_codspeed import BenchmarkFixture
 
 
 def test_read_wheel_metadata(benchmark: BenchmarkFixture, payload_wheel: Path) -> None:
@@ -37,7 +37,9 @@ def test_validate_wheel(benchmark: BenchmarkFixture, payload_wheel: Path) -> Non
 
 
 def test_unzip_wheel(
-    benchmark: BenchmarkFixture, payload_wheel: Path, tmp_path: Path
+    benchmark: BenchmarkFixture,
+    payload_wheel: Path,
+    tmp_path: Path,
 ) -> None:
     counter = itertools.count()
 
@@ -49,7 +51,9 @@ def test_unzip_wheel(
 
 
 def test_install_wheel(
-    benchmark: BenchmarkFixture, payload_wheel: Path, tmp_path: Path
+    benchmark: BenchmarkFixture,
+    payload_wheel: Path,
+    tmp_path: Path,
 ) -> None:
     counter = itertools.count()
 

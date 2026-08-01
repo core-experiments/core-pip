@@ -25,8 +25,7 @@ from cpip_test_support import TestData
 
 
 class TestUnpackArchives:
-    """
-    test_tar.tgz/test_tar.zip have content as follows engineered to confirm 3
+    """test_tar.tgz/test_tar.zip have content as follows engineered to confirm 3
     things:
      1) confirm that reg files, dirs, and symlinks get unpacked
      2) permissions are not preserved (and go by the 022 umask)
@@ -113,9 +112,7 @@ class TestUnpackArchives:
             )
 
     def make_zip_file(self, filename: str, file_list: list[str]) -> str:
-        """
-        Create a zip file for test case
-        """
+        """Create a zip file for test case"""
         test_zip = os.path.join(self.tempdir, filename)
         with zipfile.ZipFile(test_zip, "w") as myzip:
             for item in file_list:
@@ -123,9 +120,7 @@ class TestUnpackArchives:
         return test_zip
 
     def make_tar_file(self, filename: str, file_list: list[str]) -> str:
-        """
-        Create a tar file for test case
-        """
+        """Create a tar file for test case"""
         test_tar = os.path.join(self.tempdir, filename)
         with tarfile.open(test_tar, "w") as mytar:
             for item in file_list:
@@ -134,7 +129,8 @@ class TestUnpackArchives:
         return test_tar
 
     @pytest.mark.skipif(
-        sys.platform == "win32", reason="os.chmod() ignores execute bit on Windows"
+        sys.platform == "win32",
+        reason="os.chmod() ignores execute bit on Windows",
     )
     def test_confirm_files_mode_preconditions(self) -> None:
         assert self.executable_mode == 0o755
@@ -144,9 +140,7 @@ class TestUnpackArchives:
         )
 
     def test_unpack_tgz(self, data: TestData) -> None:
-        """
-        Test unpacking a *.tgz, and setting execute permissions
-        """
+        """Test unpacking a *.tgz, and setting execute permissions"""
         test_file = data.packages.joinpath("test_tar.tgz")
         untar_file(os.fspath(test_file), self.tempdir)
         self.confirm_files()
@@ -156,16 +150,13 @@ class TestUnpackArchives:
         assert mtime[0:6] == (2013, 8, 16, 5, 13, 37), mtime
 
     def test_unpack_zip(self, data: TestData) -> None:
-        """
-        Test unpacking a *.zip, and setting execute permissions
-        """
+        """Test unpacking a *.zip, and setting execute permissions"""
         test_file = data.packages.joinpath("test_zip.zip")
         unzip_file(os.fspath(test_file), self.tempdir)
         self.confirm_files()
 
     def test_unpack_zip_failure(self) -> None:
-        """
-        Test unpacking a *.zip with file containing .. path
+        """Test unpacking a *.zip with file containing .. path
         and expect exception
         """
         files = ["regular_file.txt", os.path.join("..", "outside_file.txt")]
@@ -175,8 +166,7 @@ class TestUnpackArchives:
         assert "trying to install outside target directory" in str(e.value)
 
     def test_unpack_zip_success(self) -> None:
-        """
-        Test unpacking a *.zip with regular files,
+        """Test unpacking a *.zip with regular files,
         no file will be installed outside target directory after unpack
         so no exception raised
         """
@@ -189,8 +179,7 @@ class TestUnpackArchives:
         unzip_file(test_zip, self.tempdir)
 
     def test_unpack_tar_failure(self) -> None:
-        """
-        Test unpacking a *.tar with file containing .. path
+        """Test unpacking a *.tar with file containing .. path
         and expect exception
         """
         files = ["regular_file.txt", os.path.join("..", "outside_file.txt")]
@@ -206,8 +195,7 @@ class TestUnpackArchives:
             assert "trying to install outside target directory" in str(e.value)
 
     def test_unpack_tar_success(self) -> None:
-        """
-        Test unpacking a *.tar with regular files,
+        """Test unpacking a *.tar with regular files,
         no file will be installed outside target directory after unpack
         so no exception raised
         """
@@ -220,7 +208,8 @@ class TestUnpackArchives:
         untar_file(test_tar, self.tempdir)
 
     def test_regular_only_tar_fast_path_rejects_parent_escape(
-        self, tmp_path: Path
+        self,
+        tmp_path: Path,
     ) -> None:
         archive = tmp_path / "regular-only.tar"
         destination = tmp_path / "destination"
@@ -236,10 +225,12 @@ class TestUnpackArchives:
         assert not (tmp_path / "outside.txt").exists()
 
     @pytest.mark.skipif(
-        sys.platform == "win32", reason="os.chmod() ignores execute bit on Windows"
+        sys.platform == "win32",
+        reason="os.chmod() ignores execute bit on Windows",
     )
     def test_regular_only_tar_fast_path_preserves_execution_and_time(
-        self, tmp_path: Path
+        self,
+        tmp_path: Path,
     ) -> None:
         archive = tmp_path / "regular-only.tar"
         destination = tmp_path / "destination"
@@ -263,8 +254,7 @@ class TestUnpackArchives:
         reason="tarfile filters (PEP-721) not available",
     )
     def test_unpack_tar_filter(self) -> None:
-        """
-        Test that the tarfile.data_filter is used to disallow dangerous
+        """Test that the tarfile.data_filter is used to disallow dangerous
         behaviour (PEP-721)
         """
         test_tar = os.path.join(self.tempdir, "test_tar_filter.tar")
@@ -287,9 +277,7 @@ class TestUnpackArchives:
         ],
     )
     def test_unpack_tar_links(self, input_prefix: str, unpack_prefix: str) -> None:
-        """
-        Test unpacking a *.tar with file containing hard & soft links
-        """
+        """Test unpacking a *.tar with file containing hard & soft links"""
         test_tar = os.path.join(self.tempdir, "test_tar_links.tar")
         content = b"file content"
         with tarfile.open(test_tar, "w") as mytar:
@@ -320,11 +308,10 @@ class TestUnpackArchives:
             assert f.read() == content
 
     def test_unpack_normal_tar_link1_no_data_filter(
-        self, monkeypatch: MonkeyPatch
+        self,
+        monkeypatch: MonkeyPatch,
     ) -> None:
-        """
-        Test unpacking a normal tar with file containing soft links, but no data_filter
-        """
+        """Test unpacking a normal tar with file containing soft links, but no data_filter"""
         if hasattr(tarfile, "data_filter"):
             monkeypatch.delattr("tarfile.data_filter")
 
@@ -355,11 +342,10 @@ class TestUnpackArchives:
             assert f.read() == b"normal\n"
 
     def test_unpack_normal_tar_link2_no_data_filter(
-        self, monkeypatch: MonkeyPatch
+        self,
+        monkeypatch: MonkeyPatch,
     ) -> None:
-        """
-        Test unpacking a normal tar with file containing soft links, but no data_filter
-        """
+        """Test unpacking a normal tar with file containing soft links, but no data_filter"""
         if hasattr(tarfile, "data_filter"):
             monkeypatch.delattr("tarfile.data_filter")
 
@@ -390,11 +376,10 @@ class TestUnpackArchives:
             assert f.read() == b"normal\n"
 
     def test_unpack_evil_tar_link1_no_data_filter(
-        self, monkeypatch: MonkeyPatch
+        self,
+        monkeypatch: MonkeyPatch,
     ) -> None:
-        """
-        Test unpacking a evil tar with file containing soft links, but no data_filter
-        """
+        """Test unpacking a evil tar with file containing soft links, but no data_filter"""
         if hasattr(tarfile, "data_filter"):
             monkeypatch.delattr("tarfile.data_filter")
 
@@ -425,11 +410,10 @@ class TestUnpackArchives:
         assert not os.path.exists(os.path.join(extract_path, "evil_symlink"))
 
     def test_unpack_evil_tar_link2_no_data_filter(
-        self, monkeypatch: MonkeyPatch
+        self,
+        monkeypatch: MonkeyPatch,
     ) -> None:
-        """
-        Test unpacking a evil tar with file containing soft links, but no data_filter
-        """
+        """Test unpacking a evil tar with file containing soft links, but no data_filter"""
         if hasattr(tarfile, "data_filter"):
             monkeypatch.delattr("tarfile.data_filter")
 
@@ -462,7 +446,8 @@ class TestUnpackArchives:
         assert not os.path.exists(os.path.join(extract_path, "evil_symlink"))
 
     def test_unpack_tar_symlink_then_member_no_data_filter(
-        self, monkeypatch: MonkeyPatch
+        self,
+        monkeypatch: MonkeyPatch,
     ) -> None:
         """Reject a symlink to outside before a member is written through it."""
         if hasattr(tarfile, "data_filter"):
@@ -494,7 +479,8 @@ class TestUnpackArchives:
         assert not os.path.exists(os.path.join(extract_path, "outside_link"))
 
     def test_unpack_tar_nested_symlink_traversal_no_data_filter(
-        self, monkeypatch: MonkeyPatch
+        self,
+        monkeypatch: MonkeyPatch,
     ) -> None:
         """Reject a member that escapes through a chain of in-bounds symlinks."""
         if hasattr(tarfile, "data_filter"):
@@ -605,8 +591,7 @@ def test_magic_signature_check_logic(
     untar: bool,
     exception: bool,
 ) -> None:
-    """
-    Test that cpip throws an error if file is identified as both zip and tar
+    """Test that cpip throws an error if file is identified as both zip and tar
     and all other checks came out undeterministic.
     """
     mock_tarfile.is_tarfile.return_value = is_tar
@@ -650,8 +635,7 @@ def test_check_priority(
     unzip: bool,
     untar: bool,
 ) -> None:
-    """
-    Test the order of priority of checks to ensure
+    """Test the order of priority of checks to ensure
     we don't use magic signature check unless we have to.
     """
     ArchiveExtractor(filename, "any-location", content_type=content_type).extract()
@@ -732,7 +716,9 @@ def test_content_type_vs_filename_priority(
 @pytest.mark.parametrize("filename, flatten", [("pkg.whl", False), ("pkg.zip", True)])
 @patch("cpip.install.unpacking.unzip_file")
 def test_flatten_only_for_non_whl(
-    mock_unzip: MagicMock, filename: str, flatten: bool
+    mock_unzip: MagicMock,
+    filename: str,
+    flatten: bool,
 ) -> None:
     ArchiveExtractor(filename, "any-location", content_type=None).extract()
     assert mock_unzip.call_args.kwargs["flatten"] is flatten
@@ -762,7 +748,10 @@ def write_polyglot(path: Path) -> None:
     ],
 )
 def test_polyglot_routing(
-    tmp_path: Path, filename: str, content_type: str | None, expected: bytes
+    tmp_path: Path,
+    filename: str,
+    content_type: str | None,
+    expected: bytes,
 ) -> None:
     archive = tmp_path / filename
     write_polyglot(archive)

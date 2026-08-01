@@ -6,13 +6,12 @@ import re
 import sys
 import sysconfig
 import zipfile
+from collections.abc import Collection
 from functools import cache, lru_cache
 from pathlib import Path
-from collections.abc import Collection
 from typing import TYPE_CHECKING, Protocol
 
 from .errors import InstallationError, InvalidWheelFilename, UnsupportedWheel
-from .python import CURRENT_PYTHON_VERSION_DIGITS
 from .packaging import (
     InvalidVersion,
     Requirement,
@@ -21,6 +20,7 @@ from .packaging import (
     marker_applies,
     parse_requirement,
 )
+from .python import CURRENT_PYTHON_VERSION_DIGITS
 from .wheel_metadata import (
     metadata_paths,
     parse_metadata_member,
@@ -47,11 +47,14 @@ class MetadataCache(Protocol):
     """Minimal cache contract needed by wheel parsing."""
 
     def get_reference(
-        self, identity: tuple[str, int, int]
+        self,
+        identity: tuple[str, int, int],
     ) -> dict[str, list[str]] | None: ...
 
     def put(
-        self, identity: tuple[str, int, int], headers: dict[str, list[str]]
+        self,
+        identity: tuple[str, int, int],
+        headers: dict[str, list[str]],
     ) -> None: ...
 
 
@@ -64,19 +67,19 @@ def Parser() -> EmailParser:
 
 class WheelCandidate:
     __slots__ = (
-        "name",
-        "version",
-        "path",
         "dependencies",
+        "from_cache",
+        "name",
+        "path",
         "provided_extras",
         "requires_python",
-        "source_url",
         "source_hashes",
         "source_kind",
+        "source_url",
         "source_vcs",
-        "from_cache",
-        "yanked_reason",
+        "version",
         "wheel_layout",
+        "yanked_reason",
     )
 
     def __init__(
@@ -126,13 +129,13 @@ class WheelCandidate:
 
 class WheelTag:
     __slots__ = (
-        "interpreter",
-        "abi",
-        "platform",
-        "_interpreter_lower",
         "_abi_lower",
+        "_interpreter_lower",
         "_platform_lower",
         "_platform_parts",
+        "abi",
+        "interpreter",
+        "platform",
     )
 
     def __init__(self, interpreter: str, abi: str, platform: str) -> None:
@@ -170,7 +173,7 @@ class WheelTag:
 
 
 class WheelFile:
-    __slots__ = ("name", "version", "build_tag", "tags")
+    __slots__ = ("build_tag", "name", "tags", "version")
 
     def __init__(
         self,
@@ -210,7 +213,7 @@ class WheelFile:
 
 
 class Wheel:
-    __slots__ = ("filename", "name", "version", "build_tag", "file_tags")
+    __slots__ = ("build_tag", "file_tags", "filename", "name", "version")
 
     def __init__(self, filename: str | Path) -> None:
         self.filename = str(filename)
@@ -237,7 +240,7 @@ class Wheel:
 
 
 class TargetContext:
-    __slots__ = ("platforms", "implementation", "python_version", "abis")
+    __slots__ = ("abis", "implementation", "platforms", "python_version")
 
     def __init__(
         self,
@@ -266,7 +269,7 @@ class TargetContext:
 
     def __hash__(self) -> int:
         return hash(
-            (self.platforms, self.implementation, self.python_version, self.abis)
+            (self.platforms, self.implementation, self.python_version, self.abis),
         )
 
     platforms: tuple[str, ...]
@@ -283,11 +286,11 @@ WHEEL_METADATA_CACHE_SIZE = 1024
 
 class WheelResolutionMetadata:
     __slots__ = (
-        "name",
-        "version",
         "dependencies",
+        "name",
         "provided_extras",
         "requires_python",
+        "version",
     )
 
     def __init__(
@@ -313,12 +316,17 @@ class WheelResolutionMetadata:
 
 wheel_metadata_cache: dict[tuple[str, int, int], WheelResolutionMetadata] = {}
 wheel_dependency_cache: dict[
-    tuple[tuple[str, int, int], frozenset[str]], tuple[Requirement, ...]
+    tuple[tuple[str, int, int], frozenset[str]],
+    tuple[Requirement, ...],
 ] = {}
 
 
 def parse_wheel_file(path: str | Path) -> WheelFile | None:
-    name = os.path.basename(os.fspath(path))
+    return _parse_wheel_filename(os.path.basename(os.fspath(path)))
+
+
+@lru_cache(maxsize=4096)
+def _parse_wheel_filename(name: str) -> WheelFile | None:
     if not name.endswith(".whl"):
         return None
     stem = name[:-4]
@@ -354,7 +362,9 @@ def parsed_wheel_version(value: str) -> Version:
 
 @lru_cache(maxsize=1024)
 def parsed_wheel_tags(
-    python_tags: str, abi_tags: str, platform_tags: str
+    python_tags: str,
+    abi_tags: str,
+    platform_tags: str,
 ) -> tuple[WheelTag, ...]:
     return tuple(
         WheelTag(interpreter, abi, platform)
@@ -412,7 +422,8 @@ def current_platform_tag() -> str:
 
 @lru_cache(maxsize=4096)
 def wheel_tag_rank(
-    tags: tuple[WheelTag, ...], supported_tags: tuple[WheelTag, ...] | None = None
+    tags: tuple[WheelTag, ...],
+    supported_tags: tuple[WheelTag, ...] | None = None,
 ) -> int | None:
     supported = supported_wheel_tags() if supported_tags is None else supported_tags
     for index, supported_tag in enumerate(supported):
@@ -423,7 +434,9 @@ def wheel_tag_rank(
 
 
 def wheel_archive_identity(
-    path: Path, archive: zipfile.ZipFile | None, dist_info_dir: str | None
+    path: Path,
+    archive: zipfile.ZipFile | None,
+    dist_info_dir: str | None,
 ) -> tuple[str, int, int] | None:
     try:
         if archive is not None and dist_info_dir is not None:
@@ -587,7 +600,7 @@ def read_core_metadata_headers(
         raise InstallationError(f"Wheel has no METADATA: {path}") from exc
     except UnicodeDecodeError as exc:
         raise InstallationError(
-            f"Error decoding metadata for {path}: {metadata_path}"
+            f"Error decoding metadata for {path}: {metadata_path}",
         ) from exc
 
 
@@ -636,7 +649,7 @@ def read_wheel_metadata_internal(
             contents = file.read().decode("utf-8")
         except UnicodeDecodeError as exc:
             raise InstallationError(
-                f"Error decoding metadata for {path}: {metadata_names[0]}"
+                f"Error decoding metadata for {path}: {metadata_names[0]}",
             ) from exc
         return Parser().parsestr(contents)
 
@@ -659,7 +672,7 @@ def wheel_dist_info_dir(source: zipfile.ZipFile, name: str) -> str:
     actual = re.sub(r"[-_.]+", "", dist_info_dir.removesuffix(".dist-info")).casefold()
     if not actual.startswith(expected):
         raise UnsupportedWheel(
-            f".dist-info directory {dist_info_dir!r} does not start with {name!r}"
+            f".dist-info directory {dist_info_dir!r} does not start with {name!r}",
         )
     return dist_info_dir
 
@@ -714,10 +727,11 @@ def check_compatibility(version: tuple[int, ...], name: str) -> None:
     if version[0] > VERSION_COMPATIBLE[0]:
         raise UnsupportedWheel(
             "{}'s Wheel-Version ({}) is not compatible with this version of cpip".format(
-                name, ".".join(map(str, version))
-            )
+                name,
+                ".".join(map(str, version)),
+            ),
         )
-    elif version > VERSION_COMPATIBLE:
+    if version > VERSION_COMPATIBLE:
         logger.warning(
             "Installing from a newer Wheel-Version (%s)",
             ".".join(map(str, version)),
@@ -836,12 +850,14 @@ def platform_matches(
 
 def macos_platform_matches(runtime: str, wheel: str) -> bool:
     return _macos_platform_matches_parts(
-        tuple(runtime.split("_", 3)), tuple(wheel.split("_", 3))
+        tuple(runtime.split("_", 3)),
+        tuple(wheel.split("_", 3)),
     )
 
 
 def _macos_platform_matches_parts(
-    runtime_parts: tuple[str, ...], wheel_parts: tuple[str, ...]
+    runtime_parts: tuple[str, ...],
+    wheel_parts: tuple[str, ...],
 ) -> bool:
     if len(runtime_parts) != 4 or len(wheel_parts) != 4:
         return False
@@ -859,12 +875,14 @@ def _macos_platform_matches_parts(
 
 def ios_platform_matches(runtime: str, wheel: str) -> bool:
     return _ios_platform_matches_parts(
-        tuple(runtime.split("_", 4)), tuple(wheel.split("_", 4))
+        tuple(runtime.split("_", 4)),
+        tuple(wheel.split("_", 4)),
     )
 
 
 def _ios_platform_matches_parts(
-    runtime_parts: tuple[str, ...], wheel_parts: tuple[str, ...]
+    runtime_parts: tuple[str, ...],
+    wheel_parts: tuple[str, ...],
 ) -> bool:
     if len(runtime_parts) != 5 or len(wheel_parts) != 5:
         return False
@@ -880,12 +898,14 @@ def _ios_platform_matches_parts(
 
 def android_platform_matches(runtime: str, wheel: str) -> bool:
     return _android_platform_matches_parts(
-        tuple(runtime.split("_", 3)), tuple(wheel.split("_", 3))
+        tuple(runtime.split("_", 3)),
+        tuple(wheel.split("_", 3)),
     )
 
 
 def _android_platform_matches_parts(
-    runtime_parts: tuple[str, ...], wheel_parts: tuple[str, ...]
+    runtime_parts: tuple[str, ...],
+    wheel_parts: tuple[str, ...],
 ) -> bool:
     if len(runtime_parts) != 4 or len(wheel_parts) != 4:
         return False

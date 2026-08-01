@@ -1,6 +1,7 @@
 import hashlib
 import os
 from pathlib import Path
+
 import pytest
 from cpip.network.cache import SafeFileCache
 from cpip_test_support.filesystem import chmod
@@ -14,8 +15,7 @@ def cache_tmpdir(tmp_path: Path) -> Path:
 
 
 class TestSafeFileCache:
-    """
-    The no_perms test are useless on Windows since SafeFileCache uses
+    """The no_perms test are useless on Windows since SafeFileCache uses
     cpip.platform.filesystem.check_path_owner which is based on
     os.geteuid which is absent on Windows.
     """
@@ -52,7 +52,9 @@ class TestSafeFileCache:
 
     @pytest.mark.skipif("sys.platform == 'win32'")
     def test_safe_get_no_perms(
-        self, cache_tmpdir: Path, monkeypatch: pytest.MonkeyPatch
+        self,
+        cache_tmpdir: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         monkeypatch.setattr(os.path, "exists", lambda x: True)
 
@@ -76,7 +78,7 @@ class TestSafeFileCache:
         cache = SafeFileCache(os.fspath(cache_tmpdir))
         key = "test key"
         assert cache.get_cache_path(key).endswith(
-            hashlib.sha224(key.encode()).hexdigest()
+            hashlib.sha224(key.encode()).hexdigest(),
         )
 
     @pytest.mark.skipif("sys.platform == 'win32'")
@@ -85,10 +87,14 @@ class TestSafeFileCache:
         reason="requires os.chmod to support file descriptors or not follow symlinks",
     )
     @pytest.mark.parametrize(
-        "perms, expected_perms", [(0o300, 0o600), (0o700, 0o600), (0o777, 0o666)]
+        "perms, expected_perms",
+        [(0o300, 0o600), (0o700, 0o600), (0o777, 0o666)],
     )
     def test_cache_inherit_perms(
-        self, cache_tmpdir: Path, perms: int, expected_perms: int
+        self,
+        cache_tmpdir: Path,
+        perms: int,
+        expected_perms: int,
     ) -> None:
         key = "foo"
         with chmod(cache_tmpdir, perms):
@@ -98,11 +104,15 @@ class TestSafeFileCache:
 
     @pytest.mark.skipif("sys.platform == 'win32'")
     def test_cache_not_inherit_perms(
-        self, cache_tmpdir: Path, monkeypatch: pytest.MonkeyPatch
+        self,
+        cache_tmpdir: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         monkeypatch.setattr(os, "supports_fd", os.supports_fd - {os.chmod})
         monkeypatch.setattr(
-            os, "supports_follow_symlinks", os.supports_follow_symlinks - {os.chmod}
+            os,
+            "supports_follow_symlinks",
+            os.supports_follow_symlinks - {os.chmod},
         )
         key = "foo"
         with chmod(cache_tmpdir, 0o777):

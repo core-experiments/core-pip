@@ -1,6 +1,4 @@
-"""
-tests specific to "cpip install --user"
-"""
+"""tests specific to "cpip install --user" """
 
 import os
 import textwrap
@@ -8,7 +6,6 @@ from os.path import curdir, isdir, isfile
 from pathlib import Path
 
 import pytest
-
 from cpip_test_support import (
     CpipTestEnvironment,
     TestData,
@@ -41,9 +38,7 @@ class Tests_UserSite:
         script: CpipTestEnvironment,
         data: TestData,
     ) -> None:
-        """
-        Check user site works as expected.
-        """
+        """Check user site works as expected."""
         script.cpip_install_local("--user", "INITools==0.2", "-f", data.pypi_packages)
         result = script.run(
             "python",
@@ -52,16 +47,17 @@ class Tests_UserSite:
             "('initools').metadata['Name'])",
         )
         project_name = result.stdout.strip()
-        assert "initools" == project_name, project_name
+        assert project_name == "initools", project_name
 
     @pytest.mark.xfail
     @pytest.mark.network
     @need_svn
     def test_install_subversion_usersite_editable_with_distribute(
-        self, script: CpipTestEnvironment, tmpdir: Path
+        self,
+        script: CpipTestEnvironment,
+        tmpdir: Path,
     ) -> None:
-        """
-        Test installing current directory ('.') into usersite after installing
+        """Test installing current directory ('.') into usersite after installing
         distribute
         """
         result = script.cpip(
@@ -70,18 +66,19 @@ class Tests_UserSite:
             "-e",
             "{checkout}#egg=initools".format(
                 checkout=local_checkout(
-                    "svn+http://svn.colorstudy.com/INITools", tmpdir
-                )
+                    "svn+http://svn.colorstudy.com/INITools",
+                    tmpdir,
+                ),
             ),
         )
         result.assert_installed("INITools")
 
     def test_install_from_current_directory_into_usersite(
-        self, script: CpipTestEnvironment, data: TestData
+        self,
+        script: CpipTestEnvironment,
+        data: TestData,
     ) -> None:
-        """
-        Test installing current directory ('.') into usersite
-        """
+        """Test installing current directory ('.') into usersite"""
         run_from = data.packages.joinpath("FSPkg")
         result = script.cpip(
             "install",
@@ -104,9 +101,7 @@ class Tests_UserSite:
         script: CpipTestEnvironment,
         data: TestData,
     ) -> None:
-        """
-        user install in virtualenv (with no system packages) fails with message
-        """
+        """User install in virtualenv (with no system packages) fails with message"""
         # We can't use PYTHONNOUSERSITE, as it's not
         # honoured by virtualenv's custom site.py.
         virtualenv.user_site_packages = False
@@ -124,16 +119,18 @@ class Tests_UserSite:
         )
 
     def test_install_user_conflict_in_usersite(
-        self, script: CpipTestEnvironment, data: TestData
+        self,
+        script: CpipTestEnvironment,
+        data: TestData,
     ) -> None:
-        """
-        Test user install with conflict in usersite updates usersite.
-        """
-
+        """Test user install with conflict in usersite updates usersite."""
         script.cpip_install_local("--user", "INITools==0.2", "-f", data.pypi_packages)
 
         result2 = script.cpip_install_local(
-            "--user", "INITools==0.1", "-f", data.pypi_packages
+            "--user",
+            "INITools==0.1",
+            "-f",
+            data.pypi_packages,
         )
 
         # usersite has 0.1
@@ -146,10 +143,11 @@ class Tests_UserSite:
         assert not isfile(initools_v2_file), initools_v2_file
 
     def test_install_user_conflict_in_globalsite(
-        self, virtualenv: VirtualEnvironment, script: CpipTestEnvironment
+        self,
+        virtualenv: VirtualEnvironment,
+        script: CpipTestEnvironment,
     ) -> None:
-        """
-        Test user install with conflict in global site ignores site and
+        """Test user install with conflict in global site ignores site and
         installs to usersite
         """
         create_basic_wheel_for_package(script, "initools", "0.1")
@@ -188,10 +186,11 @@ class Tests_UserSite:
         assert isdir(initools_folder)
 
     def test_upgrade_user_conflict_in_globalsite(
-        self, virtualenv: VirtualEnvironment, script: CpipTestEnvironment
+        self,
+        virtualenv: VirtualEnvironment,
+        script: CpipTestEnvironment,
     ) -> None:
-        """
-        Test user install/upgrade with conflict in global site ignores site and
+        """Test user install/upgrade with conflict in global site ignores site and
         installs to usersite
         """
         create_basic_wheel_for_package(script, "initools", "0.2")
@@ -231,10 +230,11 @@ class Tests_UserSite:
         assert isdir(initools_folder)
 
     def test_install_user_conflict_in_globalsite_and_usersite(
-        self, virtualenv: VirtualEnvironment, script: CpipTestEnvironment
+        self,
+        virtualenv: VirtualEnvironment,
+        script: CpipTestEnvironment,
     ) -> None:
-        """
-        Test user install with conflict in globalsite and usersite ignores
+        """Test user install with conflict in globalsite and usersite ignores
         global site and updates usersite.
         """
         initools_v3_file_name = os.path.join("initools", "configparser.py")
@@ -288,10 +288,10 @@ class Tests_UserSite:
         assert isdir(initools_folder)
 
     def test_install_user_in_global_virtualenv_with_conflict_fails(
-        self, script: CpipTestEnvironment
+        self,
+        script: CpipTestEnvironment,
     ) -> None:
-        """
-        Test user install in --system-site-packages virtualenv with conflict in
+        """Test user install in --system-site-packages virtualenv with conflict in
         site fails.
         """
         create_basic_wheel_for_package(script, "pkg", "0.1")
@@ -334,9 +334,7 @@ class Tests_UserSite:
         script: CpipTestEnvironment,
         data: TestData,
     ) -> None:
-        """
-        Test that --user install fails when user site-packages are disabled.
-        """
+        """Test that --user install fails when user site-packages are disabled."""
         create_basic_wheel_for_package(script, "pkg", "0.1")
 
         # Create a custom Python script that disables user site and runs cpip via exec
@@ -366,7 +364,7 @@ class Tests_UserSite:
             # Import and run cpip's main
             from cpip.cli.main import main
             sys.exit(main())
-            """)
+            """),
         )
 
         result = script.run("python", str(test_script), expect_error=True)

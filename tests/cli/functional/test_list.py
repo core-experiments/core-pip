@@ -4,7 +4,6 @@ import re
 from pathlib import Path
 
 import pytest
-
 from cpip_test_support import (
     CpipTestEnvironment,
     ScriptFactory,
@@ -37,19 +36,14 @@ def simple_script(
 
 
 def test_basic_list(simple_script: CpipTestEnvironment) -> None:
-    """
-    Test default behavior of list command without format specifier.
-
-    """
+    """Test default behavior of list command without format specifier."""
     result = simple_script.cpip("list")
     assert "simple     1.0" in result.stdout, str(result)
     assert "simple2    3.0" in result.stdout, str(result)
 
 
 def test_verbose_flag(simple_script: CpipTestEnvironment) -> None:
-    """
-    Test the list command with the '-v' option
-    """
+    """Test the list command with the '-v' option"""
     result = simple_script.cpip("list", "-v", "--format=columns")
     assert "Package" in result.stdout, str(result)
     assert "Version" in result.stdout, str(result)
@@ -60,9 +54,7 @@ def test_verbose_flag(simple_script: CpipTestEnvironment) -> None:
 
 
 def test_columns_flag(simple_script: CpipTestEnvironment) -> None:
-    """
-    Test the list command with the '--format=columns' option
-    """
+    """Test the list command with the '--format=columns' option"""
     result = simple_script.cpip("list", "--format=columns")
     assert "Package" in result.stdout, str(result)
     assert "Version" in result.stdout, str(result)
@@ -72,11 +64,12 @@ def test_columns_flag(simple_script: CpipTestEnvironment) -> None:
 
 
 def test_format_priority(simple_script: CpipTestEnvironment) -> None:
-    """
-    Test that latest format has priority over previous ones.
-    """
+    """Test that latest format has priority over previous ones."""
     result = simple_script.cpip(
-        "list", "--format=columns", "--format=freeze", expect_stderr=True
+        "list",
+        "--format=columns",
+        "--format=freeze",
+        expect_stderr=True,
     )
     assert "simple==1.0" in result.stdout, str(result)
     assert "simple2==3.0" in result.stdout, str(result)
@@ -93,19 +86,13 @@ def test_format_priority(simple_script: CpipTestEnvironment) -> None:
 
 
 def test_local_flag(simple_script: CpipTestEnvironment) -> None:
-    """
-    Test the behavior of --local flag in the list command
-
-    """
+    """Test the behavior of --local flag in the list command"""
     result = simple_script.cpip("list", "--local", "--format=json")
     assert {"name": "simple", "version": "1.0"} in json.loads(result.stdout)
 
 
 def test_local_columns_flag(simple_script: CpipTestEnvironment) -> None:
-    """
-    Test the behavior of --local --format=columns flags in the list command
-
-    """
+    """Test the behavior of --local --format=columns flags in the list command"""
     result = simple_script.cpip("list", "--local", "--format=columns")
     assert "Package" in result.stdout
     assert "Version" in result.stdout
@@ -114,10 +101,11 @@ def test_local_columns_flag(simple_script: CpipTestEnvironment) -> None:
 
 
 def test_multiple_exclude_and_normalization(
-    script: CpipTestEnvironment, tmpdir: Path
+    script: CpipTestEnvironment,
+    tmpdir: Path,
 ) -> None:
     req_path = wheel.make_wheel(name="Normalizable_Name", version="1.0").save_to_dir(
-        tmpdir
+        tmpdir,
     )
     script.cpip("install", "--no-index", req_path)
     result = script.cpip("list")
@@ -131,10 +119,7 @@ def test_multiple_exclude_and_normalization(
 
 @pytest.mark.usefixtures("enable_user_site")
 def test_user_flag(script: CpipTestEnvironment, data: TestData) -> None:
-    """
-    Test the behavior of --user flag in the list command
-
-    """
+    """Test the behavior of --user flag in the list command"""
     script.cpip_install_local("simplewheel==1.0")
     script.cpip_install_local("--user", "simple.dist==0.1")
     result = script.cpip("list", "--user", "--format=json")
@@ -144,10 +129,7 @@ def test_user_flag(script: CpipTestEnvironment, data: TestData) -> None:
 
 @pytest.mark.usefixtures("enable_user_site")
 def test_user_columns_flag(script: CpipTestEnvironment, data: TestData) -> None:
-    """
-    Test the behavior of --user --format=columns flags in the list command
-
-    """
+    """Test the behavior of --user --format=columns flags in the list command"""
     script.cpip_install_local("simplewheel==1.0")
     script.cpip_install_local("--user", "simple.dist==0.1")
     result = script.cpip("list", "--user", "--format=columns")
@@ -159,10 +141,7 @@ def test_user_columns_flag(script: CpipTestEnvironment, data: TestData) -> None:
 
 @pytest.mark.network
 def test_uptodate_flag(script: CpipTestEnvironment, data: TestData) -> None:
-    """
-    Test the behavior of --uptodate flag in the list command
-
-    """
+    """Test the behavior of --uptodate flag in the list command"""
     script.cpip(
         "install",
         "--no-build-isolation",
@@ -200,10 +179,7 @@ def test_uptodate_flag(script: CpipTestEnvironment, data: TestData) -> None:
 
 @pytest.mark.network
 def test_uptodate_columns_flag(script: CpipTestEnvironment, data: TestData) -> None:
-    """
-    Test the behavior of --uptodate --format=columns flag in the list command
-
-    """
+    """Test the behavior of --uptodate --format=columns flag in the list command"""
     script.cpip(
         "install",
         "--no-build-isolation",
@@ -236,10 +212,7 @@ def test_uptodate_columns_flag(script: CpipTestEnvironment, data: TestData) -> N
 
 @pytest.mark.network
 def test_outdated_flag(script: CpipTestEnvironment, data: TestData) -> None:
-    """
-    Test the behavior of --outdated flag in the list command
-
-    """
+    """Test the behavior of --outdated flag in the list command"""
     script.cpip(
         "install",
         "--no-build-isolation",
@@ -291,10 +264,7 @@ def test_outdated_flag(script: CpipTestEnvironment, data: TestData) -> None:
 
 @pytest.mark.network
 def test_outdated_columns_flag(script: CpipTestEnvironment, data: TestData) -> None:
-    """
-    Test the behavior of --outdated --format=columns flag in the list command
-
-    """
+    """Test the behavior of --outdated --format=columns flag in the list command"""
     script.cpip(
         "install",
         "--no-build-isolation",
@@ -356,9 +326,7 @@ def cpip_test_package_script(
 
 @pytest.mark.network
 def test_editables_flag(cpip_test_package_script: CpipTestEnvironment) -> None:
-    """
-    Test the behavior of --editables flag in the list command
-    """
+    """Test the behavior of --editables flag in the list command"""
     result = cpip_test_package_script.cpip("list", "--editable", "--format=json")
     result2 = cpip_test_package_script.cpip("list", "--editable")
     assert {"name": "simple", "version": "1.0"} not in json.loads(result.stdout)
@@ -367,11 +335,11 @@ def test_editables_flag(cpip_test_package_script: CpipTestEnvironment) -> None:
 
 @pytest.mark.network
 def test_exclude_editable_flag(cpip_test_package_script: CpipTestEnvironment) -> None:
-    """
-    Test the behavior of --editables flag in the list command
-    """
+    """Test the behavior of --editables flag in the list command"""
     result = cpip_test_package_script.cpip(
-        "list", "--exclude-editable", "--format=json"
+        "list",
+        "--exclude-editable",
+        "--format=json",
     )
     assert {"name": "simple", "version": "1.0"} in json.loads(result.stdout)
     assert "pip-test-package" not in {p["name"] for p in json.loads(result.stdout)}
@@ -379,9 +347,7 @@ def test_exclude_editable_flag(cpip_test_package_script: CpipTestEnvironment) ->
 
 @pytest.mark.network
 def test_editables_columns_flag(cpip_test_package_script: CpipTestEnvironment) -> None:
-    """
-    Test the behavior of --editables flag in the list command
-    """
+    """Test the behavior of --editables flag in the list command"""
     result = cpip_test_package_script.cpip("list", "--editable", "--format=columns")
     assert "Package" in result.stdout
     assert "Version" in result.stdout
@@ -391,11 +357,10 @@ def test_editables_columns_flag(cpip_test_package_script: CpipTestEnvironment) -
 
 @pytest.mark.network
 def test_uptodate_editables_flag(
-    cpip_test_package_script: CpipTestEnvironment, data: TestData
+    cpip_test_package_script: CpipTestEnvironment,
+    data: TestData,
 ) -> None:
-    """
-    test the behavior of --editable --uptodate flag in the list command
-    """
+    """Test the behavior of --editable --uptodate flag in the list command"""
     result = cpip_test_package_script.cpip(
         "list",
         "-f",
@@ -410,10 +375,10 @@ def test_uptodate_editables_flag(
 
 @pytest.mark.network
 def test_uptodate_editables_columns_flag(
-    cpip_test_package_script: CpipTestEnvironment, data: TestData
+    cpip_test_package_script: CpipTestEnvironment,
+    data: TestData,
 ) -> None:
-    """
-    test the behavior of --editable --uptodate --format=columns flag in the
+    """Test the behavior of --editable --uptodate --format=columns flag in the
     list command
     """
     result = cpip_test_package_script.cpip(
@@ -433,9 +398,7 @@ def test_uptodate_editables_columns_flag(
 
 @pytest.mark.network
 def test_outdated_editables_flag(script: CpipTestEnvironment, data: TestData) -> None:
-    """
-    test the behavior of --editable --outdated flag in the list command
-    """
+    """Test the behavior of --editable --outdated flag in the list command"""
     script.cpip(
         "install",
         "--no-build-isolation",
@@ -464,11 +427,10 @@ def test_outdated_editables_flag(script: CpipTestEnvironment, data: TestData) ->
 
 @pytest.mark.network
 def test_outdated_editables_columns_flag(
-    script: CpipTestEnvironment, data: TestData
+    script: CpipTestEnvironment,
+    data: TestData,
 ) -> None:
-    """
-    test the behavior of --editable --outdated flag in the list command
-    """
+    """Test the behavior of --editable --outdated flag in the list command"""
     script.cpip(
         "install",
         "--no-build-isolation",
@@ -499,11 +461,10 @@ def test_outdated_editables_columns_flag(
 
 
 def test_outdated_not_required_flag(
-    script: CpipTestEnvironment, data: TestData
+    script: CpipTestEnvironment,
+    data: TestData,
 ) -> None:
-    """
-    test the behavior of --outdated --not-required flag in the list command
-    """
+    """Test the behavior of --outdated --not-required flag in the list command"""
     script.cpip(
         "install",
         "--no-build-isolation",
@@ -522,7 +483,7 @@ def test_outdated_not_required_flag(
         "--not-required",
         "--format=json",
     )
-    assert [] == json.loads(result.stdout)
+    assert json.loads(result.stdout) == []
 
 
 def test_outdated_pre(script: CpipTestEnvironment, data: TestData) -> None:
@@ -645,7 +606,7 @@ def test_outdated_formats(script: CpipTestEnvironment, data: TestData) -> None:
             "version": "1.0",
             "latest_version": "1.1",
             "latest_filetype": "wheel",
-        }
+        },
     ]
 
 
@@ -666,7 +627,8 @@ def test_not_required_flag(script: CpipTestEnvironment, data: TestData) -> None:
 
 
 def test_not_required_with_exclude_does_not_list_dependencies(
-    script: CpipTestEnvironment, data: TestData
+    script: CpipTestEnvironment,
+    data: TestData,
 ) -> None:
     script.cpip(
         "install",
@@ -692,20 +654,14 @@ def test_not_required_with_exclude_does_not_list_dependencies(
 
 
 def test_list_freeze(simple_script: CpipTestEnvironment) -> None:
-    """
-    Test freeze formatting of list command
-
-    """
+    """Test freeze formatting of list command"""
     result = simple_script.cpip("list", "--format=freeze")
     assert "simple==1.0" in result.stdout, str(result)
     assert "simple2==3.0" in result.stdout, str(result)
 
 
 def test_list_json(simple_script: CpipTestEnvironment) -> None:
-    """
-    Test json formatting of list command
-
-    """
+    """Test json formatting of list command"""
     result = simple_script.cpip("list", "--format=json")
     data = json.loads(result.stdout)
     assert {"name": "simple", "version": "1.0"} in data
@@ -713,9 +669,7 @@ def test_list_json(simple_script: CpipTestEnvironment) -> None:
 
 
 def test_list_path(tmpdir: Path, script: CpipTestEnvironment, data: TestData) -> None:
-    """
-    Test list with --path.
-    """
+    """Test list with --path."""
     result = script.cpip("list", "--path", tmpdir, "--format=json")
     json_result = json.loads(result.stdout)
     assert {"name": "simple", "version": "2.0"} not in json_result
@@ -728,10 +682,11 @@ def test_list_path(tmpdir: Path, script: CpipTestEnvironment, data: TestData) ->
 
 @pytest.mark.usefixtures("enable_user_site")
 def test_list_path_exclude_user(
-    tmpdir: Path, script: CpipTestEnvironment, data: TestData
+    tmpdir: Path,
+    script: CpipTestEnvironment,
+    data: TestData,
 ) -> None:
-    """
-    Test list with --path and make sure packages from --user are not picked
+    """Test list with --path and make sure packages from --user are not picked
     up.
     """
     script.cpip_install_local("--user", "simple2")
@@ -747,11 +702,11 @@ def test_list_path_exclude_user(
 
 
 def test_list_path_multiple(
-    tmpdir: Path, script: CpipTestEnvironment, data: TestData
+    tmpdir: Path,
+    script: CpipTestEnvironment,
+    data: TestData,
 ) -> None:
-    """
-    Test list with multiple --path arguments.
-    """
+    """Test list with multiple --path arguments."""
     path1 = tmpdir / "path1"
     os.mkdir(path1)
     path2 = tmpdir / "path2"
@@ -771,10 +726,7 @@ def test_list_path_multiple(
 
 
 def test_list_skip_work_dir_pkg(script: CpipTestEnvironment) -> None:
-    """
-    Test that list should not include package in working directory
-    """
-
+    """Test that list should not include package in working directory"""
     # Create a test package and create .egg-info dir
     pkg_path = create_test_package_with_setup(script, name="simple", version="1.0")
     script.run("python", "setup.py", "egg_info", expect_stderr=True, cwd=pkg_path)
@@ -786,11 +738,9 @@ def test_list_skip_work_dir_pkg(script: CpipTestEnvironment) -> None:
 
 
 def test_list_include_work_dir_pkg(script: CpipTestEnvironment) -> None:
-    """
-    Test that list should include package in working directory
+    """Test that list should include package in working directory
     if working directory is added in PYTHONPATH
     """
-
     # Create a test package and create .egg-info dir
     pkg_path = create_test_package_with_setup(script, name="simple", version="1.0")
     script.run("python", "setup.py", "egg_info", expect_stderr=True, cwd=pkg_path)
@@ -805,8 +755,7 @@ def test_list_include_work_dir_pkg(script: CpipTestEnvironment) -> None:
 
 
 def test_list_pep610_editable(script: CpipTestEnvironment) -> None:
-    """
-    Test that a package installed with a direct_url.json with editable=true
+    """Test that a package installed with a direct_url.json with editable=true
     is correctly listed as editable.
     """
     pkg_path = create_test_package(script.scratch_path, name="testpkg")
@@ -843,7 +792,8 @@ def test_list_wheel_build(script: CpipTestEnvironment) -> None:
 
 
 def test_outdated_only_final_for_specific_package(
-    script: CpipTestEnvironment, data: TestData
+    script: CpipTestEnvironment,
+    data: TestData,
 ) -> None:
     """Test that --only-final filters prereleases for specific package."""
     script.cpip_install_local("simple==1.0")
@@ -885,7 +835,8 @@ def test_outdated_only_final_for_specific_package(
 
 
 def test_outdated_all_releases_for_specific_package(
-    script: CpipTestEnvironment, data: TestData
+    script: CpipTestEnvironment,
+    data: TestData,
 ) -> None:
     """Test that --all-releases allows prereleases for specific package."""
     script.cpip_install_local("simple==1.0")

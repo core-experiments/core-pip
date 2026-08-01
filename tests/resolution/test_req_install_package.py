@@ -10,13 +10,13 @@ from unittest import mock
 import pytest
 from cpip.core.errors import InstallationError, InvalidWheelFilename
 from cpip.core.packaging import Requirement, SpecifierSet
-from cpip.resolution.requirements.paths import get_url_from_path, looks_like_path
-from cpip.resolution.req_install import (
-    InstallRequirement,
+from cpip.resolution.engine.input.paths import get_url_from_path, looks_like_path
+from cpip.resolution.engine.input.requirements import (
     install_req_from_editable,
     install_req_from_line,
     parse_editable,
 )
+from cpip.resolution.req_install import InstallRequirement
 
 
 def test_url_with_query_preserves_query_and_fragment() -> None:
@@ -329,7 +329,8 @@ def test_requirement_file(tmp_path: Path) -> None:
     ],
 )
 def test_parse_editable_pep508(
-    req_str: str, expected: tuple[str, str, set[str]]
+    req_str: str,
+    expected: tuple[str, str, set[str]],
 ) -> None:
     assert parse_editable(req_str) == expected
 
@@ -340,7 +341,8 @@ def test_parse_editable_local(tmp_path: Path) -> None:
     child.mkdir()
     with mock.patch("cpip.resolution.req_install.os.path.exists", return_value=True):
         with mock.patch(
-            "cpip.resolution.req_install.os.path.abspath", return_value=os.fspath(child)
+            "cpip.resolution.req_install.os.path.abspath",
+            return_value=os.fspath(child),
         ):
             assert parse_editable("foo") == (None, child.resolve().as_uri(), set())
 
@@ -366,28 +368,36 @@ def test_parse_editable_local_extras(tmp_path: Path) -> None:
     root.mkdir()
     child = root / "foo"
     child.mkdir()
-    with mock.patch(
-        "cpip.resolution.req_install.os.path.abspath", return_value=os.fspath(root)
+    with (
+        mock.patch(
+            "cpip.resolution.req_install.os.path.abspath",
+            return_value=os.fspath(root),
+        ),
+        mock.patch(
+            "cpip.resolution.req_install.os.path.exists",
+            return_value=True,
+        ),
     ):
-        with mock.patch(
-            "cpip.resolution.req_install.os.path.exists", return_value=True
-        ):
-            assert parse_editable(".[extras]") == (
-                None,
-                root.resolve().as_uri(),
-                {"extras"},
-            )
-    with mock.patch(
-        "cpip.resolution.req_install.os.path.abspath", return_value=os.fspath(child)
+        assert parse_editable(".[extras]") == (
+            None,
+            root.resolve().as_uri(),
+            {"extras"},
+        )
+    with (
+        mock.patch(
+            "cpip.resolution.req_install.os.path.abspath",
+            return_value=os.fspath(child),
+        ),
+        mock.patch(
+            "cpip.resolution.req_install.os.path.exists",
+            return_value=True,
+        ),
     ):
-        with mock.patch(
-            "cpip.resolution.req_install.os.path.exists", return_value=True
-        ):
-            assert parse_editable("foo[bar,baz]") == (
-                None,
-                child.resolve().as_uri(),
-                {"bar", "baz"},
-            )
+        assert parse_editable("foo[bar,baz]") == (
+            None,
+            child.resolve().as_uri(),
+            {"bar", "baz"},
+        )
 
 
 def test_mismatched_versions(caplog: pytest.LogCaptureFixture) -> None:
@@ -471,13 +481,17 @@ def test_get_url_from_path(
     mock_returns: tuple[bool, bool],
     expected: None,
 ) -> None:
-    with mock.patch(
-        "cpip.resolution.req_install.os.path.isdir", return_value=mock_returns[0]
+    with (
+        mock.patch(
+            "cpip.resolution.req_install.os.path.isdir",
+            return_value=mock_returns[0],
+        ),
+        mock.patch(
+            "cpip.resolution.req_install.os.path.isfile",
+            return_value=mock_returns[1],
+        ),
     ):
-        with mock.patch(
-            "cpip.resolution.req_install.os.path.isfile", return_value=mock_returns[1]
-        ):
-            assert get_url_from_path(*args) is expected
+        assert get_url_from_path(*args) is expected
 
 
 def test_get_url_from_path_archive_file() -> None:
@@ -486,7 +500,8 @@ def test_get_url_from_path_archive_file() -> None:
     expected = Path(path).resolve(strict=False).as_uri()
     with mock.patch("cpip.resolution.req_install.os.path.isdir", return_value=False):
         with mock.patch(
-            "cpip.resolution.req_install.os.path.isfile", return_value=True
+            "cpip.resolution.req_install.os.path.isfile",
+            return_value=True,
         ):
             assert get_url_from_path(path, name) == expected
 
@@ -497,7 +512,8 @@ def test_get_url_from_path_installable_dir() -> None:
     expected = Path(path).resolve(strict=False).as_uri()
     with mock.patch("cpip.resolution.req_install.os.path.isdir", return_value=True):
         with mock.patch(
-            "cpip.resolution.req_install.os.path.isfile", return_value=True
+            "cpip.resolution.req_install.os.path.isfile",
+            return_value=True,
         ):
             assert get_url_from_path(path, name) == expected
 
@@ -507,7 +523,8 @@ def test_get_url_from_path_installable_error() -> None:
     path = f"/path/to/{name}"
     with mock.patch("cpip.resolution.req_install.os.path.isdir", return_value=True):
         with mock.patch(
-            "cpip.resolution.req_install.os.path.isfile", return_value=False
+            "cpip.resolution.req_install.os.path.isfile",
+            return_value=False,
         ):
             with pytest.raises(InstallationError) as exc:
                 get_url_from_path(path, name)
@@ -515,7 +532,8 @@ def test_get_url_from_path_installable_error() -> None:
 
 
 @pytest.mark.skipif(
-    sys.platform == "win32", reason="no need to test symlinks on Windows"
+    sys.platform == "win32",
+    reason="no need to test symlinks on Windows",
 )
 def test_tmp_build_directory() -> None:
     requirement = InstallRequirement(None, None)
@@ -527,7 +545,7 @@ def test_tmp_build_directory() -> None:
             parallel_builds=False,
         )
         assert os.path.dirname(tmp_build_dir) == os.path.realpath(
-            os.path.dirname(tmp_dir)
+            os.path.dirname(tmp_dir),
         )
         if os.path.realpath(tmp_dir) != os.path.abspath(tmp_dir):
             assert os.path.dirname(tmp_build_dir) != os.path.dirname(tmp_dir)

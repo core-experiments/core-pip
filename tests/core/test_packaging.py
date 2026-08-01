@@ -115,7 +115,9 @@ def test_specifier_set_bounds(
     ],
 )
 def test_wildcard_specifier_contains(
-    specifier: str, version: str, expected: bool
+    specifier: str,
+    version: str,
+    expected: bool,
 ) -> None:
     assert SpecifierSet(specifier).contains(version) is expected
 
@@ -129,7 +131,9 @@ def test_wildcard_specifier_contains(
     ],
 )
 def test_requires_python_specifier_oracle(
-    version: str, requires_python: str, expected: bool
+    version: str,
+    requires_python: str,
+    expected: bool,
 ) -> None:
     assert SpecifierSet(requires_python).contains(version) is expected
 

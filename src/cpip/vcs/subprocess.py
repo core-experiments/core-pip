@@ -87,7 +87,7 @@ def call_subprocess(
             )
         elif on_returncode == "raise":
             raise InstallationError(
-                f"{command_desc} exited with code {process.returncode}: {result}"
+                f"{command_desc} exited with code {process.returncode}: {result}",
             )
     elif spinner is not None:
         spinner.finish("done")

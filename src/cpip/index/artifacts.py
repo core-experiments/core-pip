@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import urllib.parse
-import urllib.request
 import hashlib
 import logging
 import os
 import posixpath
+import urllib.parse
+import urllib.request
 from pathlib import Path
 from typing import Any
 
@@ -47,7 +47,7 @@ def download_dir_internal() -> Path:
 class ArtifactLocator:
     """Locate local artifacts and materialize remote distribution URLs."""
 
-    __slots__ = ("session", "download_cache")
+    __slots__ = ("download_cache", "session")
 
     def __init__(self, session: Any = None) -> None:
         self.session = session
@@ -101,14 +101,15 @@ class ArtifactLocator:
             response = self.session.get(url, stream=True)
             if response.status_code >= 400:
                 logger.critical(
-                    "HTTP error %s while getting %s", response.status_code, url
+                    "HTTP error %s while getting %s",
+                    response.status_code,
+                    url,
                 )
                 raise InstallationError(
-                    f"{response.status_code} Client Error: {response.reason} for url: {url}"
+                    f"{response.status_code} Client Error: {response.reason} for url: {url}",
                 )
             with open(target, "wb") as file:
-                for chunk in response.iter_content(chunk_size=1024 * 1024):
-                    file.write(chunk)
+                file.writelines(response.iter_content(chunk_size=1024 * 1024))
         self.download_cache[url_or_path] = target
         return target
 

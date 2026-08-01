@@ -6,7 +6,7 @@ DEFAULT_INDEX_URL = "https://pypi.org/simple"
 
 
 class PackageIndex:
-    __slots__ = ("url", "file_storage_domain")
+    __slots__ = ("file_storage_domain", "url")
 
     def __init__(self, url: str, file_storage_domain: str) -> None:
         self.url = url

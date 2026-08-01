@@ -19,8 +19,8 @@ from cpip.core.urls import (
     split_auth_from_netloc,
     url_to_path,
 )
-from cpip.index.hashes import SUPPORTED_HASHES, supported_hashes
 from cpip.index.datetime import parse_iso_datetime
+from cpip.index.hashes import SUPPORTED_HASHES, supported_hashes
 from cpip.index.paths import PathComponent
 from cpip.index.source_models import ArtifactKind, MetadataFile
 
@@ -39,15 +39,15 @@ SUPPORTED_EXTENSIONS = (WHEEL_EXTENSION, *SOURCE_ARCHIVE_SUFFIXES)
 REQ_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 HASH_URL_FRAGMENT_RE = re.compile(
     r"[#&]({choices})=([^&]*)".format(
-        choices="|".join(re.escape(name) for name in SUPPORTED_HASHES)
-    )
+        choices="|".join(re.escape(name) for name in SUPPORTED_HASHES),
+    ),
 )
 
 
 @functools.cache
 def hash_from_url_fragment(url: str) -> tuple[str, str] | None:
     match = HASH_URL_FRAGMENT_RE.search(url)
-    return cast(tuple[str, str] | None, match.groups() if match is not None else None)
+    return cast("tuple[str, str] | None", match.groups() if match is not None else None)
 
 
 class InvalidEggFragment(DiagnosticCpipError):
@@ -117,21 +117,21 @@ class LinkType(Enum):
 @functools.total_ordering
 class Link:
     __slots__ = [
-        "parsed_url_internal",
-        "url_internal",
-        "path_internal",
-        "filename_internal",
-        "file_path_internal",
-        "hashes_internal",
-        "comes_from",
-        "requires_python",
-        "yanked_reason",
-        "metadata_file_data",
-        "upload_time",
         "cache_link_parsing",
+        "comes_from",
         "egg_fragment",
-        "text",
+        "file_path_internal",
+        "filename_internal",
+        "hashes_internal",
         "kind",
+        "metadata_file_data",
+        "parsed_url_internal",
+        "path_internal",
+        "requires_python",
+        "text",
+        "upload_time",
+        "url_internal",
+        "yanked_reason",
     ]
 
     def __init__(
@@ -197,7 +197,7 @@ class Link:
         yanked_reason: str | None = None,
         metadata_file: MetadataFile | None = None,
         upload_time: datetime.datetime | None = None,
-    ) -> "Link":
+    ) -> Link:
         normalized_hashes = (
             None
             if hashes is None
@@ -221,7 +221,7 @@ class Link:
         *,
         source_url: str | None,
         is_dir: bool | None = None,
-    ) -> "Link":
+    ) -> Link:
         if is_dir is None:
             is_dir = path.is_dir()
         # Keep the lexical path used by the caller.  Re-resolving temporary
@@ -242,8 +242,11 @@ class Link:
 
     @classmethod
     def from_element(
-        cls, attrs: dict[str, str | None], page_url: str, base_url: str
-    ) -> "Link | None":
+        cls,
+        attrs: dict[str, str | None],
+        page_url: str,
+        base_url: str,
+    ) -> Link | None:
         href = attrs.get("href")
         if not href:
             return None
@@ -277,7 +280,7 @@ class Link:
         )
 
     @classmethod
-    def from_json(cls, file_data: dict[str, Any], page_url: str) -> "Link | None":
+    def from_json(cls, file_data: dict[str, Any], page_url: str) -> Link | None:
         file_url = file_data.get("url")
         if file_url is None:
             return None
@@ -322,7 +325,7 @@ class Link:
     def source_url(self) -> str | None:
         return self.comes_from
 
-    def metadata_link(self) -> "Link | None":
+    def metadata_link(self) -> Link | None:
         if self.metadata_file_data is None:
             return None
         hashes = self.metadata_file_data.hashes
@@ -366,7 +369,7 @@ class Link:
             return cached
         name = PathComponent.from_name(posixpath.basename(self.path.rstrip("/")))
         filename = name or PathComponent.from_name(
-            split_auth_from_netloc(self.netloc)[0]
+            split_auth_from_netloc(self.netloc)[0],
         )
         self.filename_internal = filename
         return filename

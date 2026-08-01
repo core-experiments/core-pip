@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import os
-import site
 import shutil
+import site
 import sys
 from collections.abc import Generator
 from contextlib import contextmanager
@@ -10,6 +10,8 @@ from textwrap import dedent
 from typing import Literal
 
 import pytest
+from cpip.build.cache import WheelCache
+from cpip.build.tracker import get_build_tracker
 from cpip.install.build_env.base import (
     BuildEnvironment,
     BuildEnvironmentInstaller,
@@ -18,12 +20,10 @@ from cpip.install.build_env.installer import (
     InprocessBuildEnvironmentInstaller,
 )
 from cpip.install.build_env.venv import VenvBuildEnvironment
-from cpip.build.tracker import get_build_tracker
-from cpip.build.cache import WheelCache
 from cpip_test_support import (
     CpipTestEnvironment,
-    TestData,
     TestCpipResult,
+    TestData,
     create_basic_wheel_for_package,
     make_test_build_options,
 )
@@ -46,7 +46,8 @@ def env_factory(request: pytest.FixtureRequest) -> type[BuildEnvironment]:
 
 @contextmanager
 def make_test_build_env_installer(
-    method: InstallMethod, options: object
+    method: InstallMethod,
+    options: object,
 ) -> Generator[BuildEnvironmentInstaller]:
     assert method == "inprocess"
     with get_build_tracker() as tracker:
@@ -106,7 +107,7 @@ def run_with_build_env(
                         ))
                 """),
             "    ",
-        )
+        ),
     )
     args = ["python", os.fspath(build_env_script)]
     if test_script_contents is not None:
@@ -118,28 +119,35 @@ def run_with_build_env(
 
 @with_both_installers
 def test_build_env_allow_empty_requirements_install(
-    install_method: InstallMethod, env_factory: type[BuildEnvironment]
+    install_method: InstallMethod,
+    env_factory: type[BuildEnvironment],
 ) -> None:
     options = make_test_build_options()
     with make_test_build_env_installer(install_method, options) as installer:
         build_env = env_factory(installer)
         for prefix in ("normal", "overlay"):
             build_env.install_requirements(
-                [], prefix, kind="Installing build dependencies"
+                [],
+                prefix,
+                kind="Installing build dependencies",
             )
 
 
 def test_build_env_restores_unset_path_variables(
-    monkeypatch: pytest.MonkeyPatch, env_factory: type[BuildEnvironment]
+    monkeypatch: pytest.MonkeyPatch,
+    env_factory: type[BuildEnvironment],
 ) -> None:
     monkeypatch.delenv("PATH", raising=False)
     monkeypatch.delenv("PYTHONPATH", raising=False)
 
-    with make_test_build_env_installer(
-        "inprocess", make_test_build_options()
-    ) as installer:
-        with env_factory(installer):
-            pass
+    with (
+        make_test_build_env_installer(
+            "inprocess",
+            make_test_build_options(),
+        ) as installer,
+        env_factory(installer),
+    ):
+        pass
 
     assert "PATH" not in os.environ
     assert "PYTHONPATH" not in os.environ
@@ -147,7 +155,8 @@ def test_build_env_restores_unset_path_variables(
 
 @with_both_isolation_methods
 def test_build_env_requirements_check(
-    script: CpipTestEnvironment, isolation_method: IsolationMethod
+    script: CpipTestEnvironment,
+    isolation_method: IsolationMethod,
 ) -> None:
     create_basic_wheel_for_package(script, "foo", "2.0")
     create_basic_wheel_for_package(script, "bar", "1.0")
@@ -315,10 +324,10 @@ def test_build_env_isolation(
 
 
 def test_build_env_can_still_access_python_tools_on_system_path(
-    script: CpipTestEnvironment, data: TestData
+    script: CpipTestEnvironment,
+    data: TestData,
 ) -> None:
-    """
-    Ensure that backend subprocesses can still run system Python tools available
+    """Ensure that backend subprocesses can still run system Python tools available
     on PATH and that those tools can import their own dependencies from the system
     Python.
 
@@ -337,10 +346,10 @@ def test_build_env_can_still_access_python_tools_on_system_path(
 
 @with_both_installers
 def test_build_env_console_scripts_use_venv_python(
-    script: CpipTestEnvironment, install_method: InstallMethod
+    script: CpipTestEnvironment,
+    install_method: InstallMethod,
 ) -> None:
-    """
-    When using venv isolation, it's important that the build environment
+    """When using venv isolation, it's important that the build environment
     console scripts are linked with the temporary environment's Python
     executable (and not the parent executable).
     """
@@ -360,7 +369,9 @@ def test_build_env_console_scripts_use_venv_python(
     with make_test_build_env_installer(install_method, options) as installer:
         build_env = VenvBuildEnvironment(installer)
         build_env.install_requirements(
-            ["goldfish==1.0"], "normal", kind="script dependency"
+            ["goldfish==1.0"],
+            "normal",
+            kind="script dependency",
         )
 
     # Check that the console script import its own library.

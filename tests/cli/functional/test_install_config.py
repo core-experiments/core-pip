@@ -7,7 +7,6 @@ from itertools import repeat
 from pathlib import Path
 
 import pytest
-
 from cpip_test_support import CertFactory, CpipTestEnvironment, ScriptFactory, TestData
 from cpip_test_support.server import (
     MockServer,
@@ -21,10 +20,7 @@ from cpip_test_support.venv import VirtualEnvironment
 
 
 def test_options_from_env_vars(script: CpipTestEnvironment) -> None:
-    """
-    Test if ConfigOptionParser reads env vars (e.g. not using PyPI here)
-
-    """
+    """Test if ConfigOptionParser reads env vars (e.g. not using PyPI here)"""
     script.environ["CPIP_NO_INDEX"] = "1"
     result = script.cpip("install", "-vvv", "INITools", expect_error=True)
     assert "Ignoring indexes:" in result.stdout, str(result)
@@ -34,12 +30,10 @@ def test_options_from_env_vars(script: CpipTestEnvironment) -> None:
 
 
 def test_command_line_options_override_env_vars(
-    script: CpipTestEnvironment, virtualenv: VirtualEnvironment
+    script: CpipTestEnvironment,
+    virtualenv: VirtualEnvironment,
 ) -> None:
-    """
-    Test that command line options override environmental variables.
-
-    """
+    """Test that command line options override environmental variables."""
     script.environ["CPIP_INDEX_URL"] = "https://example.com/simple/"
     result = script.cpip("install", "-vvv", "INITools", expect_error=True)
     assert "Getting page https://example.com/simple/initools" in result.stdout
@@ -58,11 +52,10 @@ def test_command_line_options_override_env_vars(
 
 @pytest.mark.network
 def test_env_vars_override_config_file(
-    script: CpipTestEnvironment, virtualenv: VirtualEnvironment
+    script: CpipTestEnvironment,
+    virtualenv: VirtualEnvironment,
 ) -> None:
-    """
-    Test that environmental variables override settings in config files.
-    """
+    """Test that environmental variables override settings in config files."""
     config_file = script.scratch_path / "test-cpip.cfg"
     # set this to make cpip load it
     script.environ["CPIP_CONFIG_FILE"] = str(config_file)
@@ -74,7 +67,7 @@ def test_env_vars_override_config_file(
         textwrap.dedent("""\
         [global]
         no-index = 1
-        """)
+        """),
     )
     result = script.cpip("install", "-vvv", "INITools", expect_error=True)
     msg = "DistributionNotFound: No matching distribution found for INITools"
@@ -93,8 +86,7 @@ def test_command_line_append_flags(
     data: TestData,
     mock_server: MockServer,
 ) -> None:
-    """
-    Test command line flags that append to defaults set by environmental
+    """Test command line flags that append to defaults set by environmental
     variables.
 
     """
@@ -140,18 +132,17 @@ def test_command_line_append_flags(
 
 @pytest.mark.network
 def test_command_line_appends_correctly(
-    script: CpipTestEnvironment, data: TestData, mock_server: MockServer
+    script: CpipTestEnvironment,
+    data: TestData,
+    mock_server: MockServer,
 ) -> None:
-    """
-    Test multiple appending options set by environmental variables.
-
-    """
+    """Test multiple appending options set by environmental variables."""
     index_url = f"http://{mock_server.host}:{mock_server.port}/simple/initools/"
     mock_server.set_responses(
         [
             package_page({"INITools-0.2.tar.gz": "/files/INITools-0.2.tar.gz"}),
             file_response(data.packages / "INITools-0.2.tar.gz"),
-        ]
+        ],
     )
     mock_server.start()
     try:
@@ -177,8 +168,7 @@ def test_config_file_override_stack(
     mock_server: MockServer,
     shared_data: TestData,
 ) -> None:
-    """
-    Test config files (global, overriding a global config with a
+    """Test config files (global, overriding a global config with a
     local, overriding all with a command line flag).
     """
     mock_server.set_responses(
@@ -187,7 +177,7 @@ def test_config_file_override_stack(
             package_page({}),
             package_page({"INITools-0.2.tar.gz": "/files/INITools-0.2.tar.gz"}),
             file_response(shared_data.packages.joinpath("INITools-0.2.tar.gz")),
-        ]
+        ],
     )
     mock_server.start()
     base_address = f"http://{mock_server.host}:{mock_server.port}"
@@ -201,7 +191,7 @@ def test_config_file_override_stack(
         textwrap.dedent(f"""\
         [global]
         index-url = {base_address}/simple1
-        """)
+        """),
     )
     script.cpip("install", "-vvv", "INITools", expect_error=True)
     virtualenv.clear()
@@ -212,7 +202,7 @@ def test_config_file_override_stack(
         index-url = {base_address}/simple1
         [install]
         index-url = {base_address}/simple2
-        """)
+        """),
     )
     script.cpip("install", "-vvv", "INITools", expect_error=True)
     script.cpip(
@@ -234,12 +224,10 @@ def test_config_file_override_stack(
 
 
 def test_options_from_venv_config(
-    script: CpipTestEnvironment, virtualenv: VirtualEnvironment
+    script: CpipTestEnvironment,
+    virtualenv: VirtualEnvironment,
 ) -> None:
-    """
-    Test if ConfigOptionParser reads a virtualenv-local config file
-
-    """
+    """Test if ConfigOptionParser reads a virtualenv-local config file"""
     from cpip.platform.configuration import CONFIG_BASENAME
 
     conf = "[global]\nno-index = true"
@@ -254,7 +242,8 @@ def test_options_from_venv_config(
 
 
 def test_install_no_binary_via_config_disables_cached_wheels(
-    script: CpipTestEnvironment, data: TestData
+    script: CpipTestEnvironment,
+    data: TestData,
 ) -> None:
     config_file = tempfile.NamedTemporaryFile(mode="wt", delete=False)
     try:
@@ -263,7 +252,7 @@ def test_install_no_binary_via_config_disables_cached_wheels(
             textwrap.dedent("""\
             [global]
             no-binary = :all:
-            """)
+            """),
         )
         config_file.close()
         res = script.cpip(
@@ -283,7 +272,9 @@ def test_install_no_binary_via_config_disables_cached_wheels(
 
 
 def test_prompt_for_authentication(
-    script: CpipTestEnvironment, data: TestData, cert_factory: CertFactory
+    script: CpipTestEnvironment,
+    data: TestData,
+    cert_factory: CertFactory,
 ) -> None:
     """Test behaviour while installing from a index url
     requiring authentication
@@ -298,7 +289,7 @@ def test_prompt_for_authentication(
         package_page(
             {
                 "simple-3.0.tar.gz": "/files/simple-3.0.tar.gz",
-            }
+            },
         ),
         authorization_response(data.packages / "simple-3.0.tar.gz"),
     ]
@@ -322,7 +313,9 @@ def test_prompt_for_authentication(
 
 
 def test_do_not_prompt_for_authentication(
-    script: CpipTestEnvironment, data: TestData, cert_factory: CertFactory
+    script: CpipTestEnvironment,
+    data: TestData,
+    cert_factory: CertFactory,
 ) -> None:
     """Test behaviour if --no-input option is given while installing
     from a index url requiring authentication
@@ -338,7 +331,7 @@ def test_do_not_prompt_for_authentication(
         package_page(
             {
                 "simple-3.0.tar.gz": "/files/simple-3.0.tar.gz",
-            }
+            },
         ),
         authorization_response(data.packages / "simple-3.0.tar.gz"),
     ]
@@ -363,7 +356,9 @@ def test_do_not_prompt_for_authentication(
 
 
 def test_do_not_prompt_for_authentication_git(
-    script: CpipTestEnvironment, data: TestData, cert_factory: CertFactory
+    script: CpipTestEnvironment,
+    data: TestData,
+    cert_factory: CertFactory,
 ) -> None:
     """Test behaviour if --no-input option is given while installing
     from a git http url requiring authentication
@@ -374,7 +369,7 @@ def test_do_not_prompt_for_authentication_git(
 
     # Return 401 on all URLs
     server.mock.side_effect = lambda _, __: authorization_response(
-        data.packages / "simple-3.0.tar.gz"
+        data.packages / "simple-3.0.tar.gz",
     )
 
     url = f"git+http://{server.host}:{server.port}/simple"
@@ -430,11 +425,11 @@ def flags(
         flags.append(keyring_provider)
     if not interactive:
         flags.append("--no-input")
-    if auth_needed:
-        if keyring_provider_implementation == "disabled" or (
-            not interactive and keyring_provider in [None, "auto"]
-        ):
-            request.applymarker(pytest.mark.xfail())
+    if auth_needed and (
+        keyring_provider_implementation == "disabled"
+        or (not interactive and keyring_provider in [None, "auto"])
+    ):
+        request.applymarker(pytest.mark.xfail())
     return flags
 
 
@@ -459,7 +454,8 @@ def test_prompt_for_keyring_if_needed(
         # Install keyring into its own venv.
         keyring_virtualenv = virtualenv_factory(workspace.joinpath("keyring"))
         keyring_script = script_factory(
-            workspace.joinpath("keyring"), keyring_virtualenv
+            workspace.joinpath("keyring"),
+            keyring_virtualenv,
         )
         keyring_script.cpip_install_local(
             "keyring",
@@ -522,7 +518,7 @@ def test_prompt_for_keyring_if_needed(
         package_page(
             {
                 "simple-3.0.tar.gz": "/files/simple-3.0.tar.gz",
-            }
+            },
         ),
         response(data.packages / "simple-3.0.tar.gz"),
         response(data.packages / "simple-3.0.tar.gz"),
@@ -592,9 +588,7 @@ def test_prompt_for_keyring_if_needed(
 
 @pytest.mark.network
 def test_install_quiet_log(script: CpipTestEnvironment, data: TestData) -> None:
-    """
-    Test suppressing the progress bar with --quiet and --log.
-    """
+    """Test suppressing the progress bar with --quiet and --log."""
     logfile = script.scratch_path / "log"
     result = script.cpip("install", "-qqq", "setuptools==62.0.0", "--log", logfile)
     assert result.stdout == ""

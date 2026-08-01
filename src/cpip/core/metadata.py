@@ -3,10 +3,10 @@ from __future__ import annotations
 import importlib.metadata
 import os
 import sysconfig
-from collections.abc import Collection
+from collections.abc import Collection, Iterable
 from email.message import Message
 from pathlib import Path
-from typing import Any, Iterable, cast
+from typing import Any, cast
 
 from .packaging import (
     Requirement,
@@ -19,7 +19,7 @@ stdlib_pkgs = {"python", "wsgiref", "argparse"}
 
 
 class InstalledDistribution:
-    __slots__ = ("name", "version", "location", "metadata_location", "raw")
+    __slots__ = ("location", "metadata_location", "name", "raw", "version")
 
     def __init__(
         self,
@@ -99,7 +99,7 @@ def _iter_installed_distributions(
         distribution_paths = [os.fspath(path) for path in paths]
         distributions = importlib.metadata.distributions(path=distribution_paths)
     for dist in distributions:
-        metadata = cast(Any, dist.metadata)
+        metadata = cast("Any", dist.metadata)
         name = metadata.get("Name")
         version = dist.version
         if not name or not version:
@@ -138,7 +138,8 @@ def iter_installed_distributions(
 
 
 def find_installed(
-    name: str, paths: Iterable[str] | None = None
+    name: str,
+    paths: Iterable[str] | None = None,
 ) -> InstalledDistribution | None:
     canonical = canonicalize_name(name)
     for dist in _iter_installed_distributions(paths, {canonical}):

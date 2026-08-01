@@ -15,14 +15,14 @@ class ReportItem:
     __slots__ = (
         "candidate_name",
         "candidate_version",
-        "requested",
-        "source_url",
-        "source_hashes",
-        "yanked",
+        "editable",
         "is_direct",
+        "requested",
         "requested_extras",
         "requires_dist",
-        "editable",
+        "source_hashes",
+        "source_url",
+        "yanked",
     )
 
     def __init__(

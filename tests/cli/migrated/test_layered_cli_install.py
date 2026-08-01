@@ -22,7 +22,9 @@ def test_layered_cli_uninstall_dispatches_to_cpip_install(monkeypatch, capsys) -
     from cpip.install.requirements import RequirementInstaller
 
     monkeypatch.setattr(
-        RequirementInstaller, "uninstall", lambda self, name: fake_uninstall(name)
+        RequirementInstaller,
+        "uninstall",
+        lambda self, name: fake_uninstall(name),
     )
 
     assert greenfield.main(["uninstall", "demo-pkg"]) == 0

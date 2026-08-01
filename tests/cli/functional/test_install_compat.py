@@ -1,7 +1,4 @@
-"""
-Tests for compatibility workarounds.
-
-"""
+"""Tests for compatibility workarounds."""
 
 import os
 from pathlib import Path
@@ -19,8 +16,7 @@ def test_debian_egg_name_workaround(
     shared_data: TestData,
     tmp_path: Path,
 ) -> None:
-    """
-    We can uninstall packages installed with the pyversion removed from the
+    """We can uninstall packages installed with the pyversion removed from the
     egg-info metadata directory name.
 
     Refs:
@@ -39,7 +35,8 @@ def test_debian_egg_name_workaround(
     )
 
     egg_info = os.path.join(
-        script.site_packages, f"simplewheel-2.0-py{pyversion}.egg-info"
+        script.site_packages,
+        f"simplewheel-2.0-py{pyversion}.egg-info",
     )
 
     # Debian only removes pyversion for global installs, not inside a venv
@@ -65,10 +62,10 @@ def test_debian_egg_name_workaround(
 
 
 def test_setup_py_with_dos_line_endings(
-    script: CpipTestEnvironment, data: TestData
+    script: CpipTestEnvironment,
+    data: TestData,
 ) -> None:
-    """
-    It doesn't choke on a setup.py file that uses DOS line endings (\\r\\n).
+    """It doesn't choke on a setup.py file that uses DOS line endings (\\r\\n).
 
     Refs https://github.com/pypa/cpip/issues/237
     """

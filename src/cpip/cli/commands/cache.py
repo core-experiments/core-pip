@@ -32,7 +32,7 @@ def run_cache(args: list[str]) -> int:
         return 0
     if options.no_cache_dir:
         raise CommandError(
-            "cpip cache commands can not function since cache is disabled."
+            "cpip cache commands can not function since cache is disabled.",
         )
 
     manager = CacheManager(options.cache_dir)

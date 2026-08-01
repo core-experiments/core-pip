@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -29,10 +28,25 @@ if TYPE_CHECKING:
 
 class RequirementsBundle:
     __slots__ = tuple(
-        "requirements constraints editables requirement_config_settings "
-        "requirement_hashes constraint_hashes editable_config_settings find_links "
-        "index_url extra_index_urls no_index format_control locked_links "
-        "locked_direct_names release_control require_hashes session".split()
+        [
+            "requirements",
+            "constraints",
+            "editables",
+            "requirement_config_settings",
+            "requirement_hashes",
+            "constraint_hashes",
+            "editable_config_settings",
+            "find_links",
+            "index_url",
+            "extra_index_urls",
+            "no_index",
+            "format_control",
+            "locked_links",
+            "locked_direct_names",
+            "release_control",
+            "require_hashes",
+            "session",
+        ],
     )
 
     def __init__(
@@ -77,7 +91,7 @@ class RequirementsBundle:
 
 
 class SourceConfig:
-    __slots__ = ("find_links", "index_url", "extra_index_urls", "no_index")
+    __slots__ = ("extra_index_urls", "find_links", "index_url", "no_index")
 
     def __init__(
         self,
@@ -93,8 +107,8 @@ class SourceConfig:
 
 
 def load_source_config(command: str | None = None) -> SourceConfig:
-    from cpip.index.config import DEFAULT_INDEX_URL
     from cpip.cli.config import ConfigurationStore
+    from cpip.index.config import DEFAULT_INDEX_URL
 
     store = ConfigurationStore()
     try:
@@ -176,20 +190,20 @@ def requirements_from_script(path: Path) -> list[str]:
         data = tomllib.loads(blocks[0])
     except tomllib.TOMLDecodeError as exc:
         raise InstallationError(
-            f"Failed to parse TOML in script metadata: {exc}"
+            f"Failed to parse TOML in script metadata: {exc}",
         ) from exc
     dependencies = data.get("dependencies", [])
     if not isinstance(dependencies, list) or not all(
         isinstance(item, str) for item in dependencies
     ):
         raise InstallationError(
-            "Script metadata 'dependencies' must be a list of strings"
+            "Script metadata 'dependencies' must be a list of strings",
         )
     requires_python = data.get("requires-python")
     if requires_python is not None:
         if not isinstance(requires_python, str):
             raise InstallationError(
-                "Script metadata 'requires-python' must be a string"
+                "Script metadata 'requires-python' must be a string",
             )
         current = Version(".".join(str(part) for part in sys.version_info[:3]))
         incompatible = (
@@ -199,7 +213,7 @@ def requirements_from_script(path: Path) -> list[str]:
         )
         if incompatible or not SpecifierSet(requires_python).contains(current):
             raise InstallationError(
-                f"Script requires a different Python version: {requires_python}"
+                f"Script requires a different Python version: {requires_python}",
             )
     return dependencies
 
@@ -226,8 +240,8 @@ def collect_requirements(
     proxy: str | None = None,
     cache_dir: str | None = None,
 ) -> RequirementsBundle:
-    from cpip.index.provider import CandidateProvider
     from cpip.index.links import Link
+    from cpip.index.provider import CandidateProvider
     from cpip.index.source_locations import resolve_source_location
 
     if index_url is None:
@@ -314,7 +328,7 @@ def collect_requirements(
             )
 
     if requirement_files or constraint_files:
-        from cpip.resolution.req_file import parse_requirements
+        from cpip.resolution.engine.input.files import parse_requirements
 
         assert session is not None
 
@@ -336,7 +350,7 @@ def collect_requirements(
                 collected_editables.append(item.requirement)
                 if item.options and "config_settings" in item.options:
                     editable_settings[item.requirement] = dict(
-                        cast(dict[str, object], item.options["config_settings"])
+                        cast("dict[str, object]", item.options["config_settings"]),
                     )
             elif item.constraint:
                 validate_constraint_requirement(
@@ -348,19 +362,19 @@ def collect_requirements(
                     store_hashes(
                         constraint_hashes,
                         item.requirement,
-                        cast(dict[str, list[str]], item.options["hashes"]),
+                        cast("dict[str, list[str]]", item.options["hashes"]),
                     )
             else:
                 collected_requirements.append(item.requirement)
                 if item.options and "config_settings" in item.options:
                     requirement_settings[item.requirement] = dict(
-                        cast(dict[str, object], item.options["config_settings"])
+                        cast("dict[str, object]", item.options["config_settings"]),
                     )
                 if item.options and "hashes" in item.options:
                     store_hashes(
                         requirement_hashes,
                         item.requirement,
-                        cast(dict[str, list[str]], item.options["hashes"]),
+                        cast("dict[str, list[str]]", item.options["hashes"]),
                     )
 
     for filename in constraint_files or []:
@@ -381,7 +395,7 @@ def collect_requirements(
                 store_hashes(
                     constraint_hashes,
                     item.requirement,
-                    cast(dict[str, list[str]], item.options["hashes"]),
+                    cast("dict[str, list[str]]", item.options["hashes"]),
                 )
 
     provider.locked_links = {name: Link(url) for name, url in locked_links.items()}
@@ -414,9 +428,11 @@ def collect_requirements(
 
 
 def validate_constraint_requirement(
-    requirement: str, *, editable: bool = False
+    requirement: str,
+    *,
+    editable: bool = False,
 ) -> None:
-    from cpip.resolution.req_install import install_req_from_line
+    from cpip.resolution.engine.input.requirements import install_req_from_line
 
     text = requirement.strip()
     if editable:
@@ -438,7 +454,7 @@ def validate_constraint_requirement(
         and (
             text.startswith((".", "/", "~"))
             or text.endswith(
-                (".zip", ".whl", ".tar.gz", ".tar.bz2", ".tar.xz", ".tar.lzma", ".tgz")
+                (".zip", ".whl", ".tar.gz", ".tar.bz2", ".tar.xz", ".tar.lzma", ".tgz"),
             )
         )
     ):
@@ -450,9 +466,9 @@ def bundle_install_requirements(
     *,
     target: TargetContext | None = None,
 ) -> list[InstallRequirement]:
-    from cpip.resolution.req_install import install_req_from_line
     from cpip.core.wheel import parse_wheel_file, supported_wheel_tags, wheel_tag_rank
     from cpip.index.links import Link
+    from cpip.resolution.engine.input.requirements import install_req_from_line
 
     requirements: list[InstallRequirement] = []
     direct_sources: dict[str, tuple[str, str]] = {}
@@ -465,7 +481,8 @@ def bundle_install_requirements(
             source_path = os.path.realpath(raw_path)
             try:
                 metadata = prepare_project_metadata(
-                    Path(source_path), build_isolation=False
+                    Path(source_path),
+                    build_isolation=False,
                 )
                 source_name = canonicalize_name(metadata.name)
                 source_version = str(metadata.version)
@@ -478,7 +495,7 @@ def bundle_install_requirements(
                 print(f"The user requested {source_name} {source_version}")
                 raise InstallationError(
                     f"Cannot install {source_name} because these package versions "
-                    "have conflicting dependencies."
+                    "have conflicting dependencies.",
                 )
             direct_sources[source_name] = (source_path, source_version)
         direct_constraints = (
@@ -516,7 +533,7 @@ def bundle_install_requirements(
                 item.req = constrained
                 item.link = Link(item.req.url or "")
             wheel = parse_wheel_file(
-                Path(urllib.parse.urlparse(constrained.url or "").path)
+                Path(urllib.parse.urlparse(constrained.url or "").path),
             )
             if (
                 wheel is not None
@@ -526,7 +543,7 @@ def bundle_install_requirements(
                 raise InstallationError(
                     f"Cannot install {item.req.name} because these package versions "
                     "have conflicting dependencies. "
-                    f"The URL constraint selects incompatible version {wheel.version}."
+                    f"The URL constraint selects incompatible version {wheel.version}.",
                 )
         if item.link is not None and item.link.is_file and item.link.is_wheel:
             wheel = parse_wheel_file(item.link.file_path)
@@ -538,16 +555,16 @@ def bundle_install_requirements(
                     assert item.req is not None
                     raise InstallationError(
                         f"Cannot install {item.req.name} because these package "
-                        "versions have conflicting dependencies."
+                        "versions have conflicting dependencies.",
                     )
                 raise InstallationError(
-                    f"{item.link.filename} is not a supported wheel on this platform"
+                    f"{item.link.filename} is not a supported wheel on this platform",
                 )
         if not item.match_markers():
             if item.req is not None and item.markers:
                 print(
                     f"Ignoring {item.req.name}: markers '{item.markers}' don't match "
-                    "your environment"
+                    "your environment",
                 )
             continue
         if requirement in bundle.requirement_config_settings:
@@ -574,7 +591,7 @@ def bundle_install_requirements(
             if previous is not None and os.path.realpath(previous[0]) != source_path:
                 raise InstallationError(
                     f"Cannot install {item.req.name} because these package versions "
-                    "have conflicting dependencies."
+                    "have conflicting dependencies.",
                 )
             direct_sources[item.req.canonical_name] = (source_path, "")
         requirements.append(item)

@@ -4,8 +4,8 @@
 # mypy: strict-optional=False
 from __future__ import annotations
 
-import os
 import logging
+import os
 import shutil
 from collections.abc import Iterable
 from pathlib import Path
@@ -14,47 +14,46 @@ from typing import TYPE_CHECKING, cast
 from cpip.build.metadata import (
     MetadataDistribution,
 )
+from cpip.build.tracker import BuildTracker
 from cpip.core.direct_url import ArchiveInfo, DirectUrl, DirInfo, VcsInfo
-from cpip.core.filesystem import display_path
-from cpip.core.packaging import Requirement, canonicalize_name
-from cpip.core.urls import path_to_url
-from cpip.core.wheel import Wheel
-from cpip.index.links import Link
-from cpip.index.paths import PathComponent
-from cpip.install.downloads import (
-    DownloadManager,
-    File,
-    check_download_dir,
-)
-from cpip.install.source import SourceManager
-from cpip.install.metadata import (
-    DistributionPreparer,
-    MetadataInconsistent,
-    MetadataView,
-    check_sidecar_matches_wheel,
-)
-
-from cpip.install.build_env.base import BuildEnvironmentInstaller, BuildIsolationMode
 from cpip.core.errors import (
     DirectoryUrlHashUnsupported,
     HashUnpinned,
     InstallationError,
     VcsHashUnsupported,
 )
+from cpip.core.filesystem import display_path
 from cpip.core.hashes import Hashes, MissingHashes, hash_file
+from cpip.core.packaging import Requirement, canonicalize_name
+from cpip.core.temp_dir import TempDirectory
+from cpip.core.urls import path_to_url
+from cpip.core.wheel import Wheel
+from cpip.index.links import Link
+from cpip.index.paths import PathComponent
+from cpip.install.build_env.base import BuildEnvironmentInstaller, BuildIsolationMode
+from cpip.install.direct_url import direct_url_from_link
+from cpip.install.downloads import (
+    DownloadManager,
+    File,
+    check_download_dir,
+)
+from cpip.install.metadata import (
+    DistributionPreparer,
+    MetadataInconsistent,
+    MetadataView,
+    check_sidecar_matches_wheel,
+)
+from cpip.install.requirements import RequirementInstaller
+from cpip.install.source import SourceManager
 from cpip.network.download import Downloader
 from cpip.network.exceptions import NetworkConnectionError
+from cpip.network.http import NetworkSession
 from cpip.network.lazy_wheel import (
     HTTPRangeRequestUnsupported,
     dist_from_wheel_url,
 )
-from cpip.network.http import NetworkSession
-from cpip.build.tracker import BuildTracker
-from cpip.resolution.direct_url_helpers import direct_url_from_link
-from cpip.install.requirements import RequirementInstaller
-from cpip.core.temp_dir import TempDirectory
-from cpip.vcs.versioncontrol import vcs
 from cpip.vcs.support import hide_url
+from cpip.vcs.versioncontrol import vcs
 
 if TYPE_CHECKING:
     from cpip.network.progress import BarType
@@ -168,7 +167,9 @@ class RequirementPreparer:
             logger.info("Using cached %s", req.link.filename)
 
     def ensure_link_req_src_dir(
-        self, req: InstallRequirement, parallel_builds: bool
+        self,
+        req: InstallRequirement,
+        parallel_builds: bool,
     ) -> None:
         """Ensure source_dir of a linked InstallRequirement."""
         assert req.link is not None
@@ -251,7 +252,7 @@ class RequirementPreparer:
             return None
         # Try PEP 658 metadata first, then fall back to lazy wheel if unavailable.
         return self.fetch_metadata_using_link_data_attr(
-            req
+            req,
         ) or self.fetch_metadata_using_lazy_wheel(req.link)
 
     def fetch_metadata_using_link_data_attr(
@@ -279,7 +280,8 @@ class RequirementPreparer:
             metadata_contents = f.read()
         # (3) Generate a dist just from those file contents.
         metadata_dist = MetadataDistribution.from_metadata_file_contents(
-            metadata_contents, req.req.name
+            metadata_contents,
+            req.req.name,
         )
         # (4) Ensure the Name: field from the METADATA file matches the name from the
         #     install requirement.
@@ -289,7 +291,10 @@ class RequirementPreparer:
         #     that that should NEVER happen anyway.
         if canonicalize_name(metadata_dist.raw_name) != canonicalize_name(req.req.name):
             raise MetadataInconsistent(
-                req, "Name", req.req.name, metadata_dist.raw_name
+                req,
+                "Name",
+                req.req.name,
+                metadata_dist.raw_name,
             )
         return metadata_dist
 
@@ -341,7 +346,8 @@ class RequirementPreparer:
             links_to_fully_download[req.link] = req
 
         batch_download = self.download_internal.batch(
-            links_to_fully_download.keys(), temp_dir
+            links_to_fully_download.keys(),
+            temp_dir,
         )
         for link, (filepath, _) in batch_download:
             logger.debug("Downloading link %s to %s", link, filepath)
@@ -367,7 +373,9 @@ class RequirementPreparer:
             self.prepare_linked_requirement_internal(req, parallel_builds)
 
     def prepare_linked_requirement(
-        self, req: InstallRequirement, parallel_builds: bool = False
+        self,
+        req: InstallRequirement,
+        parallel_builds: bool = False,
     ) -> MetadataView:
         """Prepare a requirement to be obtained from req.link."""
         assert req.link
@@ -394,7 +402,8 @@ class RequirementPreparer:
                 # Ensure download_info is available even in dry-run mode.
                 if req.download_info is None:
                     req.download_info = direct_url_from_link(
-                        req.link, source_dir=req.source_dir
+                        req.link,
+                        source_dir=req.source_dir,
                     )
                 return metadata_dist
 
@@ -402,7 +411,9 @@ class RequirementPreparer:
         return self.prepare_linked_requirement_internal(req, parallel_builds)
 
     def prepare_linked_requirements_more(
-        self, reqs: Iterable[InstallRequirement], parallel_builds: bool = False
+        self,
+        reqs: Iterable[InstallRequirement],
+        parallel_builds: bool = False,
     ) -> None:
         """Prepare linked requirements more, if needed."""
         reqs = [req for req in reqs if req.link is not None]
@@ -432,7 +443,9 @@ class RequirementPreparer:
         )
 
     def prepare_linked_requirement_internal(
-        self, req: InstallRequirement, parallel_builds: bool
+        self,
+        req: InstallRequirement,
+        parallel_builds: bool,
     ) -> MetadataView:
         assert req.link is not None
         link = req.link
@@ -459,7 +472,7 @@ class RequirementPreparer:
                 logger.warning(
                     "The hashes of the source archive found in cache entry "
                     "don't match, ignoring cached built wheel "
-                    "and re-downloading source."
+                    "and re-downloading source.",
                 )
                 req.link = req.cached_wheel_source_link
                 assert req.link is not None
@@ -481,7 +494,7 @@ class RequirementPreparer:
             except NetworkConnectionError as exc:
                 raise InstallationError(
                     f"Could not install requirement {req} because of HTTP "
-                    f"error {exc} for URL {link}"
+                    f"error {exc} for URL {link}",
                 )
         else:
             file_path = self.downloaded_internal[link.url]
@@ -539,7 +552,9 @@ class RequirementPreparer:
             and link.metadata_link() is not None
         ):
             check_sidecar_matches_wheel(
-                req, cast(MetadataView, req.distribution_internal), dist
+                req,
+                cast("MetadataView", req.distribution_internal),
+                dist,
             )
 
         return dist
@@ -581,7 +596,7 @@ class RequirementPreparer:
         if self.require_hashes:
             raise InstallationError(
                 f"The editable requirement {req} cannot be installed when "
-                "requiring hashes, because there is no single file to hash."
+                "requiring hashes, because there is no single file to hash.",
             )
         req.ensure_has_source_dir(self.src_dir)
         SourceManager(req).update_editable()
@@ -620,13 +635,16 @@ class RequirementPreparer:
             f"is set to {req.satisfied_by}"
         )
         logger.info(
-            "Requirement %s: %s (%s)", skip_reason, req, req.satisfied_by.version
+            "Requirement %s: %s (%s)",
+            skip_reason,
+            req,
+            req.satisfied_by.version,
         )
         if self.require_hashes:
             logger.debug(
                 "Since it is already installed, we are trusting this "
                 "package without checking its hash. To ensure a "
                 "completely repeatable environment, install into an "
-                "empty virtualenv."
+                "empty virtualenv.",
             )
-        return cast(MetadataView, req.satisfied_by)
+        return cast("MetadataView", req.satisfied_by)

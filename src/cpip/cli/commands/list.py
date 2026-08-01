@@ -32,11 +32,15 @@ def create_parser() -> ArgumentParser:
         default=True,
     )
     parser.add_argument(
-        "--include-editable", action="store_true", dest="include_editable"
+        "--include-editable",
+        action="store_true",
+        dest="include_editable",
     )
     parser.add_argument("-v", "--verbose", action="count", default=0)
     parser.add_argument(
-        "--format", choices=("columns", "json", "freeze"), default="columns"
+        "--format",
+        choices=("columns", "json", "freeze"),
+        default="columns",
     )
     return parser
 
@@ -99,10 +103,10 @@ def run_list(args: list[str]) -> int:
             provider.release_control.apply("only_final", value)
         for dist in distributions:
             candidates = provider.evaluate_links(
-                parse_requirement(dist.raw_name)
+                parse_requirement(dist.raw_name),
             ).accepted
             allow_prereleases = provider.release_control.allows_prereleases(
-                dist.raw_name
+                dist.raw_name,
             )
             if not options.pre and allow_prereleases is not True:
                 candidates = [
@@ -137,12 +141,13 @@ def run_list(args: list[str]) -> int:
                 outdated=options.outdated,
                 verbose=options.verbose > 0,
                 latest=latest,
-            )
+            ),
         )
         return 0
     if options.format == "freeze":
         for requirement in format_list_freeze(
-            distributions, verbose=options.verbose > 0
+            distributions,
+            verbose=options.verbose > 0,
         ):
             print(requirement)
         return 0
@@ -163,6 +168,6 @@ def run_list(args: list[str]) -> int:
                 str(value).ljust(widths[i]) for i, value in enumerate(row)
             ).rstrip()
             for row in rows
-        )
+        ),
     )
     return 0

@@ -39,7 +39,7 @@ def uninstall_distribution(
         except FileNotFoundError as exc:
             raise InstallationError(
                 f"Cannot uninstall {distribution.raw_name} {distribution.version}: "
-                "no RECORD file was found"
+                "no RECORD file was found",
             ) from exc
     else:
         entries = None
@@ -59,7 +59,7 @@ def uninstall_distribution(
             if os.name == "nt" and Path(row[0]).is_absolute():
                 continue
             if ".." in relative.parts and os.path.basename(
-                os.path.dirname(resolved_text)
+                os.path.dirname(resolved_text),
             ) not in {"bin", "Scripts"}:
                 continue
             if ".." in relative.parts:
@@ -72,10 +72,10 @@ def uninstall_distribution(
                         Path(importlib.util.cache_from_source(path_text)),
                         Path(f"{path_text}c"),
                         Path(f"{path_text[:-3]}.pyo"),
-                    }
+                    },
                 )
     elif distribution.info_location and distribution.info_location.endswith(
-        ".egg-info"
+        ".egg-info",
     ):
         recorded_paths.add(Path(distribution.info_location))
         egg_link_root = Path(distribution.info_location).parent
@@ -86,8 +86,8 @@ def uninstall_distribution(
                 continue
             path = Path(
                 os.path.realpath(
-                    os.path.join(os.fspath(egg_link_root), *relative.parts)
-                )
+                    os.path.join(os.fspath(egg_link_root), *relative.parts),
+                ),
             )
             try:
                 path.relative_to(root_path)
@@ -104,7 +104,7 @@ def uninstall_distribution(
                 module_name = module_name.strip()
                 if module_name and module_name.isidentifier():
                     recorded_paths.update(
-                        {root_path / module_name, root_path / f"{module_name}.py"}
+                        {root_path / module_name, root_path / f"{module_name}.py"},
                     )
         egg_links = list(egg_link_root.glob("*.egg-link"))
         egg_links.extend(

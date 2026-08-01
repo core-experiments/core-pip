@@ -81,7 +81,7 @@ class IndexPageParser:
             "Accept": (
                 "application/vnd.pypi.simple.v1+json, "
                 "text/html;q=0.2, application/vnd.pypi.simple.v1+html;q=0.2"
-            )
+            ),
         }
         if self.session is not None:
             response = self.session.get(url, headers=headers)
@@ -94,14 +94,15 @@ class IndexPageParser:
         request = urllib.request.Request(url, headers=headers)
         parsed = urllib.parse.urlsplit(url)
         context = (
-            getattr(ssl, "create_unverified_context")()
+            ssl._create_unverified_context()
             if parsed.hostname and parsed.hostname.lower() in self.trusted_hosts
             else None
         )
         with urllib.request.urlopen(request, context=context) as response:
             content_type = response.headers.get_content_type()
             return IndexContent(
-                response.read().decode("utf-8", "replace"), content_type
+                response.read().decode("utf-8", "replace"),
+                content_type,
             )
 
     def links_from_html(self, body: str, url: str) -> list[Link]:
@@ -144,7 +145,7 @@ class IndexPageParser:
                         if file_data.get("upload-time")
                         else None
                     ),
-                )
+                ),
             )
         return links
 
@@ -181,7 +182,7 @@ class LinkParser(HTMLParser):
                     requires_python=self.current_internal.get("data-requires-python"),
                     yanked_reason=self.current_internal.get("data-yanked"),
                     metadata_file=metadata_file_from_attrs(self.current_internal),
-                )
+                ),
             )
         self.current_internal = None
         self.text_internal = []
@@ -218,7 +219,7 @@ def metadata_file_from_value(value: str | None) -> MetadataFile | None:
         return MetadataFile(None)
     name, sep, digest = value.partition("=")
     return MetadataFile(
-        {name: digest} if sep and name in SUPPORTED_RECORD_HASHES else None
+        {name: digest} if sep and name in SUPPORTED_RECORD_HASHES else None,
     )
 
 

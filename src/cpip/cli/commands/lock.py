@@ -24,21 +24,21 @@ def render_lock(packages: list[dict[str, object]]) -> str:
         if "vcs" in package:
             vcs = package["vcs"]
             assert isinstance(vcs, dict)
-            vcs = cast(dict[str, object], vcs)
+            vcs = cast("dict[str, object]", vcs)
             lines.append("[packages.vcs]")
             lines.append(f"type = {toml_string(str(vcs['type']))}")
             lines.append(f"url = {toml_string(str(vcs['url']))}")
             lines.append(
-                f"requested-revision = {toml_string(str(vcs['requested-revision']))}"
+                f"requested-revision = {toml_string(str(vcs['requested-revision']))}",
             )
             lines.append(f"commit-id = {toml_string(str(vcs['commit-id']))}")
         if "archive" in package:
             archive = package["archive"]
             assert isinstance(archive, dict)
-            archive = cast(dict[str, object], archive)
+            archive = cast("dict[str, object]", archive)
             hashes = archive["hashes"]
             assert isinstance(hashes, dict)
-            hashes = cast(dict[str, object], hashes)
+            hashes = cast("dict[str, object]", hashes)
             lines.append("[packages.archive]")
             lines.append(f"url = {toml_string(str(archive['url']))}")
             lines.append("[packages.archive.hashes]")
@@ -56,7 +56,7 @@ def render_lock(packages: list[dict[str, object]]) -> str:
             artifacts = artifact if isinstance(artifact, list) else [artifact]
             for entry in artifacts:
                 assert isinstance(entry, dict)
-                entry = cast(dict[str, object], entry)
+                entry = cast("dict[str, object]", entry)
                 header = (
                     f"[[packages.{artifact_key}]]"
                     if artifact_key == "wheels"
@@ -67,14 +67,14 @@ def render_lock(packages: list[dict[str, object]]) -> str:
                 lines.append(f"url = {toml_string(str(entry['url']))}")
                 hashes = entry["hashes"]
                 assert isinstance(hashes, dict)
-                hashes = cast(dict[str, object], hashes)
+                hashes = cast("dict[str, object]", hashes)
                 lines.append(f"[packages.{artifact_key}.hashes]")
                 lines.append(f"sha256 = {toml_string(str(hashes['sha256']))}")
         lines.append("")
     return "\n".join(lines)
 
 
-def create_parser() -> "ArgumentParser":
+def create_parser() -> ArgumentParser:
     """Resolve requirements and write a PEP 751 ``pylock.toml`` file."""
     from cpip.cli.parser import ArgumentParser
 
@@ -93,8 +93,8 @@ def create_parser() -> "ArgumentParser":
 
 def run_lock(args: list[str]) -> int:
     options = create_parser().parse_args(args)
-    from cpip.network.http import NetworkSession
     from cpip.index.artifacts import ArtifactLocator
+    from cpip.network.http import NetworkSession
 
     resolution_session = NetworkSession()
     artifact_locator = ArtifactLocator(resolution_session)
@@ -116,14 +116,16 @@ def run_lock(args: list[str]) -> int:
     for value in options.requirements:
         local_directory = os.path.abspath(value)
         if os.path.isdir(local_directory):
-            from cpip.build.build_backend import prepare_project_metadata
             from pathlib import Path
 
+            from cpip.build.build_backend import prepare_project_metadata
+
             metadata = prepare_project_metadata(
-                Path(local_directory), build_isolation=False
+                Path(local_directory),
+                build_isolation=False,
             )
             directory_packages.append(
-                {"name": metadata.name, "directory": {"path": "."}}
+                {"name": metadata.name, "directory": {"path": "."}},
             )
             continue
         if "://" not in value and not value.startswith(("git+", "hg+", "svn+", "bzr+")):
@@ -135,21 +137,21 @@ def run_lock(args: list[str]) -> int:
         if parsed.url is None or parsed.name != parsed.url:
             requirements.append(value)
             continue
-        from cpip.resolution.req_install import install_req_from_line
+        from cpip.resolution.engine.input.requirements import install_req_from_line
 
         item = install_req_from_line(value)
         if item.link is not None and not item.link.is_vcs:
             import hashlib
+            from pathlib import Path
 
             from cpip.build.build import unpack_source
             from cpip.build.build_backend import prepare_project_metadata
-            from pathlib import Path
 
             source = artifact_locator.ensure_local(item.link.url)
             if source.is_dir():
                 metadata = prepare_project_metadata(source, build_isolation=False)
                 directory_packages.append(
-                    {"name": metadata.name, "directory": {"path": "."}}
+                    {"name": metadata.name, "directory": {"path": "."}},
                 )
                 continue
             import shutil
@@ -166,18 +168,19 @@ def run_lock(args: list[str]) -> int:
                     "archive": {
                         "url": value,
                         "hashes": {
-                            "sha256": hashlib.sha256(source.read_bytes()).hexdigest()
+                            "sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
                         },
                     },
-                }
+                },
             )
             continue
         requirements.append(value)
     editable_packages: list[dict] = []
     for value in options.editable:
-        from cpip.build.build_backend import prepare_project_metadata
-        from cpip.resolution.req_install import install_req_from_line
         from pathlib import Path
+
+        from cpip.build.build_backend import prepare_project_metadata
+        from cpip.resolution.engine.input.requirements import install_req_from_line
 
         item = install_req_from_line(value)
         item.editable = True
@@ -188,15 +191,15 @@ def run_lock(args: list[str]) -> int:
             {
                 "name": metadata.name,
                 "directory": {"editable": True, "path": "."},
-            }
+            },
         )
     for filename in options.requirement:
         if os.path.basename(filename).startswith("pylock") and filename.endswith(
-            ".toml"
+            ".toml",
         ):
             from cpip.core.urls import url_to_path
-            from cpip.resolution.req_file import parse_requirements
-            from cpip.resolution.req_install import install_req_from_line
+            from cpip.resolution.engine.input.files import parse_requirements
+            from cpip.resolution.engine.input.requirements import install_req_from_line
 
             for item in parse_requirements(filename, resolution_session):
                 if item.locked_name is not None:
@@ -224,15 +227,15 @@ def run_lock(args: list[str]) -> int:
                                     if values
                                 },
                             },
-                        }
+                        },
                     )
                     continue
                 requirements.append(
                     install_req_from_line(
                         f"{item.locked_name} @ {item.locked_link}"
                         if item.locked_name is not None and item.locked_link is not None
-                        else item.requirement
-                    )
+                        else item.requirement,
+                    ),
                 )
         else:
             with open(filename, encoding="utf-8") as requirement_file:
@@ -248,13 +251,18 @@ def run_lock(args: list[str]) -> int:
 
     plan = None
     string_requirements = [item for item in requirements if isinstance(item, str)]
-    if len(string_requirements) == len(requirements) and string_requirements:
-        if options.no_index and not options.no_binary:
-            from cpip.resolution.local_wheelhouse import (
-                resolve_local_wheelhouse,
-            )
+    if (
+        len(string_requirements) == len(requirements)
+        and string_requirements
+        and options.no_index
+        and not options.no_binary
+    ):
+        from cpip.resolution.engine import ResolutionEngine
 
-            plan = resolve_local_wheelhouse(options.find_links, string_requirements)
+        plan = ResolutionEngine.resolve_wheelhouse(
+            options.find_links,
+            string_requirements,
+        )
     if plan is None and requirements:
         from cpip.index.provider import CandidateProvider
 
@@ -265,15 +273,17 @@ def run_lock(args: list[str]) -> int:
             build_isolation=not options.no_build_isolation,
             session=resolution_session,
         )
-        from cpip.resolution.req_install import install_req_from_line
-        from cpip.resolution.resolver import Resolver
+        from cpip.resolution.engine import ResolutionEngine
+        from cpip.resolution.engine.input.requirements import install_req_from_line
 
         install_requirements = [
             item if not isinstance(item, str) else install_req_from_line(item)
             for item in requirements
         ]
-        plan = Resolver(
-            provider=provider, no_deps=False, ignore_installed=True
+        plan = ResolutionEngine(
+            provider=provider,
+            no_deps=False,
+            ignore_installed=True,
         ).resolve(install_requirements)
     packages: list[dict] = [
         *editable_packages,
@@ -287,7 +297,9 @@ def run_lock(args: list[str]) -> int:
             continue
         candidate_path = None
         if candidate.source_kind == "wheel":
-            from cpip.resolution.local_wheelhouse import LocalWheelCandidate
+            from cpip.resolution.engine.sources.wheelhouse.models import (
+                LocalWheelCandidate,
+            )
 
             if isinstance(candidate, LocalWheelCandidate):
                 candidate_path = candidate.path
@@ -300,8 +312,8 @@ def run_lock(args: list[str]) -> int:
         else:
             source_path = None
         if candidate.source_vcs:
-            from cpip.index.vcs import git_revision, materialize_vcs, vcs_reference
             from cpip.core.temp_dir import remove_temp_directory
+            from cpip.index.vcs import git_revision, materialize_vcs, vcs_reference
 
             reference = vcs_reference(source)
             commit_id = getattr(candidate, "source_vcs_revision", None)
@@ -318,7 +330,7 @@ def run_lock(args: list[str]) -> int:
                         "requested-revision": reference.requested_revision,
                         "commit-id": commit_id,
                     },
-                }
+                },
             )
             continue
         if candidate.source_kind == "source-tree" and candidate.name in editable_names:
@@ -338,11 +350,11 @@ def run_lock(args: list[str]) -> int:
                             "url": source,
                             "hashes": {
                                 "sha256": hashlib.sha256(
-                                    archive_path.read_bytes()
-                                ).hexdigest()
+                                    archive_path.read_bytes(),
+                                ).hexdigest(),
                             },
                         },
-                    }
+                    },
                 )
             continue
         digest = (candidate.source_hashes or {}).get("sha256")
@@ -365,7 +377,7 @@ def run_lock(args: list[str]) -> int:
         key = "sdist" if candidate.source_kind == "sdist" else "wheels"
         value: object = [artifact] if key == "wheels" else artifact
         packages.append(
-            {"name": candidate.name, "version": str(candidate.version), key: value}
+            {"name": candidate.name, "version": str(candidate.version), key: value},
         )
     if locked_order:
         order = {name: index for index, name in enumerate(locked_order)}

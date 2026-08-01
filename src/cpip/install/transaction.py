@@ -6,8 +6,8 @@ import errno
 import os
 import shutil
 import tempfile
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
 
 from cpip.core.errors import InstallationError
 
@@ -21,10 +21,10 @@ def _read_staged_source(path: str | None) -> bytes:
 
 class StagedFile:
     __slots__ = (
-        "source_text",
         "contents",
         "destination_text",
         "mode",
+        "source_text",
     )
 
     def __init__(
@@ -57,7 +57,11 @@ class InstallTransaction:
         self.finished = False
 
     def add(
-        self, source: str | Path, destination: str | Path, *, mode: int | None = None
+        self,
+        source: str | Path,
+        destination: str | Path,
+        *,
+        mode: int | None = None,
     ) -> None:
         source_text = source if isinstance(source, str) else os.fspath(source)
         destination_text = (
@@ -65,7 +69,7 @@ class InstallTransaction:
         )
         if destination_text in self.staged_destinations:
             raise InstallationError(
-                f"duplicate installation destination: {destination_text}"
+                f"duplicate installation destination: {destination_text}",
             )
         self.staged_internal.append(StagedFile(source_text, destination_text, mode))
         self.staged_destinations.add(destination_text)
@@ -83,10 +87,10 @@ class InstallTransaction:
         )
         if destination_text in self.staged_destinations:
             raise InstallationError(
-                f"duplicate installation destination: {destination_text}"
+                f"duplicate installation destination: {destination_text}",
             )
         self.staged_internal.append(
-            StagedFile(None, destination_text, mode, contents=contents)
+            StagedFile(None, destination_text, mode, contents=contents),
         )
         self.staged_destinations.add(destination_text)
 
@@ -113,7 +117,7 @@ class InstallTransaction:
         for item in self.staged_internal:
             if item.source_text is not None and not os.path.isfile(item.source_text):
                 raise InstallationError(
-                    f"staged file does not exist: {item.source_text}"
+                    f"staged file does not exist: {item.source_text}",
                 )
             destination_text = item.destination_text
             destination_exists = os.path.lexists(destination_text)
@@ -135,12 +139,12 @@ class InstallTransaction:
                         continue
                 raise InstallationError(
                     f"Cannot install {item.destination_text} from {item.source_text}: "
-                    "an unrelated file already exists"
+                    "an unrelated file already exists",
                 )
         overlap = self.staged_destinations & self.deletions
         if overlap:
             raise InstallationError(
-                f"installation both replaces and deletes: {next(iter(overlap))}"
+                f"installation both replaces and deletes: {next(iter(overlap))}",
             )
 
     def commit(self, *, finalize: bool = True) -> None:

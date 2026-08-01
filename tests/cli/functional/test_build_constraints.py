@@ -5,13 +5,11 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
 from cpip.core.urls import path_to_url
-
 from cpip_test_support import (
     CpipTestEnvironment,
-    TestData,
     TestCpipResult,
+    TestData,
     create_test_package_with_setup,
 )
 
@@ -34,7 +32,9 @@ def create_simple_test_package(script: CpipTestEnvironment, name: str) -> Path:
 
 
 def create_constraints_file(
-    script: CpipTestEnvironment, filename: str, content: str
+    script: CpipTestEnvironment,
+    filename: str,
+    content: str,
 ) -> Path:
     """Create a constraints file with the given content."""
     constraints_file = script.scratch_path / filename
@@ -71,14 +71,19 @@ def run_cpip_install_with_build_constraints(
 
 
 def test_build_constraints_basic_functionality_simple(
-    script: CpipTestEnvironment, data: TestData, tmpdir: Path
+    script: CpipTestEnvironment,
+    data: TestData,
+    tmpdir: Path,
 ) -> None:
     """Test that build constraints options are accepted and processed."""
     project_dir = create_simple_test_package(
-        script=script, name="test_build_constraints"
+        script=script,
+        name="test_build_constraints",
     )
     constraints_file = create_constraints_file(
-        script=script, filename="constraints.txt", content="setuptools>=40.0.0\n"
+        script=script,
+        filename="constraints.txt",
+        content="setuptools>=40.0.0\n",
     )
     result = run_cpip_install_with_build_constraints(
         script=script,
@@ -87,13 +92,17 @@ def test_build_constraints_basic_functionality_simple(
         build_constraints_file=constraints_file,
     )
     result.assert_installed(
-        "test-build-constraints", editable=False, without_files=["."]
+        "test-build-constraints",
+        editable=False,
+        without_files=["."],
     )
 
 
 @pytest.mark.network
 def test_build_constraints_vs_regular_constraints_simple(
-    script: CpipTestEnvironment, data: TestData, tmpdir: Path
+    script: CpipTestEnvironment,
+    data: TestData,
+    tmpdir: Path,
 ) -> None:
     """Test that build constraints and regular constraints work independently."""
     project_dir = create_test_package_with_setup(
@@ -104,10 +113,14 @@ def test_build_constraints_vs_regular_constraints_simple(
         install_requires=["six"],
     )
     build_constraints_file = create_constraints_file(
-        script=script, filename="build_constraints.txt", content="setuptools>=40.0.0\n"
+        script=script,
+        filename="build_constraints.txt",
+        content="setuptools>=40.0.0\n",
     )
     regular_constraints_file = create_constraints_file(
-        script=script, filename="constraints.txt", content="six>=1.10.0\n"
+        script=script,
+        filename="constraints.txt",
+        content="six>=1.10.0\n",
     )
     result = script.cpip(
         "install",
@@ -125,12 +138,16 @@ def test_build_constraints_vs_regular_constraints_simple(
 
 
 def test_build_constraints_environment_isolation_simple(
-    script: CpipTestEnvironment, data: TestData, tmpdir: Path
+    script: CpipTestEnvironment,
+    data: TestData,
+    tmpdir: Path,
 ) -> None:
     """Test that build constraints work correctly in isolated build environments."""
     project_dir = create_simple_test_package(script=script, name="test_env_isolation")
     constraints_file = create_constraints_file(
-        script=script, filename="build_constraints.txt", content="setuptools>=40.0.0\n"
+        script=script,
+        filename="build_constraints.txt",
+        content="setuptools>=40.0.0\n",
     )
     result = run_cpip_install_with_build_constraints(
         script=script,
@@ -143,11 +160,14 @@ def test_build_constraints_environment_isolation_simple(
 
 
 def test_build_constraints_file_not_found(
-    script: CpipTestEnvironment, data: TestData, tmpdir: Path
+    script: CpipTestEnvironment,
+    data: TestData,
+    tmpdir: Path,
 ) -> None:
     """Test behavior when build constraints file doesn't exist."""
     project_dir = create_simple_test_package(
-        script=script, name="test_missing_constraints"
+        script=script,
+        name="test_missing_constraints",
     )
     missing_constraints = script.scratch_path / "missing_constraints.txt"
     result = run_cpip_install_with_build_constraints(
@@ -165,7 +185,8 @@ def test_use_feature_build_constraint_is_always_enabled(
     script: CpipTestEnvironment,
 ) -> None:
     """``--use-feature=build-constraint`` is accepted but now a no-op that
-    reports the feature is always enabled."""
+    reports the feature is always enabled.
+    """
     result = script.cpip(
         "install",
         "--use-feature=build-constraint",
@@ -180,7 +201,10 @@ def test_use_feature_build_constraint_is_always_enabled(
 
 @pytest.mark.parametrize("installer_args", INSTALLER_ARGS)
 def test_constraints_dont_pass_through(
-    script: CpipTestEnvironment, data: TestData, tmpdir: Path, installer_args: list[str]
+    script: CpipTestEnvironment,
+    data: TestData,
+    tmpdir: Path,
+    installer_args: list[str],
 ) -> None:
     """CPIP_CONSTRAINT must not affect the isolated build env."""
     project_dir = create_test_package_with_setup(
@@ -190,7 +214,9 @@ def test_constraints_dont_pass_through(
         py_modules=["test_isolation"],
     )
     constraints = create_constraints_file(
-        script=script, filename="constraints.txt", content="setuptools==2000\n"
+        script=script,
+        filename="constraints.txt",
+        content="setuptools==2000\n",
     )
     script.environ["CPIP_CONSTRAINT"] = path_to_url(str(constraints))
     result = script.cpip_install_local(
@@ -205,10 +231,14 @@ def test_constraints_dont_pass_through(
 
 @pytest.mark.parametrize("installer_args", INSTALLER_ARGS)
 def test_constraints_dont_pass_through_with_build_constraints(
-    script: CpipTestEnvironment, data: TestData, tmpdir: Path, installer_args: list[str]
+    script: CpipTestEnvironment,
+    data: TestData,
+    tmpdir: Path,
+    installer_args: list[str],
 ) -> None:
     """CPIP_CONSTRAINT must not affect the build env even when build
-    constraints are also passed."""
+    constraints are also passed.
+    """
     project_dir = create_test_package_with_setup(
         script,
         name="test_isolation",
@@ -217,7 +247,9 @@ def test_constraints_dont_pass_through_with_build_constraints(
     )
     # An impossible regular constraint that would break the build if it leaked.
     constraints = create_constraints_file(
-        script=script, filename="constraints.txt", content="setuptools==2000\n"
+        script=script,
+        filename="constraints.txt",
+        content="setuptools==2000\n",
     )
     # A satisfiable build constraint.
     build_constraints = create_constraints_file(
@@ -238,7 +270,10 @@ def test_constraints_dont_pass_through_with_build_constraints(
 
 @pytest.mark.parametrize("installer_args", INSTALLER_ARGS)
 def test_build_constraint_is_enforced(
-    script: CpipTestEnvironment, data: TestData, tmpdir: Path, installer_args: list[str]
+    script: CpipTestEnvironment,
+    data: TestData,
+    tmpdir: Path,
+    installer_args: list[str],
 ) -> None:
     """An unsatisfiable build constraint must make the build fail."""
     project_dir = create_test_package_with_setup(
@@ -248,7 +283,9 @@ def test_build_constraint_is_enforced(
         py_modules=["test_isolation"],
     )
     build_constraints = create_constraints_file(
-        script=script, filename="build_constraints.txt", content="setuptools==2000\n"
+        script=script,
+        filename="build_constraints.txt",
+        content="setuptools==2000\n",
     )
     result = run_cpip_install_with_build_constraints(
         script=script,

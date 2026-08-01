@@ -6,7 +6,6 @@ import logging
 import os
 from collections.abc import Generator
 from types import TracebackType
-
 from typing import Any
 
 from cpip.core.temp_dir import TempDirectory
@@ -48,7 +47,8 @@ class BuildTracker:
     context of ``BuildTracker.track()``. If a requirement shows up recursively, this
     raises an exception.
 
-    This stops fork bombs embedded in malicious packages."""
+    This stops fork bombs embedded in malicious packages.
+    """
 
     def __init__(self, root: str) -> None:
         self.root_internal = root
@@ -73,7 +73,6 @@ class BuildTracker:
 
     def add(self, req: Any, key: TrackerId) -> None:
         """Add an InstallRequirement to build tracking."""
-
         # Get the file to write information about this requirement.
         entry_path = self.entry_path_internal(key)
 
@@ -100,7 +99,6 @@ class BuildTracker:
 
     def remove(self, req: Any, key: TrackerId) -> None:
         """Remove an InstallRequirement from build tracking."""
-
         # Delete the created file and the corresponding entry.
         os.unlink(self.entry_path_internal(key))
         del self.entries_internal[key]
@@ -118,7 +116,8 @@ class BuildTracker:
         """Ensure that `key` cannot install itself as a setup requirement.
 
         :raises LookupError: If `key` was already provided in a parent invocation of
-                             the context introduced by this method."""
+                             the context introduced by this method.
+        """
         tracker_id = TrackerId(key)
         self.add(req, tracker_id)
         yield

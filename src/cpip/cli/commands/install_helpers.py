@@ -52,7 +52,7 @@ def intersect_hashes(left: Hashes, right: Hashes) -> Hashes:
             ]
             for algorithm in left.allowed_internal.keys()
             & right.allowed_internal.keys()
-        }
+        },
     )
 
 

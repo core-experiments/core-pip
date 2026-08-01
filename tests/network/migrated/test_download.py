@@ -145,9 +145,7 @@ def test_get_http_response_size(content_length: str, expected: int | None) -> No
     ],
 )
 def test_sanitize_content_filename(filename: str, expected: str) -> None:
-    """
-    Test inputs where the result is the same for Windows and non-Windows.
-    """
+    """Test inputs where the result is the same for Windows and non-Windows."""
     assert sanitize_content_filename(filename) == expected
 
 
@@ -163,11 +161,11 @@ def test_sanitize_content_filename(filename: str, expected: str) -> None:
     ],
 )
 def test_sanitize_content_filename__platform_dependent(
-    filename: str, win_expected: str, non_win_expected: str
+    filename: str,
+    win_expected: str,
+    non_win_expected: str,
 ) -> None:
-    """
-    Test inputs where the result is different for Windows and non-Windows.
-    """
+    """Test inputs where the result is different for Windows and non-Windows."""
     if sys.platform == "win32":
         expected = win_expected
     else:
@@ -182,7 +180,9 @@ def test_sanitize_content_filename__platform_dependent(
     ],
 )
 def test_parse_content_disposition(
-    content_disposition: str, default_filename: str, expected: str
+    content_disposition: str,
+    default_filename: str,
+    expected: str,
 ) -> None:
     actual = parse_content_disposition(content_disposition, default_filename)
     assert actual == expected
@@ -413,7 +413,8 @@ def test_downloader_resumes_on_protocol_error(tmp_path: Path) -> None:
     ],
 )
 def test_downloader_retries_low_level_errors_during_resume(
-    resume_error: Exception, tmp_path: Path
+    resume_error: Exception,
+    tmp_path: Path,
 ) -> None:
     """Low-level errors raised while fetching a resume response are retried."""
     session = NetworkSession(resume_retries=5)
@@ -463,7 +464,8 @@ def test_downloader_retries_low_level_errors_during_resume(
     ],
 )
 def test_downloader_retries_diagnostic_connection_errors_during_resume(
-    resume_error: Exception, tmp_path: Path
+    resume_error: Exception,
+    tmp_path: Path,
 ) -> None:
     """Diagnostic connection errors during resume should consume a resume retry."""
     session = NetworkSession(resume_retries=5)
@@ -509,7 +511,8 @@ def test_downloader_does_not_retry_on_ssl_missing_error(tmp_path: Path) -> None:
 
 
 def test_downloader_resumes_on_truncated_http_stream(
-    mock_server: MockServer, tmp_path: Path
+    mock_server: MockServer,
+    tmp_path: Path,
 ) -> None:
     """A truncated stream raises a real urllib3 ProtocolError that resume recovers."""
     body = b"0cfa7e9d-1868-4dd7-9fb3-f2561d5dfd89"
@@ -544,7 +547,8 @@ def test_downloader_resumes_on_truncated_http_stream(
 
 def test_downloader_crashes_on_mismatched_resume_offset(tmp_path: Path) -> None:
     """A 206 whose Content-Range starts at a different offset than requested
-    must fail, otherwise the misplaced bytes would corrupt the file."""
+    must fail, otherwise the misplaced bytes would corrupt the file.
+    """
     body = b"0cfa7e9d-1868-4dd7-9fb3-f2561d5dfd89"
     session = NetworkSession(resume_retries=5)
     link = Link("http://example.com/foo.tgz")
@@ -559,7 +563,7 @@ def test_downloader_crashes_on_mismatched_resume_offset(tmp_path: Path) -> None:
     # (per its Content-Range) starts at offset 0.
     mismatched = MockResponse(b"XXXXXXXXXXXX")
     mismatched.headers.update(
-        {"content-length": "12", "content-range": "bytes 0-11/36"}
+        {"content-length": "12", "content-range": "bytes 0-11/36"},
     )
     mismatched.status_code = 206
 

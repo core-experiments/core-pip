@@ -18,7 +18,8 @@ def raise_for_status(response: Any) -> None:
 
 
 def response_chunks(
-    response: Any, chunk_size: int = DOWNLOAD_CHUNK_SIZE
+    response: Any,
+    chunk_size: int = DOWNLOAD_CHUNK_SIZE,
 ) -> Generator[bytes, None, None]:
     yield from response.iter_content(chunk_size)
 

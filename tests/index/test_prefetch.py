@@ -4,8 +4,7 @@ import threading
 import time
 
 import pytest
-
-from cpip.index.prefetch import PrefetchPolicy, Prefetcher
+from cpip.index.prefetch import Prefetcher, PrefetchPolicy
 
 
 def test_prefetch_policy_prefers_fast_high_yield_sources() -> None:

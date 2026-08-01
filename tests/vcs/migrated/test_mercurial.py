@@ -1,14 +1,11 @@
-"""
-Contains functional tests of the Mercurial class.
-"""
+"""Contains functional tests of the Mercurial class."""
 
 import configparser
 import os
 from pathlib import Path
 
-from cpip.vcs.support import hide_url
 from cpip.vcs.mercurial import Mercurial
-
+from cpip.vcs.support import hide_url
 from cpip_test_support import need_mercurial
 
 

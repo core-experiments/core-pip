@@ -9,12 +9,12 @@ from cpip.build.metadata import (
     InstalledMetadataDistribution,
 )
 from cpip.core.packaging import canonicalize_name
-from cpip.resolution.req_install import InstallRequirement
 from cpip.install.target import InstallTarget
 from cpip.install.uninstall import DistributionUninstaller
 from cpip.install.wheel_transaction import (
     WheelInstaller,
 )
+from cpip.resolution.req_install import InstallRequirement
 
 logger = logging.getLogger(__name__)
 

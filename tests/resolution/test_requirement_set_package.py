@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import pytest
-from cpip.resolution.req_install import (
-    InstallRequirement,
+from cpip.resolution.engine.input.requirements import (
     install_req_from_editable,
     install_req_from_line,
 )
-from cpip.resolution.requirement_set import RequirementSet
+from cpip.resolution.engine.state.requirement_set import RequirementSet
+from cpip.resolution.req_install import InstallRequirement
 
 
 def test_add_named_requirement_tracks_lookup_by_canonical_name() -> None:
@@ -45,6 +45,7 @@ def test_all_requirements_preserves_named_then_unnamed_in_insertion_order() -> N
 def test_add_named_requirement_requires_parsed_requirement() -> None:
     reqset = RequirementSet()
     with pytest.raises(
-        ValueError, match="named requirements must define a parsed requirement"
+        ValueError,
+        match="named requirements must define a parsed requirement",
     ):
         reqset.add_named_requirement(InstallRequirement(None))

@@ -13,7 +13,8 @@ from cpip_test_support.wheel import make_wheel
 
 
 def create_test_index_with_invalid_wheels(
-    tmpdir: Path, package_name: str = "pkg"
+    tmpdir: Path,
+    package_name: str = "pkg",
 ) -> Path:
     """Create a test index with both valid and invalid wheel filenames.
 
@@ -29,7 +30,7 @@ def create_test_index_with_invalid_wheels(
         <html>
           <body><a href="{package_name}/index.html">{package_name}</a></body>
         </html>
-        """)
+        """),
     )
 
     pkg_dir = index_dir / package_name
@@ -65,7 +66,7 @@ def create_test_index_with_invalid_wheels(
             {"".join(links)}
           </body>
         </html>
-        """)
+        """),
     )
 
     return index_dir
@@ -80,7 +81,12 @@ def test_index_versions_ignores_invalid_wheel_names(
 
     # Run cpip index versions with JSON output
     result = script.cpip(
-        "index", "versions", "pkg", "--json", "--index-url", index_dir.as_uri()
+        "index",
+        "versions",
+        "pkg",
+        "--json",
+        "--index-url",
+        index_dir.as_uri(),
     )
 
     assert result.returncode == 0
@@ -102,7 +108,11 @@ def test_install_ignores_invalid_wheel_names(
 
     # Run cpip install - should ignore invalid wheels and install the latest valid one
     result = script.cpip(
-        "install", "pkg", "--no-cache-dir", "--index-url", index_dir.as_uri()
+        "install",
+        "pkg",
+        "--no-cache-dir",
+        "--index-url",
+        index_dir.as_uri(),
     )
 
     assert result.returncode == 0

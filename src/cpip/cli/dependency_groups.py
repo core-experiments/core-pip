@@ -32,19 +32,22 @@ def resolve_group_file(path: Path, group_name: str) -> list[str]:
     groups = data.get("dependency-groups")
     if not isinstance(groups, dict):
         raise InstallationError(
-            f"[dependency-groups] table was missing from {path.name!r}."
+            f"[dependency-groups] table was missing from {path.name!r}.",
         )
 
     try:
         return resolve_group(groups, group_name, stack=[])
     except InstallationError as exc:
         raise InstallationError(
-            f"[dependency-groups] resolution failed for {group_name!r} from {path.name!r}: {exc}"
+            f"[dependency-groups] resolution failed for {group_name!r} from {path.name!r}: {exc}",
         ) from exc
 
 
 def resolve_group(
-    groups: dict[str, Any], group_name: str, *, stack: list[str]
+    groups: dict[str, Any],
+    group_name: str,
+    *,
+    stack: list[str],
 ) -> list[str]:
     resolved: list[str] = []
     canonical_groups = {canonicalize_name(name): name for name in groups}
@@ -59,12 +62,13 @@ def resolve_group(
             cycle = ", ".join(
                 f"{left} -> {right}"
                 for left, right in zip(
-                    current_stack, current_stack[1:] + [current_name]
+                    current_stack,
+                    current_stack[1:] + [current_name],
                 )
             )
             root = current_stack[0] if current_stack else current_name
             raise InstallationError(
-                f"Cyclic dependency group include while resolving {root}: {cycle}"
+                f"Cyclic dependency group include while resolving {root}: {cycle}",
             )
 
         actual_name = current_name if current_name in groups else None
@@ -73,7 +77,7 @@ def resolve_group(
         raw_group = groups.get(actual_name)
         if not isinstance(raw_group, list):
             raise InstallationError(
-                f"Dependency group {current_name!r} was not defined as a list."
+                f"Dependency group {current_name!r} was not defined as a list.",
             )
 
         next_stack = [*current_stack, actual_name or current_name]
@@ -82,14 +86,14 @@ def resolve_group(
                 pending.append(("value", item, next_stack))
                 continue
             if isinstance(item, dict) and set(item) == {"include-group"}:
-                include = cast(dict[str, Any], item)["include-group"]
+                include = cast("dict[str, Any]", item)["include-group"]
                 if not isinstance(include, str):
                     raise InstallationError(
-                        f"Dependency group {current_name!r} contains an invalid include."
+                        f"Dependency group {current_name!r} contains an invalid include.",
                     )
                 pending.append(("group", include, next_stack))
                 continue
             raise InstallationError(
-                f"Dependency group {current_name!r} contains an invalid item."
+                f"Dependency group {current_name!r} contains an invalid item.",
             )
     return resolved

@@ -72,7 +72,8 @@ def make_wheel_internal(
         )
         if entry_points is not None:
             archive.writestr(
-                f"owner_demo-{version}.dist-info/entry_points.txt", entry_points
+                f"owner_demo-{version}.dist-info/entry_points.txt",
+                entry_points,
             )
         for path, data in (extra_files or {}).items():
             archive.writestr(path, data)
@@ -84,18 +85,18 @@ def test_installed_distribution_store_can_filter_names(tmp_path: Path) -> None:
     wanted = tmp_path / "wanted-1.0.dist-info"
     wanted.mkdir()
     (wanted / "METADATA").write_text(
-        "Metadata-Version: 2.1\nName: wanted\nVersion: 1.0\n"
+        "Metadata-Version: 2.1\nName: wanted\nVersion: 1.0\n",
     )
     (wanted / "RECORD").write_text("")
     unrelated = tmp_path / "unrelated-1.0.dist-info"
     unrelated.mkdir()
     (unrelated / "METADATA").write_text(
-        "Metadata-Version: 2.1\nName: unrelated\nVersion: 1.0\n"
+        "Metadata-Version: 2.1\nName: unrelated\nVersion: 1.0\n",
     )
     (unrelated / "RECORD").write_text("")
 
     distributions = InstalledDistributionStore(paths=[str(tmp_path)]).iter(
-        names={"Wanted"}
+        names={"Wanted"},
     )
 
     assert [distribution.canonical_name for distribution in distributions] == ["wanted"]
@@ -125,7 +126,7 @@ def test_uninstall_removes_recorded_files_and_generated_bytecode(
     unrelated = target / "unrelated.txt"
     unrelated.write_text("keep", encoding="utf-8")
     cache = Path(
-        importlib.util.cache_from_source(str(target / "owner_demo" / "__init__.py"))
+        importlib.util.cache_from_source(str(target / "owner_demo" / "__init__.py")),
     )
     cache.parent.mkdir(parents=True)
     cache.write_bytes(b"bytecode")
@@ -145,7 +146,8 @@ def test_uninstall_unlinks_symlinks_without_following_targets(tmp_path: Path) ->
     symlink = target / "owner-link"
     symlink.symlink_to(symlink_target)
     with (target / "owner_demo-1.0.dist-info" / "RECORD").open(
-        "a", encoding="utf-8"
+        "a",
+        encoding="utf-8",
     ) as record:
         record.write("owner-link,,\n")
 
@@ -161,7 +163,8 @@ def test_uninstall_ignores_unsafe_record_paths(tmp_path: Path) -> None:
     outside = tmp_path / "outside.txt"
     outside.write_text("keep", encoding="utf-8")
     with (target / "owner_demo-1.0.dist-info" / "RECORD").open(
-        "a", encoding="utf-8"
+        "a",
+        encoding="utf-8",
     ) as record:
         record.write(f"{outside},,\n")
         record.write("../outside.txt,,\n")
@@ -318,7 +321,8 @@ def test_large_fresh_batch_writes_without_staging(tmp_path: Path, monkeypatch) -
 
 
 def test_direct_batch_rolls_back_final_writes_on_later_failure(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path,
+    monkeypatch,
 ) -> None:
     wheel = make_wheel_internal(
         tmp_path,
@@ -389,7 +393,8 @@ def test_install_rejects_wheel_member_path_traversal(tmp_path: Path) -> None:
 
 def test_install_rejects_wheel_member_symlink_escape(tmp_path: Path) -> None:
     wheel = make_wheel_internal(
-        tmp_path, extra_files={"owner_demo/linked/escape.txt": "escape"}
+        tmp_path,
+        extra_files={"owner_demo/linked/escape.txt": "escape"},
     )
     target = tmp_path / "target"
     package = target / "owner_demo"

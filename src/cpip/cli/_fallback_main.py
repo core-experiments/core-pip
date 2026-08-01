@@ -37,7 +37,9 @@ def run(
 
     if argv and argv[0] == "lock":
         return run_fallback(
-            argv, require_virtualenv=require_virtualenv, location=location
+            argv,
+            require_virtualenv=require_virtualenv,
+            location=location,
         )
     if argv and argv[0] == "install" and not fast_install_attempted:
         from cpip.cli.commands.fast_install import run as run_fast_install
@@ -49,5 +51,7 @@ def run(
 
     with global_tempdir_manager():
         return run_fallback(
-            argv, require_virtualenv=require_virtualenv, location=location
+            argv,
+            require_virtualenv=require_virtualenv,
+            location=location,
         )

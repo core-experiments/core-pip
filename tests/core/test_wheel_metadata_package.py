@@ -23,7 +23,8 @@ def zip_dir() -> Iterator[ZipDir]:
                     file_path = os.path.join(path, dirpath, filename)
                     # Zip files must always have / as path separator
                     archive_path = os.path.relpath(file_path, path).replace(
-                        os.pathsep, "/"
+                        os.pathsep,
+                        "/",
                     )
                     z.write(file_path, archive_path)
 
@@ -74,7 +75,8 @@ def test_wheel_version_ok() -> None:
 
 
 def test_parse_wheel_validates_and_returns_metadata(
-    tmp_path: Path, zip_dir: ZipDir
+    tmp_path: Path,
+    zip_dir: ZipDir,
 ) -> None:
     dist_info_dir = tmp_path / "simple-0.1.dist-info"
     dist_info_dir.mkdir()
@@ -87,7 +89,9 @@ def test_parse_wheel_validates_and_returns_metadata(
 
 
 def test_validate_wheel_skips_email_metadata_parser(
-    tmp_path: Path, zip_dir: ZipDir, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    zip_dir: ZipDir,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     dist_info_dir = tmp_path / "simple-0.1.dist-info"
     dist_info_dir.mkdir()

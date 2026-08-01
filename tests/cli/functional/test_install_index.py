@@ -38,7 +38,8 @@ def test_find_links_no_doctype(script: CpipTestEnvironment, data: TestData) -> N
 
 
 def test_find_links_requirements_file_relative_path(
-    script: CpipTestEnvironment, data: TestData
+    script: CpipTestEnvironment,
+    data: TestData,
 ) -> None:
     """Test find-links as a relative path to a reqs file."""
     script.scratch_path.joinpath("test-req.txt").write_text(
@@ -46,7 +47,7 @@ def test_find_links_requirements_file_relative_path(
         --no-index
         --find-links={data.packages.as_posix()}
         parent==0.1
-        """)
+        """),
     )
     result = script.cpip(
         "install",
@@ -62,26 +63,33 @@ def test_find_links_requirements_file_relative_path(
 
 
 def test_install_from_file_index_hash_link(
-    script: CpipTestEnvironment, data: TestData
+    script: CpipTestEnvironment,
+    data: TestData,
 ) -> None:
-    """
-    Test that a pkg can be installed from a file:// index using a link with a
+    """Test that a pkg can be installed from a file:// index using a link with a
     hash
     """
     result = script.cpip(
-        "install", "--no-build-isolation", "-i", data.index_url(), "simple==1.0"
+        "install",
+        "--no-build-isolation",
+        "-i",
+        data.index_url(),
+        "simple==1.0",
     )
     dist_info_folder = script.site_packages / "simple-1.0.dist-info"
     result.did_create(dist_info_folder)
 
 
 def test_file_index_url_quoting(script: CpipTestEnvironment, data: TestData) -> None:
-    """
-    Test url quoting of file index url with a space
-    """
+    """Test url quoting of file index url with a space"""
     index_url = data.index_url("in dex")
     result = script.cpip(
-        "install", "--no-build-isolation", "-vvv", "--index-url", index_url, "simple"
+        "install",
+        "--no-build-isolation",
+        "-vvv",
+        "--index-url",
+        index_url,
+        "simple",
     )
     result.did_create(script.site_packages / "simple")
     result.did_create(script.site_packages / "simple-1.0.dist-info")

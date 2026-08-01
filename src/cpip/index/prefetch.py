@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Hashable
 from concurrent.futures import Future, ThreadPoolExecutor
 from threading import RLock
-from typing import Callable, Generic, Hashable, TypeVar
+from typing import Callable, Generic, TypeVar
 
 T = TypeVar("T")
 V = TypeVar("V")

@@ -10,7 +10,8 @@ def test_install_requirements_replaces_in_transaction(monkeypatch) -> None:
     requirement.should_reinstall = True
 
     def fake_install(
-        self: RequirementInstaller, install_requirement: InstallRequirement
+        self: RequirementInstaller,
+        install_requirement: InstallRequirement,
     ) -> None:
         install_requirement.install_succeeded = True
 

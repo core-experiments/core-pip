@@ -12,12 +12,12 @@ from cpip.core.packaging import Requirement, SpecifierSet, Version, is_windows_p
 from cpip.core.release_control import ReleaseControl
 from cpip.core.target_python import TargetPython, get_supported
 from cpip.core.wheel import TargetContext, Wheel, WheelTag, legacy_build_tag
-from cpip.index.candidates import BestCandidateResult, InstallationCandidate
 from cpip.index.candidate_filters import (
     allowed_hashes,
     filter_unallowed_hashes,
     supported_tag_ranks,
 )
+from cpip.index.candidates import BestCandidateResult, InstallationCandidate
 from cpip.index.links import Link
 from cpip.index.source_models import (
     INSTALLABLE_ARTIFACT_KINDS,
@@ -33,14 +33,14 @@ CandidateT = TypeVar("CandidateT", bound=CandidateRecord)
 
 class CandidateEvaluator:
     __slots__ = (
-        "project_name_internal",
-        "supported_tags_internal",
-        "supported_tag_ranks",
-        "specifier_internal",
-        "release_control_internal",
-        "prefer_binary_internal",
-        "hashes_internal",
         "allowed_hashes_internal",
+        "hashes_internal",
+        "prefer_binary_internal",
+        "project_name_internal",
+        "release_control_internal",
+        "specifier_internal",
+        "supported_tag_ranks",
+        "supported_tags_internal",
     )
 
     def __init__(
@@ -96,7 +96,8 @@ class CandidateEvaluator:
         )
 
     def get_applicable_candidates(
-        self, candidates: list[CandidateT]
+        self,
+        candidates: list[CandidateT],
     ) -> list[CandidateT]:
         allow_prereleases = self.allow_prereleases_internal()
         if allow_prereleases is None:
@@ -111,7 +112,8 @@ class CandidateEvaluator:
                     candidate
                     for candidate in candidates
                     if self.specifier_internal.contains(
-                        candidate.version, allow_prereleases=True
+                        candidate.version,
+                        allow_prereleases=True,
                     )
                 ]
             else:
@@ -128,7 +130,8 @@ class CandidateEvaluator:
                         candidate
                         for candidate in candidates
                         if self.specifier_internal.contains(
-                            candidate.version, allow_prereleases=True
+                            candidate.version,
+                            allow_prereleases=True,
                         )
                     ]
         else:
@@ -137,7 +140,8 @@ class CandidateEvaluator:
                 for candidate in candidates
                 if not (candidate.version.is_prerelease and not allow_prereleases)
                 and self.specifier_internal.contains(
-                    candidate.version, allow_prereleases=allow_prereleases
+                    candidate.version,
+                    allow_prereleases=allow_prereleases,
                 )
             ]
         return filter_unallowed_hashes(
@@ -150,7 +154,7 @@ class CandidateEvaluator:
         if self.release_control_internal is None:
             return None
         return self.release_control_internal.allows_prereleases(
-            self.project_name_internal
+            self.project_name_internal,
         )
 
     @staticmethod
@@ -231,7 +235,7 @@ class CandidateEvaluator:
             and parsed.version == Version("0")
         )
         if not unknown_direct_source_version and not requirement.is_satisfied_by(
-            parsed.version
+            parsed.version,
         ):
             return CandidateEvaluator.reject(
                 link,
@@ -256,7 +260,9 @@ class CandidateEvaluator:
             allow_yanked or CandidateEvaluator.is_exact_pin(requirement)
         ):
             return CandidateEvaluator.reject(
-                link, RejectionReason.YANKED, link.yanked_reason or "yanked"
+                link,
+                RejectionReason.YANKED,
+                link.yanked_reason or "yanked",
             )
         if link.kind is ArtifactKind.WHEEL and parsed.tag_rank is None:
             return CandidateEvaluator.reject(
@@ -295,7 +301,7 @@ class CandidateEvaluator:
         if requirement.raw.startswith("file:"):
             return True
         return requirement.raw.startswith((".", "/", "~")) or is_windows_path(
-            requirement.raw
+            requirement.raw,
         )
 
     @staticmethod
@@ -303,21 +309,24 @@ class CandidateEvaluator:
         return RejectedCandidate(link=link, reason=reason, detail=detail)
 
     def compute_best_candidate(
-        self, candidates: list[InstallationCandidate]
+        self,
+        candidates: list[InstallationCandidate],
     ) -> BestCandidateResult:
         applicable = self.get_applicable_candidates(candidates)
         best = self.sort_best_candidate(applicable)
         return BestCandidateResult(candidates, applicable, best)
 
     def sort_best_candidate(
-        self, candidates: list[InstallationCandidate]
+        self,
+        candidates: list[InstallationCandidate],
     ) -> InstallationCandidate | None:
         if not candidates:
             return None
         return max(candidates, key=self.sort_key_internal)
 
     def sort_key_internal(
-        self, candidate: InstallationCandidate
+        self,
+        candidate: InstallationCandidate,
     ) -> tuple[int, int, Version, int, int, int, int, tuple[int, str] | tuple[()]]:
         digest = None
         if candidate.link.hashes is not None:

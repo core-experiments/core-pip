@@ -42,7 +42,8 @@ def cache_identity(url: str) -> str:
 
 
 def cached_wheel_for_link(
-    wheel_cache_dir: Path | None, url: str
+    wheel_cache_dir: Path | None,
+    url: str,
 ) -> tuple[Path, dict[str, str] | None] | None:
     from cpip.index.cache import origin_hashes, wheel_cache_path
 
@@ -64,7 +65,9 @@ def cached_wheel_for_link(
 
 
 def cache_built_wheel(
-    wheel_cache_dir: Path | None, candidate: CandidateRecord, wheel: Path
+    wheel_cache_dir: Path | None,
+    candidate: CandidateRecord,
+    wheel: Path,
 ) -> None:
     from cpip.index.cache import wheel_cache_path
 
@@ -76,7 +79,9 @@ def cache_built_wheel(
     shutil.copy2(wheel, os.path.join(entry_dir_text, wheel.name))
     origin = {"archive_info": {"hashes": source_hashes_for_link(candidate.link)}}
     with open(
-        os.path.join(entry_dir_text, "origin.json"), "w", encoding="utf-8"
+        os.path.join(entry_dir_text, "origin.json"),
+        "w",
+        encoding="utf-8",
     ) as file:
         json.dump(origin, file)
 

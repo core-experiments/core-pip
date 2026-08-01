@@ -5,10 +5,7 @@ from cpip_test_support import CpipTestEnvironment
 
 
 def test_script_file(script: CpipTestEnvironment) -> None:
-    """
-    Test installing from a script with inline metadata (PEP 723).
-    """
-
+    """Test installing from a script with inline metadata (PEP 723)."""
     script_path = script.scratch_path.joinpath("script.py")
     script_path.write_text(
         textwrap.dedent("""\
@@ -20,16 +17,14 @@ def test_script_file(script: CpipTestEnvironment) -> None:
             # ///
 
             print("Hello world from a dummy program")
-            """)
+            """),
     )
     script.cpip_install_local("--requirements-from-script", script_path)
     script.assert_installed(initools="0.2", simple="1.0")
 
 
 def test_multiple_scripts(script: CpipTestEnvironment) -> None:
-    """
-    Test that --requirements-from-script can only be given once in an install command.
-    """
+    """Test that --requirements-from-script can only be given once in an install command."""
     result = script.cpip(
         "install",
         "--requirements-from-script",
@@ -46,10 +41,7 @@ def test_multiple_scripts(script: CpipTestEnvironment) -> None:
 
 
 def test_script_file_python_version(script: CpipTestEnvironment) -> None:
-    """
-    Test installing from a script with an incompatible `requires-python`
-    """
-
+    """Test installing from a script with an incompatible `requires-python`"""
     script_path = script.scratch_path.joinpath("script.py")
 
     script_path.write_text(
@@ -63,7 +55,7 @@ def test_script_file_python_version(script: CpipTestEnvironment) -> None:
             # ///
 
             print("Hello world from a dummy program")
-            """)
+            """),
     )
 
     result = script.cpip_install_local(
@@ -80,10 +72,7 @@ def test_script_file_python_version(script: CpipTestEnvironment) -> None:
 
 
 def test_script_invalid_TOML(script: CpipTestEnvironment) -> None:
-    """
-    Test installing from a script with invalid TOML in its 'script' metadata
-    """
-
+    """Test installing from a script with invalid TOML in its 'script' metadata"""
     script_path = script.scratch_path.joinpath("script.py")
 
     script_path.write_text(
@@ -94,7 +83,7 @@ def test_script_invalid_TOML(script: CpipTestEnvironment) -> None:
             # ///
 
             print("Hello world from a dummy program")
-            """)
+            """),
     )
 
     result = script.cpip_install_local(
@@ -110,10 +99,7 @@ def test_script_invalid_TOML(script: CpipTestEnvironment) -> None:
 
 
 def test_script_multiple_blocks(script: CpipTestEnvironment) -> None:
-    """
-    Test installing from a script with multiple metadata blocks
-    """
-
+    """Test installing from a script with multiple metadata blocks"""
     script_path = script.scratch_path.joinpath("script.py")
 
     script_path.write_text(
@@ -135,7 +121,7 @@ def test_script_multiple_blocks(script: CpipTestEnvironment) -> None:
             # ///
 
             print("Hello world from a dummy program")
-            """)
+            """),
     )
 
     result = script.cpip_install_local(

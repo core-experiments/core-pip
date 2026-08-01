@@ -55,21 +55,21 @@ def split_leading_dir(path: str) -> list[str]:
         ("\\" in path and path.find("/") < path.find("\\")) or "\\" not in path
     ):
         return path.split("/", 1)
-    elif "\\" in path:
+    if "\\" in path:
         return path.split("\\", 1)
-    else:
-        return [path, ""]
+    return [path, ""]
 
 
 def has_leading_dir(paths: Iterable[str]) -> bool:
     """Returns true if all the paths have the same leading path name
-    (i.e., everything is in one subdirectory in an archive)"""
+    (i.e., everything is in one subdirectory in an archive)
+    """
     common_prefix = None
     for path in paths:
         prefix, rest = split_leading_dir(path)
         if not prefix:
             return False
-        elif common_prefix is None:
+        if common_prefix is None:
             common_prefix = prefix
         elif prefix != common_prefix:
             return False
@@ -77,10 +77,12 @@ def has_leading_dir(paths: Iterable[str]) -> bool:
 
 
 def is_within_directory(
-    directory: str, target: str, *, resolve_symlinks: bool = False
+    directory: str,
+    target: str,
+    *,
+    resolve_symlinks: bool = False,
 ) -> bool:
-    """
-    Return true if the absolute path of target is within the directory
+    """Return true if the absolute path of target is within the directory
     (including when target is equal to the directory).
 
     When ``resolve_symlinks`` is true, resolve symlinks before comparing so
@@ -97,8 +99,7 @@ def is_within_directory(
 
 
 def set_extracted_file_to_default_mode_plus_executable(path: str) -> None:
-    """
-    Make file present at path have execute for user/group/world
+    """Make file present at path have execute for user/group/world
     (chmod +x) is no-op on windows per python docs
     """
     mask = os.umask(0)
@@ -114,8 +115,7 @@ def zip_item_is_executable(info: ZipInfo) -> bool:
 
 
 def unzip_file(filename: str, location: str, flatten: bool = True) -> None:
-    """
-    Unzip the file (with path `filename`) to the destination `location`.  All
+    """Unzip the file (with path `filename`) to the destination `location`.  All
     files are written based on system defaults and umask (i.e. permissions are
     not preserved), except that regular file members with any execute
     permissions (user, group, or world) have "chmod +x" applied after being
@@ -166,8 +166,7 @@ def unzip_file(filename: str, location: str, flatten: bool = True) -> None:
 
 
 def untar_file(filename: str, location: str) -> None:
-    """
-    Untar the file (with path `filename`) to the destination `location`.
+    """Untar the file (with path `filename`) to the destination `location`.
     All files are written based on system defaults and umask (i.e. permissions
     are not preserved), except that regular file members with any execute
     permissions (user, group, or world) have "chmod +x" applied on top of the
@@ -250,7 +249,7 @@ def untar_file(filename: str, location: str) -> None:
                         message.format(
                             filename,
                             exc,
-                        )
+                        ),
                     )
                 if member.isfile() and orig_mode & 0o111:
                     member.mode = default_mode_plus_executable
@@ -259,7 +258,7 @@ def untar_file(filename: str, location: str) -> None:
                     # The PEP changed this from `int` to `Optional[int]`,
                     # where None means "use the default". Mypy doesn't
                     # know this yet.
-                    cast(Any, member).mode = None
+                    cast("Any", member).mode = None
                 return member
 
             tar.extractall(location, filter=cpip_filter)
@@ -291,7 +290,7 @@ def _untar_regular_members(
             or absolute_path.startswith(absolute_location + os.sep)
         ):
             raise InstallationError(
-                f"{member.name!r} is outside the destination in {filename}"
+                f"{member.name!r} is outside the destination in {filename}",
             )
         prepared.append((member, path))
 
@@ -312,7 +311,7 @@ def _untar_regular_members(
         source = tar.extractfile(member)
         if source is None:
             raise InstallationError(
-                f"Unable to extract {member.name!r} from {filename}"
+                f"Unable to extract {member.name!r} from {filename}",
             )
         with source, open(path, "wb") as destination:
             shutil.copyfileobj(source, destination)
@@ -357,7 +356,9 @@ def untar_without_filter(
         # catches a later member redirected outside by an earlier member's
         # symlink (e.g. "link/../file").
         if not is_within_directory(location, path) or not is_within_directory(
-            location, path, resolve_symlinks=True
+            location,
+            path,
+            resolve_symlinks=True,
         ):
             message = (
                 "The tar file ({}) has a file ({}) trying to install "
@@ -376,7 +377,7 @@ def untar_without_filter(
                     "outside target directory ({})"
                 )
                 raise InstallationError(
-                    message.format(filename, member.name, member.linkname)
+                    message.format(filename, member.name, member.linkname),
                 )
             if not is_symlink_target_in_tar(tar, member):
                 message = (
@@ -384,7 +385,7 @@ def untar_without_filter(
                     "outside target directory ({})"
                 )
                 raise InstallationError(
-                    message.format(filename, member.name, member.linkname)
+                    message.format(filename, member.name, member.linkname),
                 )
             try:
                 # Avoid tarfile's internal ``data_filter`` lookup here: it is

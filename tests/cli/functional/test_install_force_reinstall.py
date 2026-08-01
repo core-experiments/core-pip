@@ -4,7 +4,9 @@ from cpip_test_support import CpipTestEnvironment, assert_all_changes
 
 
 def check_installed_version(
-    script: CpipTestEnvironment, package: str, expected: str
+    script: CpipTestEnvironment,
+    package: str,
+    expected: str,
 ) -> None:
     result = script.cpip("show", package)
     lines = result.stdout.splitlines()
@@ -17,12 +19,14 @@ def check_installed_version(
 
 
 def check_force_reinstall(
-    script: CpipTestEnvironment, specifier: str, expected: str
+    script: CpipTestEnvironment,
+    specifier: str,
+    expected: str,
 ) -> None:
-    """
-    Args:
-      specifier: the requirement specifier to force-reinstall.
-      expected: the expected version after force-reinstalling.
+    """Args:
+    specifier: the requirement specifier to force-reinstall.
+    expected: the expected version after force-reinstalling.
+
     """
     result = script.cpip_install_local("simplewheel==1.0")
     check_installed_version(script, "simplewheel", "1.0")
@@ -44,8 +48,7 @@ def check_force_reinstall(
 
 
 def test_force_reinstall_with_no_version_specifier(script: CpipTestEnvironment) -> None:
-    """
-    Check --force-reinstall when there is no version specifier and the
+    """Check --force-reinstall when there is no version specifier and the
     installed version is not the newest version.
     """
     check_force_reinstall(script, "simplewheel", "2.0")
@@ -54,8 +57,7 @@ def test_force_reinstall_with_no_version_specifier(script: CpipTestEnvironment) 
 def test_force_reinstall_with_same_version_specifier(
     script: CpipTestEnvironment,
 ) -> None:
-    """
-    Check --force-reinstall when the version specifier equals the installed
+    """Check --force-reinstall when the version specifier equals the installed
     version and the installed version is not the newest version.
     """
     check_force_reinstall(script, "simplewheel==1.0", "1.0")

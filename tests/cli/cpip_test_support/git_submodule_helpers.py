@@ -17,7 +17,8 @@ def create_test_package_submodule(env: CpipTestEnvironment) -> Path:
 
 
 def change_test_package_submodule(
-    env: CpipTestEnvironment, submodule_path: Path
+    env: CpipTestEnvironment,
+    submodule_path: Path,
 ) -> None:
     submodule_path.joinpath("testfile").write_text("this is a changed file")
     submodule_path.joinpath("testfile2").write_text("this is an added file")
@@ -26,11 +27,13 @@ def change_test_package_submodule(
 
 
 def pull_in_submodule_changes_to_module(
-    env: CpipTestEnvironment, module_path: Path, rel_path: str
+    env: CpipTestEnvironment,
+    module_path: Path,
+    rel_path: str,
 ) -> None:
-    """
-    Args:
-      rel_path: the location of the submodule relative to the superproject.
+    """Args:
+    rel_path: the location of the submodule relative to the superproject.
+
     """
     submodule_path = module_path / rel_path
     env.run("git", "pull", "-q", "origin", "master", cwd=submodule_path)
@@ -39,11 +42,12 @@ def pull_in_submodule_changes_to_module(
 
 
 def create_test_package_with_submodule(
-    env: CpipTestEnvironment, rel_path: str
+    env: CpipTestEnvironment,
+    rel_path: str,
 ) -> tuple[Path, Path]:
-    """
-    Args:
-      rel_path: the location of the submodule relative to the superproject.
+    """Args:
+    rel_path: the location of the submodule relative to the superproject.
+
     """
     env.scratch_path.joinpath("version_pkg").mkdir()
     version_pkg_path = env.scratch_path / "version_pkg"
@@ -59,7 +63,7 @@ def create_test_package_with_submodule(
                               version='0.1',
                               packages=find_packages(),
                              )
-                        """)
+                        """),
     )
     env.run("git", "init", cwd=version_pkg_path)
     env.run("git", "add", ".", cwd=version_pkg_path)

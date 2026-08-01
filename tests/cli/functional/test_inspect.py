@@ -1,7 +1,6 @@
 import json
 
 import pytest
-
 from cpip_test_support import CpipTestEnvironment, ScriptFactory, TestData
 
 
@@ -24,9 +23,7 @@ def simple_script(
 
 
 def test_inspect_basic(simple_script: CpipTestEnvironment) -> None:
-    """
-    Test default behavior of inspect command.
-    """
+    """Test default behavior of inspect command."""
     result = simple_script.cpip("inspect")
     report = json.loads(result.stdout)
     installed_by_name = {i["metadata"]["name"]: i for i in report["installed"]}

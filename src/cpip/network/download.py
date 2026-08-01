@@ -11,9 +11,9 @@ from collections.abc import Iterable, Mapping
 from http import HTTPStatus
 from typing import BinaryIO
 
+from cpip.core.urls import redact_auth_from_url
 from cpip.index.links import Link
 from cpip.index.paths import PathComponent
-from cpip.network.progress import BarType, get_download_progress_renderer
 from cpip.network.exceptions import (
     ConnectionFailedError,
     ConnectionTimeoutError,
@@ -23,8 +23,8 @@ from cpip.network.exceptions import (
     SSLVerificationError,
 )
 from cpip.network.http import HttpResponse, NetworkSession
+from cpip.network.progress import BarType, get_download_progress_renderer
 from cpip.network.utils import HEADERS, raise_for_status, response_chunks
-from cpip.core.urls import redact_auth_from_url
 from cpip.platform.filesystem import format_size
 
 logger = logging.getLogger(__name__)
@@ -52,8 +52,7 @@ def get_http_response_size(resp: HttpResponse) -> int | None:
 
 
 def get_http_response_etag_or_last_modified(resp: HttpResponse) -> str | None:
-    """
-    Return either the ETag or Last-Modified header (or None if neither exists).
+    """Return either the ETag or Last-Modified header (or None if neither exists).
     The return value can be used in an If-Range header.
     """
     return resp.headers.get("etag", resp.headers.get("last-modified"))
@@ -89,13 +88,9 @@ def log_download(
     else:
         logger.info("Downloading %s", logged_url)
 
-    if logger.getEffectiveLevel() > logging.INFO:
+    if logger.getEffectiveLevel() > logging.INFO or from_cache:
         show_progress = False
-    elif from_cache:
-        show_progress = False
-    elif not total_length:
-        show_progress = True
-    elif total_length > (512 * 1024):
+    elif not total_length or total_length > (512 * 1024):
         show_progress = True
     else:
         show_progress = False
@@ -106,21 +101,20 @@ def log_download(
         return chunks
 
     renderer = get_download_progress_renderer(
-        bar_type=progress_bar, size=total_length, initial_progress=range_start
+        bar_type=progress_bar,
+        size=total_length,
+        initial_progress=range_start,
     )
     return renderer(chunks)
 
 
 def sanitize_content_filename(filename: str) -> str:
-    """
-    Sanitize the "filename" value from a Content-Disposition header.
-    """
+    """Sanitize the "filename" value from a Content-Disposition header."""
     return os.path.basename(filename)
 
 
 def parse_content_disposition(content_disposition: str, default_filename: str) -> str:
-    """
-    Parse the "filename" value from a Content-Disposition header, and
+    """Parse the "filename" value from a Content-Disposition header, and
     return the default filename if the result is empty.
     """
     m = email.message.Message()
@@ -160,7 +154,7 @@ def get_http_response_filename(resp: HttpResponse, link: Link) -> PathComponent:
 class FileDownload:
     """Stores the state of a single link download."""
 
-    __slots__ = ("link", "output_file", "size", "bytes_received", "reattempts")
+    __slots__ = ("bytes_received", "link", "output_file", "reattempts", "size")
 
     def __init__(
         self,
@@ -204,7 +198,9 @@ class Downloader:
         )
 
     def batch(
-        self, links: Iterable[Link], location: str
+        self,
+        links: Iterable[Link],
+        location: str,
     ) -> Iterable[tuple[Link, tuple[str, str]]]:
         """Convenience method to download multiple links."""
         for link in links:
@@ -246,10 +242,11 @@ class Downloader:
             logger.warning("Connection interrupted while downloading.")
 
     def attempt_resumes_or_redownloads(
-        self, download: FileDownload, first_resp: HttpResponse
+        self,
+        download: FileDownload,
+        first_resp: HttpResponse,
     ) -> None:
         """Attempt to resume/restart the download if connection was dropped."""
-
         while (
             download.reattempts < self.resume_retries_internal
             and download.is_incomplete()
@@ -307,7 +304,9 @@ class Downloader:
             self.cache_resumed_download(download, first_resp)
 
     def cache_resumed_download(
-        self, download: FileDownload, original_response: HttpResponse
+        self,
+        download: FileDownload,
+        original_response: HttpResponse,
     ) -> None:
         cache = getattr(self.session_internal, "cache", None)
         if cache is None:
@@ -319,7 +318,7 @@ class Downloader:
                 "reason": original_response.reason,
                 "url": download.link.url_without_fragment,
                 "headers": dict(original_response.headers.items()),
-            }
+            },
         ).encode()
         cache.set(key, metadata)
         download.output_file.flush()
@@ -327,7 +326,9 @@ class Downloader:
             cache.set_body_from_io(key, body)
 
     def http_get_resume(
-        self, download: FileDownload, should_match: HttpResponse
+        self,
+        download: FileDownload,
+        should_match: HttpResponse,
     ) -> HttpResponse:
         """Issue a HTTP range request to resume the download."""
         # To better understand the download resumption logic, see the mdn web docs:
@@ -341,7 +342,9 @@ class Downloader:
         return self.http_get(download.link, headers)
 
     def http_get(
-        self, link: Link, headers: Mapping[str, str] = HEADERS
+        self,
+        link: Link,
+        headers: Mapping[str, str] = HEADERS,
     ) -> HttpResponse:
         target_url = link.url_without_fragment
         try:
@@ -350,7 +353,9 @@ class Downloader:
         except NetworkConnectionError as e:
             assert e.response is not None
             logger.critical(
-                "HTTP error %s while getting %s", e.response.status_code, link
+                "HTTP error %s while getting %s",
+                e.response.status_code,
+                link,
             )
             raise
         return resp

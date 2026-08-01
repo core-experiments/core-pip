@@ -56,7 +56,7 @@ def run_inspect(args: list[str]) -> int:
                 "cpip_version": get_cpip_version(),
                 "installed": installed,
                 "environment": default_environment(),
-            }
-        )
+            },
+        ),
     )
     return 0

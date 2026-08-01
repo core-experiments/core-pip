@@ -10,7 +10,7 @@ from cpip.core.direct_url import (
     VcsInfo,
 )
 from cpip.index.links import Link
-from cpip.resolution.direct_url_helpers import direct_url_from_link
+from cpip.install.direct_url import direct_url_from_link
 from cpip.vcs.git import Git
 
 
@@ -38,7 +38,7 @@ def test_as_pep440_requirement_archive() -> None:
     direct_url = DirectUrl(
         url="file:///home/user/archive.tgz",
         archive_info=ArchiveInfo(
-            hashes={"sha1": "1b8c5bc61a86f377fea47b4276c8c8a5842d2220"}
+            hashes={"sha1": "1b8c5bc61a86f377fea47b4276c8c8a5842d2220"},
         ),
         info_subdir="subdir",
     )
@@ -81,7 +81,8 @@ def test_as_pep440_requirement_vcs() -> None:
     direct_url = DirectUrl(
         url="https:///g.c/u/p.git",
         vcs_info=VcsInfo(
-            vcs="git", commit_id="1b8c5bc61a86f377fea47b4276c8c8a5842d2220"
+            vcs="git",
+            commit_id="1b8c5bc61a86f377fea47b4276c8c8a5842d2220",
         ),
     )
     direct_url.validate()
@@ -90,7 +91,9 @@ def test_as_pep440_requirement_vcs() -> None:
         "@1b8c5bc61a86f377fea47b4276c8c8a5842d2220"
     )
     direct_url = DirectUrl(
-        url=direct_url.url, vcs_info=direct_url.vcs_info, info_subdir="subdir"
+        url=direct_url.url,
+        vcs_info=direct_url.vcs_info,
+        info_subdir="subdir",
     )
     direct_url.validate()
     assert (
@@ -109,7 +112,7 @@ def test_from_link_vcs(mock_get_backend_for_scheme: mock.Mock) -> None:
     direct_url = direct_url_from_link_internal(Link("git+https://g.c/u/p.git#egg=pkg"))
     assert direct_url.url == "https://g.c/u/p.git"
     direct_url = direct_url_from_link_internal(
-        Link("git+https://g.c/u/p.git#egg=pkg&subdirectory=subdir")
+        Link("git+https://g.c/u/p.git#egg=pkg&subdirectory=subdir"),
     )
     assert direct_url.url == "https://g.c/u/p.git"
     assert direct_url.subdirectory == "subdir"
@@ -118,7 +121,7 @@ def test_from_link_vcs(mock_get_backend_for_scheme: mock.Mock) -> None:
     assert direct_url.vcs_info
     assert direct_url.vcs_info.requested_revision == "branch"
     direct_url = direct_url_from_link_internal(
-        Link("git+https://g.c/u/p.git@branch#egg=pkg")
+        Link("git+https://g.c/u/p.git@branch#egg=pkg"),
     )
     assert direct_url.url == "https://g.c/u/p.git"
     assert direct_url.vcs_info
@@ -137,7 +140,8 @@ def test_from_link_vcs_with_source_dir_obtains_commit_id(tmp_path: Path) -> None
     Git.run_command(["commit", "-m", "commit msg"], cwd=repo_dir)
     commit_id = Git.get_revision(repo_dir)
     direct_url = direct_url_from_link(
-        Link("git+https://g.c/u/p.git"), source_dir=repo_dir
+        Link("git+https://g.c/u/p.git"),
+        source_dir=repo_dir,
     )
     assert direct_url.url == "https://g.c/u/p.git"
     assert direct_url.vcs_info
@@ -146,7 +150,8 @@ def test_from_link_vcs_with_source_dir_obtains_commit_id(tmp_path: Path) -> None
 
 def test_from_link_vcs_without_source_dir() -> None:
     direct_url = direct_url_from_link(
-        Link("git+https://g.c/u/p.git@1"), link_is_in_wheel_cache=True
+        Link("git+https://g.c/u/p.git@1"),
+        link_is_in_wheel_cache=True,
     )
     assert direct_url.url == "https://g.c/u/p.git"
     assert direct_url.vcs_info
@@ -158,15 +163,15 @@ def test_from_link_archive() -> None:
     assert direct_url.url == "https://g.c/archive.tgz"
     assert direct_url.archive_info
     direct_url = direct_url_from_link(
-        Link("https://g.c/archive.tgz#sha1=1b8c5bc61a86f377fea47b4276c8c8a5842d2220")
+        Link("https://g.c/archive.tgz#sha1=1b8c5bc61a86f377fea47b4276c8c8a5842d2220"),
     )
     assert direct_url.archive_info
     assert direct_url.archive_info.hashes == {
-        "sha1": "1b8c5bc61a86f377fea47b4276c8c8a5842d2220"
+        "sha1": "1b8c5bc61a86f377fea47b4276c8c8a5842d2220",
     }
     # Test the hashes key has been automatically populated.
     assert direct_url.archive_info.hashes == {
-        "sha1": "1b8c5bc61a86f377fea47b4276c8c8a5842d2220"
+        "sha1": "1b8c5bc61a86f377fea47b4276c8c8a5842d2220",
     }
 
 

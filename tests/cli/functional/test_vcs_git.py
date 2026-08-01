@@ -1,6 +1,4 @@
-"""
-Contains functional tests of the Git class.
-"""
+"""Contains functional tests of the Git class."""
 
 from __future__ import annotations
 
@@ -10,10 +8,10 @@ import pathlib
 from unittest.mock import Mock, patch
 
 import pytest
-from cpip_test_support import CpipTestEnvironment, create_test_package, git_commit
 from cpip.vcs.git import Git, RemoteNotFoundError
 from cpip.vcs.support import HiddenText
 from cpip.vcs.versioncontrol import vcs
+from cpip_test_support import CpipTestEnvironment, create_test_package, git_commit
 
 
 def test_get_backend_for_scheme() -> None:
@@ -33,7 +31,9 @@ def checkout_ref(script: CpipTestEnvironment, repo_dir: str, ref: str) -> None:
 
 
 def checkout_new_branch(
-    script: CpipTestEnvironment, repo_dir: str, branch: str
+    script: CpipTestEnvironment,
+    repo_dir: str,
+    branch: str,
 ) -> None:
     script.run(
         "git",
@@ -64,9 +64,7 @@ def check_rev(repo_dir: str, rev: str, expected: tuple[str | None, bool]) -> Non
 
 
 def test_git_dir_ignored(tmpdir: pathlib.Path) -> None:
-    """
-    Test that a GIT_DIR environment variable is ignored.
-    """
+    """Test that a GIT_DIR environment variable is ignored."""
     repo_path = tmpdir / "test-repo"
     repo_path.mkdir()
     repo_dir = str(repo_path)
@@ -78,9 +76,7 @@ def test_git_dir_ignored(tmpdir: pathlib.Path) -> None:
 
 
 def test_git_work_tree_ignored(tmpdir: pathlib.Path) -> None:
-    """
-    Test that a GIT_WORK_TREE environment variable is ignored.
-    """
+    """Test that a GIT_WORK_TREE environment variable is ignored."""
     repo_path = tmpdir / "test-repo"
     repo_path.mkdir()
     repo_dir = str(repo_path)
@@ -110,11 +106,10 @@ def test_get_remote_url(script: CpipTestEnvironment, tmpdir: pathlib.Path) -> No
 
 
 def test_get_remote_url__no_remote(
-    script: CpipTestEnvironment, tmpdir: pathlib.Path
+    script: CpipTestEnvironment,
+    tmpdir: pathlib.Path,
 ) -> None:
-    """
-    Test a repo with no remote.
-    """
+    """Test a repo with no remote."""
     repo_path = tmpdir / "temp-repo"
     repo_path.mkdir()
     repo_dir = str(repo_path)
@@ -144,10 +139,10 @@ def test_get_current_branch(script: CpipTestEnvironment) -> None:
 
 
 def test_get_current_branch__branch_and_tag_same_name(
-    script: CpipTestEnvironment, tmpdir: pathlib.Path
+    script: CpipTestEnvironment,
+    tmpdir: pathlib.Path,
 ) -> None:
-    """
-    Check calling get_current_branch() from a branch or tag when the branch
+    """Check calling get_current_branch() from a branch or tag when the branch
     and tag have the same name.
     """
     repo_dir = str(tmpdir)
@@ -221,9 +216,7 @@ def test_get_revision_sha(script: CpipTestEnvironment) -> None:
 
 
 def test_is_commit_id_equal(script: CpipTestEnvironment) -> None:
-    """
-    Test Git.is_commit_id_equal().
-    """
+    """Test Git.is_commit_id_equal()."""
     version_pkg_path = os.fspath(create_test_package(script.scratch_path))
     script.run("git", "branch", "branch0.1", cwd=version_pkg_path)
     commit = script.run("git", "rev-parse", "HEAD", cwd=version_pkg_path).stdout.strip()
@@ -240,11 +233,13 @@ def test_is_immutable_rev_checkout(script: CpipTestEnvironment) -> None:
     version_pkg_path = os.fspath(create_test_package(script.scratch_path))
     commit = script.run("git", "rev-parse", "HEAD", cwd=version_pkg_path).stdout.strip()
     assert Git().is_immutable_rev_checkout(
-        "git+https://g.c/o/r@" + commit, version_pkg_path
+        "git+https://g.c/o/r@" + commit,
+        version_pkg_path,
     )
     assert not Git().is_immutable_rev_checkout("git+https://g.c/o/r", version_pkg_path)
     assert not Git().is_immutable_rev_checkout(
-        "git+https://g.c/o/r@master", version_pkg_path
+        "git+https://g.c/o/r@master",
+        version_pkg_path,
     )
 
 
@@ -263,7 +258,8 @@ def test_get_repository_root(script: CpipTestEnvironment) -> None:
 
 
 def test_resolve_commit_not_on_branch(
-    script: CpipTestEnvironment, tmp_path: pathlib.Path
+    script: CpipTestEnvironment,
+    tmp_path: pathlib.Path,
 ) -> None:
     repo_path = tmp_path / "repo"
     repo_file = repo_path / "file.txt"
@@ -300,7 +296,9 @@ def test_resolve_commit_not_on_branch(
 
 
 def initialize_clonetest_server(
-    repo_path: pathlib.Path, script: CpipTestEnvironment, enable_partial_clone: bool
+    repo_path: pathlib.Path,
+    script: CpipTestEnvironment,
+    enable_partial_clone: bool,
 ) -> pathlib.Path:
     repo_path.mkdir()
     script.run("git", "init", cwd=str(repo_path))
@@ -313,7 +311,11 @@ def initialize_clonetest_server(
     if enable_partial_clone:
         script.run("git", "config", "uploadpack.allowFilter", "true", cwd=repo_path)
         script.run(
-            "git", "config", "uploadpack.allowanysha1inwant", "true", cwd=repo_path
+            "git",
+            "config",
+            "uploadpack.allowanysha1inwant",
+            "true",
+            cwd=repo_path,
         )
 
     return repo_file
@@ -352,7 +354,9 @@ def test_partial_clone(script: CpipTestEnvironment, tmp_path: pathlib.Path) -> N
     """Test partial clone w/ a git-server that supports it"""
     repo_path = tmp_path / "repo"
     repo_file = initialize_clonetest_server(
-        repo_path, script, enable_partial_clone=True
+        repo_path,
+        script,
+        enable_partial_clone=True,
     )
     clone_path1 = repo_path / "clone1"
     clone_path2 = repo_path / "clone2"
@@ -391,12 +395,15 @@ def test_partial_clone(script: CpipTestEnvironment, tmp_path: pathlib.Path) -> N
 
 @pytest.mark.skipif(Git().get_git_version() < (2, 17), reason="git too old")
 def test_partial_clone_without_server_support(
-    script: CpipTestEnvironment, tmp_path: pathlib.Path
+    script: CpipTestEnvironment,
+    tmp_path: pathlib.Path,
 ) -> None:
     """Test partial clone w/ a git-server that does not support it"""
     repo_path = tmp_path / "repo"
     repo_file = initialize_clonetest_server(
-        repo_path, script, enable_partial_clone=False
+        repo_path,
+        script,
+        enable_partial_clone=False,
     )
     clone_path1 = repo_path / "clone1"
     clone_path2 = repo_path / "clone2"
@@ -434,12 +441,15 @@ def test_partial_clone_without_server_support(
 
 
 def test_clone_without_partial_clone_support(
-    script: CpipTestEnvironment, tmp_path: pathlib.Path
+    script: CpipTestEnvironment,
+    tmp_path: pathlib.Path,
 ) -> None:
     """Older git clients don't support partial clone. Test the fallback path"""
     repo_path = tmp_path / "repo"
     repo_file = initialize_clonetest_server(
-        repo_path, script, enable_partial_clone=True
+        repo_path,
+        script,
+        enable_partial_clone=True,
     )
     clone_path = repo_path / "clone1"
 
@@ -463,9 +473,7 @@ def test_clone_without_partial_clone_support(
 
 
 def test_git_has_commit(script: CpipTestEnvironment) -> None:
-    """
-    Test Git.has_commit().
-    """
+    """Test Git.has_commit()."""
     repo_dir = str(script.scratch_path)
 
     script.run("git", "init", cwd=repo_dir)

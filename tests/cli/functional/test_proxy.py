@@ -5,8 +5,6 @@ from typing import Any
 
 import proxy
 import pytest
-from proxy.http.proxy import HttpProxyBasePlugin
-
 from cpip_test_support import CertFactory, CpipTestEnvironment, TestData
 from cpip_test_support.server import (
     authorization_response,
@@ -14,6 +12,7 @@ from cpip_test_support.server import (
     package_page,
     server_running,
 )
+from proxy.http.proxy import HttpProxyBasePlugin
 
 
 class AccessLogPlugin(HttpProxyBasePlugin):
@@ -23,7 +22,8 @@ class AccessLogPlugin(HttpProxyBasePlugin):
 
 @pytest.mark.network
 def test_proxy_overrides_env(
-    script: CpipTestEnvironment, capfd: pytest.CaptureFixture[str]
+    script: CpipTestEnvironment,
+    capfd: pytest.CaptureFixture[str],
 ) -> None:
     capfd.readouterr()
     with (
@@ -63,7 +63,7 @@ def test_proxy_does_not_override_netrc(
         package_page(
             {
                 "simple-3.0.tar.gz": "/files/simple-3.0.tar.gz",
-            }
+            },
         ),
         authorization_response(data.packages / "simple-3.0.tar.gz"),
         authorization_response(data.packages / "simple-3.0.tar.gz"),

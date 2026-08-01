@@ -15,8 +15,7 @@ VirtualEnvironmentType = Literal["virtualenv", "venv"]
 
 
 class VirtualEnvironment:
-    """
-    An abstraction around virtual environments, currently it only uses
+    """An abstraction around virtual environments, currently it only uses
     virtualenv but in the future it could use pyvenv.
     """
 
@@ -62,7 +61,9 @@ class VirtualEnvironment:
         if self.template_internal:
             # Clone virtual environment from template.
             shutil.copytree(
-                self.template_internal.location, self.location, symlinks=True
+                self.template_internal.location,
+                self.location,
+                symlinks=True,
             )
             self.sitecustomize_internal = self.template_internal.sitecustomize
             self.user_site_packages_internal = self.template_internal.user_site_packages
@@ -159,6 +160,6 @@ class VirtualEnvironment:
     def user_site_packages(self, value: bool) -> None:
         self.user_site_packages_internal = value
         self.rewrite_pyvenv_cfg(
-            {"include-system-site-packages": str(bool(value)).lower()}
+            {"include-system-site-packages": str(bool(value)).lower()},
         )
         self.customize_site()

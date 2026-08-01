@@ -13,7 +13,7 @@ from cpip.core.wheel import WheelCandidate
 class RawWheelInfo:
     """Small member record returned by the streaming archive adapter."""
 
-    __slots__ = ("filename", "file_size", "external_attr")
+    __slots__ = ("external_attr", "file_size", "filename")
 
     def __init__(self, filename: str, file_size: int, external_attr: int) -> None:
         self.filename = filename
@@ -27,7 +27,7 @@ class RawWheelInfo:
 class RawWheelArchive:
     """ZipFile-shaped adapter over the fast wheelhouse archive reader."""
 
-    __slots__ = ("_archive", "_file", "NameToInfo", "_infos")
+    __slots__ = ("NameToInfo", "_archive", "_file", "_infos")
 
     def __init__(self, file: Any, archive: Any) -> None:
         self._file = file
@@ -66,10 +66,11 @@ class RawWheelArchive:
 
 
 def open_wheel_archive(
-    path: str | Path, candidate: WheelCandidate
+    path: str | Path,
+    candidate: WheelCandidate,
 ) -> zipfile.ZipFile | RawWheelArchive:
     """Open a fast raw archive when its members fit the streaming contract."""
-    from cpip.resolution.fast_wheelhouse.archive import (
+    from cpip.resolution.engine.sources.wheelhouse.archive import (
         WheelArchive,
         WheelhouseUnavailable,
     )

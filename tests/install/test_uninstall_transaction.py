@@ -57,7 +57,8 @@ def test_uninstall_removes_symlink_without_following_target(tmp_path: Path) -> N
     link = target / "demo-link"
     link.symlink_to(outside)
     with (target / "demo-1.0.dist-info" / "RECORD").open(
-        "a", encoding="utf-8"
+        "a",
+        encoding="utf-8",
     ) as record:
         record.write("demo-link,,\n")
 

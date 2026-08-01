@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 from cpip.index.provider import CandidateProvider
-from cpip.resolution.resolver import Resolver
+from cpip.resolution.engine import ResolutionEngine
 
 from .wheel_helpers import make_wheel
 
@@ -49,11 +49,13 @@ def _make_sat_graph(wheelhouse: Path, order: tuple[str, ...]) -> None:
 
 @pytest.mark.parametrize("order_kind", ["forward", "reverse", "rotated", "striped"])
 def test_resolution_is_order_invariant_under_candidate_activity_perturbation(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, order_kind: str
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    order_kind: str,
 ) -> None:
     names = tuple(
         [f"variable-{index}" for index in range(4)]
-        + [f"clause-{index}" for index in range(15)]
+        + [f"clause-{index}" for index in range(15)],
     )
     orders = {
         "forward": names,
@@ -64,9 +66,10 @@ def test_resolution_is_order_invariant_under_candidate_activity_perturbation(
     wheelhouse = tmp_path / order_kind
     wheelhouse.mkdir()
     _make_sat_graph(wheelhouse, orders[order_kind])
-    resolver = Resolver(
+    resolver = ResolutionEngine(
         provider=CandidateProvider.from_options(
-            find_links=[wheelhouse.as_posix()], no_index=True
+            find_links=[wheelhouse.as_posix()],
+            no_index=True,
         ),
         ignore_installed=True,
         compute_source_hashes=False,

@@ -55,8 +55,8 @@ def freeze(
         installations[req.canonical_name] = req
 
     if requirement:
-        from cpip.resolution.requirement_files.parser import COMMENT_RE
-        from cpip.resolution.req_install import (
+        from cpip.resolution.engine.input.files.parser import COMMENT_RE
+        from cpip.resolution.engine.input.requirements import (
             install_req_from_editable,
             install_req_from_line,
         )
@@ -88,7 +88,7 @@ def freeze(
                                 "--process-dependency-links",
                                 "--extra-index-url",
                                 "--use-feature",
-                            )
+                            ),
                         )
                     ):
                         line = line.rstrip()
@@ -118,7 +118,7 @@ def freeze(
                             line.strip(),
                         )
                         logger.info(
-                            "  (add #egg=PackageName to the URL to avoid this warning)"
+                            "  (add #egg=PackageName to the URL to avoid this warning)",
                         )
                     else:
                         line_req_canonical_name = canonicalize_name(line_req.name)
@@ -182,8 +182,7 @@ def format_as_name_version(dist: InstalledMetadataDistribution) -> str:
 
 
 def get_editable_info(dist: InstalledMetadataDistribution) -> EditableInfo:
-    """
-    Compute and return values (req, comments) for use in
+    """Compute and return values (req, comments) for use in
     FrozenRequirement.from_dist().
     """
     from cpip.vcs.errors import BadCommand
@@ -249,7 +248,7 @@ def get_editable_info(dist: InstalledMetadataDistribution) -> EditableInfo:
 
 
 class FrozenRequirement:
-    __slots__ = ("name", "req", "editable", "comments")
+    __slots__ = ("comments", "editable", "name", "req")
 
     def __init__(
         self,

@@ -23,18 +23,17 @@ from urllib.request import pathname2url
 from zipfile import ZipFile
 
 import pytest
-from packaging.utils import canonicalize_name
 from cpip.cli.main import main as cpip_entry_point
 from cpip.core.direct_url import DIRECT_URL_METADATA_NAME, DirectUrl
 from cpip.core.release_control import ReleaseControl
 from cpip.install.build_env.installer import BuildConfiguration
 from cpip.network.http import NetworkSession
 from cpip.platform.locations.base import get_major_minor_version
-from scripttest import FoundDir, FoundFile, ProcResult, TestFileEnvironment
-
 from cpip_test_support.filesystem import create_file
 from cpip_test_support.venv import VirtualEnvironment
 from cpip_test_support.wheel import make_wheel
+from packaging.utils import canonicalize_name
+from scripttest import FoundDir, FoundFile, ProcResult, TestFileEnvironment
 
 ResolverVariant = Literal["resolvelib", "legacy"]
 
@@ -57,9 +56,7 @@ def make_test_build_options(
     session: NetworkSession | None = None,
     uploaded_prior_to: datetime.datetime | None = None,
 ) -> BuildConfiguration:
-    """
-    Create build-installation settings for testing purposes.
-    """
+    """Create build-installation settings for testing purposes."""
     if session is None:
         session = NetworkSession()
     release_control = ReleaseControl()
@@ -78,8 +75,7 @@ def make_test_build_options(
 
 
 class TestData:
-    """
-    Represents a bundle of pre-created test data.
+    """Represents a bundle of pre-created test data.
 
     This copies a pristine set of test data into a root location that is
     designed to be test specific. The reason for this is when running the tests
@@ -175,9 +171,7 @@ class TestData:
 
 
 class TestFailure(AssertionError):
-    """
-    An "assertion" failed during testing.
-    """
+    """An "assertion" failed during testing."""
 
 
 StrPath = str | pathlib.Path
@@ -190,7 +184,7 @@ class FoundFiles(Mapping[StrPath, FoundFile]):
     def __contains__(self, o: object) -> bool:
         if isinstance(o, pathlib.Path):
             return o in self.paths_internal
-        elif isinstance(o, str):
+        if isinstance(o, str):
             return pathlib.Path(o) in self.paths_internal
         return False
 
@@ -200,7 +194,7 @@ class FoundFiles(Mapping[StrPath, FoundFile]):
     def __getitem__(self, k: StrPath) -> FoundFile:
         if isinstance(k, pathlib.Path):
             return self.paths_internal[k]
-        elif isinstance(k, str):
+        if isinstance(k, str):
             return self.paths_internal[pathlib.Path(k)]
         raise KeyError(k)
 
@@ -308,16 +302,15 @@ class TestCpipResult:
                 raise TestFailure(
                     "unexpected editable direct_url.json created: "
                     f"{self.get_created_direct_url_path(dist_name)!r}\n"
-                    f"{self}"
+                    f"{self}",
                 )
-        else:
-            if not direct_url or not direct_url.is_local_editable():
-                raise TestFailure(
-                    f"{dist_name!r} not installed as editable: direct_url.json "
-                    "not found or not editable\n"
-                    f"{self.get_created_direct_url_path(dist_name)!r}\n"
-                    f"{self}"
-                )
+        elif not direct_url or not direct_url.is_local_editable():
+            raise TestFailure(
+                f"{dist_name!r} not installed as editable: direct_url.json "
+                "not found or not editable\n"
+                f"{self.get_created_direct_url_path(dist_name)!r}\n"
+                f"{self}",
+            )
 
         if pkg_dir and (pkg_dir in self.files_created) == (os.curdir in without_files):
             maybe = "not " if os.curdir in without_files else ""
@@ -327,21 +320,21 @@ class TestCpipResult:
                     expected package directory {pkg_dir!r} {maybe}to be created
                     actually created:
                     {files}
-                    """)
+                    """),
             )
 
         for f in with_files:
             normalized_path = os.path.normpath(pkg_dir / f)
             if normalized_path not in self.files_created:
                 raise TestFailure(
-                    f"Package directory {pkg_dir!r} missing expected content {f!r}"
+                    f"Package directory {pkg_dir!r} missing expected content {f!r}",
                 )
 
         for f in without_files:
             normalized_path = os.path.normpath(pkg_dir / f)
             if normalized_path in self.files_created:
                 raise TestFailure(
-                    f"Package directory {pkg_dir!r} has unexpected content {f}"
+                    f"Package directory {pkg_dir!r} has unexpected content {f}",
                 )
 
     def did_create(self, path: StrPath, message: str | None = None) -> None:
@@ -366,9 +359,7 @@ def one_or_both(a: str | None, b: Any) -> str:
 
 
 def make_check_stderr_message(stderr: str, line: str, reason: str) -> str:
-    """
-    Create an exception message to use inside check_stderr().
-    """
+    """Create an exception message to use inside check_stderr()."""
     return dedent("""\
     {reason}:
      Caused by line: {line!r}
@@ -381,8 +372,7 @@ def check_stderr(
     allow_stderr_warning: bool,
     allow_stderr_error: bool,
 ) -> None:
-    """
-    Check the given stderr for logged warnings and errors.
+    """Check the given stderr for logged warnings and errors.
 
     :param stderr: stderr output as a string.
     :param allow_stderr_warning: whether a logged warning (or deprecation
@@ -428,9 +418,7 @@ def check_stderr(
 
 
 class CpipTestEnvironment(TestFileEnvironment):
-    """
-    A specialized TestFileEnvironment for testing cpip
-    """
+    """A specialized TestFileEnvironment for testing cpip"""
 
     #
     # Attribute naming convention
@@ -441,7 +429,7 @@ class CpipTestEnvironment(TestFileEnvironment):
     # a name of the form xxxx_path and relative paths have a name that
     # does not end in '_path'.
 
-    exe = sys.platform == "win32" and ".exe" or ""
+    exe = (sys.platform == "win32" and ".exe") or ""
     verbose = False
 
     def __init__(
@@ -472,7 +460,7 @@ class CpipTestEnvironment(TestFileEnvironment):
             self.user_bin_path = scripts_base.joinpath("Scripts")
         else:
             self.user_bin_path = self.user_base_path.joinpath(
-                os.path.relpath(self.bin_path, self.venv_path)
+                os.path.relpath(self.bin_path, self.venv_path),
             )
 
         # Create a Directory to use as a scratch pad
@@ -526,7 +514,7 @@ class CpipTestEnvironment(TestFileEnvironment):
         ]:
             real_name = f"{name}_path"
             relative_path = pathlib.Path(
-                os.path.relpath(getattr(self, real_name), self.base_path)
+                os.path.relpath(getattr(self, real_name), self.base_path),
             )
             setattr(self, name, relative_path)
 
@@ -570,8 +558,7 @@ class CpipTestEnvironment(TestFileEnvironment):
         allow_error: bool = False,
         **kw: Any,
     ) -> TestCpipResult:
-        """
-        :param allow_stderr_error: whether a logged error is allowed in
+        """:param allow_stderr_error: whether a logged error is allowed in
             stderr.  Passing True for this argument implies
             `allow_stderr_warning` since warnings are weaker than errors.
         :param allow_stderr_warning: whether a logged warning (or
@@ -606,7 +593,7 @@ class CpipTestEnvironment(TestFileEnvironment):
             # Then default to allowing logged errors.
             if allow_stderr_error is not None and not allow_stderr_error:
                 raise RuntimeError(
-                    "cannot pass allow_stderr_error=False with expect_error=True"
+                    "cannot pass allow_stderr_error=False with expect_error=True",
                 )
             allow_stderr_error = True
 
@@ -614,16 +601,18 @@ class CpipTestEnvironment(TestFileEnvironment):
             # Then default to allowing logged warnings.
             if allow_stderr_warning is not None and not allow_stderr_warning:
                 raise RuntimeError(
-                    "cannot pass allow_stderr_warning=False with expect_stderr=True"
+                    "cannot pass allow_stderr_warning=False with expect_stderr=True",
                 )
             allow_stderr_warning = True
 
-        if allow_stderr_error:
-            if allow_stderr_warning is not None and not allow_stderr_warning:
-                raise RuntimeError(
-                    "cannot pass allow_stderr_warning=False with "
-                    "allow_stderr_error=True"
-                )
+        if (
+            allow_stderr_error
+            and allow_stderr_warning is not None
+            and not allow_stderr_warning
+        ):
+            raise RuntimeError(
+                "cannot pass allow_stderr_warning=False with allow_stderr_error=True",
+            )
 
         # Default values if not set.
         if allow_stderr_error is None:
@@ -638,10 +627,9 @@ class CpipTestEnvironment(TestFileEnvironment):
         # B026 Star-arg unpacking after a keyword argument is strongly discouraged
         result = super().run(cwd=cwd, *args, **kw)  # noqa: B026
 
-        if expect_error and not allow_error:
-            if result.returncode == 0:
-                __tracebackhide__ = True
-                raise AssertionError(f"Script passed unexpectedly:\n{result}")
+        if expect_error and not allow_error and result.returncode == 0:
+            __tracebackhide__ = True
+            raise AssertionError(f"Script passed unexpectedly:\n{result}")
 
         check_stderr(
             result.stderr,
@@ -677,8 +665,7 @@ class CpipTestEnvironment(TestFileEnvironment):
         build_isolation: bool = False,
         **kwargs: Any,
     ) -> TestCpipResult:
-        """
-        Invoke cpip install without PyPI access. By default, only local
+        """Invoke cpip install without PyPI access. By default, only local
         packages are included via --find-links.
         """
         # Convert find links paths to absolute file: URIs
@@ -704,8 +691,7 @@ class CpipTestEnvironment(TestFileEnvironment):
         find_links: StrPath | list[StrPath] = pathlib.Path(DATA_DIR, "packages"),
         **kwargs: Any,
     ) -> dict[str, Any]:
-        """
-        Invoke cpip install with --dry-run --report and return parsed JSON report.
+        """Invoke cpip install with --dry-run --report and return parsed JSON report.
         Includes --no-index and --find-links like cpip_install_local.
         """
         result = self.cpip_install_local(
@@ -752,7 +738,9 @@ class CpipTestEnvironment(TestFileEnvironment):
         )
 
     def temporary_file(
-        self, filename: str | pathlib.Path, contents: str
+        self,
+        filename: str | pathlib.Path,
+        contents: str,
     ) -> pathlib.Path:
         """Create a temporary file with the given filename and contents."""
         path = self.scratch_path.joinpath(filename)
@@ -760,7 +748,9 @@ class CpipTestEnvironment(TestFileEnvironment):
         return path
 
     def temporary_multiline_file(
-        self, filename: str | pathlib.Path, contents: str
+        self,
+        filename: str | pathlib.Path,
+        contents: str,
     ) -> pathlib.Path:
         """Like temporary_file() but calls textwrap.dedent beforehand."""
         return self.temporary_file(filename, textwrap.dedent(contents))
@@ -770,10 +760,11 @@ class CpipTestEnvironment(TestFileEnvironment):
 # ProcResult; this generalizes it so states can be compared across
 # multiple commands.  Maybe should be rolled into ScriptTest?
 def diff_states(
-    start: FilesState, end: FilesState, ignore: Iterable[StrPath] = ()
+    start: FilesState,
+    end: FilesState,
+    ignore: Iterable[StrPath] = (),
 ) -> dict[str, FilesState]:
-    """
-    Differences two "filesystem states" as represented by dictionaries
+    """Differences two "filesystem states" as represented by dictionaries
     of FoundFile and FoundDir objects.
 
     Returns a dictionary with following keys:
@@ -819,8 +810,7 @@ def assert_all_changes(
     end_state: FilesState | TestCpipResult,
     expected_changes: list[StrPath],
 ) -> dict[str, FilesState]:
-    """
-    Fails if anything changed that isn't listed in the
+    """Fails if anything changed that isn't listed in the
     expected_changes.
 
     start_state is either a dict mapping paths to
@@ -839,14 +829,14 @@ def assert_all_changes(
         start_files = start_state.files_before
     if isinstance(end_state, TestCpipResult):
         end_files = end_state.files_after
-    start_files = cast(FilesState, start_files)
-    end_files = cast(FilesState, end_files)
+    start_files = cast("FilesState", start_files)
+    end_files = cast("FilesState", end_files)
 
     diff = diff_states(start_files, end_files, ignore=expected_changes)
     if list(diff.values()) != [{}, {}, {}]:
         raise TestFailure(
             "Unexpected changes:\n"
-            + "\n".join([k + ": " + ", ".join(v.keys()) for k, v in diff.items()])
+            + "\n".join([k + ": " + ", ".join(v.keys()) for k, v in diff.items()]),
         )
 
     # Don't throw away this potentially useful information
@@ -858,9 +848,7 @@ def create_main_file(
     name: str | None = None,
     output: str | None = None,
 ) -> None:
-    """
-    Create a module with a main() function that prints the given output.
-    """
+    """Create a module with a main() function that prints the given output."""
     if name is None:
         name = "version_pkg"
     if output is None:
@@ -879,12 +867,12 @@ def git_commit(
     allow_empty: bool = False,
     stage_modified: bool = False,
 ) -> None:
-    """
-    Run git-commit.
+    """Run git-commit.
 
     Args:
       repo_dir: a path to a Git repository.
       message: an optional commit message.
+
     """
     if message is None:
         message = "test commit"
@@ -918,7 +906,8 @@ def vcs_add(
         subprocess.check_call(["git", "init"], cwd=os.fspath(version_pkg_path))
         subprocess.check_call(["git", "add", "."], cwd=os.fspath(version_pkg_path))
         subprocess.check_call(
-            ["git", "commit", "-m", "initial version"], cwd=os.fspath(version_pkg_path)
+            ["git", "commit", "-m", "initial version"],
+            cwd=os.fspath(version_pkg_path),
         )
     elif vcs == "hg":
         subprocess.check_call(["hg", "init"], cwd=os.fspath(version_pkg_path))
@@ -938,7 +927,8 @@ def vcs_add(
     elif vcs == "svn":
         repo_url = create_svn_repo(location, version_pkg_path)
         subprocess.check_call(
-            ["svn", "checkout", repo_url, "cpip-test-package"], cwd=os.fspath(location)
+            ["svn", "checkout", repo_url, "cpip-test-package"],
+            cwd=os.fspath(location),
         )
         checkout_path = location / "cpip-test-package"
 
@@ -968,7 +958,8 @@ def vcs_add(
 
 
 def create_test_package_with_subdirectory(
-    script: CpipTestEnvironment, subdirectory: str
+    script: CpipTestEnvironment,
+    subdirectory: str,
 ) -> pathlib.Path:
     script.scratch_path.joinpath("version_pkg").mkdir()
     version_pkg_path = script.scratch_path / "version_pkg"
@@ -984,7 +975,7 @@ def create_test_package_with_subdirectory(
                 py_modules=["version_pkg"],
                 entry_points=dict(console_scripts=["version_pkg=version_pkg:main"]),
             )
-            """)
+            """),
     )
 
     subdirectory_path = version_pkg_path.joinpath(subdirectory)
@@ -1002,7 +993,7 @@ def create_test_package_with_subdirectory(
                 py_modules=["version_subpkg"],
                 entry_points=dict(console_scripts=["version_pkg=version_subpkg:main"]),
             )
-            """)
+            """),
     )
 
     script.run("git", "init", cwd=version_pkg_path)
@@ -1013,7 +1004,9 @@ def create_test_package_with_subdirectory(
 
 
 def create_test_package_with_srcdir(
-    dir_path: pathlib.Path, name: str = "version_pkg", vcs: str = "git"
+    dir_path: pathlib.Path,
+    name: str = "version_pkg",
+    vcs: str = "git",
 ) -> pathlib.Path:
     dir_path.joinpath(name).mkdir()
     version_pkg_path = dir_path / name
@@ -1033,13 +1026,15 @@ def create_test_package_with_srcdir(
                     packages=find_packages(),
                     package_dir={{"": "src"}},
                 )
-            """)
+            """),
     )
     return vcs_add(dir_path, version_pkg_path, vcs)
 
 
 def create_test_package(
-    dir_path: pathlib.Path, name: str = "version_pkg", vcs: str = "git"
+    dir_path: pathlib.Path,
+    name: str = "version_pkg",
+    vcs: str = "git",
 ) -> pathlib.Path:
     dir_path.joinpath(name).mkdir()
     version_pkg_path = dir_path / name
@@ -1054,7 +1049,7 @@ def create_test_package(
                     py_modules=["{name}"],
                     entry_points=dict(console_scripts=["{name}={name}:main"]),
                 )
-            """)
+            """),
     )
     return vcs_add(dir_path, version_pkg_path, vcs)
 
@@ -1062,7 +1057,8 @@ def create_test_package(
 def create_svn_repo(repo_path: pathlib.Path, version_pkg_path: StrPath) -> str:
     repo_url = repo_path.joinpath("cpip-test-package-repo", "trunk").as_uri()
     subprocess.check_call(
-        "svnadmin create cpip-test-package-repo".split(), cwd=repo_path
+        ["svnadmin", "create", "cpip-test-package-repo"],
+        cwd=repo_path,
     )
     subprocess.check_call(
         [
@@ -1079,10 +1075,13 @@ def create_svn_repo(repo_path: pathlib.Path, version_pkg_path: StrPath) -> str:
 
 
 def change_test_package_version(
-    script: CpipTestEnvironment, version_pkg_path: pathlib.Path
+    script: CpipTestEnvironment,
+    version_pkg_path: pathlib.Path,
 ) -> None:
     create_main_file(
-        version_pkg_path, name="version_pkg", output="some different version"
+        version_pkg_path,
+        name="version_pkg",
+        output="some different version",
     )
     # Pass -a to stage the change to the main file.
     git_commit(version_pkg_path, message="messed version", stage_modified=True)
@@ -1104,7 +1103,8 @@ def requirements_file(contents: str, tmpdir: pathlib.Path) -> Iterator[pathlib.P
 
 
 def create_test_package_with_setup(
-    script: CpipTestEnvironment, **setup_kwargs: Any
+    script: CpipTestEnvironment,
+    **setup_kwargs: Any,
 ) -> pathlib.Path:
     assert "name" in setup_kwargs, setup_kwargs
     pkg_path = script.scratch_path / setup_kwargs["name"]
@@ -1114,7 +1114,7 @@ def create_test_package_with_setup(
                 from setuptools import setup
                 kwargs = {setup_kwargs!r}
                 setup(**kwargs)
-            """)
+            """),
     )
     return pkg_path
 
@@ -1311,8 +1311,8 @@ def need_bzr(fn: Test) -> Test:
 def need_svn(fn: Test) -> Test:
     return pytest.mark.svn(
         need_executable("Subversion", ("svn", "--version"))(
-            need_executable("Subversion Admin", ("svnadmin", "--version"))(fn)
-        )
+            need_executable("Subversion Admin", ("svnadmin", "--version"))(fn),
+        ),
     )
 
 

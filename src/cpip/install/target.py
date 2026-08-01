@@ -16,7 +16,7 @@ from cpip.platform.scheme import Scheme
 class InstallTarget:
     """The complete destination scheme for one installation transaction."""
 
-    __slots__ = ("purelib", "platlib", "headers", "scripts", "data")
+    __slots__ = ("data", "headers", "platlib", "purelib", "scripts")
 
     def __init__(
         self,
@@ -65,7 +65,7 @@ class InstallTarget:
                 # install mutate the caller's environment and can create
                 # unrelated-file collisions between packages.
                 scripts=os.fspath(
-                    target_path / ("Scripts" if os.name == "nt" else "bin")
+                    target_path / ("Scripts" if os.name == "nt" else "bin"),
                 ),
                 data=os.fspath(target_path),
             )
@@ -80,7 +80,7 @@ class InstallTarget:
                 root=root,
                 isolated=isolated,
                 prefix=prefix,
-            )
+            ),
         )
 
     @property

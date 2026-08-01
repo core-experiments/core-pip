@@ -2,7 +2,6 @@ import collections
 import hashlib
 
 import pytest
-
 from cpip_test_support import (
     CpipTestEnvironment,
     create_basic_sdist_for_package,
@@ -28,7 +27,7 @@ def create_find_links(script: CpipTestEnvironment) -> FindLinks:
         <!DOCTYPE html>
         <a href="{sdist_path.as_uri()}#sha256={sdist_hash}">{sdist_path.stem}</a>
         <a href="{wheel_path.as_uri()}#sha256={wheel_hash}">{wheel_path.stem}</a>
-        """.strip()
+        """.strip(),
     )
 
     return FindLinks(index_html, sdist_hash, wheel_hash)
@@ -58,7 +57,9 @@ def create_find_links(script: CpipTestEnvironment) -> FindLinks:
     ids=["identical", "intersect"],
 )
 def test_new_resolver_hash_intersect(
-    script: CpipTestEnvironment, requirements_template: str, message: str
+    script: CpipTestEnvironment,
+    requirements_template: str,
+    message: str,
 ) -> None:
     find_links = create_find_links(script)
 
@@ -331,27 +332,39 @@ def test_new_resolver_unpinned_requirement_with_pinned_hash_constraint(
 
 def test_new_resolver_hash_with_extras(script: CpipTestEnvironment) -> None:
     parent_with_extra_path = create_basic_wheel_for_package(
-        script, "parent_with_extra", "0.1.0", depends=["child[extra]"]
+        script,
+        "parent_with_extra",
+        "0.1.0",
+        depends=["child[extra]"],
     )
     parent_with_extra_hash = hashlib.sha256(
-        parent_with_extra_path.read_bytes()
+        parent_with_extra_path.read_bytes(),
     ).hexdigest()
 
     parent_without_extra_path = create_basic_wheel_for_package(
-        script, "parent_without_extra", "0.1.0", depends=["child"]
+        script,
+        "parent_without_extra",
+        "0.1.0",
+        depends=["child"],
     )
     parent_without_extra_hash = hashlib.sha256(
-        parent_without_extra_path.read_bytes()
+        parent_without_extra_path.read_bytes(),
     ).hexdigest()
 
     child_path = create_basic_wheel_for_package(
-        script, "child", "0.1.0", extras={"extra": ["extra"]}
+        script,
+        "child",
+        "0.1.0",
+        extras={"extra": ["extra"]},
     )
     child_hash = hashlib.sha256(child_path.read_bytes()).hexdigest()
 
     # Newer release
     create_basic_wheel_for_package(
-        script, "child", "0.2.0", extras={"extra": ["extra"]}
+        script,
+        "child",
+        "0.2.0",
+        extras={"extra": ["extra"]},
     )
 
     extra_path = create_basic_wheel_for_package(script, "extra", "0.1.0")

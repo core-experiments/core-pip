@@ -4,7 +4,7 @@ from __future__ import annotations
 
 
 class ExecutionContext:
-    __slots__ = ("version", "runner")
+    __slots__ = ("runner", "version")
 
     def __init__(self) -> None:
         self.version: str | None = None

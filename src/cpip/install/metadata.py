@@ -86,7 +86,7 @@ class DistributionPreparer:
                     raise AssertionError("source requirement has no prepared metadata")
                 distribution = MetadataDistribution.from_directory(directory)
                 req.set_dist(distribution)
-            return cast(MetadataView, distribution)
+            return cast("MetadataView", distribution)
 
         path = req.local_file_path
         name = req.name
@@ -96,7 +96,9 @@ class DistributionPreparer:
 
 
 def canonical_requires(
-    req: InstallRequirement, dist: MetadataView, source: str
+    req: InstallRequirement,
+    dist: MetadataView,
+    source: str,
 ) -> frozenset[str]:
     canonical: set[str] = set()
     for raw in dist.iter_raw_dependencies():
@@ -122,11 +124,16 @@ def check_sidecar_matches_wheel(
 
     if sidecar_dist.version != wheel_dist.version:
         raise SidecarMetadataInconsistent(
-            req, "Version", str(sidecar_dist.version), str(wheel_dist.version)
+            req,
+            "Version",
+            str(sidecar_dist.version),
+            str(wheel_dist.version),
         )
 
     sidecar_requires = canonical_requires(
-        req, sidecar_dist, "the PEP 658 .metadata file"
+        req,
+        sidecar_dist,
+        "the PEP 658 .metadata file",
     )
     wheel_requires = canonical_requires(req, wheel_dist, "the wheel's METADATA")
     if sidecar_requires != wheel_requires:

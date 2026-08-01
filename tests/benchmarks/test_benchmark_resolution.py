@@ -9,20 +9,20 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
 from benchmark_support import reset_caches
-from pytest_codspeed import BenchmarkFixture
-from cpip.index.provider import CandidateProvider
-from cpip.resolution.req_file import parse_requirements
-from cpip.resolution.resolver import Resolver
 from cpip.core.errors import ResolutionError
+from cpip.index.provider import CandidateProvider
+from cpip.resolution.engine import ResolutionEngine
+from cpip.resolution.engine.input.files import parse_requirements
+from pytest_codspeed import BenchmarkFixture
 
 
 def resolve(wheelhouse: Path, requirements: list[str]) -> int:
     reset_caches()
-    resolver = Resolver(
+    resolver = ResolutionEngine(
         provider=CandidateProvider.from_options(
-            find_links=[str(wheelhouse)], no_index=True
+            find_links=[str(wheelhouse)],
+            no_index=True,
         ),
         ignore_installed=True,
     )
@@ -30,7 +30,8 @@ def resolve(wheelhouse: Path, requirements: list[str]) -> int:
 
 
 def test_parse_requirements_file(
-    benchmark: BenchmarkFixture, requirements_file: Path
+    benchmark: BenchmarkFixture,
+    requirements_file: Path,
 ) -> None:
     def parse_file() -> int:
         reset_caches()
@@ -40,7 +41,8 @@ def test_parse_requirements_file(
 
 
 def test_resolve_single_project(
-    benchmark: BenchmarkFixture, graph_wheelhouse: Path
+    benchmark: BenchmarkFixture,
+    graph_wheelhouse: Path,
 ) -> None:
     def resolve_leaf() -> int:
         return resolve(graph_wheelhouse, ["leaf-0"])
@@ -49,7 +51,8 @@ def test_resolve_single_project(
 
 
 def test_resolve_dependency_graph(
-    benchmark: BenchmarkFixture, graph_wheelhouse: Path
+    benchmark: BenchmarkFixture,
+    graph_wheelhouse: Path,
 ) -> None:
     def resolve_application() -> int:
         return resolve(graph_wheelhouse, ["application"])
@@ -58,7 +61,8 @@ def test_resolve_dependency_graph(
 
 
 def test_resolve_pinned_dependency_graph(
-    benchmark: BenchmarkFixture, graph_wheelhouse: Path
+    benchmark: BenchmarkFixture,
+    graph_wheelhouse: Path,
 ) -> None:
     requirements = [f"middle-{index}==2.2.0" for index in range(10)]
 
@@ -69,7 +73,8 @@ def test_resolve_pinned_dependency_graph(
 
 
 def test_resolve_with_backtracking(
-    benchmark: BenchmarkFixture, backtracking_wheelhouse: Path
+    benchmark: BenchmarkFixture,
+    backtracking_wheelhouse: Path,
 ) -> None:
     def resolve_conflicting() -> int:
         return resolve(backtracking_wheelhouse, ["conflicting"])
@@ -78,7 +83,8 @@ def test_resolve_with_backtracking(
 
 
 def test_uv_wrong_package_backtracking_families(
-    benchmark: BenchmarkFixture, wrong_package_wheelhouses: dict[str, Path]
+    benchmark: BenchmarkFixture,
+    wrong_package_wheelhouses: dict[str, Path],
 ) -> None:
     """Exercise the uv issue corpus' large wrong-package candidate shapes."""
 
@@ -92,7 +98,8 @@ def test_uv_wrong_package_backtracking_families(
 
 
 def test_top88_requirements_stress(
-    benchmark: BenchmarkFixture, stress_wheelhouse: Path
+    benchmark: BenchmarkFixture,
+    stress_wheelhouse: Path,
 ) -> None:
     requirements = [f"stress-{index}" for index in range(88)]
 
@@ -102,30 +109,9 @@ def test_top88_requirements_stress(
     assert benchmark(resolve_stress) == 176
 
 
-def test_resolver_metrics(
-    benchmark: BenchmarkFixture,
-    graph_wheelhouse: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("CPIP_RESOLVER_METRICS", "1")
-
-    def resolve_with_metrics() -> int:
-        reset_caches()
-        resolver = Resolver(
-            provider=CandidateProvider.from_options(
-                find_links=[str(graph_wheelhouse)], no_index=True
-            ),
-            ignore_installed=True,
-        )
-        resolver.resolve(["application"])
-        metrics = resolver.metrics_snapshot()
-        return metrics["candidates_considered"] + metrics["propagations"]
-
-    assert benchmark(resolve_with_metrics) > 10
-
-
 def test_candidate_scan_scaling(
-    benchmark: BenchmarkFixture, candidate_scan_wheelhouse: Path
+    benchmark: BenchmarkFixture,
+    candidate_scan_wheelhouse: Path,
 ) -> None:
     """Scan many releases while rejecting a Requires-Python-heavy tail."""
 
@@ -136,7 +122,8 @@ def test_candidate_scan_scaling(
 
 
 def test_resolvelib_backjump_pattern(
-    benchmark: BenchmarkFixture, backjump_wheelhouse: Path
+    benchmark: BenchmarkFixture,
+    backjump_wheelhouse: Path,
 ) -> None:
     def resolve_conflict() -> int:
         reset_caches()
@@ -157,7 +144,8 @@ def test_resolvelib_backjump_pattern(
 
 
 def test_unsatisfiable_error_reporting(
-    benchmark: BenchmarkFixture, unsatisfiable_wheelhouse: Path
+    benchmark: BenchmarkFixture,
+    unsatisfiable_wheelhouse: Path,
 ) -> None:
     requirements = ["unsatisfiable-root"]
 
@@ -173,16 +161,18 @@ def test_unsatisfiable_error_reporting(
 
 
 def test_constraints_and_pins(
-    benchmark: BenchmarkFixture, graph_wheelhouse: Path
+    benchmark: BenchmarkFixture,
+    graph_wheelhouse: Path,
 ) -> None:
     requirements = [f"middle-{index}>=2.0.0" for index in range(10)]
     constraints = [f"middle-{index}==2.2.0" for index in range(10)]
 
     def resolve_constrained() -> int:
         reset_caches()
-        resolver = Resolver(
+        resolver = ResolutionEngine(
             provider=CandidateProvider.from_options(
-                find_links=[str(graph_wheelhouse)], no_index=True
+                find_links=[str(graph_wheelhouse)],
+                no_index=True,
             ),
             ignore_installed=True,
             constraints=constraints,
@@ -193,7 +183,8 @@ def test_constraints_and_pins(
 
 
 def test_conflicting_direct_requirements(
-    benchmark: BenchmarkFixture, graph_wheelhouse: Path
+    benchmark: BenchmarkFixture,
+    graph_wheelhouse: Path,
 ) -> None:
     requirements = ["middle-0==2.1.0", "middle-0==2.2.0"]
 

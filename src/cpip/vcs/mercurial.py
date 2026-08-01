@@ -38,7 +38,11 @@ class Mercurial(VersionControl):
         return [f"--rev={rev}"]
 
     def fetch_new(
-        self, dest: str, url: HiddenText, rev_options: RevOptions, verbosity: int
+        self,
+        dest: str,
+        url: HiddenText,
+        rev_options: RevOptions,
+        verbosity: int,
     ) -> None:
         rev_display = rev_options.to_display()
         logger.info(
@@ -116,9 +120,7 @@ class Mercurial(VersionControl):
 
     @classmethod
     def get_revision(cls, location: str) -> str:
-        """
-        Return the repository-local changeset revision number, as an integer.
-        """
+        """Return the repository-local changeset revision number, as an integer."""
         current_revision = cls.run_command(
             ["parents", "--template={rev}"],
             show_stdout=False,
@@ -129,8 +131,7 @@ class Mercurial(VersionControl):
 
     @classmethod
     def get_requirement_revision(cls, repo_dir: str) -> str:
-        """
-        Return the changeset identification hash, as a 40-character
+        """Return the changeset identification hash, as a 40-character
         hexadecimal string
         """
         current_rev_hash = cls.run_command(
@@ -148,13 +149,15 @@ class Mercurial(VersionControl):
 
     @classmethod
     def get_subdirectory(cls, location: str) -> str | None:
-        """
-        Return the path to Python project root, relative to the repo root.
+        """Return the path to Python project root, relative to the repo root.
         Return None if the project root is in the repo root.
         """
         # find the repo root
         repo_root = cls.run_command(
-            ["root"], show_stdout=False, stdout_only=True, cwd=location
+            ["root"],
+            show_stdout=False,
+            stdout_only=True,
+            cwd=location,
         ).strip()
         if not os.path.isabs(repo_root):
             repo_root = os.path.abspath(os.path.join(location, repo_root))

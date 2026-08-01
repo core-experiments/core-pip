@@ -5,7 +5,9 @@ from cpip.index.links import Link
 
 
 def make_mock_candidate(
-    version: str, yanked_reason: str | None = None, hex_digest: str | None = None
+    version: str,
+    yanked_reason: str | None = None,
+    hex_digest: str | None = None,
 ) -> InstallationCandidate:
     url = f"https://example.com/pkg-{version}.tar.gz"
     if hex_digest is not None:

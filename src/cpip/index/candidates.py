@@ -80,7 +80,7 @@ class InstallationCandidate(CandidateRecord):
         link: Link,
         *,
         target: TargetContext | None = None,
-    ) -> "InstallationCandidate | RejectedCandidate":
+    ) -> InstallationCandidate | RejectedCandidate:
         from cpip.core.wheel import (
             parse_wheel_file,
             supported_wheel_tags,
@@ -96,7 +96,9 @@ class InstallationCandidate(CandidateRecord):
             wheel = parse_wheel_file(link.filename)
             if wheel is None:
                 return RejectedCandidate(
-                    link, RejectionReason.INVALID_WHEEL, "invalid wheel filename"
+                    link,
+                    RejectionReason.INVALID_WHEEL,
+                    "invalid wheel filename",
                 )
             return cls(
                 name=wheel.name,
@@ -127,22 +129,27 @@ class InstallationCandidate(CandidateRecord):
 
     @classmethod
     def from_source_tree(
-        cls, link: Link
-    ) -> "InstallationCandidate | RejectedCandidate":
+        cls,
+        link: Link,
+    ) -> InstallationCandidate | RejectedCandidate:
         from cpip.index.source_models import RejectedCandidate, RejectionReason
 
         local = Path(link.file_path)
         source_dir = os.fspath(local)
         if not os.path.exists(source_dir):
             return RejectedCandidate(
-                link, RejectionReason.MISSING_ARTIFACT, "source tree is not local"
+                link,
+                RejectionReason.MISSING_ARTIFACT,
+                "source tree is not local",
             )
         try:
             metadata = prepare_project_metadata(local)
             version = Version(metadata.version)
         except ValueError:
             return RejectedCandidate(
-                link, RejectionReason.INVALID_VERSION, "invalid project version"
+                link,
+                RejectionReason.INVALID_VERSION,
+                "invalid project version",
             )
         except BuildError:
             if link.source_url is None and not (
@@ -165,12 +172,14 @@ class InstallationCandidate(CandidateRecord):
             return cls(name=local.name or "source", version=Version("0"), link=link)
         except OSError:
             return RejectedCandidate(
-                link, RejectionReason.MISSING_ARTIFACT, "source tree is unreadable"
+                link,
+                RejectionReason.MISSING_ARTIFACT,
+                "source tree is unreadable",
             )
         return cls(name=metadata.name, version=version, link=link)
 
     @classmethod
-    def from_vcs(cls, link: Link) -> "InstallationCandidate | RejectedCandidate":
+    def from_vcs(cls, link: Link) -> InstallationCandidate | RejectedCandidate:
         from cpip.index.source_models import RejectedCandidate, RejectionReason
         from cpip.index.vcs import materialize_vcs
 
@@ -181,7 +190,9 @@ class InstallationCandidate(CandidateRecord):
             version = Version(metadata.version)
         except (BuildError, ValueError):
             return RejectedCandidate(
-                link, RejectionReason.INVALID_VERSION, "invalid project version"
+                link,
+                RejectionReason.INVALID_VERSION,
+                "invalid project version",
             )
         except OSError as exc:
             return RejectedCandidate(link, RejectionReason.MISSING_ARTIFACT, str(exc))

@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-import logging
 import io
+import logging
 import os
 from pathlib import Path
 
 import pytest
 from cpip.cli.main import main
-from cpip.core.packaging import parse_requirement, Requirement, Version
+from cpip.core.packaging import Requirement, Version, parse_requirement
 from cpip.core.wheel import TargetContext
 from cpip.index.cache import origin_hashes
 from cpip.index.candidate_evaluators import CandidateEvaluator
@@ -16,7 +16,7 @@ from cpip.index.candidates import InstallationCandidate
 from cpip.index.directory_index import local_source_files
 from cpip.index.links import Link
 from cpip.index.provider import CandidateProvider
-from cpip.index.source_locations import FindLinksSource
+from cpip.index.source_locations import FindLinksSource, SimpleIndexSource
 from cpip.index.source_models import (
     ArtifactKind,
     CandidateMetadata,
@@ -26,6 +26,7 @@ from cpip.index.source_models import (
 )
 from cpip.index.vcs import is_immutable_vcs_link, vcs_reference
 from cpip.network.http import HttpResponse
+
 from .wheel_helpers import make_sdist, make_wheel
 
 
@@ -50,7 +51,8 @@ def test_link_filename_oracle(url: str, expected: str) -> None:
 
 
 def test_local_source_files_uses_directory_entry_types(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     artifact = tmp_path / "demo-1.0.tar.gz"
     artifact.touch()
@@ -104,13 +106,13 @@ def test_vcs_reference_splits_repo_url_and_revision(
 def test_immutable_vcs_link_requires_full_git_sha() -> None:
     assert is_immutable_vcs_link(
         "git+https://example.com/demo/pkg.git@"
-        "0123456789abcdef0123456789abcdef01234567#egg=demo-pkg"
+        "0123456789abcdef0123456789abcdef01234567#egg=demo-pkg",
     )
     assert not is_immutable_vcs_link(
-        "git+https://example.com/demo/pkg.git@master#egg=demo-pkg"
+        "git+https://example.com/demo/pkg.git@master#egg=demo-pkg",
     )
     assert not is_immutable_vcs_link(
-        "git+https://example.com/demo/pkg.git@0123456#egg=demo-pkg"
+        "git+https://example.com/demo/pkg.git@0123456#egg=demo-pkg",
     )
 
 
@@ -129,7 +131,8 @@ def test_candidate_provider_reads_pep503_file_index(tmp_path: Path) -> None:
 
 
 def test_candidate_provider_prunes_versions_before_materialization(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     index = tmp_path / "simple"
     wheelhouse = tmp_path / "packages"
@@ -164,7 +167,8 @@ def test_candidate_provider_prunes_versions_before_materialization(
 
 
 def test_candidate_provider_scans_find_links_once(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     wheelhouse = tmp_path / "packages"
     wheelhouse.mkdir()
@@ -174,7 +178,8 @@ def test_candidate_provider_scans_find_links_once(
     calls = 0
 
     def counting_collect_links(
-        source: FindLinksSource, requirement: Requirement
+        source: FindLinksSource,
+        requirement: Requirement,
     ) -> list[Link]:
         nonlocal calls
         calls += 1
@@ -182,7 +187,8 @@ def test_candidate_provider_scans_find_links_once(
 
     monkeypatch.setattr(FindLinksSource, "collect_links", counting_collect_links)
     provider = CandidateProvider.from_options(
-        find_links=[str(wheelhouse)], no_index=True
+        find_links=[str(wheelhouse)],
+        no_index=True,
     )
 
     assert len(provider.collect_links(parse_requirement("first"))) == 2
@@ -194,25 +200,60 @@ def test_local_find_links_do_not_start_catalog_prefetcher(tmp_path: Path) -> Non
     wheelhouse = tmp_path / "packages"
     wheelhouse.mkdir()
     provider = CandidateProvider.from_options(
-        find_links=[str(wheelhouse)], no_index=True, session=object()
+        find_links=[str(wheelhouse)],
+        no_index=True,
+        session=object(),
     )
 
     provider.prefetch_available_versions(
-        (parse_requirement("first"), parse_requirement("second"))
+        (parse_requirement("first"), parse_requirement("second")),
     )
 
     assert provider.prefetcher is None
 
 
+def test_remote_index_fanout_preserves_order_and_deduplicates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def collect(source: SimpleIndexSource, requirement: Requirement) -> list[Link]:
+        del requirement
+        return [
+            Link.from_url(
+                f"https://packages.invalid/{source.index_url}/demo-1.0.whl",
+                source_url=None,
+            ),
+            Link.from_url("https://packages.invalid/shared-1.0.whl", source_url=None),
+        ]
+
+    monkeypatch.setattr(SimpleIndexSource, "collect_links", collect)
+    provider = CandidateProvider.from_options(
+        index_url="primary",
+        extra_index_urls=["fallback"],
+        session=object(),
+    )
+    try:
+        links = provider.catalog_links(parse_requirement("demo"))
+    finally:
+        provider.close()
+
+    assert [link.url for link in links] == [
+        "https://packages.invalid/primary/demo-1.0.whl",
+        "https://packages.invalid/shared-1.0.whl",
+        "https://packages.invalid/fallback/demo-1.0.whl",
+    ]
+
+
 def test_candidate_provider_groups_find_links_catalog_by_project(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     wheelhouse = tmp_path / "packages"
     wheelhouse.mkdir()
     first = make_wheel(wheelhouse, "first", "first", "1.0")
     make_wheel(wheelhouse, "second", "second", "1.0")
     provider = CandidateProvider.from_options(
-        find_links=[str(wheelhouse)], no_index=True
+        find_links=[str(wheelhouse)],
+        no_index=True,
     )
 
     links = provider.catalog_links(parse_requirement("first"))
@@ -232,8 +273,28 @@ def test_candidate_provider_groups_find_links_catalog_by_project(
     assert evaluated == [first]
 
 
+def test_candidate_provider_deduplicates_equivalent_index_artifacts(
+    tmp_path: Path,
+) -> None:
+    primary = tmp_path / "primary"
+    fallback = tmp_path / "fallback"
+    primary.mkdir()
+    fallback.mkdir()
+    make_wheel(primary, "demo-pkg", "demo_pkg", "1.0")
+    make_wheel(fallback, "demo-pkg", "demo_pkg", "1.0")
+    provider = CandidateProvider.from_options(
+        find_links=[str(primary)],
+        index_url=fallback.as_uri(),
+    )
+
+    candidates = provider.find_candidates(parse_requirement("demo-pkg"))
+
+    assert len(candidates) == 1
+
+
 def test_candidate_provider_reuses_candidate_materializer(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     wheelhouse = tmp_path / "packages"
     wheelhouse.mkdir()
@@ -243,7 +304,9 @@ def test_candidate_provider_reuses_candidate_materializer(
     calls = 0
 
     def counting_initialize(
-        materializer: CandidateMaterializer, *args: object, **kwargs: object
+        materializer: CandidateMaterializer,
+        *args: object,
+        **kwargs: object,
     ) -> None:
         nonlocal calls
         calls += 1
@@ -251,7 +314,8 @@ def test_candidate_provider_reuses_candidate_materializer(
 
     monkeypatch.setattr(CandidateMaterializer, "__init__", counting_initialize)
     provider = CandidateProvider.from_options(
-        find_links=[str(wheelhouse)], no_index=True
+        find_links=[str(wheelhouse)],
+        no_index=True,
     )
 
     assert len(provider.find_candidates(parse_requirement("first"))) == 1
@@ -260,13 +324,15 @@ def test_candidate_provider_reuses_candidate_materializer(
 
 
 def test_candidate_materializer_reuses_stable_wheel_metadata(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     wheelhouse = tmp_path / "packages"
     wheelhouse.mkdir()
     wheel_path = make_wheel(wheelhouse, "first", "first", "1.0")
     provider = CandidateProvider.from_options(
-        find_links=[str(wheelhouse)], no_index=True
+        find_links=[str(wheelhouse)],
+        no_index=True,
     )
     materializer = provider.materializer_internal
     assert materializer is None
@@ -358,7 +424,7 @@ def test_pypi_release_metadata_is_shared_by_artifacts() -> None:
                 headers={"Content-Type": "application/json"},
                 raw=io.BytesIO(
                     b'{"info": {"name": "demo", "version": "1.0", '
-                    b'"requires_dist": ["base", "extra; extra == \'feature\'"]}}'
+                    b'"requires_dist": ["base", "extra; extra == \'feature\'"]}}',
                 ),
             )
 
@@ -394,7 +460,7 @@ def test_dry_run_reads_detached_wheel_metadata_without_download(
                 url=url,
                 headers={"Content-Type": "text/plain"},
                 raw=io.BytesIO(
-                    b"Name: demo\nVersion: 1.0\nRequires-Dist: requests>=2\n"
+                    b"Name: demo\nVersion: 1.0\nRequires-Dist: requests>=2\n",
                 ),
             )
 
@@ -412,7 +478,8 @@ def test_dry_run_reads_detached_wheel_metadata_without_download(
 
 
 def test_candidate_provider_parses_index_artifacts_once(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     index = tmp_path / "simple"
     wheelhouse = tmp_path / "packages"
@@ -455,14 +522,16 @@ def test_candidate_provider_parses_index_artifacts_once(
 
 
 def test_candidate_provider_reuses_catalog_for_exact_version_lookup(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     wheelhouse = tmp_path / "packages"
     wheelhouse.mkdir()
     make_wheel(wheelhouse, "demo-pkg", "demo_pkg", "1.0")
     make_wheel(wheelhouse, "demo-pkg", "demo_pkg", "2.0")
     provider = CandidateProvider.from_options(
-        find_links=[str(wheelhouse)], no_index=True
+        find_links=[str(wheelhouse)],
+        no_index=True,
     )
     requirement = parse_requirement("demo-pkg")
 
@@ -477,13 +546,15 @@ def test_candidate_provider_reuses_catalog_for_exact_version_lookup(
 
 
 def test_candidate_provider_skips_release_filter_for_stable_candidates(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     wheelhouse = tmp_path / "packages"
     wheelhouse.mkdir()
     wheel = make_wheel(wheelhouse, "demo-pkg", "demo_pkg", "1.0")
     provider = CandidateProvider.from_options(
-        find_links=[str(wheelhouse)], no_index=True
+        find_links=[str(wheelhouse)],
+        no_index=True,
     )
 
     def fail_evaluator(*args: object, **kwargs: object) -> None:
@@ -502,7 +573,7 @@ def test_candidate_provider_filters_wheels_for_download_target(tmp_path: Path) -
     wheelhouse.mkdir()
     linux = wheelhouse / "demo_pkg-2.0-py3-none-linux_x86_64.whl"
     linux.write_bytes(
-        make_wheel(wheelhouse, "demo-pkg", "demo_pkg", "2.0").read_bytes()
+        make_wheel(wheelhouse, "demo-pkg", "demo_pkg", "2.0").read_bytes(),
     )
     any_wheel = make_wheel(wheelhouse, "demo-pkg", "demo_pkg", "1.0")
     any_target = wheelhouse / "demo_pkg-1.0-py3-none-any.whl"
@@ -523,7 +594,8 @@ def test_candidate_provider_filters_wheels_for_download_target(tmp_path: Path) -
 
 
 def test_origin_hashes_with_invalid_json(
-    caplog: pytest.LogCaptureFixture, tmp_path: Path
+    caplog: pytest.LogCaptureFixture,
+    tmp_path: Path,
 ) -> None:
     origin_file = tmp_path / "origin.json"
     origin_file.write_text("{", encoding="utf-8")
@@ -551,7 +623,7 @@ def test_evaluate_links_propagates_unexpected_source_tree_error(
                 'name = "dir-pkg"',
                 'version = "1.0"',
                 "",
-            ]
+            ],
         ),
         encoding="utf-8",
     )
@@ -579,7 +651,9 @@ def test_evaluate_links_propagates_unexpected_source_tree_error(
     ],
 )
 def test_html_requires_python_oracle(
-    tmp_path: Path, anchor_html: str, expected: str | None
+    tmp_path: Path,
+    anchor_html: str,
+    expected: str | None,
 ) -> None:
     write_simple_project_html(tmp_path / "simple", "pkg", anchor_html)
 
@@ -608,7 +682,9 @@ def test_html_requires_python_oracle(
     ],
 )
 def test_html_yanked_reason_oracle(
-    tmp_path: Path, anchor_html: str, expected: str | None
+    tmp_path: Path,
+    anchor_html: str,
+    expected: str | None,
 ) -> None:
     write_simple_project_html(tmp_path / "simple", "pkg", anchor_html)
 
@@ -703,7 +779,7 @@ def test_candidate_provider_reads_direct_file_url(tmp_path: Path) -> None:
 
     provider = CandidateProvider.from_options(no_index=True)
     candidates = provider.find_candidates(
-        parse_requirement(f"demo-pkg @ {wheel.as_uri()}")
+        parse_requirement(f"demo-pkg @ {wheel.as_uri()}"),
     )
 
     assert [candidate.path for candidate in candidates] == [wheel]
@@ -723,7 +799,7 @@ def test_candidate_provider_reads_direct_project_directory(tmp_path: Path) -> No
                 'name = "dir-pkg"',
                 'version = "1.0"',
                 "",
-            ]
+            ],
         ),
         encoding="utf-8",
     )
@@ -733,7 +809,7 @@ def test_candidate_provider_reads_direct_project_directory(tmp_path: Path) -> No
     candidates = provider.find_candidates(parse_requirement(str(project)))
 
     assert [candidate.link.kind for candidate in selection.accepted] == [
-        ArtifactKind.SOURCE_TREE
+        ArtifactKind.SOURCE_TREE,
     ]
     assert [candidate.name for candidate in candidates] == ["dir-pkg"]
     assert [str(candidate.version) for candidate in candidates] == ["1.0"]
@@ -751,7 +827,7 @@ def test_candidate_provider_rejects_invalid_source_tree_version(
                 'name = "dir-pkg"',
                 'version = "not-a-version"',
                 "",
-            ]
+            ],
         ),
         encoding="utf-8",
     )
@@ -762,7 +838,7 @@ def test_candidate_provider_rejects_invalid_source_tree_version(
 
     assert selection.accepted == ()
     assert [rejected.reason for rejected in selection.rejected] == [
-        RejectionReason.INVALID_VERSION
+        RejectionReason.INVALID_VERSION,
     ]
 
 
@@ -779,7 +855,7 @@ def test_evaluate_links_rejects_incompatible_requires_python(tmp_path: Path) -> 
 
     assert selection.accepted == ()
     assert [rejected.reason for rejected in selection.rejected] == [
-        RejectionReason.REQUIRES_PYTHON
+        RejectionReason.REQUIRES_PYTHON,
     ]
 
 
@@ -796,7 +872,7 @@ def test_evaluate_links_rejects_unsupported_wheel_tags(tmp_path: Path) -> None:
 
     assert selection.accepted == ()
     assert [rejected.reason for rejected in selection.rejected] == [
-        RejectionReason.UNSUPPORTED_WHEEL
+        RejectionReason.UNSUPPORTED_WHEEL,
     ]
 
 
@@ -813,7 +889,7 @@ def test_evaluate_links_yanked_policy_oracle(tmp_path: Path) -> None:
     pinned = provider.evaluate_links(parse_requirement("demo-pkg==1.0"))
 
     assert [rejected.reason for rejected in unpinned.rejected] == [
-        RejectionReason.YANKED
+        RejectionReason.YANKED,
     ]
     assert [str(candidate.version) for candidate in pinned.accepted] == ["1.0"]
 
@@ -831,7 +907,7 @@ def test_evaluate_links_collects_all_artifact_kinds(tmp_path: Path) -> None:
                 '<a href="demo-pkg-1.0.tar.gz.metadata"></a>',
                 '<a href="demo-pkg-1.0.tar.gz.attestation"></a>',
                 '<a href="demo-pkg-1.0.unknown"></a>',
-            ]
+            ],
         ),
     )
 
@@ -853,7 +929,7 @@ def test_evaluate_links_collects_all_artifact_kinds(tmp_path: Path) -> None:
         ArtifactKind.SDIST,
     ]
     assert {rejected.reason for rejected in selection.rejected} == {
-        RejectionReason.UNSUPPORTED_ARTIFACT
+        RejectionReason.UNSUPPORTED_ARTIFACT,
     }
 
 
@@ -877,12 +953,13 @@ def test_candidate_provider_builds_sdist_candidate(tmp_path: Path) -> None:
     assert [str(candidate.version) for candidate in candidates] == ["1.0"]
     assert candidates[0].path.name == "source_pkg-1.0-py3-none-any.whl"
     assert [dependency.raw for dependency in candidates[0].dependencies] == [
-        "dep-pkg>=1"
+        "dep-pkg>=1",
     ]
 
 
 def test_candidate_provider_defers_sdist_build_when_matching_wheel_exists(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     index = tmp_path / "simple"
     packages = tmp_path / "packages"
@@ -903,7 +980,8 @@ def test_candidate_provider_defers_sdist_build_when_matching_wheel_exists(
 
 
 def test_candidate_provider_only_builds_highest_ranked_source_candidate(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     index = tmp_path / "simple"
     packages = tmp_path / "packages"
@@ -915,7 +993,8 @@ def test_candidate_provider_only_builds_highest_ranked_source_candidate(
 
     built: list[str] = []
     real_build = __import__(
-        "cpip.build.build", fromlist=["build_wheel_from_source"]
+        "cpip.build.build",
+        fromlist=["build_wheel_from_source"],
     ).build_wheel_from_source
 
     def tracking_build(path, *args, **kwargs):
@@ -955,7 +1034,7 @@ def test_candidate_provider_runs_project_build_backend(tmp_path: Path) -> None:
     candidates = provider.find_candidates(parse_requirement("backend-pkg"))
 
     assert [candidate.path.name for candidate in candidates] == [
-        "backend_pkg-1.0-py3-none-any.whl"
+        "backend_pkg-1.0-py3-none-any.whl",
     ]
 
 
@@ -993,7 +1072,7 @@ def test_core_download_uses_index_and_extra_index_url(tmp_path: Path, capsys) ->
             "--dest",
             str(dest),
             "demo-pkg",
-        ]
+        ],
     )
     captured = capsys.readouterr()
 
@@ -1019,7 +1098,7 @@ def test_core_download_no_index_ignores_index_url(tmp_path: Path, capsys) -> Non
             "--dest",
             str(dest),
             "demo-pkg",
-        ]
+        ],
     )
     captured = capsys.readouterr()
 
@@ -1039,7 +1118,9 @@ def write_simple_project_index(index: Path, project: str, wheels: list[Path]) ->
 
 
 def write_simple_project_archive_index(
-    index: Path, project: str, archives: list[Path]
+    index: Path,
+    project: str,
+    archives: list[Path],
 ) -> None:
     project_dir = index / project
     project_dir.mkdir(parents=True)

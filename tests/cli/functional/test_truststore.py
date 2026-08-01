@@ -2,7 +2,6 @@ from collections.abc import Callable
 from typing import Any
 
 import pytest
-
 from cpip_test_support import CpipTestEnvironment, TestCpipResult
 
 CpipRunner = Callable[..., TestCpipResult]

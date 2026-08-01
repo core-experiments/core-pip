@@ -98,7 +98,7 @@ def make_sdist(
                     '        archive.writestr(dist_info + "/RECORD", "")',
                     "    return name",
                     "",
-                ]
+                ],
             ),
             encoding="utf-8",
         )
@@ -109,7 +109,7 @@ def make_sdist(
                 'build-backend = "local_backend"',
                 'backend-path = ["backend"]',
                 "",
-            ]
+            ],
         )
     pyproject_lines.extend(
         [
@@ -120,7 +120,7 @@ def make_sdist(
             dependencies,
             "]",
             "",
-        ]
+        ],
     )
     root.joinpath("pyproject.toml").write_text(
         "\n".join(pyproject_lines),

@@ -25,12 +25,12 @@ def validate_member_parts(name: str) -> tuple[str, ...]:
         raise InstallationError(f"wheel member uses an invalid separator: {name!r}")
     if name.startswith("/"):
         raise InstallationError(
-            f"wheel member is outside the install destination: {name!r}"
+            f"wheel member is outside the install destination: {name!r}",
         )
     parts = tuple(part for part in name.split("/") if part and part != ".")
     if ".." in parts:
         raise InstallationError(
-            f"wheel member is outside the install destination: {name!r}"
+            f"wheel member is outside the install destination: {name!r}",
         )
     return parts
 
@@ -173,7 +173,7 @@ def _safe_destination_parts_with_text(
                 raise ValueError
         except (OSError, ValueError) as exc:
             raise InstallationError(
-                f"wheel member escapes installation root: {display_relative}"
+                f"wheel member escapes installation root: {display_relative}",
             ) from exc
         if resolved_directories is not None:
             resolved_directories[cache_key] = resolved_parent_text

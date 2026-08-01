@@ -8,8 +8,8 @@ from cpip.build import build as build_module
 from cpip.build.build_backend import (
     BackendSpec,
     ProjectBuilder,
-    prepare_project_metadata,
     ProjectMetadataReader,
+    prepare_project_metadata,
 )
 from cpip.core.errors import BuildError
 from cpip.index.candidate_materialization import validate_build_requirements
@@ -108,7 +108,7 @@ def test_build_backend_reads_setup_py_console_scripts(tmp_path: Path) -> None:
                 'console_scripts=["script-pkg=script_pkg:main"]),',
                 ")",
                 "",
-            ]
+            ],
         ),
         encoding="utf-8",
     )
@@ -118,7 +118,7 @@ def test_build_backend_reads_setup_py_console_scripts(tmp_path: Path) -> None:
 
     with zipfile.ZipFile(wheel_dir / wheel_name) as archive:
         entry_points = archive.read(
-            "script_pkg-1.0.dist-info/entry_points.txt"
+            "script_pkg-1.0.dist-info/entry_points.txt",
         ).decode()
     assert "script-pkg = script_pkg:main" in entry_points
 
@@ -146,7 +146,7 @@ def test_build_backend_uses_setuptools_for_dynamic_legacy_metadata(
                 "    py_modules=['dynamic_pkg'],",
                 ")",
                 "",
-            ]
+            ],
         ),
         encoding="utf-8",
     )
@@ -304,7 +304,7 @@ def write_project(tmp_path: Path, name: str, package: str, version: str) -> Path
                 f'name = "{name}"',
                 f'version = "{version}"',
                 "",
-            ]
+            ],
         ),
         encoding="utf-8",
     )

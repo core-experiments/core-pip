@@ -8,8 +8,9 @@ import tempfile
 import zipfile
 from pathlib import Path
 
-from .build_backend import ProjectBuilder
 from cpip.core.errors import BuildError
+
+from .build_backend import ProjectBuilder
 
 
 def build_wheel_from_source(
@@ -75,7 +76,7 @@ def build_editable_from_source(
             if "build_editable" not in str(exc):
                 raise
             if os.path.isfile(os.fspath(source_path / "setup.py")) and os.path.isfile(
-                os.fspath(source_path / "pyproject.toml")
+                os.fspath(source_path / "pyproject.toml"),
             ):
                 return build_wheel_from_source(
                     source_path,
@@ -85,7 +86,7 @@ def build_editable_from_source(
                     build_isolation=build_isolation,
                 )
             raise BuildError(
-                f"Build backend for {source_path} is missing the 'build_editable' hook"
+                f"Build backend for {source_path} is missing the 'build_editable' hook",
             ) from exc
         wheel_name = builder.build_editable(output_dir, config_settings=config_settings)
     wheel_path = output_dir / wheel_name
@@ -108,7 +109,7 @@ def unpack_source(source: Path, destination: Path) -> Path:
         with zipfile.ZipFile(source) as archive:
             archive.extractall(destination)
     elif source.name.endswith(
-        (".tar.gz", ".tgz", ".tar.bz2", ".tar.xz", ".tar.lzma", ".tar")
+        (".tar.gz", ".tgz", ".tar.bz2", ".tar.xz", ".tar.lzma", ".tar"),
     ):
         with tarfile.open(source) as archive:
             archive.extractall(destination)

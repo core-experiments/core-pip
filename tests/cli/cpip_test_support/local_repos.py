@@ -8,15 +8,13 @@ from cpip.vcs.versioncontrol import vcs
 
 
 def create_svn_initools_repo(initools_dir: str) -> None:
-    """
-    Create the SVN INITools repo.
-    """
+    """Create the SVN INITools repo."""
     directory = os.path.dirname(initools_dir)
-    subprocess.check_call("svnadmin create INITools".split(), cwd=directory)
+    subprocess.check_call(["svnadmin", "create", "INITools"], cwd=directory)
 
     filename, _ = urllib.request.urlretrieve(
         "http://bitbucket.org/hltbra/cpip-initools-dump/raw/8b55c908a320/"
-        "INITools_modified.dump"
+        "INITools_modified.dump",
     )
     with open(filename, "rb") as dump:
         subprocess.check_call(
@@ -31,10 +29,9 @@ def local_checkout(
     remote_repo: str,
     temp_path: Path,
 ) -> str:
-    """
-    :param temp_path: the return value of the tmpdir fixture, which is a
-        temp directory Path object unique to each test function invocation,
-        created as a sub directory of the base temp directory.
+    """:param temp_path: the return value of the tmpdir fixture, which is a
+    temp directory Path object unique to each test function invocation,
+    created as a sub directory of the base temp directory.
     """
     assert "+" in remote_repo
     vcs_name, vcs_url = remote_repo.split("+", 1)

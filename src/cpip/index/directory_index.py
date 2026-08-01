@@ -43,7 +43,7 @@ class DirectoryIndex:
                 # The common simple-index page suffixes can be recognized
                 # without invoking mimetypes for every wheel and archive.
                 if filename.lower().endswith(
-                    (".html", ".htm", ".html.gz", ".htm.gz")
+                    (".html", ".htm", ".html.gz", ".htm.gz"),
                 ) and is_html_file(url):
                     self.page_candidates_internal.append(url)
                     continue

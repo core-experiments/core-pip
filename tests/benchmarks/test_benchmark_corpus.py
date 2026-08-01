@@ -5,12 +5,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from benchmark_support import reset_caches
 from cpip.core.packaging import parse_requirement
 from cpip.index.page_parsing import IndexPageParser
 from pytest_codspeed import BenchmarkFixture
-
-from benchmark_support import reset_caches
-
 
 SNAPSHOT = Path(__file__).with_name("corpus") / "pypi_snapshot.json"
 
@@ -54,7 +52,7 @@ def test_frozen_pypi_simple_api_candidates(benchmark: BenchmarkFixture) -> None:
                 "url": f"https://files.pythonhosted.org/packages/{filename}",
                 "requires-python": ">=3.9",
                 "core-metadata": {"sha256": "b" * 64},
-            }
+            },
         )
     body = json.dumps({"meta": {"api-version": "1.1"}, "files": files})
     parser = IndexPageParser()

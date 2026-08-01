@@ -67,7 +67,10 @@ def test_reqfile_no_binary_overrides_cmdline_only_binary(
     )
 
     result = script.cpip_install_local(
-        "--only-binary=:all:", "-r", req_file, find_links=[]
+        "--only-binary=:all:",
+        "-r",
+        req_file,
+        find_links=[],
     )
     script.assert_installed(simple="1.0")
     # Requirements file --no-binary should override CLI --only-binary
@@ -88,7 +91,10 @@ def test_reqfile_only_binary_overrides_cmdline_no_binary(
     )
 
     result = script.cpip_install_local(
-        "--no-binary=:all:", "-r", req_file, find_links=[]
+        "--no-binary=:all:",
+        "-r",
+        req_file,
+        find_links=[],
     )
     result.assert_installed("simple", editable=False)
     # Requirements file --only-binary should override CLI --no-binary

@@ -5,9 +5,10 @@ import os
 import time
 import urllib.parse
 from bisect import bisect_left, bisect_right
-from types import MappingProxyType
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import RLock
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
 from cpip.core.errors import InstallationError
@@ -17,7 +18,7 @@ from cpip.core.release_control import ReleaseControl
 from cpip.index.candidates import InstallationCandidate
 from cpip.index.config import DEFAULT_INDEX_URL
 from cpip.index.links import Link
-from cpip.index.prefetch import PrefetchPolicy, Prefetcher
+from cpip.index.prefetch import Prefetcher, PrefetchPolicy
 from cpip.index.source_locations import (
     FindLinksSource,
     SimpleIndexSource,
@@ -28,8 +29,8 @@ from cpip.index.source_models import (
     INSTALLABLE_ARTIFACT_KINDS,
     SOURCE_ARTIFACT_KINDS,
     ArtifactKind,
-    CandidateSelection,
     CandidateRecord,
+    CandidateSelection,
     CandidateSummary,
     PackageCatalog,
     PackageSource,
@@ -103,10 +104,15 @@ class CandidateProvider:
         self.candidate_selection_cache = {}
         self.matching_versions_cache = {}
         self.package_catalog_cache = {}
+        self.candidate_work_cost_cache = {}
         self.cache_lock = RLock()
         self.prefetcher = None
         self.prefetch_policy = PrefetchPolicy()
         self.materializer_internal = None
+        self.index_executor: ThreadPoolExecutor | None = None
+        self.index_sources = tuple(
+            source for source in sources if isinstance(source, SimpleIndexSource)
+        )
 
     @classmethod
     def from_options(
@@ -139,8 +145,10 @@ class CandidateProvider:
         if normalized_find_links:
             sources.append(
                 FindLinksSource(
-                    tuple(normalized_find_links), tuple(trusted_hosts), session
-                )
+                    tuple(normalized_find_links),
+                    tuple(trusted_hosts),
+                    session,
+                ),
             )
         sources.extend(
             SimpleIndexSource(url, tuple(trusted_hosts), session)
@@ -191,7 +199,9 @@ class CandidateProvider:
         if self.find_links:
             if self.find_links_cache is None:
                 source = FindLinksSource(
-                    tuple(self.find_links), self.trusted_hosts, self.session
+                    tuple(self.find_links),
+                    self.trusted_hosts,
+                    self.session,
                 )
                 self.find_links_cache = tuple(source.collect_links(requirement))
             for link in self.find_links_cache:
@@ -199,12 +209,9 @@ class CandidateProvider:
                     continue
                 seen.add(link.url)
                 links.append(link)
-        sources.extend(
-            SimpleIndexSource(url, self.trusted_hosts, self.session)
-            for url in self.index_urls
-        )
-        for source in sources:
-            for link in source.collect_links(requirement):
+        sources.extend(self.index_sources)
+        for link_group in self.collect_index_links(requirement):
+            for link in link_group:
                 if link.url in seen:
                     continue
                 seen.add(link.url)
@@ -225,7 +232,9 @@ class CandidateProvider:
             return cached_links
         if self.find_links_cache is None:
             source = FindLinksSource(
-                tuple(self.find_links), self.trusted_hosts, self.session
+                tuple(self.find_links),
+                self.trusted_hosts,
+                self.session,
             )
             self.find_links_cache = tuple(source.collect_links(requirement))
         if self.find_links_by_name_cache is None:
@@ -235,7 +244,8 @@ class CandidateProvider:
                 if parsed is None:
                     try:
                         parsed = InstallationCandidate.from_link(
-                            link, target=self.target
+                            link,
+                            target=self.target,
                         )
                     except ValueError:
                         continue
@@ -248,15 +258,31 @@ class CandidateProvider:
 
         links = list(self.find_links_by_name_cache.get(requirement.canonical_name, ()))
         seen = {link.url for link in links}
-        for index_url in self.index_urls:
-            source = SimpleIndexSource(index_url, self.trusted_hosts, self.session)
-            for link in source.collect_links(requirement):
+        for link_group in self.collect_index_links(requirement):
+            for link in link_group:
                 if link.url not in seen:
                     seen.add(link.url)
                     links.append(link)
         result = tuple(links)
         self.link_cache[requirement.canonical_name] = result
         return result
+
+    def collect_index_links(self, requirement: Requirement) -> tuple[list[Link], ...]:
+        """Fetch configured index pages concurrently, preserving source order."""
+        if len(self.index_sources) <= 1 or self.session is None:
+            return tuple(
+                source.collect_links(requirement) for source in self.index_sources
+            )
+        if self.index_executor is None:
+            self.index_executor = ThreadPoolExecutor(
+                max_workers=min(8, len(self.index_sources)),
+            )
+        return tuple(
+            self.index_executor.map(
+                lambda source: source.collect_links(requirement),
+                self.index_sources,
+            ),
+        )
 
     def evaluate_links(self, requirement: Requirement) -> CandidateSelection:
         accepted: list[CandidateRecord] = []
@@ -324,7 +350,8 @@ class CandidateProvider:
                 if parsed is None:
                     try:
                         parsed = InstallationCandidate.from_link(
-                            link, target=self.target
+                            link,
+                            target=self.target,
                         )
                     except ValueError:
                         continue
@@ -343,7 +370,7 @@ class CandidateProvider:
                     rejected.append(result)
             accepted.sort(
                 key=lambda candidate: candidate.sort_key(
-                    prefer_binary=self.prefer_binary
+                    prefer_binary=self.prefer_binary,
                 ),
                 reverse=True,
             )
@@ -359,36 +386,35 @@ class CandidateProvider:
                 # user's control and must not be rejected by this filter.
                 if link.is_file or link.is_existing_dir or link.is_vcs:
                     pass
-                else:
-                    if link.upload_time is None or (
-                        link.upload_time.replace(tzinfo=datetime.timezone.utc)
-                        if link.upload_time.tzinfo is None
-                        else link.upload_time
-                    ) >= (
-                        self.uploaded_prior_to.replace(tzinfo=datetime.timezone.utc)
-                        if self.uploaded_prior_to.tzinfo is None
-                        else self.uploaded_prior_to
+                elif link.upload_time is None or (
+                    link.upload_time.replace(tzinfo=datetime.timezone.utc)
+                    if link.upload_time.tzinfo is None
+                    else link.upload_time
+                ) >= (
+                    self.uploaded_prior_to.replace(tzinfo=datetime.timezone.utc)
+                    if self.uploaded_prior_to.tzinfo is None
+                    else self.uploaded_prior_to
+                ):
+                    host = urllib.parse.urlparse(link.source_url or "").hostname
+                    cutoff = self.uploaded_prior_to
+                    if cutoff.tzinfo is None:
+                        cutoff = cutoff.replace(tzinfo=datetime.timezone.utc)
+                    if (
+                        link.upload_time is None
+                        and host in PYPI_HOSTS
+                        and cutoff > datetime.datetime.now(datetime.timezone.utc)
                     ):
-                        host = urllib.parse.urlparse(link.source_url or "").hostname
-                        cutoff = self.uploaded_prior_to
-                        if cutoff.tzinfo is None:
-                            cutoff = cutoff.replace(tzinfo=datetime.timezone.utc)
-                        if (
-                            link.upload_time is None
-                            and host in PYPI_HOSTS
-                            and cutoff > datetime.datetime.now(datetime.timezone.utc)
-                        ):
-                            continue
-                        rejected.append(
-                            RejectedCandidate(
-                                link,
-                                RejectionReason.MISSING_ARTIFACT,
-                                "does not provide upload-time metadata before the cutoff",
-                            )
-                        )
                         continue
+                    rejected.append(
+                        RejectedCandidate(
+                            link,
+                            RejectionReason.MISSING_ARTIFACT,
+                            "does not provide upload-time metadata before the cutoff",
+                        ),
+                    )
+                    continue
             cache_parsed = not CandidateEvaluator.is_unnamed_direct_requirement(
-                requirement
+                requirement,
             )
             parsed = self.parsed_link_cache.get(link) if cache_parsed else None
             if parsed is None:
@@ -400,7 +426,7 @@ class CandidateProvider:
                             link,
                             RejectionReason.INVALID_VERSION,
                             "could not parse project and version",
-                        )
+                        ),
                     )
                     continue
                 if cache_parsed:
@@ -435,9 +461,13 @@ class CandidateProvider:
 
         selection = self.evaluate_links(requirement)
         accepted = selection.accepted
-        if not accepted and requirement.url is not None:
-            if selection.rejected and selection.rejected[0].link.is_vcs:
-                raise InstallationError(selection.rejected[0].detail)
+        if (
+            not accepted
+            and requirement.url is not None
+            and selection.rejected
+            and selection.rejected[0].link.is_vcs
+        ):
+            raise InstallationError(selection.rejected[0].detail)
         if not accepted and selection.rejected:
             upload_rejection = next(
                 (
@@ -449,7 +479,7 @@ class CandidateProvider:
             )
             if upload_rejection is not None:
                 host = urllib.parse.urlparse(
-                    upload_rejection.link.source_url or ""
+                    upload_rejection.link.source_url or "",
                 ).hostname
                 if host not in PYPI_HOSTS:
                     raise InstallationError(upload_rejection.detail)
@@ -472,7 +502,7 @@ class CandidateProvider:
                     specifier=requirement.specifier,
                     target=self.target,
                     hashes=None,
-                ).get_applicable_candidates(list(accepted))
+                ).get_applicable_candidates(list(accepted)),
             )
         hashes = self.hashes_by_name.get(requirement.canonical_name)
         if hashes is not None and hashes.allowed_internal:
@@ -492,6 +522,7 @@ class CandidateProvider:
             )
             if matching and len(matching) != len(accepted):
                 accepted = matching
+        accepted = tuple(self.deduplicate_candidates(list(accepted)))
         preferred = self.best_accepted_candidates(accepted)
         preferred_set = set(preferred)
         ordered = preferred + tuple(
@@ -510,7 +541,8 @@ class CandidateProvider:
         return self.materializer_internal.materialize(requirement, ordered)
 
     def available_versions(
-        self, requirement: Requirement
+        self,
+        requirement: Requirement,
     ) -> tuple[CandidateSummary, ...]:
         allow_binary, allow_source = self.allowed_formats_internal(requirement)
         cache_key = (
@@ -555,7 +587,7 @@ class CandidateProvider:
                     from cpip.index.candidate_evaluators import CandidateEvaluator
 
                     if not CandidateEvaluator.requires_python_matches(
-                        link.requires_python
+                        link.requires_python,
                     ):
                         continue
                 except ValueError:
@@ -583,7 +615,7 @@ class CandidateProvider:
                 yanked_reason=link.yanked_reason,
             )
         result = tuple(
-            sorted(versions.values(), key=lambda item: (item.version, item.is_yanked))
+            sorted(versions.values(), key=lambda item: (item.version, item.is_yanked)),
         )
         summaries_by_version: dict[Version, list[CandidateSummary]] = {}
         for summary in result:
@@ -596,10 +628,10 @@ class CandidateProvider:
                 {
                     version: tuple(summaries)
                     for version, summaries in summaries_by_version.items()
-                }
+                },
             ),
             links_by_version=MappingProxyType(
-                {version: tuple(links) for version, links in links_by_version.items()}
+                {version: tuple(links) for version, links in links_by_version.items()},
             ),
         )
         with self.cache_lock:
@@ -618,7 +650,8 @@ class CandidateProvider:
         return result
 
     def prefetch_available_versions(
-        self, requirements: tuple[Requirement, ...]
+        self,
+        requirements: tuple[Requirement, ...],
     ) -> None:
         """Fetch independent project catalogs in bounded background workers."""
         if (
@@ -654,11 +687,16 @@ class CandidateProvider:
         if self.prefetcher is not None:
             self.prefetcher.close()
             self.prefetcher = None
+        if self.index_executor is not None:
+            self.index_executor.shutdown(wait=True, cancel_futures=True)
+            self.index_executor = None
         if self.materializer_internal is not None:
             self.materializer_internal.close()
 
     def available_versions_for(
-        self, requirement: Requirement, version: Version
+        self,
+        requirement: Requirement,
+        version: Version,
     ) -> tuple[CandidateSummary, ...]:
         allow_binary, allow_source = self.allowed_formats_internal(requirement)
         catalog_key = (
@@ -671,6 +709,25 @@ class CandidateProvider:
             self.available_versions(requirement)
             catalog = self.package_catalog_cache[catalog_key]
         return catalog.summaries_by_version.get(version, ())
+
+    def candidate_work_cost(self, requirement: Requirement) -> int:
+        """Estimate metadata/build cost without initiating new I/O."""
+        key = requirement.canonical_name
+        cached = self.candidate_work_cost_cache.get(key)
+        if cached is not None:
+            return cached
+        links = self.link_cache.get(key)
+        if links is None:
+            # Never turn a scheduling decision into a network request.
+            return 1
+        cost = 1
+        for link in links:
+            if link.kind in SOURCE_ARTIFACT_KINDS:
+                cost = max(cost, 8)
+            elif not link.is_file:
+                cost = max(cost, 2)
+        self.candidate_work_cost_cache[key] = cost
+        return cost
 
     def matching_versions(
         self,
@@ -691,7 +748,7 @@ class CandidateProvider:
             return cached
         available = self.available_versions(requirement)
         catalog = self.package_catalog_cache.get(
-            (requirement.canonical_name, allow_binary, allow_source)
+            (requirement.canonical_name, allow_binary, allow_source),
         )
         summary_versions = (
             catalog.summary_versions
@@ -738,6 +795,26 @@ class CandidateProvider:
         if requirement.url is not None or requirement.raw.startswith((".", "/", "~")):
             return True, True
         return self.format_control.allowed_formats(requirement.name)
+
+    @staticmethod
+    def deduplicate_candidates(
+        accepted: list[CandidateRecord],
+    ) -> list[CandidateRecord]:
+        """Collapse equivalent artifacts while retaining hash alternatives."""
+        seen: set[tuple[str, Version, str, tuple[tuple[str, str], ...]]] = set()
+        result: list[CandidateRecord] = []
+        for candidate in accepted:
+            key = (
+                candidate.canonical_name,
+                candidate.version,
+                str(candidate.link.filename),
+                tuple(sorted((candidate.link.hashes or {}).items())),
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            result.append(candidate)
+        return result
 
     @staticmethod
     def best_accepted_candidates(

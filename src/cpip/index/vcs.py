@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import tempfile
 import urllib.parse
-import shutil
 from pathlib import Path
 
 from cpip.index.source_models import VcsReference
@@ -41,17 +41,22 @@ def vcs_reference(url: str) -> VcsReference:
         if requested_revision == "":
             raise OSError(f"VCS URL has an empty revision: {url}")
     repo_url = urllib.parse.urlunsplit(
-        (parsed.scheme, parsed.netloc, path, parsed.query, parsed.fragment)
+        (parsed.scheme, parsed.netloc, path, parsed.query, parsed.fragment),
     )
     if requested_revision is not None:
         requested_revision = urllib.parse.unquote(requested_revision)
     return VcsReference(
-        vcs=vcs, repo_url=repo_url, requested_revision=requested_revision
+        vcs=vcs,
+        repo_url=repo_url,
+        requested_revision=requested_revision,
     )
 
 
 def materialize_vcs(
-    url: str, *, emit_resolution: bool = True, prompting: bool = True
+    url: str,
+    *,
+    emit_resolution: bool = True,
+    prompting: bool = True,
 ) -> Path:
     reference = vcs_reference(url)
     if reference.vcs != "git":
@@ -126,5 +131,5 @@ def is_immutable_vcs_link(url: str) -> bool:
     return bool(
         revision
         and len(revision) == 40
-        and all(character in "0123456789abcdefABCDEF" for character in revision)
+        and all(character in "0123456789abcdefABCDEF" for character in revision),
     )

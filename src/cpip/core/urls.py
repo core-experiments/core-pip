@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import os
 import ntpath
+import os
 import string
 import sys
 import urllib.parse
@@ -34,7 +34,7 @@ def url_to_path(url: str) -> str:
         netloc = "\\\\" + netloc
     else:
         raise ValueError(
-            f"non-local file URIs are not supported on this platform: {url!r}"
+            f"non-local file URIs are not supported on this platform: {url!r}",
         )
 
     if WINDOWS:
@@ -94,7 +94,7 @@ def split_auth_netloc_from_url(
     if netloc == parsed.netloc:
         return url, netloc, credentials
     clean = urllib.parse.urlunsplit(
-        (parsed.scheme, netloc, parsed.path, parsed.query, parsed.fragment)
+        (parsed.scheme, netloc, parsed.path, parsed.query, parsed.fragment),
     )
     return clean, netloc, credentials
 
@@ -111,5 +111,5 @@ def redact_auth_from_url(url: str) -> str:
     user, separator, password_internal = auth.partition(":")
     redacted = f"{urllib.parse.quote(user)}:****@" if separator else "****@"
     return urllib.parse.urlunsplit(
-        (parsed.scheme, redacted + netloc, parsed.path, parsed.query, parsed.fragment)
+        (parsed.scheme, redacted + netloc, parsed.path, parsed.query, parsed.fragment),
     )

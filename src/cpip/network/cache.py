@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import shutil
-import hashlib
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from datetime import datetime
 from typing import Any, BinaryIO
 
 from cpip.core.filesystem import ensure_dir
-
 from cpip.platform.filesystem import (
     adjacent_tmp_file,
     copy_directory_permissions,
@@ -31,8 +30,7 @@ def suppressed_cache_errors() -> Generator[None, None, None]:
 
 
 class SafeFileCache:
-    """
-    A file based cache which is safe to use even when the target directory may
+    """A file based cache which is safe to use even when the target directory may
     not be accessible or writable.
 
     There is a race condition when two processes try to write and/or read the
@@ -64,9 +62,8 @@ class SafeFileCache:
         body_path = metadata_path + ".body"
         if not (os.path.exists(metadata_path) and os.path.exists(body_path)):
             return None
-        with suppressed_cache_errors():
-            with open(metadata_path, "rb") as f:
-                return f.read()
+        with suppressed_cache_errors(), open(metadata_path, "rb") as f:
+            return f.read()
 
     def write_to_file(self, path: str, writer_func: Callable[[BinaryIO], Any]) -> None:
         """Common file writing logic with proper permissions and atomic replacement."""
@@ -88,7 +85,10 @@ class SafeFileCache:
         self.write_to_file(path, lambda f: shutil.copyfileobj(source_file, f))
 
     def set(
-        self, key: str, value: bytes, expires: int | datetime | None = None
+        self,
+        key: str,
+        value: bytes,
+        expires: int | datetime | None = None,
     ) -> None:
         path = self.get_cache_path(key)
         self.write_internal(path, value)

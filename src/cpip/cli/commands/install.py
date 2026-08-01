@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import sys
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 from cpip.cli.commands.install_plan import (
@@ -22,9 +23,9 @@ if TYPE_CHECKING:
 
 
 def run_install(args: list[str]) -> int:
-    from cpip.cli.commands.install_helpers import normalize_install_args
     from cpip.cli.commands.install_helpers import (
         install_candidate,
+        normalize_install_args,
         target_library_is_empty,
     )
 
@@ -42,12 +43,12 @@ def run_install(args: list[str]) -> int:
         load_source_config,
         requirements_from_script,
     )
+    from cpip.core.appdirs import user_cache_dir
     from cpip.core.errors import (
         CommandError,
         DistributionNotFound,
         InstallationError,
     )
-    from cpip.core.appdirs import user_cache_dir
     from cpip.core.format_control import FormatControl
     from cpip.core.packaging import (
         canonicalize_name,
@@ -57,7 +58,7 @@ def run_install(args: list[str]) -> int:
     from cpip.core.wheel import TargetContext, wheel_candidate
     from cpip.install.target import InstallTarget
     from cpip.install.wheel_transaction import install_wheels_transactionally
-    from cpip.resolution.req_install import install_req_from_line
+    from cpip.resolution.engine.input.requirements import install_req_from_line
 
     if len(options.requirements_from_scripts) > 1:
         raise CommandError("--requirements-from-script can only be given once")
@@ -73,7 +74,7 @@ def run_install(args: list[str]) -> int:
         if not Path(filename).is_file():
             raise InstallationError(
                 f"Could not open requirements file: {filename}: "
-                "No such file or directory"
+                "No such file or directory",
             )
     for feature in options.use_features:
         if feature == "build-constraint":
@@ -113,7 +114,7 @@ def run_install(args: list[str]) -> int:
     script_requirements: list[str] = []
     if options.requirements_from_scripts:
         script_requirements = requirements_from_script(
-            Path(options.requirements_from_scripts[0])
+            Path(options.requirements_from_scripts[0]),
         )
     format_control = FormatControl()
     index = 0
@@ -141,11 +142,11 @@ def run_install(args: list[str]) -> int:
             if running_under_virtualenv():
                 raise InstallationError(
                     "Can not perform a '--user' install. User site-packages are "
-                    "not visible in this virtualenv."
+                    "not visible in this virtualenv.",
                 )
             raise InstallationError(
                 "Can not perform a '--user' install. User site-packages are "
-                "disabled for this Python."
+                "disabled for this Python.",
             )
         if running_under_virtualenv():
             for raw_requirement in options.requirements:
@@ -165,7 +166,7 @@ def run_install(args: list[str]) -> int:
                     raise InstallationError(
                         "Will not install to the user site because it will lack "
                         f"sys.path precedence to {installed.raw_name} in "
-                        f"{installed.location}"
+                        f"{installed.location}",
                     )
     if (
         not options.target
@@ -174,7 +175,7 @@ def run_install(args: list[str]) -> int:
     ):
         raise CommandError(
             "Can not use any platform or abi specific options unless installing via "
-            "'--target'"
+            "'--target'",
         )
     if options.pre and (options.all_releases or options.only_final):
         raise CommandError("--pre cannot be used with --all-releases or --only-final")
@@ -252,7 +253,7 @@ def run_install(args: list[str]) -> int:
         and not options.requirement_files
     ):
         raise CommandError(
-            'You must give at least one requirement to install (see "cpip help install")'
+            'You must give at least one requirement to install (see "cpip help install")',
         )
     installed: list[str] = []
     installed_canonical_names: list[str] = []
@@ -340,7 +341,8 @@ def run_install(args: list[str]) -> int:
             requirement
         )
         requested_extras_by_name.setdefault(
-            canonicalize_name(requirement.req.name), set()
+            canonicalize_name(requirement.req.name),
+            set(),
         ).update(requirement.req.extras)
         if requirement.link is not None:
             source_requirements_by_url[requirement.link.url] = requirement
@@ -385,7 +387,7 @@ def run_install(args: list[str]) -> int:
                 continue
             print(
                 "Getting page "
-                f"{bundle.index_url.rstrip('/')}/{requirement.req.canonical_name}"
+                f"{bundle.index_url.rstrip('/')}/{requirement.req.canonical_name}",
             )
     if options.verbose and bundle.find_links:
         for find_link in bundle.find_links:
@@ -395,12 +397,13 @@ def run_install(args: list[str]) -> int:
     preinstalled_editables: set[str] = set()
     preinstalled_editable_reports: dict[str, tuple[Any, Any]] = {}
     if bundle.editables:
-        from cpip.install.editable import prepare_editable_source
         from cpip.build.build import build_editable_from_source
+        from cpip.install.editable import prepare_editable_source
 
         for editable in bundle.editables:
             source_path, direct_url, metadata = prepare_editable_source(
-                editable, build_isolation=not options.no_build_isolation
+                editable,
+                build_isolation=not options.no_build_isolation,
             )
             if (
                 metadata is None
@@ -421,12 +424,13 @@ def run_install(args: list[str]) -> int:
                     constraint.canonical_name == candidate.canonical_name
                     and constraint.url is None
                     and not constraint.is_satisfied_by(
-                        candidate.version, allow_prereleases=options.pre
+                        candidate.version,
+                        allow_prereleases=options.pre,
                     )
                 ):
                     raise InstallationError(
                         f"Cannot install {candidate.name} {candidate.version} because "
-                        f"these package versions have conflicting dependencies."
+                        f"these package versions have conflicting dependencies.",
                     )
             if not options.dry_run:
                 install_candidate(
@@ -453,13 +457,16 @@ def run_install(args: list[str]) -> int:
             or user_cache_dir("cpip")
         )
         plan = _try_local_wheelhouse_plan(
-            options, bundle, requirements, cache_dir=cache_dir
+            options,
+            bundle,
+            requirements,
+            cache_dir=cache_dir,
         )
         if plan is None:
             try:
-                from cpip.resolution.resolver import Resolver
+                from cpip.resolution.engine import ResolutionEngine
 
-                plan = Resolver(
+                plan = ResolutionEngine(
                     provider=get_provider(),
                     no_deps=options.no_deps,
                     upgrade=options.upgrade,
@@ -485,17 +492,23 @@ def run_install(args: list[str]) -> int:
                     )
                     print(f"DistributionNotFound: {detail}")
                 raise
+        assert plan is not None
         unique_candidates: dict[str, Any] = {}
         for candidate in plan.candidates:
             unique_candidates.setdefault(candidate.canonical_name, candidate)
-        plan.candidates = list(unique_candidates.values())
+        from cpip.resolution.engine.model import ResolutionResult
+
+        if isinstance(plan, ResolutionResult):
+            plan = replace(plan, candidates=tuple(unique_candidates.values()))
+        else:
+            plan.candidates = list(unique_candidates.values())
         for item in plan.satisfied:
             requested = item.requirement.raw or item.requirement.name
             if not quiet:
                 if options.upgrade:
                     print(
                         f"Requirement already satisfied: {requested} in "
-                        f"{item.distribution.location}"
+                        f"{item.distribution.location}",
                     )
                 else:
                     print(f"Requirement already satisfied: {requested}")
@@ -506,7 +519,7 @@ def run_install(args: list[str]) -> int:
                 + ", ".join(
                     requested_names.get(candidate.canonical_name, candidate.name)
                     for candidate in plan.candidates
-                )
+                ),
             )
         if plan.candidates:
             batch_target = InstallTarget.from_options(
@@ -519,7 +532,7 @@ def run_install(args: list[str]) -> int:
             candidate_direct_urls: dict[str, Any] = {}
             for candidate in plan.candidates:
                 source_requirement = source_requirements_by_name.get(
-                    candidate.canonical_name
+                    candidate.canonical_name,
                 ) or source_requirements_by_url.get(candidate.source_url or "")
                 direct_url = None
                 if (
@@ -528,7 +541,7 @@ def run_install(args: list[str]) -> int:
                     and source_requirement.req is not None
                     and source_requirement.req.url is not None
                 ):
-                    from cpip.resolution.direct_url_helpers import direct_url_from_link
+                    from cpip.install.direct_url import direct_url_from_link
 
                     direct_url = direct_url_from_link(source_requirement.link)
                 candidate_direct_urls[os.fspath(candidate.path)] = direct_url
@@ -594,7 +607,7 @@ def run_install(args: list[str]) -> int:
                                 if candidate.canonical_name == conflict_name:
                                     print(
                                         f"The user requested {candidate.canonical_name} "
-                                        f"{candidate.version}"
+                                        f"{candidate.version}",
                                     )
                         raise
         plan_order = {
@@ -637,7 +650,7 @@ def run_install(args: list[str]) -> int:
             for parent in plan.candidates:
                 parent_name = requested_names.get(parent.canonical_name, parent.name)
                 parent_extras = tuple(
-                    sorted(requested_extras_by_name.get(parent.canonical_name, ()))
+                    sorted(requested_extras_by_name.get(parent.canonical_name, ())),
                 )
                 for child_name in plan.graph.get(parent.canonical_name, ()):
                     if child_name in provenance_with_extras:
@@ -664,14 +677,14 @@ def run_install(args: list[str]) -> int:
                 suffix = f" (from {provenance})" if provenance else ""
                 print(f"Processing {candidate.path}{suffix}")
             source_requirement = source_requirements_by_name.get(
-                candidate.canonical_name
+                candidate.canonical_name,
             ) or source_requirements_by_url.get(candidate.source_url or "")
             requested_extras = tuple(
-                sorted(requested_extras_by_name.get(candidate.canonical_name, ()))
+                sorted(requested_extras_by_name.get(candidate.canonical_name, ())),
             )
             if source_requirement is not None and source_requirement.req is not None:
                 requested_extras = tuple(
-                    sorted(set(requested_extras) | set(source_requirement.req.extras))
+                    sorted(set(requested_extras) | set(source_requirement.req.extras)),
                 )
             add_report_item(
                 candidate_name=candidate.name,
@@ -707,8 +720,8 @@ def run_install(args: list[str]) -> int:
                 editable=True,
             )
             continue
-        from cpip.install.editable import prepare_editable_source
         from cpip.build.build import build_editable_from_source
+        from cpip.install.editable import prepare_editable_source
 
         source_path, direct_url, metadata = prepare_editable_source(editable)
         built = build_editable_from_source(
@@ -730,7 +743,7 @@ def run_install(args: list[str]) -> int:
                 raise InstallationError(
                     f"Cannot install {built_candidate.name} "
                     f"{built_candidate.version} because it does not satisfy "
-                    f"the constraint {raw_constraint}"
+                    f"the constraint {raw_constraint}",
                 )
         editable_dependencies = [
             dependency
@@ -755,12 +768,12 @@ def run_install(args: list[str]) -> int:
             ]
             for extra in editable_requirement.req.extras:
                 editable_dependencies.extend(
-                    metadata.optional_dependencies.get(extra, ())
+                    metadata.optional_dependencies.get(extra, ()),
                 )
         if not options.no_deps and editable_dependencies:
-            from cpip.resolution.resolver import Resolver
+            from cpip.resolution.engine import ResolutionEngine
 
-            dependency_plan = Resolver(
+            dependency_plan = ResolutionEngine(
                 provider=get_provider(),
                 no_deps=False,
                 upgrade=options.upgrade and options.upgrade_strategy == "eager",
@@ -776,7 +789,7 @@ def run_install(args: list[str]) -> int:
                 [
                     install_req_from_line(str(requirement))
                     for requirement in editable_dependencies
-                ]
+                ],
             )
             for candidate in dependency_plan.candidates:
                 add_report_item(
@@ -900,22 +913,40 @@ def create_parser() -> argparse.ArgumentParser:
         default=[],
     )
     parser.add_argument(
-        "-r", "--requirement", dest="requirement_files", action="append", default=[]
+        "-r",
+        "--requirement",
+        dest="requirement_files",
+        action="append",
+        default=[],
     )
     parser.add_argument(
-        "-c", "--constraint", dest="constraint_files", action="append", default=[]
+        "-c",
+        "--constraint",
+        dest="constraint_files",
+        action="append",
+        default=[],
     )
     parser.add_argument(
-        "--build-constraint", dest="build_constraint_files", action="append", default=[]
+        "--build-constraint",
+        dest="build_constraint_files",
+        action="append",
+        default=[],
     )
     parser.add_argument(
-        "-e", "--editable", dest="editables", action="append", default=[]
+        "-e",
+        "--editable",
+        dest="editables",
+        action="append",
+        default=[],
     )
     parser.add_argument("-f", "--find-links", action="append", default=[])
     parser.add_argument("-i", "--index-url")
     parser.add_argument("--extra-index-url", action="append", default=[])
     parser.add_argument(
-        "--trusted-host", dest="trusted_hosts", action="append", default=[]
+        "--trusted-host",
+        dest="trusted_hosts",
+        action="append",
+        default=[],
     )
     parser.add_argument("--cert")
     parser.add_argument("--client-cert")
@@ -933,7 +964,10 @@ def create_parser() -> argparse.ArgumentParser:
     parser.add_argument("--use-pep517", action="store_true")
     parser.add_argument("--use-deprecated", action="append", default=[])
     parser.add_argument(
-        "--use-feature", dest="use_features", action="append", default=[]
+        "--use-feature",
+        dest="use_features",
+        action="append",
+        default=[],
     )
     parser.add_argument("--disable-cpip-version-check", action="store_true")
     parser.add_argument("--compile", action="store_true")

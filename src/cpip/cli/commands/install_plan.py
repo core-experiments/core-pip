@@ -66,10 +66,14 @@ def try_local_wheelhouse_plan(
         values.append(requirement.req.raw)
     from cpip.core.packaging import Requirement, SpecifierSet, Version
     from cpip.core.wheel import WheelCandidate, parse_wheel, wheel_candidate
-    from cpip.resolution.fast_local_wheelhouse import resolve
-    from cpip.resolution.resolver_internals.state.plans import InstallPlan
+    from cpip.resolution.engine import ResolutionEngine
+    from cpip.resolution.engine.state.plans import InstallPlan
 
-    local_plan = resolve(bundle.find_links, values, cache_dir=cache_dir)
+    local_plan = ResolutionEngine.resolve_wheelhouse(
+        bundle.find_links,
+        values,
+        cache_dir=cache_dir,
+    )
     if local_plan is None:
         return None
     candidates = []

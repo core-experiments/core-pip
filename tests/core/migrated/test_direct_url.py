@@ -36,7 +36,7 @@ def test_archive_info() -> None:
     assert direct_url.url == direct_url_dict["url"]
     # test we add the hashes key automatically
     assert direct_url.archive_info.hashes == {
-        "sha1": "1b8c5bc61a86f377fea47b4276c8c8a5842d2220"
+        "sha1": "1b8c5bc61a86f377fea47b4276c8c8a5842d2220",
     }
 
 
@@ -77,7 +77,8 @@ def test_vcs_info() -> None:
 
 def test_parsing_validation() -> None:
     with pytest.raises(
-        DirectUrlValidationError, match="Missing required value in 'url'"
+        DirectUrlValidationError,
+        match="Missing required value in 'url'",
     ):
         DirectUrl.from_dict({"dir_info": {}})
     with pytest.raises(
@@ -96,7 +97,8 @@ def test_parsing_validation() -> None:
     ):
         DirectUrl.from_dict({"url": "http://...", "archive_info": {"hash": 1}})
     with pytest.raises(
-        DirectUrlValidationError, match=r"Missing required value in 'vcs_info\.vcs'"
+        DirectUrlValidationError,
+        match=r"Missing required value in 'vcs_info\.vcs'",
     ):
         DirectUrl.from_dict({"url": "http://...", "vcs_info": {"vcs": None}})
     with pytest.raises(
@@ -117,7 +119,7 @@ def test_parsing_validation() -> None:
         ),
     ):
         DirectUrl.from_dict(
-            {"url": "http://...", "archive_info": {"hash": "sha256:aaa"}}
+            {"url": "http://...", "archive_info": {"hash": "sha256:aaa"}},
         )
 
 

@@ -102,7 +102,7 @@ def test_supported_wheel_tags_target_context_oracle() -> None:
             implementation="cp",
             python_version="3.11",
             abis=("cp311",),
-        )
+        ),
     )
 
     assert WheelTag("cp311", "cp311", "linux_x86_64") in tags
@@ -119,7 +119,9 @@ def test_supported_wheel_tags_target_context_oracle() -> None:
     ],
 )
 def test_wheel_tag_rank_macos_platform_oracle(
-    runtime: str, wheel: str, expected: bool
+    runtime: str,
+    wheel: str,
+    expected: bool,
 ) -> None:
     supported = (WheelTag("cp311", "cp311", runtime),)
     candidate = (WheelTag("cp311", "cp311", wheel),)
@@ -147,7 +149,7 @@ def test_current_macos_accepts_newer_arm64_wheel() -> None:
     wheel = parse_wheel_file(
         "demo-1.0-cp"
         f"{CURRENT_PYTHON_VERSION_DIGITS}-cp{CURRENT_PYTHON_VERSION_DIGITS}"
-        "-macosx_12_0_arm64.whl"
+        "-macosx_12_0_arm64.whl",
     )
     assert wheel is not None
     assert wheel_tag_rank(wheel.tags) is not None
@@ -162,7 +164,8 @@ def test_wheel_candidate_rejects_invalid_filename_oracle(tmp_path: Path) -> None
 
 
 def test_wheel_candidate_reuses_metadata_across_extras(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     wheel = tmp_path / "demo-1.0-py3-none-any.whl"
     with zipfile.ZipFile(wheel, "w") as archive:
@@ -176,7 +179,7 @@ def test_wheel_candidate_reuses_metadata_across_extras(
                     "Requires-Dist: optional; extra == 'feature'",
                     "Provides-Extra: feature",
                     "",
-                )
+                ),
             ),
         )
     base = wheel_candidate(wheel)

@@ -12,7 +12,6 @@ from benchmark_support import (
     reset_caches,
     version_strings,
 )
-from pytest_codspeed import BenchmarkFixture
 from cpip.core.packaging import (
     SpecifierSet,
     Version,
@@ -21,6 +20,7 @@ from cpip.core.packaging import (
     marker_applies,
     parse_requirement,
 )
+from pytest_codspeed import BenchmarkFixture
 
 REQUIREMENTS = requirement_lines()
 VERSION_STRINGS = version_strings()

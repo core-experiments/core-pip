@@ -9,14 +9,15 @@ from cpip.core.errors import InstallationError
 
 
 def test_parse_simple_dependency_groups(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     pyproject = tmp_path.joinpath("pyproject.toml")
     pyproject.write_text(
         textwrap.dedent("""\
             [dependency-groups]
             foo = ["bar"]
-            """)
+            """),
     )
     monkeypatch.chdir(tmp_path)
 
@@ -27,7 +28,8 @@ def test_parse_simple_dependency_groups(
 
 
 def test_parse_cyclic_dependency_groups(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     pyproject = tmp_path.joinpath("pyproject.toml")
     pyproject.write_text(
@@ -35,7 +37,7 @@ def test_parse_cyclic_dependency_groups(
             [dependency-groups]
             foo = [{include-group="bar"}]
             bar = [{include-group="foo"}]
-            """)
+            """),
     )
     monkeypatch.chdir(tmp_path)
 
@@ -55,7 +57,8 @@ def test_parse_cyclic_dependency_groups(
 
 
 def test_parse_deep_dependency_groups_without_recursion(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     count = 1_500
     groups = ["[dependency-groups]"]
@@ -72,7 +75,8 @@ def test_parse_deep_dependency_groups_without_recursion(
 
 
 def test_parse_with_no_dependency_groups_defined(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     pyproject = tmp_path.joinpath("pyproject.toml")
     pyproject.write_text("")
@@ -86,7 +90,8 @@ def test_parse_with_no_dependency_groups_defined(
 
 
 def test_parse_with_no_pyproject_file(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.chdir(tmp_path)
 
@@ -95,14 +100,15 @@ def test_parse_with_no_pyproject_file(
 
 
 def test_parse_with_malformed_pyproject_file(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     pyproject = tmp_path.joinpath("pyproject.toml")
     pyproject.write_text(
         textwrap.dedent("""\
             [dependency-groups  # no closing bracket
             foo = ["bar"]
-            """)
+            """),
     )
     monkeypatch.chdir(tmp_path)
 
@@ -111,14 +117,15 @@ def test_parse_with_malformed_pyproject_file(
 
 
 def test_parse_gets_unexpected_oserror(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     pyproject = tmp_path.joinpath("pyproject.toml")
     pyproject.write_text(
         textwrap.dedent("""\
             [dependency-groups]
             foo = ["bar"]
-            """)
+            """),
     )
     monkeypatch.chdir(tmp_path)
 

@@ -3,15 +3,14 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from email.parser import Parser
-from typing import Any, Mapping
+from typing import Any
 
-from cpip.core.packaging import canonicalize_name
 from cpip.core.cpip_version import CPIP_DISTRIBUTION_NAMES
+from cpip.core.packaging import canonicalize_name
 
 from .metadata import InstalledDistributionStore, InstalledMetadataDistribution
-
 
 LatestInfo = Mapping[str, tuple[Any, str]]
 
@@ -39,7 +38,7 @@ def select_installed_distributions(
             editables_only=editables_only,
             include_editables=include_editables,
             skip=set(skip),
-        )
+        ),
     )
     if not_required:
         dependency_names = {
@@ -129,7 +128,9 @@ def format_list_json(
 
 
 def format_list_freeze(
-    distributions: list[InstalledMetadataDistribution], *, verbose: bool = False
+    distributions: list[InstalledMetadataDistribution],
+    *,
+    verbose: bool = False,
 ) -> list[str]:
     """Build lines for the list freeze format."""
     result = []

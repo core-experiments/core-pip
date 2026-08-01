@@ -5,8 +5,8 @@ from __future__ import annotations
 import ast
 import importlib
 from pathlib import Path
-import tomllib
 
+import tomllib
 
 WORKSPACE_ROOT = Path(__file__).parents[1]
 

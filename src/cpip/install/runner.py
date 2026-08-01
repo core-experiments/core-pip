@@ -2,7 +2,6 @@
 
 import os
 
-
 cpip_runner: str | None = None
 
 
@@ -36,6 +35,7 @@ def get_runnable_pip() -> str:
         raise RuntimeError("cpip runner could not be located")
     return os.fsdecode(
         os.path.join(
-            os.path.dirname(os.path.realpath(cpip_spec.origin)), "__cpip-runner__.py"
-        )
+            os.path.dirname(os.path.realpath(cpip_spec.origin)),
+            "__cpip-runner__.py",
+        ),
     )

@@ -28,7 +28,11 @@ def test_check_install_canonicalization(script: CpipTestEnvironment) -> None:
 
     # Let's install pkgA without its dependency
     result = script.cpip(
-        "install", "--no-build-isolation", "--no-index", pkga_path, "--no-deps"
+        "install",
+        "--no-build-isolation",
+        "--no-index",
+        pkga_path,
+        "--no-deps",
     )
     assert "Successfully installed pkgA-1.0" in result.stdout, str(result)
 
@@ -93,7 +97,11 @@ def test_check_install_does_not_warn_for_out_of_graph_issues(
 
     # Install a package without it's dependencies
     result = script.cpip(
-        "install", "--no-build-isolation", "--no-index", pkg_broken_path, "--no-deps"
+        "install",
+        "--no-build-isolation",
+        "--no-index",
+        pkg_broken_path,
+        "--no-deps",
     )
     assert "requires" not in result.stderr
 

@@ -6,11 +6,10 @@ import time
 from pathlib import Path
 
 import pytest
-
 from cpip.core.errors import InstallationError
 from cpip.network.http import HttpResponse
-from cpip.resolution.requirement_files.models import RequirementsFileParseError
-from cpip.resolution.requirement_files.parser import parse_requirements
+from cpip.resolution.engine.input.files.models import RequirementsFileParseError
+from cpip.resolution.engine.input.files.parser import parse_requirements
 
 
 def test_deep_requirement_includes_without_recursion(tmp_path: Path) -> None:
@@ -49,7 +48,8 @@ def test_requirement_include_order_is_preserved(tmp_path: Path) -> None:
 
 
 def test_repeated_requirement_include_reuses_content(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     included = tmp_path / "included.txt"
     root = tmp_path / "requirements.txt"
@@ -82,7 +82,7 @@ def test_simple_requirement_fast_path_retains_validation(tmp_path: Path) -> None
     results = parse_requirements(str(requirements), object())
 
     assert [item.requirement for item in results] == [
-        "demo[extra]>=1,<3; python_version >= '3.11'"
+        "demo[extra]>=1,<3; python_version >= '3.11'",
     ]
 
 

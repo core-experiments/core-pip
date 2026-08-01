@@ -9,9 +9,7 @@ from cpip.core import target_python
 
 class Testcompatibility_tags:
     def mock_get_config_var(self, **kwd: str) -> Callable[[str], Any]:
-        """
-        Patch sysconfig.get_config_var for arbitrary keys.
-        """
+        """Patch sysconfig.get_config_var for arbitrary keys."""
         get_config_var = sysconfig.get_config_var
 
         def mock_get_config_var_internal(var: str) -> Any:
@@ -22,9 +20,7 @@ class Testcompatibility_tags:
         return mock_get_config_var_internal
 
     def test_no_hyphen_tag(self) -> None:
-        """
-        Test that no tag contains a hyphen.
-        """
+        """Test that no tag contains a hyphen."""
         mock_gcf = self.mock_get_config_var(SOABI="cpython-35m-darwin")
 
         with patch("sysconfig.get_config_var", mock_gcf):
@@ -45,11 +41,11 @@ class TestManylinux2010Tags:
         ],
     )
     def test_manylinux2010_implies_manylinux1(
-        self, manylinux2010: str, manylinux1: str
+        self,
+        manylinux2010: str,
+        manylinux1: str,
     ) -> None:
-        """
-        Specifying manylinux2010 implies manylinux1.
-        """
+        """Specifying manylinux2010 implies manylinux1."""
         groups: dict[tuple[str, str], list[str]] = {}
         supported = target_python.get_supported(platforms=[manylinux2010])
         for tag in supported:
@@ -70,11 +66,11 @@ class TestManylinux2014Tags:
         ],
     )
     def test_manylinuxA_implies_manylinuxB(
-        self, manylinuxA: str, manylinuxB: list[str]
+        self,
+        manylinuxA: str,
+        manylinuxB: list[str],
     ) -> None:
-        """
-        Specifying manylinux2014 implies manylinux2010/manylinux1.
-        """
+        """Specifying manylinux2014 implies manylinux2010/manylinux1."""
         groups: dict[tuple[str, str], list[str]] = {}
         supported = target_python.get_supported(platforms=[manylinuxA])
         for tag in supported:

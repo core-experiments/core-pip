@@ -16,7 +16,6 @@ from cpip.index.provider import CandidateProvider
 from cpip.network.http import NetworkSession
 from pytest_codspeed import BenchmarkFixture
 
-
 pytestmark = [
     pytest.mark.network,
     pytest.mark.skipif(
@@ -71,8 +70,8 @@ def test_live_index_failure_path(benchmark: BenchmarkFixture) -> None:
         try:
             return len(
                 provider.collect_links(
-                    parse_requirement("cpip-benchmark-does-not-exist")
-                )
+                    parse_requirement("cpip-benchmark-does-not-exist"),
+                ),
             )
         finally:
             provider.close()

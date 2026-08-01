@@ -4,7 +4,6 @@ from os.path import join
 from pathlib import Path
 
 import pytest
-
 from cpip_test_support import (
     CpipTestEnvironment,
     ResolverVariant,
@@ -21,9 +20,7 @@ def setuptools_compatibility_constraint(script: CpipTestEnvironment) -> Path:
 
 @pytest.mark.network
 def test_simple_extras_install_from_pypi(script: CpipTestEnvironment) -> None:
-    """
-    Test installing a package from PyPI using extras dependency Paste[openid].
-    """
+    """Test installing a package from PyPI using extras dependency Paste[openid]."""
     result = script.cpip(
         "install",
         "--build-constraint",
@@ -36,9 +33,7 @@ def test_simple_extras_install_from_pypi(script: CpipTestEnvironment) -> None:
 
 
 def test_extras_after_wheel(script: CpipTestEnvironment, data: TestData) -> None:
-    """
-    Test installing a package with extras after installing from a wheel.
-    """
+    """Test installing a package with extras after installing from a wheel."""
     simple = script.site_packages / "simple"
 
     no_extra = script.cpip(
@@ -66,9 +61,7 @@ def test_extras_after_wheel(script: CpipTestEnvironment, data: TestData) -> None
 
 @pytest.mark.network
 def test_no_extras_uninstall(script: CpipTestEnvironment) -> None:
-    """
-    No extras dependency gets uninstalled when the root package is uninstalled
-    """
+    """No extras dependency gets uninstalled when the root package is uninstalled"""
     result = script.cpip(
         "install",
         "--build-constraint",
@@ -85,10 +78,10 @@ def test_no_extras_uninstall(script: CpipTestEnvironment) -> None:
 
 
 def test_nonexistent_extra_warns_user_no_wheel(
-    script: CpipTestEnvironment, data: TestData
+    script: CpipTestEnvironment,
+    data: TestData,
 ) -> None:
-    """
-    A warning is logged telling the user that the extra option they requested
+    """A warning is logged telling the user that the extra option they requested
     does not exist in the project they are wishing to install.
 
     This exercises source installs.
@@ -103,15 +96,15 @@ def test_nonexistent_extra_warns_user_no_wheel(
         expect_stderr=True,
     )
     assert "simple 3.0 does not provide the extra 'nonexistent'" in result.stderr, str(
-        result
+        result,
     )
 
 
 def test_nonexistent_extra_warns_user_with_wheel(
-    script: CpipTestEnvironment, data: TestData
+    script: CpipTestEnvironment,
+    data: TestData,
 ) -> None:
-    """
-    A warning is logged telling the user that the extra option they requested
+    """A warning is logged telling the user that the extra option they requested
     does not exist in the project they are wishing to install.
 
     This exercises wheel installs.
@@ -127,11 +120,10 @@ def test_nonexistent_extra_warns_user_with_wheel(
 
 
 def test_nonexistent_options_listed_in_order(
-    script: CpipTestEnvironment, data: TestData
+    script: CpipTestEnvironment,
+    data: TestData,
 ) -> None:
-    """
-    Warn the user for each extra that doesn't exist.
-    """
+    """Warn the user for each extra that doesn't exist."""
     result = script.cpip(
         "install",
         "--no-index",
@@ -140,22 +132,23 @@ def test_nonexistent_options_listed_in_order(
         expect_stderr=True,
     )
     matches = re.findall(
-        "WARNING: simplewheel 2.0 does not provide the extra '([a-z]*)'", result.stderr
+        "WARNING: simplewheel 2.0 does not provide the extra '([a-z]*)'",
+        result.stderr,
     )
     assert matches == ["nonexistent", "nope"]
 
 
 def test_install_fails_if_extra_at_end(
-    script: CpipTestEnvironment, data: TestData
+    script: CpipTestEnvironment,
+    data: TestData,
 ) -> None:
-    """
-    Fail if order of specifiers and extras is incorrect.
+    """Fail if order of specifiers and extras is incorrect.
 
     Test uses a requirements file to avoid a testing issue where
     the specifier gets interpreted as shell redirect.
     """
     script.scratch_path.joinpath("requirements.txt").write_text(
-        "requires_simple_extra>=0.1[extra]"
+        "requires_simple_extra>=0.1[extra]",
     )
 
     result = script.cpip(
@@ -237,7 +230,7 @@ def test_install_extra_merging(
               extras_require={'extra1': ['simple<3'],
                               'extra2': ['simple==1.*']},
         )
-    """)
+    """),
     )
 
     result = script.cpip_install_local(
@@ -305,7 +298,8 @@ def test_install_self_referential_extras(
 
 
 def test_install_setuptools_extras_inconsistency(
-    script: CpipTestEnvironment, tmp_path: Path
+    script: CpipTestEnvironment,
+    tmp_path: Path,
 ) -> None:
     test_project_path = tmp_path.joinpath("test")
     test_project_path.mkdir()
@@ -317,6 +311,6 @@ def test_install_setuptools_extras_inconsistency(
                     version='0.1',
                     extras_require={'extra_underscored': ['packaging']},
                 )
-            """)
+            """),
     )
     script.cpip("install", "--no-build-isolation", "--dry-run", test_project_path)

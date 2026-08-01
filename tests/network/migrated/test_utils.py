@@ -2,7 +2,6 @@ from email.message import Message
 from io import BytesIO
 
 import pytest
-
 from cpip.network.exceptions import NetworkConnectionError
 from cpip.network.http import HttpResponse
 from cpip.network.utils import raise_for_status, response_chunks

@@ -70,7 +70,8 @@ def create_timestamped_callable(sleep_per_call: float = 0) -> tuple[Mock, list[f
 
 
 @pytest.mark.skipif(
-    sys.platform == "win32", reason="Too flaky on Windows due to poor timer resolution"
+    sys.platform == "win32",
+    reason="Too flaky on Windows due to poor timer resolution",
 )
 @pytest.mark.flaky(reruns=3, reruns_delay=1)
 @pytest.mark.parametrize("wait_duration", [0.015, 0.045, 0.15])
@@ -87,11 +88,13 @@ def test_retry_wait(wait_duration: float) -> None:
 
 
 @pytest.mark.skipif(
-    sys.platform == "win32", reason="Too flaky on Windows due to poor timer resolution"
+    sys.platform == "win32",
+    reason="Too flaky on Windows due to poor timer resolution",
 )
 @pytest.mark.flaky(reruns=3, reruns_delay=1)
 @pytest.mark.parametrize(
-    "call_duration, max_allowed_calls", [(0.01, 11), (0.04, 3), (0.15, 1)]
+    "call_duration, max_allowed_calls",
+    [(0.01, 11), (0.04, 3), (0.15, 1)],
 )
 def test_retry_time_limit(call_duration: float, max_allowed_calls: int) -> None:
     function, timestamps = create_timestamped_callable(sleep_per_call=call_duration)
