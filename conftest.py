@@ -567,10 +567,9 @@ def setuptools_install(
 
 
 @pytest.fixture(scope="session")
-def coverage_install(
-    tmpdir_factory: pytest.TempPathFactory, common_wheels: Path
-) -> Path:
-    return common_wheel_editable_install(tmpdir_factory, common_wheels, "coverage")
+def coverage_install() -> Path:
+    """Expose the test runner's platform-compatible coverage installation."""
+    return Path(str(importlib.metadata.distribution("coverage").locate_file("")))
 
 
 @pytest.fixture(scope="session")

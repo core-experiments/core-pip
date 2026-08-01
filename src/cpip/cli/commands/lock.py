@@ -6,8 +6,7 @@ import os
 from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
-    import argparse
-
+    from cpip.cli.parser import ArgumentParser
     from cpip.resolution.req_install import InstallRequirement
 
 
@@ -75,11 +74,11 @@ def render_lock(packages: list[dict[str, object]]) -> str:
     return "\n".join(lines)
 
 
-def create_parser() -> argparse.ArgumentParser:
+def create_parser() -> "ArgumentParser":
     """Resolve requirements and write a PEP 751 ``pylock.toml`` file."""
-    import argparse
+    from cpip.cli.parser import ArgumentParser
 
-    parser = argparse.ArgumentParser(prog="cpip lock", allow_abbrev=False)
+    parser = ArgumentParser(prog="cpip lock", allow_abbrev=False)
     parser.add_argument("requirements", nargs="*")
     parser.add_argument("-e", "--editable", action="append", default=[])
     parser.add_argument("-r", "--requirement", action="append", default=[])
