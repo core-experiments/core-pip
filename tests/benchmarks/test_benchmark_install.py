@@ -13,11 +13,11 @@ from pathlib import Path
 
 from benchmark_support import reset_caches
 from pytest_codspeed import BenchmarkFixture
-from pip.core.hashes import Hashes, hash_file
-from pip.core.wheel import read_wheel_metadata, validate_wheel
-from pip.install.target import InstallTarget
-from pip.install.unpacking import unzip_file
-from pip.install.wheel_transaction import WheelInstaller
+from cpip.core.hashes import Hashes, hash_file
+from cpip.core.wheel import read_wheel_metadata, validate_wheel
+from cpip.install.target import InstallTarget
+from cpip.install.unpacking import unzip_file
+from cpip.install.wheel_transaction import WheelInstaller
 
 
 def test_read_wheel_metadata(benchmark: BenchmarkFixture, payload_wheel: Path) -> None:

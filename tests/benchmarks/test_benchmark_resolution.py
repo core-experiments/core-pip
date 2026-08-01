@@ -11,9 +11,9 @@ from pathlib import Path
 
 from benchmark_support import reset_caches
 from pytest_codspeed import BenchmarkFixture
-from pip.index.provider import CandidateProvider
-from pip.resolution.req_file import parse_requirements
-from pip.resolution.resolver import Resolver
+from cpip.index.provider import CandidateProvider
+from cpip.resolution.req_file import parse_requirements
+from cpip.resolution.resolver import Resolver
 
 
 def resolve(wheelhouse: Path, requirements: list[str]) -> int:

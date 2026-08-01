@@ -1,4 +1,4 @@
-"""CodSpeed coverage for workloads added by the original ASV suite."""
+"""CodSpeed coverage for the remaining benchmark workloads."""
 
 from __future__ import annotations
 
@@ -8,12 +8,12 @@ from pathlib import Path
 
 from benchmark_support import make_wheel, reset_caches
 from pytest_codspeed import BenchmarkFixture
-from pip.core.packaging import SpecifierSet, parse_requirement
-from pip.core.wheel import read_wheel_metadata
-from pip.install.unpacking import unzip_file
-from pip.index.provider import CandidateProvider
-from pip.resolution.req_file import parse_requirements
-from pip.resolution.resolver import Resolver
+from cpip.core.packaging import SpecifierSet, parse_requirement
+from cpip.core.wheel import read_wheel_metadata
+from cpip.install.unpacking import unzip_file
+from cpip.index.provider import CandidateProvider
+from cpip.resolution.req_file import parse_requirements
+from cpip.resolution.resolver import Resolver
 
 
 def test_hash_throughput(benchmark: BenchmarkFixture) -> None:
