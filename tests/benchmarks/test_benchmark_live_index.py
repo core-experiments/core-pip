@@ -50,9 +50,7 @@ def test_live_index_cold_cache(benchmark: BenchmarkFixture) -> None:
     assert benchmark(collect_cold) > 0
 
 
-def test_live_index_warm_cache(
-    benchmark: BenchmarkFixture, tmp_path: Path
-) -> None:
+def test_live_index_warm_cache(benchmark: BenchmarkFixture, tmp_path: Path) -> None:
     session = NetworkSession(retries=0, cache=str(tmp_path / "http-cache"))
     collect_packages(session)
 
@@ -71,7 +69,11 @@ def test_live_index_failure_path(benchmark: BenchmarkFixture) -> None:
             session=session,
         )
         try:
-            return len(provider.collect_links(parse_requirement("cpip-benchmark-does-not-exist")))
+            return len(
+                provider.collect_links(
+                    parse_requirement("cpip-benchmark-does-not-exist")
+                )
+            )
         finally:
             provider.close()
 

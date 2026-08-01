@@ -49,9 +49,17 @@ def backtracking_wheelhouse(tmp_path_factory: pytest.TempPathFactory) -> Path:
 
 
 @pytest.fixture(scope="session")
-def wrong_package_wheelhouses(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
+def wrong_package_wheelhouses(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> dict[str, Path]:
     cases = {}
-    for name in ("boto3-urllib3", "numpy-numba", "sentry-rapidjson", "starlette-fastapi", "apache-beam-dill"):
+    for name in (
+        "boto3-urllib3",
+        "numpy-numba",
+        "sentry-rapidjson",
+        "starlette-fastapi",
+        "apache-beam-dill",
+    ):
         wheelhouse = tmp_path_factory.mktemp(f"{name}-wheelhouse")
         make_wrong_package_graph(wheelhouse, name, versions=64)
         cases[name] = wheelhouse

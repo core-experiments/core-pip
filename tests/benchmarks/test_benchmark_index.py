@@ -28,6 +28,7 @@ from cpip.index.candidates import BestCandidateResult, InstallationCandidate
 from cpip.index.links import Link
 from cpip.index.page_parsing import IndexPageParser
 from cpip.index.provider import CandidateProvider
+
 PAGE_URL = "https://example.invalid/simple/package/"
 WHEEL_FILENAMES = wheel_filenames()
 CANDIDATE_URLS = [

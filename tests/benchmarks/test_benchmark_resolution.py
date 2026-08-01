@@ -81,6 +81,7 @@ def test_uv_wrong_package_backtracking_families(
     benchmark: BenchmarkFixture, wrong_package_wheelhouses: dict[str, Path]
 ) -> None:
     """Exercise the uv issue corpus' large wrong-package candidate shapes."""
+
     def resolve_cases() -> int:
         total = 0
         for name, wheelhouse in wrong_package_wheelhouses.items():
@@ -136,11 +137,14 @@ def test_resolvelib_backjump_pattern(
     def resolve_conflict() -> int:
         reset_caches()
         try:
-            resolve(backjump_wheelhouse, [
-                "python>=3.12",
-                "lz4==4.3.3",
-                "clickhouse-driver>=0.2.9",
-            ])
+            resolve(
+                backjump_wheelhouse,
+                [
+                    "python>=3.12",
+                    "lz4==4.3.3",
+                    "clickhouse-driver>=0.2.9",
+                ],
+            )
         except ResolutionError as error:
             return len(str(error))
         raise AssertionError("backjump workload unexpectedly resolved")

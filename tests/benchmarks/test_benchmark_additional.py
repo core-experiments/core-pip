@@ -128,7 +128,9 @@ def test_sdist_metadata_build_isolated(
     assert benchmark(prepare_metadata) == "1.0.0"
 
 
-def test_editable_build(benchmark: BenchmarkFixture, source_tree: Path, tmp_path: Path) -> None:
+def test_editable_build(
+    benchmark: BenchmarkFixture, source_tree: Path, tmp_path: Path
+) -> None:
     wheel_directory = tmp_path / "editable-wheel"
     wheel_directory.mkdir()
 
@@ -144,8 +146,8 @@ def test_build_isolation_requirements_validation(
     project = tmp_path / "build-requirements"
     project.mkdir()
     (project / "pyproject.toml").write_text(
-        "[build-system]\nrequires = [\"setuptools>=65\", \"wheel>=0.40\", "
-        "\"packaging>=23\"]\nbuild-backend = \"setuptools.build_meta\"\n",
+        '[build-system]\nrequires = ["setuptools>=65", "wheel>=0.40", '
+        '"packaging>=23"]\nbuild-backend = "setuptools.build_meta"\n',
         encoding="utf-8",
     )
 
