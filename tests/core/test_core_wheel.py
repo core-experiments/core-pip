@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import zipfile
 import platform
 import sys
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -143,7 +143,10 @@ def test_parse_wheel_filename_rejects_invalid_oracle(filename: str) -> None:
 def test_current_macos_accepts_newer_arm64_wheel() -> None:
     if sys.platform != "darwin" or platform.machine() != "arm64":
         pytest.skip("macOS arm64 wheel compatibility test")
-    wheel = parse_wheel_file("demo-1.0-cp314-cp314-macosx_12_0_arm64.whl")
+    version = f"{sys.version_info.major}{sys.version_info.minor}"
+    wheel = parse_wheel_file(
+        f"demo-1.0-cp{version}-cp{version}-macosx_12_0_arm64.whl"
+    )
     assert wheel is not None
     assert wheel_tag_rank(wheel.tags) is not None
 
