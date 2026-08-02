@@ -11,24 +11,12 @@ import sys
 import zipfile
 from collections.abc import Collection
 from types import SimpleNamespace
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
-from cpip.core.direct_url import DirectUrl
-from cpip.core.metadata import (
-    InstalledDistribution,
-    find_installed,
-    iter_installed_distributions,
-)
-from cpip.core.packaging import (
-    Requirement,
-    SpecifierSet,
-    Version,
-    canonicalize_name,
-    marker_applies,
-    parse_requirement,
-)
-from cpip.core.urls import url_to_path
-from cpip.core.wheel import parse_wheel, read_wheel_metadata_file
+if TYPE_CHECKING:
+    from cpip.core.direct_url import DirectUrl
+    from cpip.core.metadata import InstalledDistribution
+    from cpip.core.packaging import Requirement, SpecifierSet, Version
 
 
 def egg_link_names(raw_name: str) -> list[str]:
@@ -118,6 +106,8 @@ class MetadataDistribution:
         name: str,
         location: str,
     ) -> MetadataDistribution:
+        from cpip.core.wheel import parse_wheel, read_wheel_metadata_file
+
         info_dir, _ = parse_wheel(archive, name)
         contents = read_wheel_metadata_file(archive, f"{info_dir}/METADATA")
         metadata = email.parser.BytesParser().parsebytes(contents)
@@ -160,6 +150,8 @@ class MetadataDistribution:
 
     @property
     def canonical_name(self) -> str:
+        from cpip.core.packaging import canonicalize_name
+
         return canonicalize_name(self.raw_name)
 
     @property
@@ -168,13 +160,19 @@ class MetadataDistribution:
 
     @property
     def version(self) -> Version:
+        from cpip.core.packaging import Version
+
         return Version(self.raw_version)
 
     @property
     def requires_python(self) -> SpecifierSet:
+        from cpip.core.packaging import SpecifierSet
+
         return SpecifierSet(str(self.metadata.get("Requires-Python", "")))
 
     def iter_dependencies(self, extras: tuple[str, ...] = ()) -> list[Requirement]:
+        from cpip.core.packaging import marker_applies, parse_requirement
+
         dependencies: list[Requirement] = []
         for value in self.metadata.get_all("Requires-Dist", []):
             requirement = parse_requirement(value)
@@ -189,6 +187,8 @@ class MetadataDistribution:
         return parse_entry_points(self.entry_points_text_internal)
 
     def iter_provided_extras(self) -> list[str]:
+        from cpip.core.packaging import canonicalize_name
+
         return [
             canonicalize_name(value)
             for value in self.metadata.get_all("Provides-Extra", [])
@@ -243,6 +243,8 @@ class InstalledMetadataDistribution:
 
     @property
     def version(self) -> Version:
+        from cpip.core.packaging import Version
+
         return Version(self.raw_version)
 
     @property
@@ -338,6 +340,8 @@ class InstalledMetadataDistribution:
 
     @property
     def direct_url(self) -> DirectUrl | None:
+        from cpip.core.direct_url import DirectUrl
+
         try:
             return DirectUrl.from_json(self.read_text("direct_url.json"))
         except (FileNotFoundError, ValueError):
@@ -347,6 +351,8 @@ class InstalledMetadataDistribution:
     def editable_project_location(self) -> str | None:
         direct_url = self.direct_url
         if direct_url and direct_url.is_local_editable():
+            from cpip.core.urls import url_to_path
+
             return url_to_path(direct_url.url)
         if self.info_location and self.info_location.endswith(".egg-info"):
             egg_link_root = os.path.dirname(self.info_location)
@@ -381,6 +387,8 @@ class InstalledMetadataDistribution:
 
     @property
     def requires_python(self) -> SpecifierSet:
+        from cpip.core.packaging import SpecifierSet
+
         return SpecifierSet(str(self.metadata.get("Requires-Python", "")))
 
     @property
@@ -404,6 +412,8 @@ class InstalledMetadataDistribution:
         return self.metadata.get_all("Requires-Dist", [])
 
     def iter_provided_extras(self) -> list[str]:
+        from cpip.core.packaging import canonicalize_name
+
         return [
             canonicalize_name(value)
             for value in self.metadata.get_all("Provides-Extra", [])
@@ -463,6 +473,8 @@ class InstalledDistributionStore:
         skip: Collection[str] | None = None,
         names: Collection[str] | None = None,
     ) -> list[InstalledMetadataDistribution]:
+        from cpip.core.metadata import iter_installed_distributions
+
         result: list[InstalledMetadataDistribution] = []
         for distribution in iter_installed_distributions(self.paths, names=names):
             view = InstalledMetadataDistribution(
@@ -483,7 +495,11 @@ class InstalledDistributionStore:
         return result
 
     def find(self, name: str) -> InstalledMetadataDistribution | None:
+        from cpip.core.packaging import canonicalize_name
+
         if self.paths is not None and self.user_site is None:
+            from cpip.core.metadata import find_installed
+
             distribution = find_installed(name, self.paths)
             return (
                 InstalledMetadataDistribution(distribution, user_site=self.user_site)

@@ -15,8 +15,14 @@ def run(
     quiet_fast_command: bool,
     fast_install_attempted: bool = False,
 ) -> int:
+    spec = None
+    if argv:
+        from cpip.cli.commands.registry import get_command
+
+        spec = get_command(argv[0])
+
     if (version is not None or location is not None) and (
-        not argv or argv[0] != "lock"
+        not argv or (argv[0] != "lock" and (spec is None or spec.needs_tempdir))
     ):
         from cpip.cli._execution_context import configure
 
@@ -29,7 +35,8 @@ def run(
             ),
         )
 
-    if not quiet_fast_command and not os.environ.get("CPIP_QUIET"):
+    needs_logging = spec is None or spec.needs_logging
+    if needs_logging and not quiet_fast_command and not os.environ.get("CPIP_QUIET"):
         from cpip.cli.logging_config import configure_logging
 
         configure_logging(log_file)
@@ -42,11 +49,17 @@ def run(
             location=location,
         )
     if argv and argv[0] == "install" and not fast_install_attempted:
-        from cpip.cli.commands.fast_install import run as run_fast_install
+        from cpip.cli.fast_install import run as run_fast_install
 
         status = run_fast_install(argv[1:])
         if status is not None:
             return status
+    if spec is not None and not spec.needs_tempdir:
+        return run_fallback(
+            argv,
+            require_virtualenv=require_virtualenv,
+            location=location,
+        )
     from cpip.core.temp_dir import global_tempdir_manager
 
     with global_tempdir_manager():

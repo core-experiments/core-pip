@@ -21,11 +21,9 @@ if not __spec__ or __spec__.parent == "":
 if __name__ == "__main__":
     from cpip.cli.entrypoint import main as main_internal
 
-    from . import __version__
-
     sys.exit(
         main_internal(
-            version=__version__,
+            version=None,
             location=os.path.join(os.path.dirname(__file__), "__init__.py"),
         ),
     )

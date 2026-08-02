@@ -573,7 +573,7 @@ def run_install(args: list[str]) -> int:
                         for candidate in plan.candidates
                     )
                 ):
-                    from cpip.cli.commands.fast_install import (
+                    from cpip.cli.fast_install import (
                         install_resolved_pure_wheels,
                     )
 

@@ -2,15 +2,12 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import Iterable, Mapping
-from email.parser import Parser
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from cpip.core.cpip_version import CPIP_DISTRIBUTION_NAMES
-from cpip.core.packaging import canonicalize_name
+if TYPE_CHECKING:
+    from .metadata import InstalledMetadataDistribution
 
-from .metadata import InstalledDistributionStore, InstalledMetadataDistribution
 
 LatestInfo = Mapping[str, tuple[Any, str]]
 
@@ -28,6 +25,11 @@ def select_installed_distributions(
     user_site: str | None = None,
 ) -> list[InstalledMetadataDistribution]:
     """Return installed distributions after applying listing filters."""
+    from cpip.core.cpip_version import CPIP_DISTRIBUTION_NAMES
+    from cpip.core.packaging import canonicalize_name
+
+    from .metadata import InstalledDistributionStore
+
     excluded = {canonicalize_name(name) for name in excludes}
     if "pip" in excluded:
         excluded.update(canonicalize_name(name) for name in CPIP_DISTRIBUTION_NAMES)
@@ -62,6 +64,8 @@ def format_list_columns(
     latest: LatestInfo | None = None,
 ) -> tuple[list[list[str]], list[str]]:
     """Build rows and headers for the columns list format."""
+    from email.parser import Parser
+
     header = ["Package", "Version"]
     if outdated:
         header.extend(("Latest", "Type"))
@@ -107,6 +111,8 @@ def format_list_json(
     latest: LatestInfo | None = None,
 ) -> str:
     """Build JSON for the list format."""
+    import json
+
     data = []
     for dist in distributions:
         try:

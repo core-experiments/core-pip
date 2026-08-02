@@ -19,7 +19,9 @@ classifiers = [
     "Programming Language :: Python :: Implementation :: CPython",
     "Programming Language :: Python :: Implementation :: PyPy",
 ]
-authors = [{ name = "turcioskevinr@gmail.com", email = "turcioskevinr@gmail.com" }]
+authors = [
+    { name = "turcioskevinr@gmail.com", email = "turcioskevinr@gmail.com" },
+]
 
 # NOTE: requires-python is duplicated in __cpip-runner__.py.
 # When changing this value, please change the other copy as well.
@@ -27,7 +29,7 @@ requires-python = ">=3.9"
 dependencies = []
 
 [project.scripts]
-cpip = "cpip.cli.main:main"
+cpip = "cpip.cli.entrypoint:main"
 
 [project.urls]
 Homepage = "https://cpip.pypa.io/"
@@ -40,11 +42,7 @@ build-backend = "cpip.build.build_backend"
 backend-path = ["src"]
 
 [dependency-groups]
-benchmark = [
-    "pytest-codspeed>=5.0.3",
-    "tomli>=2",
-    "uv==0.12.1",
-]
+benchmark = ["pytest-codspeed>=5.0.3", "tomli>=2", "uv==0.12.1"]
 typing = ["ruff", "ty"]
 test = [
     "cryptography",
@@ -94,36 +92,3 @@ markers = [
 
 [tool.ty.environment]
 python-version = "3.14"
-
-[tool.cpip.architecture]
-domains = [
-    "core",
-    "platform",
-    "network",
-    "build",
-    "index",
-    "resolution",
-    "install",
-    "vcs",
-    "cli",
-]
-
-[tool.cpip.architecture.dependencies]
-core = []
-platform = ["core"]
-build = ["core", "platform"]
-index = ["core", "build", "platform"]
-network = ["core", "platform", "build", "index"]
-vcs = ["core"]
-resolution = ["core", "index", "network", "vcs"]
-install = ["core", "platform", "network", "build", "index", "resolution", "vcs"]
-cli = [
-    "core",
-    "platform",
-    "network",
-    "build",
-    "index",
-    "resolution",
-    "install",
-    "vcs",
-]

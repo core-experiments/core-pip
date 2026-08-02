@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ._version import __version__
+__version__ = "0.0.1"
 
 
 def main(args: list[str] | None = None) -> int:
@@ -10,4 +10,4 @@ def main(args: list[str] | None = None) -> int:
     """
     from cpip.cli.entrypoint import main as main_internal
 
-    return main_internal(args, version=__version__, location=__file__)
+    return main_internal(args, version=None, location=__file__)

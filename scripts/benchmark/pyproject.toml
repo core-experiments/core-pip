@@ -1,0 +1,19 @@
+[project]
+name = "cpip-benchmark"
+version = "0.0.1"
+description = "Hyperfine benchmark harness for cpip"
+requires-python = ">=3.10"
+dependencies = [
+  "pytest",
+]
+
+[project.scripts]
+cpip-bench = "cpip_benchmark.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--confcutdir=."
