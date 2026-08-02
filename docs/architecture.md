@@ -10,7 +10,7 @@ places to start reading.
 | --- | --- | --- |
 | What happens when `cpip` starts? | `src/cpip/cli/entrypoint.py:main` | bootstrap, fast paths, fallback dispatch |
 | Where is a command implemented? | `src/cpip/cli/commands/registry.py` | the command's `run_*` function |
-| How are dependencies resolved? | `src/cpip/resolution/resolver.py:Resolver` | `resolution/resolver_internals/state/`, `resolution/algorithms.py`, `CandidateProvider`, candidate search |
+| How are dependencies resolved? | `src/cpip/resolution/engine/api.py:ResolutionEngine` | `resolution/engine/runtime.py`, `resolution/engine/state/`, `CandidateProvider`, search and policy operations |
 | Where do index candidates come from? | `src/cpip/index/provider.py:CandidateProvider` | source locations and link parsing |
 | How are wheels installed? | `src/cpip/install/wheel_transaction.py` | archive validation, transaction, commit/rollback |
 | How are packages downloaded? | `src/cpip/network/download.py` | HTTP transport and cache |
@@ -52,10 +52,14 @@ The normal dependency path is:
 ```text
 CLI command
   -> requirement collection
-  -> resolution.resolver:Resolver.resolve
-       -> resolution.resolver_internals.state: agenda, domains, plans, requests
-       -> resolution.algorithms: candidate, version, hash, and URL primitives
-       -> resolution.resolver_internals: search, selection, conflicts, checks
+  -> resolution.engine.api:ResolutionEngine.resolve
+       -> resolution.engine.input: requirement coercion and file models
+       -> resolution.engine.runtime: provider setup and resolution orchestration
+       -> resolution.engine.state: agenda, domains, plans, and requests
+       -> resolution.engine.algorithms: candidate, version, hash, graph, and URL primitives
+       -> resolution.engine.loop: search, selection, and backtracking
+       -> resolution.engine.conflict_learning: learned incompatibilities
+       -> resolution.engine.policy / validation: candidate and hash checks
        -> index.provider:CandidateProvider
             -> source_locations / page_parsing / links
        -> index.candidate_evaluators:CandidateEvaluator
@@ -68,39 +72,46 @@ CLI command
   -> install.wheel_transaction
 ```
 
-`resolution.resolver_internals` contains the resolver’s private operation
-domains and the type-only `ResolverContext` protocol. It documents shared
-resolver state without adding a runtime import or compatibility layer.
+`resolution.engine.context` contains type-only protocols for the resolver's
+configuration, search state, conflict state, and operation boundaries. These
+protocols document the shared resolver state without adding runtime coupling.
 
-The public `Resolver` is composed from three implementation domains:
+The public `ResolutionEngine` is composed from these implementation domains:
 
-- `ResolverSearch`: candidate selection and backtracking search.
-- `ResolverConflicts`: learned incompatibilities and version-domain reasoning.
-- `ResolverChecks`: candidate policy, compatibility, and hash validation.
+- `SearchLoop`: candidate selection and backtracking search.
+- `ConflictLearning`: learned incompatibilities and version-domain reasoning.
+- `PolicyChecks`: candidate policy, Python compatibility, and hash validation.
 
-The domain classes are deliberately flat operations on the resolver context;
-they do not allocate helper objects during resolution.
+These operations are mixed into `ResolutionRuntime` and operate through the
+type-only context protocols; they do not expose a second public resolver API.
 
 The local pure-wheel benchmark path is separate and deliberately narrow:
 
 ```text
 cli.entrypoint
   -> cli.commands.fast_install:run
-  -> resolution.fast_local_wheelhouse:resolve
-       -> resolution.fast_wheelhouse: catalog, metadata, search, archive
-  -> install.wheel_transaction:install_resolved_pure_wheels
+  -> cli.fast_install:resolve_simple_wheelhouse
+       -> resolution.engine.sources.wheelhouse: catalog, metadata, search
+  -> cli.fast_install:install_resolved_pure_wheels
 ```
 
-Do not route this path through the full `Resolver` or normal build/network
-stack unless the input no longer satisfies the fast-path assumptions. The
-fallback is the compatibility and feature-complete path; the fast path is the
-performance path.
+The normal install command also uses `cli.fast_install:install_resolved_pure_wheels`
+as a hybrid optimization when its resolved plan is an empty-target install of
+pure wheels. The installer accepts the small `PureWheelCandidate` protocol
+(`canonical_name` and `path`), so it can consume both the lightweight
+`FastCandidate` records and the normal resolver's wheel candidates. It validates
+the wheel archive and writes directly to the target; unsupported layouts or
+write failures return control to the normal transactional installer.
+
+Do not route unsupported inputs through this path. The fast path is deliberately
+narrow and must return `None` or `False` so the fallback remains the
+compatibility and feature-complete path.
 
 ## Package ownership
 
 | Package | Owns | Should not own |
 | --- | --- | --- |
-| `cli` | argument parsing, command dispatch, presentation | candidate selection or archive mutation |
+| `cli` | argument parsing, command dispatch, presentation, narrow fast paths | general candidate selection or normal archive transactions |
 | `core` | shared data models, packaging rules, URLs, hashes, wheels | command-specific policy |
 | `index` | sources, links, catalogs, candidate discovery | dependency backtracking |
 | `resolution` | requirements, constraints, candidate selection, dependency search | filesystem installation |
@@ -128,26 +139,28 @@ Within `index` and `resolution`, keep the split visible:
   - `index/source_models.py` owns the records and metadata value objects passed
     between discovery, evaluation, and materialization.
 
-  - `resolver.py` owns orchestration and exposes the public `Resolver` façade.
-  - `resolver_internals/state/` owns rollback-friendly agenda, domain, request,
-    and plan state.
-  - `resolver_internals/inputs.py` owns requirement coercion and result-input
-    mapping; `resolver_internals/outputs.py` owns plan materialization and
-    installation ordering.
-  - `algorithms.py` owns stateless candidate, version, hash, graph, and URL
+  - `resolution/engine/api.py` owns orchestration and exposes the public
+    `ResolutionEngine` façade.
+  - `resolution/engine/state/` owns agenda, domain, request, and plan state.
+  - `resolution/engine/input/` owns requirement coercion, input models, and
+    requirements-file parsing; `resolution/engine/output.py` owns result
+    materialization and installation ordering.
+  - `resolution/engine/algorithms.py` owns stateless candidate, version, hash, graph, and URL
     algorithms. It must not acquire resolver state or command-line policy.
-  - `resolver_internals/search.py` owns the stateful search loop, frame
-    management, and backtracking behavior.
-  - `resolver_internals/conflicts.py` owns learned incompatibilities, conflict activity, and
-    version-domain masks. It must not perform network access or installation.
-  - `resolver_internals/selection.py` owns installed-distribution satisfaction, requirement
-    ordering, candidate counts, and provider filtering.
-  - `resolver_internals/validation.py` owns Python compatibility and requirement/source hash
-    validation.
-  - `fast_wheelhouse/` owns the lightweight local-wheel implementation; its
-    `fast_local_wheelhouse.py` module is an explicit command-facing façade.
-  - `requirements/` owns requirement-line parsing, paths, and build-backend
-    invocation; `requirement_files/` owns requirements-file and pylock parsing.
+  - `resolution/engine/loop.py` owns the stateful search loop, frame
+    management, selection, and backtracking behavior.
+  - `resolution/engine/conflict_learning.py` owns learned incompatibilities,
+    conflict activity, and version-domain masks. It must not perform network
+    access or installation.
+  - `resolution/engine/selection.py` owns installed-distribution satisfaction,
+    requirement ordering, candidate counts, and provider filtering.
+  - `resolution/engine/validation.py` owns Python compatibility and
+    requirement/source hash validation; `policy.py` owns candidate policy and
+    resolver diagnostics.
+  - `resolution/engine/sources/wheelhouse/` owns the local pure-wheel catalog,
+    metadata, search, and archive handling used by the fast resolver.
+  - `cli/requirements.py` owns CLI requirement collection; build-backend
+    invocation belongs to `build/build_backend.py` and install preparation.
 
 When a change appears to fit two packages, keep the policy in the higher-level
 owner and put only reusable mechanics in the lower-level package. This keeps
@@ -165,8 +178,10 @@ and benchmarks:
    `None`, allowing the normal path to take over.
 4. Catalog scanning and candidate metadata loading should remain behind the
    resolver/provider boundary, where their caches can be reused.
-5. Installation writes must remain transactional; performance shortcuts must
-   not bypass validation or rollback.
+5. Normal installation writes must remain transactional. The pure-wheel
+   shortcut must validate archive layout before writing and remove its own
+   partial writes on failure; unsupported cases must return to the normal
+   transaction.
 
 For a performance change, first identify which boundary it crosses. Prefer
 moving work behind an existing lazy boundary or reducing repeated work inside
@@ -176,15 +191,15 @@ one owner over introducing a new shared utility imported by every command.
 
 For a CLI bug, start with `entrypoint.py`, identify the selected command in
 `commands/registry.py`, then follow that command's `run_*` function. For a
-resolution bug, start with `Resolver.resolve`, inspect the provider method it
-calls, and only then descend into source parsing or materialization. For an
-install bug, start at `wheel_transaction.py` and walk backward to the
+resolution bug, start with `ResolutionEngine.resolve`, inspect the provider
+method it calls, and only then descend into source parsing or materialization.
+For an install bug, start at `wheel_transaction.py` and walk backward to the
 preparer/builder rather than beginning in archive helpers.
 
 The most useful searches are:
 
 ```sh
-rg -n "CommandSpec|run_[a-z_]+|Resolver|CandidateProvider" src/cpip
-rg -n "install_resolved_pure_wheels|fast_local_wheelhouse" src tests benchmarks
-rg -n "load_catalog|scan_catalog|search_candidates|materialize" src/cpip
+rg -n "CommandSpec|run_[a-z_]+|ResolutionEngine|CandidateProvider" src/cpip
+rg -n "install_resolved_pure_wheels|resolve_simple_wheelhouse" src tests
+rg -n "load_catalog|scan_catalog|search_candidates|CandidateMaterializer" src/cpip
 ```
