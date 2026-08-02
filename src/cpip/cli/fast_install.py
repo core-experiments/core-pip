@@ -3,17 +3,23 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Iterable
-from contextlib import ExitStack
-from typing import Protocol
 
 
-class ResolvedCandidate(Protocol):
-    @property
-    def path(self) -> str | os.PathLike[str]: ...
+class FastCandidate:
+    __slots__ = ("canonical_name", "dependencies", "name", "path", "version")
 
-    @property
-    def canonical_name(self) -> str: ...
+    def __init__(
+        self,
+        name: str,
+        version: str,
+        path: str,
+        dependencies: list[str],
+    ) -> None:
+        self.name = name
+        self.version = version
+        self.path = path
+        self.dependencies = dependencies
+        self.canonical_name = normalize_name(name)
 
 
 class InstallOptions:
@@ -39,9 +45,26 @@ class InstallOptions:
         self.quiet = False
 
 
-def parse_arguments(args: list[str]) -> InstallOptions | None:
-    from cpip.cli.commands._fast_path import option_value, read_requirements
+def option_value(args: list[str], index: int) -> str | None:
+    if index + 1 >= len(args):
+        return None
+    value = args[index + 1]
+    return None if value.startswith("-") else value
 
+
+def read_requirements(path: str) -> list[str] | None:
+    try:
+        with open(path, encoding="utf-8") as requirement_file:
+            return [
+                line.strip()
+                for line in requirement_file.read().splitlines()
+                if line.strip() and not line.lstrip().startswith("#")
+            ]
+    except OSError:
+        return None
+
+
+def parse_arguments(args: list[str]) -> InstallOptions | None:
     options = InstallOptions()
     index = 0
     while index < len(args):
@@ -121,16 +144,189 @@ def is_safe_member(name: str) -> bool:
     )
 
 
+def normalize_name(value: str) -> str:
+    return value.replace("_", "-").replace(".", "-").lower()
+
+
+def version_key(value: str) -> tuple[int, ...] | None:
+    parts = value.split(".")
+    if not parts:
+        return None
+    result = []
+    for part in parts:
+        if not part.isdigit():
+            return None
+        result.append(int(part))
+    while len(result) > 1 and result[-1] == 0:
+        result.pop()
+    return tuple(result)
+
+
+def parse_wheel_filename(path: str) -> tuple[str, str] | None:
+    filename = os.path.basename(path)
+    if not filename.endswith(".whl"):
+        return None
+    parts = filename[:-4].split("-")
+    if len(parts) < 5:
+        return None
+    name, version = parts[0], parts[1]
+    if version_key(version) is None:
+        return None
+    return name.replace("_", "-"), version
+
+
+def parse_requirement(value: str) -> tuple[str, str, tuple[int, ...] | None] | None:
+    value = value.split(";", 1)[0].strip()
+    if not value:
+        return None
+    for operator in ("==", ">=", "<=", ">", "<"):
+        if operator in value:
+            name, _, version = value.partition(operator)
+            key = version_key(version.strip())
+            if key is None:
+                return None
+            return normalize_name(name.partition("[")[0].strip()), operator, key
+    return normalize_name(value.partition("[")[0].strip()), "", None
+
+
+def requirement_satisfied(
+    requirement: tuple[str, str, tuple[int, ...] | None],
+    candidate: FastCandidate,
+) -> bool:
+    _, operator, expected = requirement
+    if not operator:
+        return True
+    key = version_key(candidate.version)
+    if key is None or expected is None:
+        return False
+    if operator == "==":
+        return key == expected
+    if operator == ">=":
+        return key >= expected
+    if operator == "<=":
+        return key <= expected
+    if operator == ">":
+        return key > expected
+    if operator == "<":
+        return key < expected
+    return False
+
+
+def wheel_metadata(path: str) -> tuple[list[str], bool] | None:
+    import zipfile
+
+    try:
+        with zipfile.ZipFile(path) as archive:
+            metadata_members = [
+                name for name in archive.namelist() if name.endswith(".dist-info/METADATA")
+            ]
+            wheel_members = [
+                name for name in archive.namelist() if name.endswith(".dist-info/WHEEL")
+            ]
+            if len(metadata_members) != 1 or len(wheel_members) != 1:
+                return None
+            metadata = archive.read(metadata_members[0]).decode("utf-8")
+            wheel = archive.read(wheel_members[0]).decode("utf-8")
+    except (OSError, UnicodeDecodeError, zipfile.BadZipFile):
+        return None
+    dependencies = []
+    for line in metadata.splitlines():
+        if line.startswith("Requires-Dist:"):
+            dependencies.append(line.partition(":")[2].strip())
+    pure = any(
+        line.casefold().strip() == "root-is-purelib: true"
+        for line in wheel.splitlines()
+    )
+    return dependencies, pure
+
+
+def iter_wheel_paths(find_links: list[str]) -> list[str] | None:
+    result = []
+    for value in find_links:
+        if value.endswith(".whl"):
+            if not os.path.isfile(value):
+                return None
+            result.append(os.path.abspath(value))
+            continue
+        try:
+            with os.scandir(value) as entries:
+                for entry in entries:
+                    if entry.name.endswith(".whl") and entry.is_file():
+                        result.append(os.path.abspath(entry.path))
+        except OSError:
+            return None
+    return result
+
+
+def resolve_simple_wheelhouse(
+    find_links: list[str],
+    requirements: list[str],
+) -> list[FastCandidate] | None:
+    paths = iter_wheel_paths(find_links)
+    if paths is None:
+        return None
+    candidates_by_name: dict[str, list[FastCandidate]] = {}
+    for path in paths:
+        parsed = parse_wheel_filename(path)
+        if parsed is None:
+            return None
+        name, version = parsed
+        metadata = wheel_metadata(path)
+        if metadata is None:
+            return None
+        dependencies, pure = metadata
+        if not pure:
+            return None
+        candidate = FastCandidate(name, version, path, dependencies)
+        candidates_by_name.setdefault(candidate.canonical_name, []).append(candidate)
+    for candidates in candidates_by_name.values():
+        candidates.sort(key=lambda candidate: version_key(candidate.version) or (), reverse=True)
+
+    resolved: dict[str, FastCandidate] = {}
+    visiting: set[str] = set()
+
+    def add_requirement(raw: str) -> bool:
+        requirement = parse_requirement(raw)
+        if requirement is None:
+            return False
+        name = requirement[0]
+        existing = resolved.get(name)
+        if existing is not None:
+            return requirement_satisfied(requirement, existing)
+        if name in visiting:
+            return True
+        candidates = candidates_by_name.get(name, ())
+        selected = next(
+            (
+                candidate
+                for candidate in candidates
+                if requirement_satisfied(requirement, candidate)
+            ),
+            None,
+        )
+        if selected is None:
+            return False
+        visiting.add(name)
+        for dependency in selected.dependencies:
+            if not add_requirement(dependency):
+                return False
+        visiting.remove(name)
+        resolved[name] = selected
+        return True
+
+    for requirement in requirements:
+        if not add_requirement(requirement):
+            return None
+    return list(resolved.values())
+
+
 def install_resolved_pure_wheels(
-    candidates: Iterable[ResolvedCandidate],
+    candidates: list[FastCandidate],
     target: str,
     requested_roots: set[str],
 ) -> bool:
     """Install an already-resolved pure-wheel plan into an empty target."""
-    from cpip.resolution.engine.sources.wheelhouse.archive import (
-        WheelArchive,
-        WheelhouseUnavailable,
-    )
+    import zipfile
 
     target = os.path.abspath(target)
     separator = os.sep
@@ -144,37 +340,14 @@ def install_resolved_pure_wheels(
     elif os.path.exists(target):
         return False
 
-    prepared: list[
-        tuple[
-            ResolvedCandidate,
-            WheelArchive,
-            list[str],
-            list[str],
-            list[str],
-            str,
-            bool,
-            tuple[str, bytes] | None,
-            int,
-        ]
-    ] = []
+    prepared: list[tuple[str, bool, list[tuple[str, str, bytes]]]] = []
     destinations: set[str] = set()
-    with ExitStack() as files:
-        for candidate in candidates:
-            try:
-                file = files.enter_context(open(os.fspath(candidate.path), "rb"))
-                layout = getattr(candidate, "wheel_layout", None)
-                if layout is not None:
-                    dist_info, raw_members, pure = layout
-                    archive = WheelArchive(
-                        file,
-                        {item[0]: tuple(item[1:]) for item in raw_members},
-                    )
-                    archive_names = list(archive.members)
-                    if not pure:
-                        return False
-                else:
-                    archive = WheelArchive(file)
-                    archive_names = archive.namelist()
+    for candidate in candidates:
+        if not isinstance(candidate, FastCandidate):
+            return False
+        try:
+            with zipfile.ZipFile(os.fspath(candidate.path)) as archive:
+                archive_names = archive.namelist()
                 names = []
                 destinations_for_wheel = []
                 directories_for_wheel = []
@@ -193,116 +366,75 @@ def install_resolved_pure_wheels(
                     names.append(name)
                     destinations_for_wheel.append(destination)
                     directories_for_wheel.append(os.path.dirname(destination))
-                if layout is None:
-                    wheel_members = [
-                        name for name in names if name.endswith(".dist-info/WHEEL")
-                    ]
-                    if len(wheel_members) != 1:
-                        return False
-                    wheel_contents = archive.read(wheel_members[0])
-                    wheel_text = wheel_contents.decode("utf-8")
-            except (OSError, ValueError, WheelhouseUnavailable, UnicodeDecodeError):
-                return False
-            if layout is None and not any(
-                line.casefold().strip() == "root-is-purelib: true"
-                for line in wheel_text.splitlines()
-            ):
-                return False
-            if layout is None:
+                wheel_members = [
+                    name for name in names if name.endswith(".dist-info/WHEEL")
+                ]
+                if len(wheel_members) != 1:
+                    return False
+                wheel_contents = archive.read(wheel_members[0])
+                wheel_text = wheel_contents.decode("utf-8")
+                if not any(
+                    line.casefold().strip() == "root-is-purelib: true"
+                    for line in wheel_text.splitlines()
+                ):
+                    return False
                 dist_info = wheel_members[0].rsplit("/", 1)[0]
-                preloaded_wheel = (wheel_members[0], wheel_contents)
-                wheel_index = names.index(wheel_members[0])
-            else:
-                preloaded_wheel = None
-                wheel_index = -1
-            prepared.append(
-                (
-                    candidate,
-                    archive,
-                    names,
-                    destinations_for_wheel,
-                    directories_for_wheel,
-                    dist_info,
-                    candidate.canonical_name in requested_roots,
-                    preloaded_wheel,
-                    wheel_index,
-                ),
-            )
-
-        os.makedirs(target, exist_ok=True)
-        created_directories = {target}
-        created_files: list[str] = []
-        try:
-            for (
-                _,
-                archive,
-                names,
-                destinations_for_wheel,
-                directories_for_wheel,
-                dist_info,
-                requested,
-                preloaded_wheel,
-                wheel_index,
-            ) in prepared:
-                if preloaded_wheel is None:
-                    members = zip(
+                members = [
+                    (
+                        destination,
+                        directory,
+                        wheel_contents if name == wheel_members[0] else archive.read(name),
+                    )
+                    for name, destination, directory in zip(
+                        names,
                         destinations_for_wheel,
                         directories_for_wheel,
-                        archive.read_many(names, ordered_input=True),
                     )
-                else:
-                    wheel_name, wheel_contents = preloaded_wheel
-                    read_names = names[:wheel_index] + names[wheel_index + 1 :]
-                    read_destinations = (
-                        destinations_for_wheel[:wheel_index]
-                        + destinations_for_wheel[wheel_index + 1 :]
-                    )
-                    read_directories = (
-                        directories_for_wheel[:wheel_index]
-                        + directories_for_wheel[wheel_index + 1 :]
-                    )
-                    wheel_destination = destinations_for_wheel[wheel_index]
-                    wheel_directory = directories_for_wheel[wheel_index]
-                    members = zip(
-                        read_destinations,
-                        read_directories,
-                        archive.read_many(read_names, ordered_input=True),
-                    )
-                    from itertools import chain
+                ]
+        except (OSError, ValueError, zipfile.BadZipFile, UnicodeDecodeError):
+            return False
+        prepared.append(
+            (
+                dist_info,
+                candidate.canonical_name in requested_roots,
+                members,
+            ),
+        )
 
-                    members = chain(
-                        ((wheel_destination, wheel_directory, wheel_contents),),
-                        members,
-                    )
-                for destination, directory, contents in members:
-                    if directory not in created_directories:
-                        os.makedirs(directory, exist_ok=True)
-                        created_directories.add(directory)
-                    with open(destination, "wb", buffering=0) as output:
-                        output.write(contents)
-                    created_files.append(destination)
-                installer = os.path.join(target, dist_info, "INSTALLER")
-                with open(installer, "w", encoding="utf-8") as output:
-                    output.write("cpip\n")
-                created_files.append(installer)
-                if requested:
-                    requested_path = os.path.join(target, dist_info, "REQUESTED")
-                    with open(requested_path, "w"):
-                        pass
-                    created_files.append(requested_path)
-        except (OSError, ValueError, WheelhouseUnavailable):
-            for path in reversed(created_files):
+    os.makedirs(target, exist_ok=True)
+    created_directories = {target}
+    created_files: list[str] = []
+    try:
+        for dist_info, requested, members in prepared:
+            for destination, directory, contents in members:
+                if directory not in created_directories:
+                    os.makedirs(directory, exist_ok=True)
+                    created_directories.add(directory)
+                with open(destination, "wb", buffering=0) as output:
+                    output.write(contents)
+                created_files.append(destination)
+            installer = os.path.join(target, dist_info, "INSTALLER")
+            with open(installer, "w", encoding="utf-8") as output:
+                output.write("cpip\n")
+            created_files.append(installer)
+            if requested:
+                requested_path = os.path.join(target, dist_info, "REQUESTED")
+                with open(requested_path, "w"):
+                    pass
+                created_files.append(requested_path)
+    except (OSError, ValueError, zipfile.BadZipFile):
+        for path in reversed(created_files):
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+        for directory in sorted(created_directories, key=len, reverse=True):
+            if directory != target:
                 try:
-                    os.unlink(path)
+                    os.rmdir(directory)
                 except OSError:
                     pass
-            for directory in sorted(created_directories, key=len, reverse=True):
-                if directory != target:
-                    try:
-                        os.rmdir(directory)
-                    except OSError:
-                        pass
-            return False
+        return False
     return True
 
 
@@ -335,14 +467,8 @@ def run(args: list[str]) -> int | None:
     if not _target_is_empty(options.target):
         return None
 
-    from cpip.resolution.engine import ResolutionEngine
-
-    plan = ResolutionEngine.resolve_wheelhouse(
-        options.find_links,
-        options.requirements,
-        cache_dir=options.cache_dir,
-    )
-    if plan is None:
+    candidates = resolve_simple_wheelhouse(options.find_links, options.requirements)
+    if candidates is None:
         return None
 
     roots = {
@@ -358,18 +484,18 @@ def run(args: list[str]) -> int | None:
     }
     if not options.quiet:
         print(f"Looking in links: {', '.join(options.find_links)}")
-        if plan.candidates:
+        if candidates:
             print(
                 "Installing collected packages: "
-                + ", ".join(candidate.name for candidate in plan.candidates),
+                + ", ".join(candidate.name for candidate in candidates),
             )
-    if not install_resolved_pure_wheels(plan.candidates, options.target, roots):
+    if not install_resolved_pure_wheels(candidates, options.target, roots):
         return None
-    if plan.candidates and not options.quiet:
+    if candidates and not options.quiet:
         print(
             "Successfully installed "
             + " ".join(
-                f"{candidate.name}-{candidate.version}" for candidate in plan.candidates
+                f"{candidate.name}-{candidate.version}" for candidate in candidates
             ),
         )
     return 0

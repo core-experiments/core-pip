@@ -49,7 +49,7 @@ def run(
             location=location,
         )
     if argv and argv[0] == "install" and not fast_install_attempted:
-        from cpip.cli.commands.fast_install import run as run_fast_install
+        from cpip.cli.fast_install import run as run_fast_install
 
         status = run_fast_install(argv[1:])
         if status is not None:

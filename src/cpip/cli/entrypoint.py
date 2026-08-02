@@ -201,7 +201,7 @@ def main(
                 )
             )
         ):
-            from cpip.cli.commands.fast_install import run as run_fast_install
+            from cpip.cli.fast_install import run as run_fast_install
 
             fast_install_attempted = True
             status = run_fast_install(argv[1:])
@@ -209,7 +209,7 @@ def main(
                 sys.stdout.flush()
                 sys.stderr.flush()
                 return status
-            from cpip.cli.commands.fast_install import run_local_fallback
+            from cpip.cli.fast_install import run_local_fallback
 
             status = run_local_fallback(argv[1:])
             if status is not None:
