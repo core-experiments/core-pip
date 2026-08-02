@@ -3,6 +3,13 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Sequence
+from typing import Protocol
+
+
+class PureWheelCandidate(Protocol):
+    canonical_name: str
+    path: str
 
 
 class FastCandidate:
@@ -325,7 +332,7 @@ def resolve_simple_wheelhouse(
 
 
 def install_resolved_pure_wheels(
-    candidates: list[FastCandidate],
+    candidates: Sequence[PureWheelCandidate],
     target: str,
     requested_roots: set[str],
 ) -> bool:
@@ -347,8 +354,6 @@ def install_resolved_pure_wheels(
     prepared: list[tuple[str, bool, list[tuple[str, str, bytes]]]] = []
     destinations: set[str] = set()
     for candidate in candidates:
-        if not isinstance(candidate, FastCandidate):
-            return False
         try:
             with zipfile.ZipFile(os.fspath(candidate.path)) as archive:
                 archive_names = archive.namelist()
