@@ -108,8 +108,6 @@ def print_help() -> None:
 
 
 def print_version(version: str | None, location: str | None) -> None:
-    from cpip.core.python import CURRENT_PYTHON_VERSION
-
     if version is None or location is None:
         import cpip
 
@@ -119,9 +117,10 @@ def print_version(version: str | None, location: str | None) -> None:
             location = os.path.dirname(cpip.__file__)
     if location is None:
         raise RuntimeError("cpip package location is unavailable")
+    python_version = f"{sys.version_info.major}.{sys.version_info.minor}"
     print(
         f"cpip {version} from {os.path.realpath(location)} "
-        f"(python {CURRENT_PYTHON_VERSION})",
+        f"(python {python_version})",
     )
 
 
@@ -219,7 +218,7 @@ def main(
                 return status
 
         if argv and argv[0] == "list":
-            from cpip.cli.commands.fast_list import run as run_fast_list
+            from cpip.cli.fast_list import run as run_fast_list
 
             status = run_fast_list(argv[1:])
             if status is not None:

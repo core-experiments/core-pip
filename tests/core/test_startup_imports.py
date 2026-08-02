@@ -165,6 +165,7 @@ def test_list_empty_explicit_path_stays_on_fast_path(tmp_path: Path) -> None:
         modules,
         "argparse",
         "cpip.cli.context",
+        "cpip.cli.commands",
         "cpip.core.metadata",
         "cpip.platform.locations.sysconfig",
         "importlib.metadata",

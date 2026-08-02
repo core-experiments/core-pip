@@ -138,6 +138,44 @@ def iter_distributions(paths: list[str]) -> list[dict[str, str]]:
     return result
 
 
+def json_string(value: str) -> str:
+    replacements = {
+        '"': '\\"',
+        "\\": "\\\\",
+        "\b": "\\b",
+        "\f": "\\f",
+        "\n": "\\n",
+        "\r": "\\r",
+        "\t": "\\t",
+    }
+    parts = ['"']
+    for char in value:
+        replacement = replacements.get(char)
+        if replacement is not None:
+            parts.append(replacement)
+        elif ord(char) < 0x20:
+            parts.append(f"\\u{ord(char):04x}")
+        else:
+            parts.append(char)
+    parts.append('"')
+    return "".join(parts)
+
+
+def render_json(distributions: list[dict[str, str]], verbose: bool) -> str:
+    if not distributions:
+        return "[]"
+    items = []
+    for distribution in distributions:
+        fields = [
+            f'"name": {json_string(distribution["name"])}',
+            f'"version": {json_string(distribution["version"])}',
+        ]
+        if verbose:
+            fields.append(f'"location": {json_string(distribution["location"])}')
+        items.append("{" + ", ".join(fields) + "}")
+    return "[" + ", ".join(items) + "]"
+
+
 def run(args: list[str]) -> int | None:
     options = parse_arguments(args)
     if options is None:
@@ -150,24 +188,7 @@ def run(args: list[str]) -> int | None:
     distributions.sort(key=lambda item: canonicalize_name(item["name"]))
 
     if options.format == "json":
-        import json
-
-        print(
-            json.dumps(
-                [
-                    {
-                        "name": distribution["name"],
-                        "version": distribution["version"],
-                        **(
-                            {"location": distribution["location"]}
-                            if options.verbose > 0
-                            else {}
-                        ),
-                    }
-                    for distribution in distributions
-                ],
-            ),
-        )
+        print(render_json(distributions, options.verbose > 0))
         return 0
     if options.format == "freeze":
         for distribution in distributions:
