@@ -85,7 +85,9 @@ def cleanup_command(paths: list[Path], *, mkdir: list[Path] | None = None) -> st
     return shlex.join(command)
 
 
-def prepare_with_cache(cwd: Path, *, cache: Path, outputs: list[Path], cold: bool) -> str:
+def prepare_with_cache(
+    cwd: Path, *, cache: Path, outputs: list[Path], cold: bool
+) -> str:
     paths = []
     if cold:
         paths.append(cache)
@@ -149,27 +151,58 @@ def build_commands(
     if benchmark == "startup-install-help":
         return [
             Command("cpip (startup-install-help)", None, cpip(["install", "--help"])),
-            Command("uv (startup-install-help)", None, uv_command(uv_path, ["pip", "install", "--help"])),
+            Command(
+                "uv (startup-install-help)",
+                None,
+                uv_command(uv_path, ["pip", "install", "--help"]),
+            ),
         ]
     if benchmark == "startup-lock-help":
         return [
             Command("cpip (startup-lock-help)", None, cpip(["lock", "--help"])),
-            Command("uv (startup-lock-help)", None, uv_command(uv_path, ["pip", "compile", "--help"])),
+            Command(
+                "uv (startup-lock-help)",
+                None,
+                uv_command(uv_path, ["pip", "compile", "--help"]),
+            ),
         ]
     if benchmark == "startup-list-help":
         return [
             Command("cpip (startup-list-help)", None, cpip(["list", "--help"])),
-            Command("uv (startup-list-help)", None, uv_command(uv_path, ["pip", "list", "--help"])),
+            Command(
+                "uv (startup-list-help)",
+                None,
+                uv_command(uv_path, ["pip", "list", "--help"]),
+            ),
         ]
     if benchmark == "startup-invalid-command":
         return [
-            Command("cpip (startup-invalid-command)", None, cpip(["definitely-not-a-command"])),
-            Command("uv (startup-invalid-command)", None, uv_command(uv_path, ["definitely-not-a-command"])),
+            Command(
+                "cpip (startup-invalid-command)",
+                None,
+                cpip(["definitely-not-a-command"]),
+            ),
+            Command(
+                "uv (startup-invalid-command)",
+                None,
+                uv_command(uv_path, ["definitely-not-a-command"]),
+            ),
         ]
     if benchmark == "startup-list-empty":
         return [
-            Command("cpip (startup-list-empty)", cleanup_command([cpip_target], mkdir=[cpip_target]), cpip(["list", "--format=json", "--path", str(cpip_target)])),
-            Command("uv (startup-list-empty)", cleanup_command([uv_target], mkdir=[uv_target]), uv_command(uv_path, ["pip", "list", "--format=json", "--target", str(uv_target)])),
+            Command(
+                "cpip (startup-list-empty)",
+                cleanup_command([cpip_target], mkdir=[cpip_target]),
+                cpip(["list", "--format=json", "--path", str(cpip_target)]),
+            ),
+            Command(
+                "uv (startup-list-empty)",
+                cleanup_command([uv_target], mkdir=[uv_target]),
+                uv_command(
+                    uv_path,
+                    ["pip", "list", "--format=json", "--target", str(uv_target)],
+                ),
+            ),
         ]
     if benchmark == "startup-fast-lock":
         if wheelhouse is None:
@@ -201,8 +234,14 @@ def build_commands(
         cpip_run = cpip(cpip_args)
         cpip_run[4:4] = ["--env", f"CPIP_CACHE_DIR={cpip_cache}"]
         return [
-            Command("cpip (startup-fast-lock)", cleanup_command([cpip_output]), cpip_run),
-            Command("uv (startup-fast-lock)", cleanup_command([uv_output]), uv_command(uv_path, uv_args)),
+            Command(
+                "cpip (startup-fast-lock)", cleanup_command([cpip_output]), cpip_run
+            ),
+            Command(
+                "uv (startup-fast-lock)",
+                cleanup_command([uv_output]),
+                uv_command(uv_path, uv_args),
+            ),
         ]
     if benchmark == "startup-fast-install":
         if wheelhouse is None:
@@ -230,11 +269,21 @@ def build_commands(
             "-r",
             install_requirements,
         ]
-        cpip_args.extend(["--no-index", "--find-links", wheelhouse, "--cache-dir", str(cpip_cache)])
+        cpip_args.extend(
+            ["--no-index", "--find-links", wheelhouse, "--cache-dir", str(cpip_cache)]
+        )
         uv_args.extend(["--no-index", "--find-links", wheelhouse])
         return [
-            Command("cpip (startup-fast-install)", cleanup_command([cpip_target]), cpip(cpip_args)),
-            Command("uv (startup-fast-install)", cleanup_command([uv_target]), uv_command(uv_path, uv_args)),
+            Command(
+                "cpip (startup-fast-install)",
+                cleanup_command([cpip_target]),
+                cpip(cpip_args),
+            ),
+            Command(
+                "uv (startup-fast-install)",
+                cleanup_command([uv_target]),
+                uv_command(uv_path, uv_args),
+            ),
         ]
 
     if benchmark.startswith("lock-"):
@@ -267,7 +316,9 @@ def build_commands(
         if wheelhouse is None:
             cpip_args.extend(["-r", source_requirements])
         else:
-            cpip_args.extend(["--no-index", "--find-links", wheelhouse, "-r", source_requirements])
+            cpip_args.extend(
+                ["--no-index", "--find-links", wheelhouse, "-r", source_requirements]
+            )
             uv_args.extend(["--no-index", "--find-links", wheelhouse])
         cpip_run = cpip(cpip_args)
         cpip_run[4:4] = ["--env", f"CPIP_CACHE_DIR={cpip_cache}"]
@@ -314,7 +365,15 @@ def build_commands(
             install_requirements,
         ]
         if wheelhouse is not None:
-            cpip_args.extend(["--no-index", "--find-links", wheelhouse, "--cache-dir", str(cpip_cache)])
+            cpip_args.extend(
+                [
+                    "--no-index",
+                    "--find-links",
+                    wheelhouse,
+                    "--cache-dir",
+                    str(cpip_cache),
+                ]
+            )
             uv_args.extend(["--no-index", "--find-links", wheelhouse])
         return [
             Command(f"cpip ({benchmark})", cpip_prepare, cpip(cpip_args)),
@@ -325,12 +384,16 @@ def build_commands(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Benchmark cpip against uv with hyperfine.")
+    parser = argparse.ArgumentParser(
+        description="Benchmark cpip against uv with hyperfine."
+    )
     parser.add_argument("--benchmark", "-b", choices=BENCHMARKS, action="append")
     parser.add_argument("--workload", choices=("offline", "live"), default="offline")
     parser.add_argument("--cpip-python", default=sys.executable)
     parser.add_argument("--cpip-console")
-    parser.add_argument("--cpip-launcher", choices=("module", "direct"), default="module")
+    parser.add_argument(
+        "--cpip-launcher", choices=("module", "direct"), default="module"
+    )
     parser.add_argument("--uv-path", default=shutil.which("uv") or "uv")
     parser.add_argument("--python", default=sys.executable)
     parser.add_argument("--warmup", type=int, default=3)

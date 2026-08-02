@@ -38,9 +38,7 @@ def make_wheel(
     }
     for index in range(payload_files):
         files[f"{distribution}/module_{index}.py"] = (
-            f"VALUE = {index}\n\n"
-            "def compute() -> int:\n"
-            "    return VALUE * 2\n"
+            f"VALUE = {index}\n\ndef compute() -> int:\n    return VALUE * 2\n"
         )
 
     rows = []
@@ -75,8 +73,7 @@ def write_offline_workload(root: Path) -> tuple[Path, Path]:
                 f"middle-{middle}",
                 f"2.{minor}.0",
                 requires=[
-                    f"leaf-{(middle * 2 + offset) % 24}>=1.1.0"
-                    for offset in range(5)
+                    f"leaf-{(middle * 2 + offset) % 24}>=1.1.0" for offset in range(5)
                 ],
             )
     make_wheel(
@@ -94,7 +91,9 @@ def write_live_workload(root: Path) -> tuple[Path, Path]:
     fixtures = Path(__file__).resolve().parents[2] / "requirements"
     source = root / "trio.in"
     compiled = root / "trio.txt"
-    source.write_text((fixtures / "trio.in").read_text(encoding="utf-8"), encoding="utf-8")
+    source.write_text(
+        (fixtures / "trio.in").read_text(encoding="utf-8"), encoding="utf-8"
+    )
     compiled.write_text(
         (fixtures / "compiled" / "trio.txt").read_text(encoding="utf-8"),
         encoding="utf-8",

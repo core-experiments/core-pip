@@ -119,8 +119,7 @@ def print_version(version: str | None, location: str | None) -> None:
         raise RuntimeError("cpip package location is unavailable")
     python_version = f"{sys.version_info.major}.{sys.version_info.minor}"
     print(
-        f"cpip {version} from {os.path.realpath(location)} "
-        f"(python {python_version})",
+        f"cpip {version} from {os.path.realpath(location)} (python {python_version})",
     )
 
 

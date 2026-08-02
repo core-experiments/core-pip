@@ -22,7 +22,10 @@ def test_builds_all_offline_commands(tmp_path: Path) -> None:
         )
         assert {command.name.split()[0] for command in commands} == {"cpip", "uv"}
         assert all(command.command for command in commands)
-        assert all(command.command[:3] == [sys.executable, "-m", "cpip_benchmark.runner"] for command in commands)
+        assert all(
+            command.command[:3] == [sys.executable, "-m", "cpip_benchmark.runner"]
+            for command in commands
+        )
 
 
 def test_generated_fragments_are_not_posix_specific(tmp_path: Path) -> None:
@@ -40,7 +43,9 @@ def test_generated_fragments_are_not_posix_specific(tmp_path: Path) -> None:
         )
         for command in commands:
             fragments = [command.prepare or "", " ".join(command.command)]
-            assert not any(token in fragment for token in forbidden for fragment in fragments)
+            assert not any(
+                token in fragment for token in forbidden for fragment in fragments
+            )
 
 
 def test_direct_launcher_uses_generated_wrapper(tmp_path: Path) -> None:
@@ -57,8 +62,12 @@ def test_direct_launcher_uses_generated_wrapper(tmp_path: Path) -> None:
 
     cpip = commands[0].command
     assert str(tmp_path / "cpip-direct.py") in cpip
-    assert (tmp_path / "cpip-direct.py").read_text(encoding="utf-8").startswith(
-        "from __future__ import annotations\nfrom cpip.cli.entrypoint import main\n",
+    assert (
+        (tmp_path / "cpip-direct.py")
+        .read_text(encoding="utf-8")
+        .startswith(
+            "from __future__ import annotations\nfrom cpip.cli.entrypoint import main\n",
+        )
     )
 
 
@@ -101,4 +110,6 @@ def test_live_workload_writes_trio_files(tmp_path: Path) -> None:
     manifest = workload_manifest(tmp_path, workload="live")
 
     assert "sphinx" in Path(manifest["source_requirements"]).read_text(encoding="utf-8")
-    assert "sphinx==" in Path(manifest["install_requirements"]).read_text(encoding="utf-8")
+    assert "sphinx==" in Path(manifest["install_requirements"]).read_text(
+        encoding="utf-8"
+    )

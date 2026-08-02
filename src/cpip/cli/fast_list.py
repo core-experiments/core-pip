@@ -206,7 +206,9 @@ def run(args: list[str]) -> int | None:
     ]
     print(
         "\n".join(
-            " ".join(str(value).ljust(widths[i]) for i, value in enumerate(row)).rstrip()
+            " ".join(
+                str(value).ljust(widths[i]) for i, value in enumerate(row)
+            ).rstrip()
             for row in rows
         ),
     )

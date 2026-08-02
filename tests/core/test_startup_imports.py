@@ -78,7 +78,9 @@ def imported_modules(
     return set(json.loads(marker_line.removeprefix(MARKER)))
 
 
-def run_cpip(args: list[str], *, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
+def run_cpip(
+    args: list[str], *, cwd: Path | None = None
+) -> subprocess.CompletedProcess[str]:
     process_env = os.environ.copy()
     process_env["PYTHONPATH"] = str(SRC)
     return subprocess.run(

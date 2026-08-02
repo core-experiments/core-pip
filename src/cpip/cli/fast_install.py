@@ -218,7 +218,9 @@ def wheel_metadata(path: str) -> tuple[list[str], bool] | None:
     try:
         with zipfile.ZipFile(path) as archive:
             metadata_members = [
-                name for name in archive.namelist() if name.endswith(".dist-info/METADATA")
+                name
+                for name in archive.namelist()
+                if name.endswith(".dist-info/METADATA")
             ]
             wheel_members = [
                 name for name in archive.namelist() if name.endswith(".dist-info/WHEEL")
@@ -280,7 +282,9 @@ def resolve_simple_wheelhouse(
         candidate = FastCandidate(name, version, path, dependencies)
         candidates_by_name.setdefault(candidate.canonical_name, []).append(candidate)
     for candidates in candidates_by_name.values():
-        candidates.sort(key=lambda candidate: version_key(candidate.version) or (), reverse=True)
+        candidates.sort(
+            key=lambda candidate: version_key(candidate.version) or (), reverse=True
+        )
 
     resolved: dict[str, FastCandidate] = {}
     visiting: set[str] = set()
@@ -383,7 +387,9 @@ def install_resolved_pure_wheels(
                     (
                         destination,
                         directory,
-                        wheel_contents if name == wheel_members[0] else archive.read(name),
+                        wheel_contents
+                        if name == wheel_members[0]
+                        else archive.read(name),
                     )
                     for name, destination, directory in zip(
                         names,
