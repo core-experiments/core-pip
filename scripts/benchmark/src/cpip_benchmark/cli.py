@@ -41,8 +41,32 @@ def tool_command(command: list[str], *, env: dict[str, str] | None = None) -> li
     return wrapped
 
 
-def cpip_command(args: list[str], *, cpip_python: str, cpip_console: str | None) -> list[str]:
-    command = [cpip_console, *args] if cpip_console is not None else [cpip_python, "-m", "cpip", *args]
+def cpip_direct_launcher(workspace: Path) -> Path:
+    launcher = workspace / "cpip-direct.py"
+    if not launcher.exists():
+        launcher.write_text(
+            "from __future__ import annotations\n"
+            "from cpip.cli.entrypoint import main\n"
+            "raise SystemExit(main())\n",
+            encoding="utf-8",
+        )
+    return launcher
+
+
+def cpip_command(
+    args: list[str],
+    *,
+    workspace: Path,
+    cpip_python: str,
+    cpip_console: str | None,
+    cpip_launcher: str,
+) -> list[str]:
+    if cpip_console is not None:
+        command = [cpip_console, *args]
+    elif cpip_launcher == "direct":
+        command = [cpip_python, str(cpip_direct_launcher(workspace)), *args]
+    else:
+        command = [cpip_python, "-m", "cpip", *args]
     return [
         *tool_command(command, env={"PYTHONPATH": str(repo_root() / "src")}),
     ]
@@ -88,6 +112,7 @@ def build_commands(
     workspace: Path,
     cpip_python: str,
     cpip_console: str | None,
+    cpip_launcher: str,
     uv_path: str,
     python: str,
 ) -> list[Command]:
@@ -102,39 +127,48 @@ def build_commands(
     source_requirements = manifest["source_requirements"]
     install_requirements = manifest["install_requirements"]
 
+    def cpip(args: list[str]) -> list[str]:
+        return cpip_command(
+            args,
+            workspace=workspace,
+            cpip_python=cpip_python,
+            cpip_console=cpip_console,
+            cpip_launcher=cpip_launcher,
+        )
+
     if benchmark == "startup-help":
         return [
-            Command("cpip (startup-help)", None, cpip_command(["--help"], cpip_python=cpip_python, cpip_console=cpip_console)),
+            Command("cpip (startup-help)", None, cpip(["--help"])),
             Command("uv (startup-help)", None, uv_command(uv_path, ["--help"])),
         ]
     if benchmark == "startup-version":
         return [
-            Command("cpip (startup-version)", None, cpip_command(["--version"], cpip_python=cpip_python, cpip_console=cpip_console)),
+            Command("cpip (startup-version)", None, cpip(["--version"])),
             Command("uv (startup-version)", None, uv_command(uv_path, ["--version"])),
         ]
     if benchmark == "startup-install-help":
         return [
-            Command("cpip (startup-install-help)", None, cpip_command(["install", "--help"], cpip_python=cpip_python, cpip_console=cpip_console)),
+            Command("cpip (startup-install-help)", None, cpip(["install", "--help"])),
             Command("uv (startup-install-help)", None, uv_command(uv_path, ["pip", "install", "--help"])),
         ]
     if benchmark == "startup-lock-help":
         return [
-            Command("cpip (startup-lock-help)", None, cpip_command(["lock", "--help"], cpip_python=cpip_python, cpip_console=cpip_console)),
+            Command("cpip (startup-lock-help)", None, cpip(["lock", "--help"])),
             Command("uv (startup-lock-help)", None, uv_command(uv_path, ["pip", "compile", "--help"])),
         ]
     if benchmark == "startup-list-help":
         return [
-            Command("cpip (startup-list-help)", None, cpip_command(["list", "--help"], cpip_python=cpip_python, cpip_console=cpip_console)),
+            Command("cpip (startup-list-help)", None, cpip(["list", "--help"])),
             Command("uv (startup-list-help)", None, uv_command(uv_path, ["pip", "list", "--help"])),
         ]
     if benchmark == "startup-invalid-command":
         return [
-            Command("cpip (startup-invalid-command)", None, cpip_command(["definitely-not-a-command"], cpip_python=cpip_python, cpip_console=cpip_console)),
+            Command("cpip (startup-invalid-command)", None, cpip(["definitely-not-a-command"])),
             Command("uv (startup-invalid-command)", None, uv_command(uv_path, ["definitely-not-a-command"])),
         ]
     if benchmark == "startup-list-empty":
         return [
-            Command("cpip (startup-list-empty)", cleanup_command([cpip_target], mkdir=[cpip_target]), cpip_command(["list", "--format=json", "--path", str(cpip_target)], cpip_python=cpip_python, cpip_console=cpip_console)),
+            Command("cpip (startup-list-empty)", cleanup_command([cpip_target], mkdir=[cpip_target]), cpip(["list", "--format=json", "--path", str(cpip_target)])),
             Command("uv (startup-list-empty)", cleanup_command([uv_target], mkdir=[uv_target]), uv_command(uv_path, ["pip", "list", "--format=json", "--target", str(uv_target)])),
         ]
     if benchmark == "startup-fast-lock":
@@ -164,10 +198,10 @@ def build_commands(
             python,
         ]
         uv_args.extend(["--no-index", "--find-links", wheelhouse])
-        cpip = cpip_command(cpip_args, cpip_python=cpip_python, cpip_console=cpip_console)
-        cpip[4:4] = ["--env", f"CPIP_CACHE_DIR={cpip_cache}"]
+        cpip_run = cpip(cpip_args)
+        cpip_run[4:4] = ["--env", f"CPIP_CACHE_DIR={cpip_cache}"]
         return [
-            Command("cpip (startup-fast-lock)", cleanup_command([cpip_output]), cpip),
+            Command("cpip (startup-fast-lock)", cleanup_command([cpip_output]), cpip_run),
             Command("uv (startup-fast-lock)", cleanup_command([uv_output]), uv_command(uv_path, uv_args)),
         ]
     if benchmark == "startup-fast-install":
@@ -199,7 +233,7 @@ def build_commands(
         cpip_args.extend(["--no-index", "--find-links", wheelhouse, "--cache-dir", str(cpip_cache)])
         uv_args.extend(["--no-index", "--find-links", wheelhouse])
         return [
-            Command("cpip (startup-fast-install)", cleanup_command([cpip_target]), cpip_command(cpip_args, cpip_python=cpip_python, cpip_console=cpip_console)),
+            Command("cpip (startup-fast-install)", cleanup_command([cpip_target]), cpip(cpip_args)),
             Command("uv (startup-fast-install)", cleanup_command([uv_target]), uv_command(uv_path, uv_args)),
         ]
 
@@ -235,10 +269,10 @@ def build_commands(
         else:
             cpip_args.extend(["--no-index", "--find-links", wheelhouse, "-r", source_requirements])
             uv_args.extend(["--no-index", "--find-links", wheelhouse])
-        cpip = cpip_command(cpip_args, cpip_python=cpip_python, cpip_console=cpip_console)
-        cpip[4:4] = ["--env", f"CPIP_CACHE_DIR={cpip_cache}"]
+        cpip_run = cpip(cpip_args)
+        cpip_run[4:4] = ["--env", f"CPIP_CACHE_DIR={cpip_cache}"]
         return [
-            Command(f"cpip ({benchmark})", cpip_prepare, cpip),
+            Command(f"cpip ({benchmark})", cpip_prepare, cpip_run),
             Command(f"uv ({benchmark})", uv_prepare, uv_command(uv_path, uv_args)),
         ]
 
@@ -283,7 +317,7 @@ def build_commands(
             cpip_args.extend(["--no-index", "--find-links", wheelhouse, "--cache-dir", str(cpip_cache)])
             uv_args.extend(["--no-index", "--find-links", wheelhouse])
         return [
-            Command(f"cpip ({benchmark})", cpip_prepare, cpip_command(cpip_args, cpip_python=cpip_python, cpip_console=cpip_console)),
+            Command(f"cpip ({benchmark})", cpip_prepare, cpip(cpip_args)),
             Command(f"uv ({benchmark})", uv_prepare, uv_command(uv_path, uv_args)),
         ]
 
@@ -296,6 +330,7 @@ def main() -> None:
     parser.add_argument("--workload", choices=("offline", "live"), default="offline")
     parser.add_argument("--cpip-python", default=sys.executable)
     parser.add_argument("--cpip-console")
+    parser.add_argument("--cpip-launcher", choices=("module", "direct"), default="module")
     parser.add_argument("--uv-path", default=shutil.which("uv") or "uv")
     parser.add_argument("--python", default=sys.executable)
     parser.add_argument("--warmup", type=int, default=3)
@@ -323,6 +358,7 @@ def main() -> None:
                 workspace=workspace,
                 cpip_python=args.cpip_python,
                 cpip_console=args.cpip_console,
+                cpip_launcher=args.cpip_launcher,
                 uv_path=args.uv_path,
                 python=args.python,
             )

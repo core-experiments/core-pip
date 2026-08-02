@@ -15,7 +15,15 @@ if TYPE_CHECKING:
 
 
 class CommandSpec:
-    __slots__ = ("module", "name", "parser_factory", "runner", "visible")
+    __slots__ = (
+        "module",
+        "name",
+        "needs_logging",
+        "needs_tempdir",
+        "parser_factory",
+        "runner",
+        "visible",
+    )
 
     def __init__(
         self,
@@ -24,18 +32,24 @@ class CommandSpec:
         runner: str | None = None,
         parser_factory: str | None = None,
         visible: bool = True,
+        needs_logging: bool = True,
+        needs_tempdir: bool = True,
     ) -> None:
         self.name = name
         self.module = module
         self.runner = runner
         self.parser_factory = parser_factory
         self.visible = visible
+        self.needs_logging = needs_logging
+        self.needs_tempdir = needs_tempdir
 
     name: str
     module: str | None
     runner: str | None
     parser_factory: str | None
     visible: bool
+    needs_logging: bool
+    needs_tempdir: bool
 
     def load_runner(self) -> CommandRunner | None:
         if self.module is None or self.runner is None:
@@ -74,15 +88,57 @@ COMMAND_SPECS = (
         "run_uninstall",
         "create_parser",
     ),
-    CommandSpec("list", "cpip.cli.commands.list", "run_list", "create_parser"),
-    CommandSpec("freeze", "cpip.cli.commands.freeze", "run_freeze", "create_parser"),
-    CommandSpec("show", "cpip.cli.commands.show", "run_show", "create_parser"),
-    CommandSpec("inspect", "cpip.cli.commands.inspect", "run_inspect", "create_parser"),
-    CommandSpec("hash", "cpip.cli.commands.hash", "run_hash", "create_parser"),
-    CommandSpec("check", "cpip.cli.commands.check", "run_check", "create_parser"),
+    CommandSpec(
+        "list",
+        "cpip.cli.commands.list",
+        "run_list",
+        "create_parser",
+        needs_logging=False,
+        needs_tempdir=False,
+    ),
+    CommandSpec(
+        "freeze",
+        "cpip.cli.commands.freeze",
+        "run_freeze",
+        "create_parser",
+        needs_logging=False,
+        needs_tempdir=False,
+    ),
+    CommandSpec(
+        "show",
+        "cpip.cli.commands.show",
+        "run_show",
+        "create_parser",
+        needs_logging=False,
+        needs_tempdir=False,
+    ),
+    CommandSpec(
+        "inspect",
+        "cpip.cli.commands.inspect",
+        "run_inspect",
+        "create_parser",
+        needs_logging=False,
+        needs_tempdir=False,
+    ),
+    CommandSpec(
+        "hash",
+        "cpip.cli.commands.hash",
+        "run_hash",
+        "create_parser",
+        needs_logging=False,
+        needs_tempdir=False,
+    ),
+    CommandSpec(
+        "check",
+        "cpip.cli.commands.check",
+        "run_check",
+        "create_parser",
+        needs_logging=False,
+        needs_tempdir=False,
+    ),
     CommandSpec("cache", "cpip.cli.commands.cache", "run_cache", "create_parser"),
     CommandSpec("lock", "cpip.cli.commands.lock", "run_lock", "create_parser"),
-    CommandSpec("help", visible=False),
+    CommandSpec("help", visible=False, needs_logging=False, needs_tempdir=False),
 )
 
 COMMANDS_internal = {spec.name: spec for spec in COMMAND_SPECS}

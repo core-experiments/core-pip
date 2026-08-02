@@ -16,6 +16,7 @@ def test_builds_all_offline_commands(tmp_path: Path) -> None:
             workspace=tmp_path / benchmark,
             cpip_python=sys.executable,
             cpip_console=None,
+            cpip_launcher="module",
             uv_path="uv",
             python=sys.executable,
         )
@@ -33,12 +34,32 @@ def test_generated_fragments_are_not_posix_specific(tmp_path: Path) -> None:
             workspace=tmp_path / benchmark,
             cpip_python=sys.executable,
             cpip_console=None,
+            cpip_launcher="module",
             uv_path="uv",
             python=sys.executable,
         )
         for command in commands:
             fragments = [command.prepare or "", " ".join(command.command)]
             assert not any(token in fragment for token in forbidden for fragment in fragments)
+
+
+def test_direct_launcher_uses_generated_wrapper(tmp_path: Path) -> None:
+    commands = build_commands(
+        "startup-help",
+        workload="offline",
+        workspace=tmp_path,
+        cpip_python=sys.executable,
+        cpip_console=None,
+        cpip_launcher="direct",
+        uv_path="uv",
+        python=sys.executable,
+    )
+
+    cpip = commands[0].command
+    assert str(tmp_path / "cpip-direct.py") in cpip
+    assert (tmp_path / "cpip-direct.py").read_text(encoding="utf-8").startswith(
+        "from __future__ import annotations\nfrom cpip.cli.entrypoint import main\n",
+    )
 
 
 def test_hyperfine_dry_run_contains_prepare_and_names() -> None:

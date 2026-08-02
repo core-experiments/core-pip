@@ -5,16 +5,97 @@ from __future__ import annotations
 import os
 import sys
 
-from cpip.cli._bootstrap import (
-    VISIBLE_COMMAND_NAMES,
-    extract_global_options,
-    extract_python_option,
+VISIBLE_COMMAND_NAMES = (
+    "install",
+    "wheel",
+    "index",
+    "download",
+    "uninstall",
+    "list",
+    "freeze",
+    "show",
+    "inspect",
+    "hash",
+    "check",
+    "cache",
+    "lock",
 )
-from cpip.core.python import CURRENT_PYTHON_VERSION
+COMMAND_NAMES = frozenset((*VISIBLE_COMMAND_NAMES, "help"))
+VIRTUALENV_OPTIONS = frozenset(("--require-virtualenv", "--require-venv"))
 
 VERBOSITY_FLAGS = frozenset(("-vv", "-vvv"))
 VERSION_FLAGS = frozenset(("-V", "--version"))
 HELP_FLAGS = frozenset(("-h", "--help"))
+CPIP_VERSION = "0.0.1"
+
+
+def extract_python_option(args: list[str]) -> tuple[list[str], str | None]:
+    filtered: list[str] = []
+    target_prefix: str | None = None
+    index = 0
+    while index < len(args):
+        token = args[index]
+        if token in COMMAND_NAMES:
+            filtered.extend(args[index:])
+            break
+        if token == "--python":
+            if index + 1 >= len(args):
+                from cpip.core.errors import CommandError
+
+                raise CommandError("--python requires a path")
+            target_prefix = args[index + 1]
+            index += 2
+            continue
+        if token.startswith("--python="):
+            target_prefix = token.partition("=")[2]
+            index += 1
+            continue
+        filtered.append(token)
+        index += 1
+    return filtered, target_prefix
+
+
+def extract_global_options(
+    args: list[str],
+) -> tuple[list[str], int, bool, str | None]:
+    filtered: list[str] = []
+    log_file: str | None = None
+    index = 0
+    while index < len(args):
+        token = args[index]
+        if token == "--log":
+            if index + 1 < len(args):
+                log_file = args[index + 1]
+            index += 2
+            continue
+        if token.startswith("--log="):
+            log_file = token.partition("=")[2]
+            index += 1
+            continue
+        filtered.append(token)
+        index += 1
+
+    result: list[str] = []
+    verbosity = 0
+    require_virtualenv = False
+    index = 0
+    while index < len(filtered):
+        token = filtered[index]
+        if token in VIRTUALENV_OPTIONS:
+            require_virtualenv = True
+            index += 1
+            continue
+        if token == "--verbose":
+            verbosity += 1
+            index += 1
+            continue
+        if token.startswith("-") and set(token[1:]) == {"v"}:
+            verbosity += len(token) - 1
+            index += 1
+            continue
+        result.extend(filtered[index:])
+        break
+    return result, verbosity, require_virtualenv, log_file
 
 
 def print_help() -> None:
@@ -27,11 +108,13 @@ def print_help() -> None:
 
 
 def print_version(version: str | None, location: str | None) -> None:
+    from cpip.core.python import CURRENT_PYTHON_VERSION
+
     if version is None or location is None:
         import cpip
 
         if version is None:
-            version = cpip.__version__
+            version = CPIP_VERSION
         if location is None:
             location = os.path.dirname(cpip.__file__)
     if location is None:
@@ -135,10 +218,24 @@ def main(
                 sys.stderr.flush()
                 return status
 
+        if argv and argv[0] == "list":
+            from cpip.cli.commands.fast_list import run as run_fast_list
+
+            status = run_fast_list(argv[1:])
+            if status is not None:
+                sys.stdout.flush()
+                sys.stderr.flush()
+                return status
+
         if not require_virtualenv and log_file is None and verbosity == 0:
             if not argv or argv[0] in HELP_FLAGS or argv[:1] == ["help"]:
                 if argv[:1] == ["help"] and len(argv) > 1:
-                    pass
+                    command = argv[1]
+                    if command not in COMMAND_NAMES or command == "help":
+                        print(f"ERROR: Unknown command: {command}", file=sys.stderr)
+                        sys.stdout.flush()
+                        sys.stderr.flush()
+                        return 1
                 else:
                     print_help()
                     sys.stdout.flush()
@@ -149,6 +246,11 @@ def main(
                 sys.stdout.flush()
                 sys.stderr.flush()
                 return 0
+            if argv and argv[0] not in COMMAND_NAMES:
+                print(f"ERROR: Unknown command: {argv[0]}", file=sys.stderr)
+                sys.stdout.flush()
+                sys.stderr.flush()
+                return 1
 
         quiet_fast_command = bool(
             argv

@@ -318,8 +318,6 @@ def _target_is_empty(target: str) -> bool:
 
 def run(args: list[str]) -> int | None:
     """Install pure local wheels, or return ``None`` for normal cpip install."""
-    from cpip.resolution.engine import ResolutionEngine
-
     options = parse_arguments(args)
     if (
         options is None
@@ -336,6 +334,8 @@ def run(args: list[str]) -> int | None:
     # wheelhouse a second time just to reject the plan.
     if not _target_is_empty(options.target):
         return None
+
+    from cpip.resolution.engine import ResolutionEngine
 
     plan = ResolutionEngine.resolve_wheelhouse(
         options.find_links,

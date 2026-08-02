@@ -13,6 +13,13 @@ Run from this directory:
 uv run cpip-bench --workload offline --benchmark startup-help --benchmark lock-warm
 ```
 
+By default, cpip is measured as `python -m cpip`. To measure the direct
+console-script style launcher, pass `--cpip-launcher direct`:
+
+```console
+uv run cpip-bench --cpip-launcher direct --benchmark startup-help
+```
+
 Startup-focused cases:
 
 ```console

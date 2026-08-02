@@ -5,8 +5,6 @@ from __future__ import annotations
 import os
 import sys
 
-from cpip.core.python import CURRENT_PYTHON_VERSION
-
 HELP_TEXT = """Usage:
   cpip <command> [options]
 
@@ -55,6 +53,8 @@ def _run_bootstrap_command(
             location = os.path.dirname(cpip.__file__)
     if location is None:
         raise RuntimeError("cpip package location is unavailable")
+    from cpip.core.python import CURRENT_PYTHON_VERSION
+
     sys.stdout.write(
         f"cpip {version} from {os.path.realpath(location)} "
         f"(python {CURRENT_PYTHON_VERSION})\n",

@@ -27,7 +27,7 @@ requires-python = ">=3.9"
 dependencies = []
 
 [project.scripts]
-cpip = "cpip.cli.main:main"
+cpip = "cpip.cli.entrypoint:main"
 
 [project.urls]
 Homepage = "https://cpip.pypa.io/"

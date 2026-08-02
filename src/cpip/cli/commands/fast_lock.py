@@ -202,8 +202,6 @@ def write_output(output: str, rendered: str) -> None:
 
 def run(args: list[str]) -> "int | None":
     """Run the local-wheel fast path, or return ``None`` for fallback."""
-    from cpip.resolution.engine import ResolutionEngine
-
     options = parse_arguments(args)
     if options is None or not options.no_index or not options.requirements:
         return None
@@ -218,6 +216,8 @@ def run(args: list[str]) -> "int | None":
     if cached_output is not None:
         write_output(options.output, cached_output)
         return 0
+
+    from cpip.resolution.engine import ResolutionEngine
 
     plan = ResolutionEngine.resolve_wheelhouse(options.find_links, options.requirements)
     if plan is None:
