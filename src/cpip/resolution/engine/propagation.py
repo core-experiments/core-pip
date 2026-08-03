@@ -41,6 +41,7 @@ class KernelUnsatisfiable(Exception):
 
 _EXTRA_MARKER_RE = re.compile(r"\bextra\b", flags=re.IGNORECASE)
 _KERNEL_FAILURE_CACHE_MAX = 128
+_KERNEL_MAX_CONFLICTS = 4096
 _KernelFailureKey = tuple[
     tuple[str, ...],
     tuple[str, ...],
@@ -218,16 +219,24 @@ class FiniteDomainKernel:
             self.domains[name] = domain
             return domain
 
-        if source is not None and source not in domain.causes:
-            self.trail.append(("cause", name, source))
-            domain.causes.add(source)
         merged_extras = domain.extras | frozenset(requirement.extras)
-        if merged_extras != domain.extras:
-            self.trail.append(("extras", name, domain.extras))
-            domain.extras = merged_extras
         old_mask = domain.mask
         mask = old_mask & self.requirement_mask(requirement, domain.candidates)
         self.resolver.metrics.release_intersections += 1
+        if (
+            source is not None
+            and source not in domain.causes
+            and (mask != old_mask or merged_extras != domain.extras)
+        ):
+            # Requirements that leave both the version domain and requested
+            # extras unchanged cannot contribute to a later conflict. Keeping
+            # them bloats clauses and can prevent useful incompatibility
+            # learning on highly connected packages such as protobuf.
+            self.trail.append(("cause", name, source))
+            domain.causes.add(source)
+        if merged_extras != domain.extras:
+            self.trail.append(("extras", name, domain.extras))
+            domain.extras = merged_extras
         if mask != old_mask:
             self.trail.append(("mask", name, old_mask))
             domain.mask = mask
@@ -542,6 +551,11 @@ class FiniteDomainKernel:
         self.record_decision_blocker(causes)
         self.resolver.metrics.conflicts += 1
         conflict_count = self.resolver.metrics.conflicts
+        if conflict_count > _KERNEL_MAX_CONFLICTS:
+            # This kernel is an optional accelerator. Bound adversarial or
+            # unexpectedly complex searches and let the authoritative generic
+            # resolver continue instead of turning them into unbounded detours.
+            raise KernelUnsupported
         if self.resolver.debug_internal and (
             conflict_count <= 10 or conflict_count in {100, 1000, 10_000, 100_000}
         ):
@@ -552,51 +566,6 @@ class FiniteDomainKernel:
                 f"domains={len(self.domains)} clauses={len(self.learned_nogoods)}",
                 flush=True,
             )
-            if len(causes) <= 2:
-                print(f"finite-domain causes: {sorted(causes)}", flush=True)
-            cause_matches = []
-            for term in causes:
-                match: tuple[int, str, bool, int, int, int] | None = None
-                for index, decision in enumerate(self.decisions):
-                    if decision.name != term[0]:
-                        continue
-                    candidate = self.domains[decision.name].candidates[
-                        decision.choices[decision.next_choice]
-                    ]
-                    match = (
-                        index,
-                        str(candidate.version),
-                        term[2] <= self.domains[decision.name].extras,
-                        len(decision.choices),
-                        decision.next_choice,
-                        len(decision.blockers),
-                    )
-                    if decision.blockers and len(decision.choices) <= 16:
-                        blocker_summary = [
-                            (
-                                position,
-                                len(blocker),
-                                tuple(sorted(item[0] for item in blocker)),
-                            )
-                            for position, blocker in sorted(decision.blockers.items())
-                        ]
-                        print(
-                            f"finite-domain blockers for {decision.name}: "
-                            f"{blocker_summary}",
-                            flush=True,
-                        )
-                        if decision.name in self.selected:
-                            active = self.violated_nogood(
-                                self.selected_term(decision.name),
-                            )
-                            print(
-                                f"finite-domain indexed violation for "
-                                f"{decision.name}: {active}",
-                                flush=True,
-                            )
-                    break
-                cause_matches.append((term[0], term[1], len(term[2]), match))
-            print(f"finite-domain decision matches: {cause_matches}", flush=True)
         if not causes:
             self.rollback(checkpoint)
             raise KernelUnsatisfiable
