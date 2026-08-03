@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from cpip.resolution.engine.constraints import ConstraintStore
     from cpip.resolution.engine.input.models import RequirementInput
     from cpip.resolution.engine.metrics import ResolutionMetrics
+    from cpip.resolution.engine.state.memo import FailedStateMemo
     from cpip.resolution.engine.state.domains import (
         Assignment,
         LearnedIncompatibility,
@@ -68,7 +69,7 @@ class SearchState(Protocol):
             tuple[tuple[str, str, tuple[str, ...], str | None, str | None], ...],
         ]
     ]
-    failed_search_states: set[tuple[object, ...]]
+    failed_search_states: FailedStateMemo
     candidate_state_keys: dict[int, tuple[str, str, str, str]]
     requirement_state_keys: dict[int, RequirementStateKey]
     candidate_dependency_groups: dict[
@@ -163,6 +164,7 @@ class EngineOperations(Protocol):
     def search_frame_inner(self, *args: Any, **kwargs: Any) -> Any: ...
     def search_frame_internal(self, *args: Any, **kwargs: Any) -> Any: ...
     def search_state_key_internal(self, *args: Any, **kwargs: Any) -> Any: ...
+    def search_state_fingerprint_internal(self, *args: Any, **kwargs: Any) -> Any: ...
     def search_uncached(self, *args: Any, **kwargs: Any) -> Any: ...
     def search_with_satisfied(self, *args: Any, **kwargs: Any) -> Any: ...
     def should_backjump_after_failure(self, *args: Any, **kwargs: Any) -> Any: ...

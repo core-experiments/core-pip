@@ -401,11 +401,12 @@ class CandidateMaterializer:
         self.source_hash_cache[fingerprint] = result
         return dict(result)
 
-    def materialize(
+    def prepare_records(
         self,
         requirement: Requirement,
         accepted: tuple[CandidateRecord, ...],
-    ) -> CandidateStream:
+    ) -> tuple[CandidateRecord, ...]:
+        """Attach lazy metadata loaders without loading candidate metadata."""
         record_key = (
             requirement.canonical_name,
             tuple(sorted(requirement.extras)),
@@ -424,6 +425,14 @@ class CandidateMaterializer:
                 for candidate in accepted
             )
             self.prepared_record_cache[record_key] = records
+        return records
+
+    def materialize(
+        self,
+        requirement: Requirement,
+        accepted: tuple[CandidateRecord, ...],
+    ) -> CandidateStream:
+        records = self.prepare_records(requirement, accepted)
         # Keep the speculative window bounded, but widen it for large remote
         # candidate sets.  The resolver usually consumes candidates in order;
         # overlapping metadata-only requests for the first few candidates
@@ -759,6 +768,13 @@ class CandidateMaterializer:
 
                 self.session = requests.Session()
             response = self.session.get(url)
+            if getattr(response, "status_code", None) == 404:
+                # The versioned JSON API is only a metadata optimization.
+                # Legacy or removed releases can remain downloadable from
+                # the Simple API after this endpoint disappears, so fall
+                # through to artifact metadata instead of failing resolution.
+                self.release_metadata_cache[release_key] = None
+                return None
             response.raise_for_status()
             data = json.loads(response.text)
             info = data["info"]

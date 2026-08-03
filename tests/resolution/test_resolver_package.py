@@ -282,6 +282,65 @@ def test_finite_domain_kernel_supports_root_extras(
     assert "extra-dev" in kernel_names
 
 
+def test_finite_domain_kernel_resolves_lazy_index_domains(tmp_path: Path) -> None:
+    index = tmp_path / "simple"
+    packages = tmp_path / "packages"
+    packages.mkdir()
+    root_archives = []
+    for version in range(1, 101):
+        root_archives.append(
+            make_wheel(
+                packages,
+                "remote-root",
+                "remote_root",
+                f"{version}.0",
+                requires=["remote-child[feature]>=1"] if version == 100 else [],
+            ),
+        )
+    child = make_wheel(
+        packages,
+        "remote-child",
+        "remote_child",
+        "1.0",
+        requires=["remote-extra>=1; extra == 'feature'"],
+        provides_extra=["feature"],
+    )
+    extra = make_wheel(packages, "remote-extra", "remote_extra", "1.0")
+    independent = make_wheel(
+        packages,
+        "remote-independent",
+        "remote_independent",
+        "1.0",
+    )
+    write_simple_project_archive_index(index, "remote-root", root_archives)
+    write_simple_project_archive_index(index, "remote-child", [child])
+    write_simple_project_archive_index(index, "remote-extra", [extra])
+    write_simple_project_archive_index(
+        index,
+        "remote-independent",
+        [independent],
+    )
+
+    resolver = ResolutionEngine(
+        provider=CandidateProvider.from_options(index_url=index.as_uri()),
+        ignore_installed=True,
+    )
+    plan = resolver.resolve(["remote-root", "remote-independent"])
+
+    selected = {
+        candidate.canonical_name: str(candidate.version)
+        for candidate in plan.candidates
+    }
+    assert selected == {
+        "remote-root": "100.0",
+        "remote-child": "1.0",
+        "remote-extra": "1.0",
+        "remote-independent": "1.0",
+    }
+    assert plan.metrics["search_frames"] == 0
+    assert plan.metrics["metadata_loads"] <= 4
+
+
 def test_finite_domain_kernel_matches_generic_across_targets(tmp_path: Path) -> None:
     wheelhouse = tmp_path / "kernel-targets"
     wheelhouse.mkdir()
@@ -440,6 +499,79 @@ def test_finite_domain_kernel_performs_nonchronological_backjump(
     assert {candidate.canonical_name for candidate in kernel_plan.candidates} == {
         candidate.canonical_name for candidate in baseline_plan.candidates
     }
+
+
+def test_finite_domain_kernel_resolves_exhausted_singleton_causes(
+    tmp_path: Path,
+) -> None:
+    wheelhouse = tmp_path / "kernel-singleton-resolution"
+    wheelhouse.mkdir()
+    make_wheel(wheelhouse, "shared", "shared", "1.0")
+    make_wheel(wheelhouse, "shared", "shared", "2.0")
+    make_wheel(
+        wheelhouse,
+        "anchor",
+        "anchor",
+        "1.0",
+        requires=["shared==1.0"],
+    )
+    for version in ("1.0", "2.0"):
+        make_wheel(
+            wheelhouse,
+            "trigger",
+            "trigger",
+            version,
+            requires=["shared==2.0"],
+        )
+    noise = [f"branch-noise-{index}" for index in range(8)]
+    for name in noise:
+        make_wheel(wheelhouse, name, "branch_noise", "1.0")
+        make_wheel(wheelhouse, name, "branch_noise", "2.0")
+    make_wheel(wheelhouse, "gate", "gate", "1.0")
+    make_wheel(
+        wheelhouse,
+        "gate",
+        "gate",
+        "2.0",
+        requires=["trigger>=1", *(f"{name}>=1" for name in noise)],
+    )
+    make_wheel(
+        wheelhouse,
+        "singleton-root",
+        "singleton_root",
+        "1.0",
+        requires=["gate==1.0"],
+    )
+    make_wheel(
+        wheelhouse,
+        "singleton-root",
+        "singleton_root",
+        "2.0",
+        requires=["gate==2.0"],
+    )
+    for index in range(30):
+        make_wheel(wheelhouse, f"singleton-leaf-{index}", "leaf", "1.0")
+
+    requirements = [
+        "singleton-root",
+        "anchor",
+        *(f"singleton-leaf-{index}" for index in range(30)),
+    ]
+    resolver = ResolutionEngine(
+        provider=CandidateProvider.from_options(
+            find_links=[str(wheelhouse)],
+            no_index=True,
+        ),
+        ignore_installed=True,
+    )
+    plan = resolver.resolve(requirements)
+    selected = {candidate.canonical_name: candidate for candidate in plan.candidates}
+
+    assert selected["singleton-root"].version == Version("1.0")
+    assert selected["gate"].version == Version("1.0")
+    assert selected["shared"].version == Version("1.0")
+    assert resolver.metrics.backjumps >= 1
+    assert resolver.metrics.conflicts < 16
 
 
 def test_pending_agenda_maintains_wide_state_key_incrementally() -> None:

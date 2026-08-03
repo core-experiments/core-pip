@@ -663,12 +663,13 @@ class CandidateProvider:
         self.candidate_selection_cache[selection_key] = selection
         return selection
 
-    def find_candidates(
+    def applicable_candidate_records(
         self,
         requirement: Requirement,
         *,
         allowed_versions: frozenset[Version] | None = None,
-    ) -> CandidateStream:
+    ) -> tuple[CandidateRecord, ...]:
+        """Return policy-filtered candidate records without loading metadata."""
         selection = self.evaluate_links(
             requirement,
             allowed_versions=allowed_versions,
@@ -735,7 +736,32 @@ class CandidateProvider:
         ordered = preferred + tuple(
             candidate for candidate in accepted if candidate not in preferred_set
         )
-        return self.get_materializer_internal().materialize(requirement, ordered)
+        return ordered
+
+    def find_candidate_records(
+        self,
+        requirement: Requirement,
+        *,
+        allowed_versions: frozenset[Version] | None = None,
+    ) -> tuple[CandidateRecord, ...]:
+        """Return ordered records carrying one-shot lazy metadata loaders."""
+        records = self.applicable_candidate_records(
+            requirement,
+            allowed_versions=allowed_versions,
+        )
+        return self.get_materializer_internal().prepare_records(requirement, records)
+
+    def find_candidates(
+        self,
+        requirement: Requirement,
+        *,
+        allowed_versions: frozenset[Version] | None = None,
+    ) -> CandidateStream:
+        records = self.applicable_candidate_records(
+            requirement,
+            allowed_versions=allowed_versions,
+        )
+        return self.get_materializer_internal().materialize(requirement, records)
 
     def get_materializer_internal(self) -> CandidateMaterializer:
         materializer = self.materializer_internal

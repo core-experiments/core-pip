@@ -540,6 +540,37 @@ def test_pypi_release_metadata_is_shared_by_artifacts() -> None:
     assert [item.name for item in second_metadata.dependencies] == ["base", "extra"]
 
 
+def test_pypi_release_metadata_404_falls_back_to_artifact() -> None:
+    candidate = CandidateRecord(
+        name="legacy",
+        version=Version("1.0"),
+        link=Link.from_url(
+            "https://files.pythonhosted.org/packages/legacy-1.0.tar.gz",
+            source_url="https://pypi.org/simple/legacy/",
+        ),
+    )
+
+    class Session:
+        calls = 0
+
+        def get(self, url: str) -> HttpResponse:
+            self.calls += 1
+            return HttpResponse(
+                status_code=404,
+                reason="Not Found",
+                url=url,
+                headers={},
+                raw=io.BytesIO(),
+            )
+
+    session = Session()
+    materializer = CandidateMaterializer(dry_run=True, session=session)
+
+    assert materializer.pypi_metadata(candidate, frozenset()) is None
+    assert materializer.pypi_metadata(candidate, frozenset()) is None
+    assert session.calls == 1
+
+
 @pytest.mark.parametrize("dry_run", [False, True])
 def test_reads_detached_wheel_metadata_without_download(
     dry_run: bool,

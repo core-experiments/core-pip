@@ -72,6 +72,8 @@ class PendingAgenda:
         "state_key_cache",
         "state_key_counts",
         "state_key_dirty",
+        "state_hash",
+        "state_hash2",
         "tail_internal",
         "undo",
     )
@@ -92,6 +94,8 @@ class PendingAgenda:
         self.state_key_counts: dict[RequirementStateKey, int] = {}
         self.state_key_cache: tuple[RequirementStateKey, ...] = ()
         self.state_key_dirty = True
+        self.state_hash = 0
+        self.state_hash2 = 0
         self.append_initial(requirements)
 
     def key_internal(self, requirement: Requirement) -> RequirementStateKey:
@@ -114,6 +118,11 @@ class PendingAgenda:
 
     def remove_state_key(self, requirement: Requirement) -> None:
         key = self.key_internal(requirement)
+        key_hash = hash(key)
+        self.state_hash -= key_hash
+        self.state_hash2 ^= hash((key_hash, self.state_key_counts[key]))
+        if self.state_key_counts[key] > 1:
+            self.state_hash2 ^= hash((key_hash, self.state_key_counts[key] - 1))
         count = self.state_key_counts[key]
         if count == 1:
             self.state_key_counts.pop(key)
@@ -123,8 +132,18 @@ class PendingAgenda:
 
     def add_state_key(self, requirement: Requirement) -> None:
         key = self.key_internal(requirement)
-        self.state_key_counts[key] = self.state_key_counts.get(key, 0) + 1
+        old_count = self.state_key_counts.get(key, 0)
+        if old_count:
+            self.state_hash2 ^= hash((hash(key), old_count))
+        new_count = old_count + 1
+        self.state_key_counts[key] = new_count
+        key_hash = hash(key)
+        self.state_hash += key_hash
+        self.state_hash2 ^= hash((key_hash, new_count))
         self.state_key_dirty = True
+
+    def state_fingerprint(self) -> tuple[int, int, int]:
+        return self.length_internal, self.state_hash, self.state_hash2
 
     def append_initial(self, requirements: Iterable[Requirement]) -> None:
         for order, requirement in enumerate(requirements):

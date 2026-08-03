@@ -37,6 +37,7 @@ from cpip.resolution.engine.state.domains import (
     PackageDomain,
     RequirementStateKey,
 )
+from cpip.resolution.engine.state.memo import FailedStateMemo
 from cpip.resolution.engine.state.plans import (
     InstallPlan,
     SatisfiedRequirement,
@@ -154,7 +155,7 @@ class ResolutionRuntime(
                 tuple[tuple[str, str, tuple[str, ...], str | None, str | None], ...],
             ]
         ] = set()
-        self.failed_search_states: set[tuple[object, ...]] = set()
+        self.failed_search_states = FailedStateMemo(self.metrics)
         self.candidate_state_keys: dict[int, tuple[str, str, str, str]] = {}
         self.requirement_state_keys: dict[int, RequirementStateKey] = {}
         self.candidate_dependency_groups: dict[
@@ -196,6 +197,7 @@ class ResolutionRuntime(
         | list[str],
     ) -> InstallPlan:
         self.metrics = ResolutionMetrics()
+        self.failed_search_states = FailedStateMemo(self.metrics)
         self.release_frontier.reset()
         started = perf_counter()
         try:

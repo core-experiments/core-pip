@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, cast
 
 from cpip.core.packaging import Requirement, Version, marker_applies, parse_requirement
@@ -64,10 +64,14 @@ class KernelResult:
 class _Domain:
     candidates: tuple[WheelCandidate, ...]
     mask: int
+    extras: frozenset[str]
+    causes: set[_Assignment]
 
 
-TrailKey = str | tuple[Requirement, ...] | tuple[int, Requirement]
-TrailValue = _Domain | int | None
+_Assignment = tuple[str, str, frozenset[str]]
+_Clause = frozenset[_Assignment]
+_PendingRequirement = tuple[Requirement, _Assignment | None]
+_NogoodIndex = dict[tuple[str, str], set[_Clause]]
 
 
 @dataclass(slots=True)
@@ -77,27 +81,34 @@ class _Decision:
     next_choice: int
     parent_checkpoint: int
     candidate_checkpoint: int
-
-
-class _KernelConflict(Exception):
-    """The current decision violates a learned assignment nogood."""
+    extras: frozenset[str]
+    blockers: dict[int, _Clause] = field(default_factory=dict)
 
 
 class FiniteDomainKernel:
-    """Iterative trail-based search over a finite local candidate catalog."""
+    """Iterative trail-based search over metadata-lazy candidate catalogs."""
 
     def __init__(self, resolver: EngineContext) -> None:
         self.resolver = resolver
         self.domains: dict[str, _Domain] = {}
         self.catalogs: dict[str, tuple[WheelCandidate, ...]] = {}
         self.selected: dict[str, WheelCandidate] = {}
-        self.pending: list[Requirement] = []
+        self.selected_extras: dict[str, frozenset[str]] = {}
+        self.pending: list[_PendingRequirement] = []
         self.trail: list[tuple[str, object, object]] = []
         self.decisions: list[_Decision] = []
-        self.dependencies_cache: dict[int, tuple[Requirement, ...]] = {}
-        self.learned_nogoods: list[frozenset[tuple[str, str]]] = []
-        self.learned_nogood_keys: set[frozenset[tuple[str, str]]] = set()
-        self.root_names: set[str] = set()
+        self.decision_positions: dict[str, int] = {}
+        self.dependencies_cache: dict[
+            tuple[str, str, frozenset[str]],
+            tuple[Requirement, ...],
+        ] = {}
+        self.requirement_masks: dict[tuple[str, str, bool], int] = {}
+        self.learned_nogoods: list[_Clause] = []
+        self.learned_nogood_keys: set[_Clause] = set()
+        self.pending_clause_checks: list[_Clause] = []
+        self.unary_nogoods: _NogoodIndex = {}
+        self.binary_nogoods: _NogoodIndex = {}
+        self.long_nogoods: _NogoodIndex = {}
 
     def resolve(
         self,
@@ -108,56 +119,39 @@ class FiniteDomainKernel:
     ) -> KernelResult:
         del source_requirements, source_requirements_by_url
         active_requirements = self.active_requirements(requirements)
-        self.root_names = {
-            requirement.canonical_name for requirement in active_requirements
-        }
-        self.pending.extend(reversed(active_requirements))
+        self.pending.extend((requirement, None) for requirement in active_requirements)
 
         while True:
-            if not self.pending:
+            active_conflict = self.active_selected_nogood()
+            if active_conflict is not None:
+                conflict_name, clause = active_conflict
+                self.fail(
+                    len(self.trail),
+                    clause,
+                    conflict_name=conflict_name,
+                )
+                continue
+            conflict = self.propagate()
+            if conflict is not None:
+                checkpoint, conflict_name, causes = conflict
+                self.fail(checkpoint, causes, conflict_name=conflict_name)
+                continue
+
+            name = self.choose_domain()
+            if name is None:
                 return KernelResult(
                     self.selected,
                     self.build_graph(active_requirements),
                 )
-
-            requirement = self.pop_pending()
             checkpoint = len(self.trail)
-            domain = self.add_requirement(requirement)
-            name = requirement.canonical_name
-            selected = self.selected.get(name)
-            if selected is not None:
-                if not requirement.is_satisfied_by(
-                    selected.version,
-                    allow_prereleases=self.resolver.allow_prereleases_internal(
-                        requirement,
-                    ),
-                ):
-                    self.fail(checkpoint, conflict_name=name)
-                continue
-
-            if not domain.mask:
-                self.fail(checkpoint, conflict_name=name)
-                continue
-
-            choices = tuple(
-                index
-                for index in range(len(domain.candidates))
-                if domain.mask & (1 << index)
-            )
-            if len(choices) == 1:
-                # A singleton domain cannot branch.  Avoid allocating a
-                # decision frame, while retaining the trail entries needed
-                # to unwind if a later dependency proves the workload
-                # unsupported or unsatisfiable.
-                singleton = _Decision(
-                    name=name,
-                    choices=choices,
-                    next_choice=0,
-                    parent_checkpoint=checkpoint,
-                    candidate_checkpoint=len(self.trail),
+            domain = self.domains[name]
+            choices = self.available_indices(name, domain)
+            if not choices:
+                self.fail(
+                    checkpoint,
+                    frozenset(domain.causes),
+                    conflict_name=name,
                 )
-                if not self.select(singleton):
-                    self.fail(checkpoint)
                 continue
             decision = _Decision(
                 name=name,
@@ -165,128 +159,312 @@ class FiniteDomainKernel:
                 next_choice=0,
                 parent_checkpoint=checkpoint,
                 candidate_checkpoint=len(self.trail),
+                extras=domain.extras,
             )
+            self.decision_positions[name] = len(self.decisions)
             self.decisions.append(decision)
-            if not self.select(decision):
-                self.fail(decision.candidate_checkpoint)
+            if (clause := self.select(decision)) is not None:
+                self.fail(
+                    decision.candidate_checkpoint,
+                    clause,
+                    conflict_name=name,
+                )
 
-    def add_requirement(self, requirement: Requirement) -> _Domain:
+    def propagate(self) -> tuple[int, str, _Clause] | None:
+        """Apply every queued requirement before making another decision."""
+        while self.pending:
+            checkpoint = len(self.trail)
+            entry = self.pending.pop()
+            requirement, source = entry
+            self.trail.append(("restore_pending", entry, None))
+            requirement = self.resolver.apply_constraints(requirement)
+            domain = self.add_requirement(requirement, source)
+            self.resolver.metrics.propagations += 1
+            if not domain.mask:
+                return checkpoint, requirement.canonical_name, frozenset(domain.causes)
+
+            name = requirement.canonical_name
+            selected = self.selected.get(name)
+            if selected is None:
+                continue
+            if not requirement.is_satisfied_by(
+                selected.version,
+                allow_prereleases=self.resolver.allow_prereleases_internal(
+                    requirement,
+                ),
+            ):
+                causes = set(domain.causes)
+                causes.add(self.selected_term(name))
+                return checkpoint, name, frozenset(causes)
+            violated = self.merge_selected_extras(name)
+            if violated is not None:
+                return checkpoint, name, violated
+        self.note_trail_depth()
+        return None
+
+    def add_requirement(
+        self,
+        requirement: Requirement,
+        source: _Assignment | None,
+    ) -> _Domain:
         name = requirement.canonical_name
         domain = self.domains.get(name)
         if domain is None:
             candidates = self.load_candidates(requirement)
-            mask = sum(
-                1 << index
-                for index, candidate in enumerate(candidates)
-                if requirement.is_satisfied_by(
-                    candidate.version,
-                    allow_prereleases=self.resolver.allow_prereleases_internal(
-                        requirement,
-                    ),
-                )
-            )
-            domain = _Domain(candidates, mask)
+            mask = self.requirement_mask(requirement, candidates)
+            causes = set() if source is None else {source}
+            domain = _Domain(candidates, mask, frozenset(requirement.extras), causes)
             self.trail.append(("domain", name, None))
             self.domains[name] = domain
             return domain
 
+        if source is not None and source not in domain.causes:
+            self.trail.append(("cause", name, source))
+            domain.causes.add(source)
+        merged_extras = domain.extras | frozenset(requirement.extras)
+        if merged_extras != domain.extras:
+            self.trail.append(("extras", name, domain.extras))
+            domain.extras = merged_extras
         old_mask = domain.mask
-        allow_prereleases = self.resolver.allow_prereleases_internal(requirement)
-        mask = old_mask
-        for index, candidate in enumerate(domain.candidates):
-            if not requirement.is_satisfied_by(
-                candidate.version,
-                allow_prereleases=allow_prereleases,
-            ):
-                mask &= ~(1 << index)
+        mask = old_mask & self.requirement_mask(requirement, domain.candidates)
+        self.resolver.metrics.release_intersections += 1
         if mask != old_mask:
             self.trail.append(("mask", name, old_mask))
             domain.mask = mask
         return domain
 
+    def requirement_mask(
+        self,
+        requirement: Requirement,
+        candidates: tuple[WheelCandidate, ...],
+    ) -> int:
+        allow_prereleases = self.resolver.allow_prereleases_internal(requirement)
+        key = (
+            requirement.canonical_name,
+            str(requirement.specifier),
+            allow_prereleases,
+        )
+        cached = self.requirement_masks.get(key)
+        if cached is not None:
+            return cached
+        mask = 0
+        for index, candidate in enumerate(candidates):
+            if requirement.is_satisfied_by(
+                candidate.version,
+                allow_prereleases=allow_prereleases,
+            ):
+                mask |= 1 << index
+        self.requirement_masks[key] = mask
+        self.resolver.metrics.release_masks_built += 1
+        return mask
+
     def load_candidates(self, requirement: Requirement) -> tuple[WheelCandidate, ...]:
         candidates = self.catalogs.get(requirement.canonical_name)
         if candidates is None:
-            stream = self.resolver.provider.find_candidates(requirement)
-            candidates = tuple(stream)
-            self.catalogs[requirement.canonical_name] = candidates
-        if not candidates:
-            raise KernelUnsatisfiable
+            from cpip.index.candidate_materialization import LazyWheelCandidate
 
+            provider = self.resolver.provider
+            records = provider.find_candidate_records(requirement)
+            materializer = provider.get_materializer_internal()
+            candidates = tuple(
+                LazyWheelCandidate(record, requirement, materializer)
+                for record in records
+            )
+            # A release is the decision unit. Artifact ranking is owned by the
+            # provider, so retain only its first (best) artifact per version.
+            candidates_by_version: dict[Version, WheelCandidate] = {}
+            for candidate in candidates:
+                candidates_by_version.setdefault(candidate.version, candidate)
+            candidates = tuple(candidates_by_version.values())
+            self.catalogs[requirement.canonical_name] = candidates
         compatible: list[WheelCandidate] = []
         for candidate in candidates:
-            if not self.is_local_wheel(candidate):
+            if not self.is_supported_candidate(candidate):
                 raise KernelUnsupported
-            if (
-                not self.resolver.ignore_requires_python
-                and not self.resolver.candidate_matches_python(candidate)
-            ):
-                continue
             compatible.append(candidate)
-        if not compatible:
-            raise KernelUnsupported
         return tuple(compatible)
 
     @staticmethod
-    def is_local_wheel(candidate: WheelCandidate) -> bool:
-        if candidate.source_kind != "wheel":
-            return False
-        if isinstance(candidate, LazyWheelCandidate):
-            return candidate.record_internal.link.is_file
-        if candidate.source_url is not None:
-            return candidate.source_url.startswith("file:")
-        # Non-lazy candidates with no source URL are already materialized wheel
-        # records.  Their ``source_kind`` was assigned by wheel discovery, so
-        # probing the path again only repeats I/O that candidate construction
-        # has already made authoritative.
-        return True
+    def is_supported_candidate(candidate: WheelCandidate) -> bool:
+        return candidate.source_kind in {"wheel", "sdist"}
 
-    def select(self, decision: _Decision) -> bool:
-        candidate = self.domains[decision.name].candidates[
+    def select(self, decision: _Decision) -> _Clause | None:
+        domain = self.domains[decision.name]
+        candidate = domain.candidates[
             decision.choices[decision.next_choice]
         ]
-        if self.violates_nogood(decision.name, candidate):
-            return False
+        candidate = self.candidate_with_extras(candidate, domain.extras)
+        candidate_term = self.assignment(decision.name, candidate, domain.extras)
+        violated = self.violated_nogood(candidate_term)
+        if violated is not None:
+            return violated
+        if (
+            not self.resolver.ignore_requires_python
+            and not self.resolver.candidate_matches_python(candidate)
+        ):
+            return frozenset((candidate_term,))
         self.resolver.validate_candidate_policy(candidate)
         self.resolver.validate_candidate_constraints(candidate)
         self.trail.append(("selected", decision.name, None))
         self.selected[decision.name] = candidate
+        self.selected_extras[decision.name] = domain.extras
+        self.resolver.metrics.decisions += 1
         dependencies = self.dependencies(candidate)
-        self.trail.append(("pending", dependencies, None))
-        self.pending.extend(dependencies)
+        self.append_pending(dependencies, candidate_term)
+        self.note_trail_depth()
+        return None
+
+    def candidate_with_extras(
+        self,
+        candidate: WheelCandidate,
+        extras: frozenset[str],
+    ) -> WheelCandidate:
+        if not isinstance(candidate, LazyWheelCandidate):
+            if extras:
+                raise KernelUnsupported
+            return candidate
+        if candidate.requirement_internal.extras == extras:
+            return candidate
+        requirement = candidate.requirement_internal.copy_with(extras=extras)
+        record = candidate.record_internal.copy_with(
+            metadata_loader=candidate.materializer_internal.metadata_loader(
+                candidate.record_internal,
+                requirement,
+            ),
+        )
+        return LazyWheelCandidate(record, requirement, candidate.materializer_internal)
+
+    def merge_selected_extras(
+        self,
+        name: str,
+    ) -> _Clause | None:
+        requested = self.selected_extras.get(name, frozenset())
+        merged = self.domains[name].extras
+        if merged == requested:
+            return None
+        candidate = self.selected[name]
+        enriched = self.candidate_with_extras(candidate, merged)
+        assignment = self.assignment(name, enriched, merged)
+        violated = self.violated_nogood(assignment)
+        if violated is not None:
+            return violated
+        self.trail.append(
+            ("replace_selected", name, (candidate, requested)),
+        )
+        self.selected[name] = enriched
+        self.selected_extras[name] = merged
+        dependencies = self.dependencies(enriched)
+        self.append_pending(
+            dependencies,
+            assignment,
+        )
+        return None
+
+    def append_pending(
+        self,
+        dependencies: tuple[Requirement, ...],
+        source: _Assignment,
+    ) -> None:
+        if not dependencies:
+            return
+        entries = tuple((dependency, source) for dependency in dependencies)
+        self.trail.append(("pending", entries, None))
+        self.pending.extend(entries)
+
+    @staticmethod
+    def assignment(
+        name: str,
+        candidate: WheelCandidate,
+        extras: frozenset[str],
+    ) -> _Assignment:
+        return name, str(candidate.version), extras
+
+    def selected_term(self, name: str) -> _Assignment:
+        return self.assignment(
+            name,
+            self.selected[name],
+            self.selected_extras.get(name, frozenset()),
+        )
+
+    def term_is_active(self, term: _Assignment) -> bool:
+        selected = self.selected.get(term[0])
+        return (
+            selected is not None
+            and str(selected.version) == term[1]
+            and term[2] <= self.selected_extras.get(term[0], frozenset())
+        )
+
+    def clause_is_active(
+        self,
+        clause: _Clause,
+        candidate_term: _Assignment,
+    ) -> bool:
+        for term in clause:
+            if (
+                term[:2] == candidate_term[:2]
+                and term[2] <= candidate_term[2]
+            ):
+                continue
+            if not self.term_is_active(term):
+                return False
         return True
 
-    def violates_nogood(self, name: str, candidate: WheelCandidate) -> bool:
-        assignment = {
-            (selected_name, str(selected.version))
-            for selected_name, selected in self.selected.items()
-        }
-        assignment.add((name, str(candidate.version)))
-        for nogood in self.learned_nogoods:
-            if nogood.issubset(assignment):
-                return True
-        return False
+    def violated_nogood(self, candidate_term: _Assignment) -> _Clause | None:
+        key = candidate_term[:2]
+        for index in (
+            self.unary_nogoods,
+            self.binary_nogoods,
+            self.long_nogoods,
+        ):
+            for clause in index.get(key, ()):
+                if self.clause_is_active(clause, candidate_term):
+                    return clause
+        return None
+
+    def active_selected_nogood(self) -> tuple[str, _Clause] | None:
+        """Propagate clauses learned after their assignments were selected."""
+        while self.pending_clause_checks:
+            clause = self.pending_clause_checks.pop()
+            if clause not in self.learned_nogood_keys:
+                continue
+            latest: tuple[int, str] | None = None
+            for term in clause:
+                if not self.term_is_active(term):
+                    break
+                position = self.decision_positions.get(term[0])
+                if position is None:
+                    break
+                if latest is None or position > latest[0]:
+                    latest = position, term[0]
+            else:
+                if latest is not None:
+                    return latest[1], clause
+        return None
 
     def dependencies(self, candidate: WheelCandidate) -> tuple[Requirement, ...]:
-        key = id(candidate)
+        requested_extras = (
+            candidate.requirement_internal.extras
+            if isinstance(candidate, LazyWheelCandidate)
+            else frozenset()
+        )
+        key = (
+            candidate.canonical_name,
+            str(candidate.version),
+            frozenset(requested_extras),
+        )
         cached = self.dependencies_cache.get(key)
         if cached is not None:
             return cached
         dependencies = tuple(candidate.dependencies)
         active: list[Requirement] = []
-        requested_extras = (
-            candidate.requirement_internal.extras
-            if isinstance(candidate, LazyWheelCandidate)
-            else None
-        )
         for dependency in dependencies:
-            if dependency.extras or dependency.url is not None:
+            if dependency.url is not None:
                 raise KernelUnsupported
             if dependency.marker is not None:
                 has_extra_marker = (
                     _EXTRA_MARKER_RE.search(dependency.marker) is not None
                 )
-                if has_extra_marker and requested_extras is None:
+                if has_extra_marker and not isinstance(candidate, LazyWheelCandidate):
                     raise KernelUnsupported
                 if not has_extra_marker and not self.marker_supported(
                     dependency.marker,
@@ -294,7 +472,7 @@ class FiniteDomainKernel:
                     raise KernelUnsupported
                 if not marker_applies(
                     dependency.marker,
-                    extras=requested_extras or (),
+                    extras=requested_extras,
                 ):
                     continue
             active.append(dependency)
@@ -319,149 +497,359 @@ class FiniteDomainKernel:
             active.append(requirement)
         return active
 
-    def pop_pending(self) -> Requirement:
-        # Minimum-remaining-values ordering turns a broad chronological
-        # search into a conflict-first search.  Crucially, it only uses
-        # catalogs already loaded by propagation; choosing a requirement must
-        # never trigger extra I/O or metadata work.
-        if len(self.pending) > 32:
-            # Avoid repeatedly scanning a wide independent root set.  The
-            # conflict frontier is normally small after the first dependency
-            # expansion, where the MRV pass provides its benefit.
-            choice = len(self.pending) - 1
-        else:
-            choice = max(
-                range(len(self.pending)),
-                key=lambda index: self.pending_priority(self.pending[index], index),
-            )
-        requirement = self.pending.pop(choice)
-        self.trail.append(("restore_pending", (choice, requirement), None))
-        return requirement
+    def choose_domain(self) -> str | None:
+        best_name: str | None = None
+        best_size = 0
+        for name, domain in self.domains.items():
+            if name in self.selected:
+                continue
+            size = domain.mask.bit_count()
+            if best_name is None or size < best_size:
+                best_name = name
+                best_size = size
+                if size == 1:
+                    break
+        return best_name
 
-    def pending_priority(
+    def available_indices(self, name: str, domain: _Domain) -> tuple[int, ...]:
+        """Return candidates not ruled out by unconditional learned clauses."""
+        result: list[int] = []
+        mask = domain.mask
+        while mask:
+            bit = mask & -mask
+            index = bit.bit_length() - 1
+            candidate = domain.candidates[index]
+            blocked = False
+            key = (name, str(candidate.version))
+            for clause in self.unary_nogoods.get(key, ()):
+                term = next(iter(clause))
+                if term[2] <= domain.extras:
+                    blocked = True
+                    break
+            if not blocked:
+                result.append(index)
+            mask ^= bit
+        return tuple(result)
+
+    def fail(
         self,
-        requirement: Requirement,
-        index: int,
-    ) -> tuple[int, int, int]:
-        name = requirement.canonical_name
-        domain = self.domains.get(name)
-        if domain is not None:
-            # Smaller domains are more urgent.  Negating the count lets the
-            # max() call select the minimum remaining value.
-            return (2, -domain.mask.bit_count(), -index)
-        catalog = self.catalogs.get(name)
-        if catalog is not None:
-            return (1, -len(catalog), -index)
-        # Preserve the old LIFO behavior for unseen packages.  This keeps the
-        # common linear case cheap while allowing already-constrained domains
-        # to jump ahead of it.
-        return (0, 0, index)
+        checkpoint: int,
+        causes: _Clause,
+        *,
+        conflict_name: str,
+    ) -> None:
+        causes = self.normalize_causes(causes)
+        self.record_decision_blocker(causes)
+        self.resolver.metrics.conflicts += 1
+        conflict_count = self.resolver.metrics.conflicts
+        if self.resolver.debug_internal and (
+            conflict_count <= 10 or conflict_count in {100, 1000, 10_000, 100_000}
+        ):
+            print(
+                "finite-domain conflict "
+                f"{conflict_count}: package={conflict_name} "
+                f"causes={len(causes)} decisions={len(self.decisions)} "
+                f"domains={len(self.domains)} clauses={len(self.learned_nogoods)}",
+                flush=True,
+            )
+            if len(causes) <= 2:
+                print(f"finite-domain causes: {sorted(causes)}", flush=True)
+            cause_matches = []
+            for term in causes:
+                match: tuple[int, str, bool, int, int, int] | None = None
+                for index, decision in enumerate(self.decisions):
+                    if decision.name != term[0]:
+                        continue
+                    candidate = self.domains[decision.name].candidates[
+                        decision.choices[decision.next_choice]
+                    ]
+                    match = (
+                        index,
+                        str(candidate.version),
+                        term[2] <= self.domains[decision.name].extras,
+                        len(decision.choices),
+                        decision.next_choice,
+                        len(decision.blockers),
+                    )
+                    if decision.blockers and len(decision.choices) <= 16:
+                        blocker_summary = [
+                            (
+                                position,
+                                len(blocker),
+                                tuple(sorted(item[0] for item in blocker)),
+                            )
+                            for position, blocker in sorted(decision.blockers.items())
+                        ]
+                        print(
+                            f"finite-domain blockers for {decision.name}: "
+                            f"{blocker_summary}",
+                            flush=True,
+                        )
+                        if decision.name in self.selected:
+                            active = self.violated_nogood(
+                                self.selected_term(decision.name),
+                            )
+                            print(
+                                f"finite-domain indexed violation for "
+                                f"{decision.name}: {active}",
+                                flush=True,
+                            )
+                    break
+                cause_matches.append((term[0], term[1], len(term[2]), match))
+            print(f"finite-domain decision matches: {cause_matches}", flush=True)
+        if not causes:
+            self.rollback(checkpoint)
+            raise KernelUnsatisfiable
+        clause = self.learn_nogood(causes) or causes
+        self.resolve_conflict(clause)
 
-    def fail(self, checkpoint: int, conflict_name: str | None = None) -> None:
-        clause = self.learn_nogood(conflict_name)
-        if clause is not None and self.try_backjump(clause):
-            return
-        self.rollback(checkpoint)
-        while self.decisions:
-            decision = self.decisions[-1]
-            self.rollback(decision.candidate_checkpoint)
-            if decision.next_choice + 1 < len(decision.choices):
-                decision.next_choice += 1
+    def resolve_conflict(self, clause: _Clause) -> None:
+        """Resolve exhausted decisions until an assignment can change.
+
+        A conflict can be newest at a singleton decision. Merely backtracking
+        chronologically from there explores unrelated descendants. Resolve the
+        singleton's candidate blocker with the causes of its domain instead,
+        then continue with the resulting package-level incompatibility.
+        """
+        while clause:
+            target_index = self.latest_clause_decision(clause)
+            if target_index is None:
+                # At least one term is no longer assigned, so the learned
+                # incompatibility has already been satisfied by a rollback.
+                return
+            target = self.decisions[target_index]
+            self.record_decision_blocker(clause)
+            skipped = len(self.decisions) - target_index - 1
+            self.rollback(target.candidate_checkpoint)
+            self.discard_decisions_from(target_index + 1)
+
+            while target.next_choice + 1 < len(target.choices):
+                target.next_choice += 1
                 self.resolver.emit_backtracking_message()
-                if self.select(decision):
+                rejected = self.select(target)
+                if rejected is None:
+                    if skipped:
+                        self.resolver.metrics.backjumps += 1
                     return
-                self.rollback(decision.candidate_checkpoint)
-            self.rollback(decision.parent_checkpoint)
-            self.decisions.pop()
+                rejected = self.normalize_causes(rejected)
+                self.record_decision_blocker(rejected)
+                self.learn_nogood(rejected)
+                self.rollback(target.candidate_checkpoint)
+
+            derived = self.exhausted_domain_clause(target)
+            if derived is None:  # pragma: no cover - guarded search invariant
+                raise KernelUnsupported
+            derived = self.normalize_causes(derived)
+            self.rollback(target.parent_checkpoint)
+            self.discard_decisions_from(target_index)
+            if skipped:
+                self.resolver.metrics.backjumps += 1
+            if not derived:
+                raise KernelUnsatisfiable
+            clause = self.learn_nogood(derived) or derived
+
         raise KernelUnsatisfiable
+
+    def latest_clause_decision(self, clause: _Clause) -> int | None:
+        latest = -1
+        for term in clause:
+            position = self.decision_positions.get(term[0])
+            if position is None:
+                return None
+            decision = self.decisions[position]
+            candidate = self.domains[decision.name].candidates[
+                decision.choices[decision.next_choice]
+            ]
+            if (
+                str(candidate.version) != term[1]
+                or not term[2] <= self.domains[decision.name].extras
+            ):
+                return None
+            latest = max(latest, position)
+        return latest if latest >= 0 else None
+
+    def discard_decisions_from(self, start: int) -> None:
+        for decision in self.decisions[start:]:
+            self.decision_positions.pop(decision.name, None)
+        del self.decisions[start:]
+
+    def record_decision_blocker(self, clause: _Clause) -> None:
+        """Retain the clause that rejected one candidate in an active domain."""
+        latest: tuple[int, _Decision] | None = None
+        for term in clause:
+            position = self.decision_positions.get(term[0])
+            if position is None:
+                continue
+            decision = self.decisions[position]
+            candidate = self.domains[decision.name].candidates[
+                decision.choices[decision.next_choice]
+            ]
+            if (
+                term[1] == str(candidate.version)
+                and term[2] <= self.domains[decision.name].extras
+                and (latest is None or position > latest[0])
+            ):
+                latest = position, decision
+        if latest is not None:
+            decision = latest[1]
+            decision.blockers[decision.next_choice] = clause
+
+    def normalize_causes(self, causes: _Clause) -> _Clause:
+        """Resolve extras-expanded assignments to their decision reasons."""
+        normalized: set[_Assignment] = set()
+        pending = list(causes)
+        seen: set[_Assignment] = set()
+        while pending:
+            term = pending.pop()
+            if term in seen:
+                continue
+            seen.add(term)
+            position = self.decision_positions.get(term[0])
+            if position is None:
+                normalized.add(term)
+                continue
+            decision = self.decisions[position]
+            candidate = self.domains[decision.name].candidates[
+                decision.choices[decision.next_choice]
+            ]
+            if str(candidate.version) != term[1] or term[2] <= decision.extras:
+                normalized.add(term)
+                continue
+            normalized.add((term[0], term[1], decision.extras))
+            for source in self.domains[term[0]].causes:
+                if source[:2] == term[:2]:
+                    continue
+                pending.append(source)
+        return frozenset(normalized)
+
+    def exhausted_domain_clause(self, decision: _Decision) -> _Clause | None:
+        """Resolve candidate blockers into a package-level conflict clause."""
+        domain = self.domains[decision.name]
+        causes = set(domain.causes)
+        for position, index in enumerate(decision.choices):
+            candidate = domain.candidates[index]
+            candidate_term = self.assignment(
+                decision.name,
+                candidate,
+                domain.extras,
+            )
+            blocker = decision.blockers.get(position)
+            if blocker is None:
+                blocker = self.violated_nogood(candidate_term)
+            if blocker is None:
+                return None
+            for term in blocker:
+                if (
+                    term[:2] == candidate_term[:2]
+                ):
+                    continue
+                causes.add(term)
+        return frozenset(causes)
 
     def learn_nogood(
         self,
-        conflict_name: str | None = None,
-    ) -> frozenset[tuple[str, str]] | None:
-        """Remember the smallest conservative clause available at conflict."""
-        relevant: set[tuple[str, str]] = set()
-        if conflict_name is not None and conflict_name not in self.root_names:
-            for decision in self.decisions:
-                candidate = self.selected.get(decision.name)
-                if candidate is not None and any(
-                    dependency.canonical_name == conflict_name
-                    for dependency in self.dependencies(candidate)
-                ):
-                    relevant.add((decision.name, str(candidate.version)))
-        if not relevant:
-            relevant = {
-                (decision.name, str(self.selected[decision.name].version))
-                for decision in self.decisions
-                if decision.name in self.selected
-            }
-        if not relevant:
-            relevant = {
-                (name, str(candidate.version))
-                for name, candidate in self.selected.items()
-            }
-        if not relevant or len(relevant) > 32:
+        causes: _Clause,
+    ) -> _Clause | None:
+        """Record the assignments that introduced a contradictory domain."""
+        if not causes or len(causes) > 32:
             return None
-        clause = frozenset(relevant)
+        clause = frozenset(causes)
         if clause in self.learned_nogood_keys:
             return clause
         if len(self.learned_nogoods) >= 1024:
             evicted = self.learned_nogoods.pop(0)
             self.learned_nogood_keys.remove(evicted)
+            self.remove_indexed_nogood(evicted)
         self.learned_nogoods.append(clause)
         self.learned_nogood_keys.add(clause)
+        self.index_nogood(clause)
+        self.pending_clause_checks.append(clause)
+        self.resolver.metrics.learned_incompatibilities += 1
+        self.resolver.metrics.peak_learned_clauses = max(
+            self.resolver.metrics.peak_learned_clauses,
+            len(self.learned_nogoods),
+        )
         return clause
 
-    def try_backjump(self, clause: frozenset[tuple[str, str]]) -> bool:
-        """Jump over decisions absent from a learned conflict clause."""
-        decision_indices = {
-            (decision.name, str(self.selected[decision.name].version)): index
-            for index, decision in enumerate(self.decisions)
-            if decision.name in self.selected
-        }
-        clause_indices = [
-            decision_indices[term] for term in clause if term in decision_indices
-        ]
-        if len(clause_indices) != len(clause):
-            return False
-        target_index = max(clause_indices)
-        if target_index >= len(self.decisions) - 1:
-            return False
-        target = self.decisions[target_index]
-        if target.next_choice + 1 >= len(target.choices):
-            return False
-        self.rollback(target.candidate_checkpoint)
-        del self.decisions[target_index + 1 :]
-        target.next_choice += 1
-        self.resolver.emit_backtracking_message()
-        if not self.select(target):
-            self.rollback(target.candidate_checkpoint)
-            return False
-        return True
+    @staticmethod
+    def nogood_index(
+        clause: _Clause,
+        unary: _NogoodIndex,
+        binary: _NogoodIndex,
+        long: _NogoodIndex,
+    ) -> _NogoodIndex:
+        if len(clause) == 1:
+            return unary
+        if len(clause) == 2:
+            return binary
+        return long
+
+    def index_nogood(self, clause: _Clause) -> None:
+        index = self.nogood_index(
+            clause,
+            self.unary_nogoods,
+            self.binary_nogoods,
+            self.long_nogoods,
+        )
+        for key in {term[:2] for term in clause}:
+            index.setdefault(key, set()).add(clause)
+
+    def remove_indexed_nogood(self, clause: _Clause) -> None:
+        index = self.nogood_index(
+            clause,
+            self.unary_nogoods,
+            self.binary_nogoods,
+            self.long_nogoods,
+        )
+        for key in {term[:2] for term in clause}:
+            indexed = index[key]
+            indexed.remove(clause)
+            if not indexed:
+                index.pop(key)
 
     def rollback(self, checkpoint: int) -> None:
         while len(self.trail) > checkpoint:
             kind, key, value = self.trail.pop()
             if kind == "domain":
-                if value is None:
-                    self.domains.pop(cast("str", key), None)
-                else:
-                    self.domains[cast("str", key)] = cast("_Domain", value)
+                self.domains.pop(cast("str", key), None)
             elif kind == "mask":
                 self.domains[cast("str", key)].mask = cast("int", value)
+            elif kind == "extras":
+                self.domains[cast("str", key)].extras = cast(
+                    "frozenset[str]",
+                    value,
+                )
+            elif kind == "cause":
+                self.domains[cast("str", key)].causes.remove(
+                    cast("_Assignment", value),
+                )
             elif kind == "selected":
                 self.selected.pop(key, None)
+                self.selected_extras.pop(cast("str", key), None)
+            elif kind == "replace_selected":
+                candidate, extras = cast(
+                    "tuple[WheelCandidate, frozenset[str]]",
+                    value,
+                )
+                name = cast("str", key)
+                self.selected[name] = candidate
+                self.selected_extras[name] = extras
             elif kind == "pending":
-                for dependency in reversed(cast("tuple[Requirement, ...]", key)):
+                for entry in reversed(cast("tuple[_PendingRequirement, ...]", key)):
                     for index in range(len(self.pending) - 1, -1, -1):
-                        if self.pending[index] is dependency:
+                        if self.pending[index] is entry:
                             self.pending.pop(index)
                             break
             elif kind == "restore_pending":
-                index, requirement = cast("tuple[int, Requirement]", key)
-                self.pending.insert(index, requirement)
+                self.pending.append(cast("_PendingRequirement", key))
             else:  # pragma: no cover - an internal invariant failure
                 raise AssertionError(f"unknown trail entry: {kind}")
+
+    def note_trail_depth(self) -> None:
+        self.resolver.metrics.peak_trail_depth = max(
+            self.resolver.metrics.peak_trail_depth,
+            len(self.trail),
+        )
 
     def build_graph(self, requirements: list[Requirement]) -> dict[str, set[str]]:
         graph: dict[str, set[str]] = {
@@ -777,9 +1165,7 @@ def eligible(
         # Provider instrumentation is part of the resolver's supported
         # diagnostic seam; leave those runs on the generic implementation.
         return False
-    if resolver.constraints or resolver.require_hashes:
-        return False
-    if resolver.provider.index_urls:
+    if resolver.require_hashes:
         return False
     if any(
         requirement.url is not None
@@ -801,16 +1187,10 @@ def eligible(
         # the finite kernel for workloads where its branching machinery can
         # amortize the setup cost.
         return False
-    # Eagerly materializing a finite domain only pays off when there is enough
-    # branching to amortize the catalog setup.  A single root cannot branch,
-    # so keep one-root scans on the lazy generic resolver; this is especially
-    # important for large catalogs with Requires-Python rejections.
-    if len(requirements) == 1:
-        return False
     if len(requirements) < 32:
         largest_root_catalog = max(
             (
-                len(resolver.provider.catalog_links(requirement))
+                len(resolver.provider.available_versions(requirement))
                 for requirement in requirements
                 if requirement.url is None
             ),
@@ -857,20 +1237,30 @@ def try_resolve(
         )
         if local_result is not None:
             return local_result
-    if eligible(
+    finite_domain_eligible = eligible(
         resolver,
         requirements,
         source_requirements=source_requirements,
         source_requirements_by_url=source_requirements_by_url,
-    ):
+    )
+    if resolver.debug_internal:
+        print(
+            f"finite-domain kernel eligible: {finite_domain_eligible}",
+            flush=True,
+        )
+    if finite_domain_eligible:
         try:
             result = FiniteDomainKernel(resolver).resolve(
                 requirements,
                 source_requirements=source_requirements,
                 source_requirements_by_url=source_requirements_by_url,
             )
-        except (KernelUnsupported, KernelUnsatisfiable):
-            pass
+        except (KernelUnsupported, KernelUnsatisfiable) as exc:
+            if resolver.debug_internal:
+                print(
+                    f"finite-domain kernel declined: {type(exc).__name__}",
+                    flush=True,
+                )
         else:
             return result
     if prefer_finite_domain:

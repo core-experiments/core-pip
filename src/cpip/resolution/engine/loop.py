@@ -21,6 +21,10 @@ from cpip.resolution.engine.state.domains import (
     requirement_state_key,
 )
 from cpip.resolution.engine.state.plans import SatisfiedRequirement
+from cpip.resolution.engine.state.memo import (
+    StateFingerprint,
+    state_token_count,
+)
 from cpip.resolution.engine.state.requests import (
     SearchFailure,
     SearchFrame,
@@ -135,6 +139,7 @@ class SearchEngine:
         return resolved
 
     def search_frame_inner(self: EngineContext, request: SearchRequest) -> SearchFrame:
+        self.metrics.search_frames += 1
         pending = request.pending
         selected = request.selected
         selected_extras = request.selected_extras
@@ -162,18 +167,28 @@ class SearchEngine:
                 )
             )
         state: tuple[object, ...] | None = None
+        fingerprint: StateFingerprint | None = None
         # There is no failed state to consult on the first pass.  Defer key
         # construction until a search actually fails; later branches will
         # still build the key before consulting the populated memo.
         if self.failed_search_states:
-            state = self.search_state_key_internal(
+            fingerprint = self.search_state_fingerprint_internal(
                 pending,
                 selected,
                 selected_extras,
                 satisfied,
-                graph,
             )
-            if state in self.failed_search_states:
+            hit, state = self.failed_search_states.contains(
+                fingerprint,
+                lambda: self.search_state_key_internal(
+                    pending,
+                    selected,
+                    selected_extras,
+                    satisfied,
+                    graph,
+                ),
+            )
+            if hit:
                 return False
         resolved = yield from self.search_uncached(
             pending,
@@ -185,7 +200,15 @@ class SearchEngine:
             source_requirements_by_url=source_requirements_by_url,
         )
         if not resolved:
+            if fingerprint is None:
+                fingerprint = self.search_state_fingerprint_internal(
+                    pending,
+                    selected,
+                    selected_extras,
+                    satisfied,
+                )
             if state is None:
+                self.metrics.state_key_builds += 1
                 state = self.search_state_key_internal(
                     pending,
                     selected,
@@ -194,8 +217,52 @@ class SearchEngine:
                     graph,
                 )
             assert state is not None
-            self.failed_search_states.add(state)
+            self.failed_search_states.add(
+                fingerprint,
+                state,
+                tokens=state_token_count(state),
+            )
         return resolved
+
+    def search_state_fingerprint_internal(
+        self: EngineContext,
+        pending: PendingAgenda,
+        selected: dict[str, WheelCandidate],
+        selected_extras: dict[str, frozenset[str]],
+        satisfied: dict[str, SatisfiedRequirement],
+    ) -> StateFingerprint:
+        """Return a cheap, non-authoritative fingerprint for memo bucketing."""
+        pending_length, pending_hash, pending_hash2 = pending.state_fingerprint()
+        selected_hash = 0
+        for name, candidate in selected.items():
+            source_url = candidate.source_url or ""
+            key = self.candidate_state_keys.get(id(candidate))
+            if key is None:
+                key = (
+                    candidate.canonical_name,
+                    str(candidate.version),
+                    source_url,
+                    "" if source_url else candidate.path,
+                )
+                self.candidate_state_keys[id(candidate)] = key
+            selected_hash += hash((key, selected_extras.get(name, frozenset())))
+        satisfied_hash = 0
+        for name, item in satisfied.items():
+            requirement_key = self.requirement_state_keys.get(id(item.requirement))
+            if requirement_key is None:
+                requirement_key = requirement_state_key(item.requirement)
+                self.requirement_state_keys[id(item.requirement)] = requirement_key
+            satisfied_hash += hash(
+                (name, item.distribution.version, requirement_key),
+            )
+        return (
+            pending_length,
+            pending_hash,
+            pending_hash2,
+            len(selected),
+            selected_hash,
+            hash((len(satisfied), satisfied_hash)),
+        )
 
     def search_state_key_internal(
         self: EngineContext,

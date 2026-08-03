@@ -21,6 +21,15 @@ class ResolutionMetrics:
     conflicts: int = 0
     backjumps: int = 0
     learned_incompatibilities: int = 0
+    search_frames: int = 0
+    state_key_builds: int = 0
+    state_memo_lookups: int = 0
+    state_memo_hits: int = 0
+    state_memo_entries: int = 0
+    state_memo_tokens: int = 0
+    state_memo_evictions: int = 0
+    peak_trail_depth: int = 0
+    peak_learned_clauses: int = 0
     catalogs_loaded: int = 0
     catalog_cache_hits: int = 0
     release_masks_built: int = 0
@@ -41,6 +50,15 @@ class ResolutionMetrics:
             "conflicts": self.conflicts,
             "backjumps": self.backjumps,
             "learned_incompatibilities": self.learned_incompatibilities,
+            "search_frames": self.search_frames,
+            "state_key_builds": self.state_key_builds,
+            "state_memo_lookups": self.state_memo_lookups,
+            "state_memo_hits": self.state_memo_hits,
+            "state_memo_entries": self.state_memo_entries,
+            "state_memo_tokens": self.state_memo_tokens,
+            "state_memo_evictions": self.state_memo_evictions,
+            "peak_trail_depth": self.peak_trail_depth,
+            "peak_learned_clauses": self.peak_learned_clauses,
             "catalogs_loaded": self.catalogs_loaded,
             "catalog_cache_hits": self.catalog_cache_hits,
             "release_masks_built": self.release_masks_built,
