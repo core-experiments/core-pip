@@ -11,7 +11,8 @@ import sys
 import tempfile
 import urllib.parse
 import zipfile
-from collections.abc import Generator, Iterator
+from collections.abc import Generator, Iterable, Iterator
+from itertools import chain, islice
 from threading import RLock
 from typing import Any
 
@@ -419,31 +420,60 @@ class CandidateMaterializer:
             if len(self.prepared_record_cache) >= 4096:
                 self.prepared_record_cache.pop(next(iter(self.prepared_record_cache)))
             records = tuple(
-                candidate.copy_with(
-                    metadata_loader=self.metadata_loader(candidate, requirement),
-                )
+                self.prepare_record(requirement, candidate)
                 for candidate in accepted
             )
             self.prepared_record_cache[record_key] = records
         return records
 
+    def prepare_record(
+        self,
+        requirement: Requirement,
+        candidate: CandidateRecord,
+    ) -> CandidateRecord:
+        """Attach metadata only when a candidate reaches a consumption boundary."""
+        if candidate.metadata_loader is not None:
+            return candidate
+        return candidate.copy_with(
+            metadata_loader=self.metadata_loader(candidate, requirement),
+        )
+
     def materialize(
         self,
         requirement: Requirement,
-        accepted: tuple[CandidateRecord, ...],
+        accepted: Iterable[CandidateRecord],
     ) -> CandidateStream:
-        records = self.prepare_records(requirement, accepted)
-        # Keep the speculative window bounded, but widen it for large remote
-        # candidate sets.  The resolver usually consumes candidates in order;
-        # overlapping metadata-only requests for the first few candidates
-        # avoids serial latency without downloading artifacts or building
-        # sdists.  Small sets retain the old two-request footprint.
-        prefetch_count = 2
-        self.prefetch_metadata(records[:prefetch_count])
+        requested_extras = frozenset(requirement.extras)
+        accepted_iterator = iter(accepted)
+        first = next(accepted_iterator, None)
+        if first is None:
+            return CandidateStream(iter(()))
+        # A cached first choice is the common warm path. Do not speculate on a
+        # second release in that case; cold misses retain a two-request window
+        # so network latency can overlap when the resolver must backtrack.
+        prefetch_count = (
+            0
+            if self.has_cached_metadata(first, requested_extras)
+            else 2
+        )
+        initial_records = [first]
+        if prefetch_count > 1:
+            initial_records.extend(islice(accepted_iterator, prefetch_count - 1))
+        prefetched_records = tuple(
+            self.prepare_record(requirement, candidate)
+            for candidate in initial_records[:prefetch_count]
+        )
+        self.prefetch_metadata(prefetched_records, requirement=requirement)
+        accepted_records = chain(initial_records, accepted_iterator)
 
         def generate() -> Iterator[WheelCandidate]:
             invalid_versions: set[tuple[str, Version]] = set()
-            for candidate in records:
+            for index, candidate in enumerate(accepted_records):
+                candidate = (
+                    prefetched_records[index]
+                    if index < len(prefetched_records)
+                    else self.prepare_record(requirement, candidate)
+                )
                 identity = (candidate.canonical_name, candidate.version)
                 if identity in invalid_versions:
                     continue
@@ -513,8 +543,64 @@ class CandidateMaterializer:
         if self.persistent_release_facts_cache is not None:
             self.persistent_release_facts_cache.put(key, reason)
 
-    def prefetch_metadata(self, records: tuple[CandidateRecord, ...]) -> None:
+    def metadata_cache_keys(
+        self,
+        candidate: CandidateRecord,
+        requested_extras: frozenset[str],
+    ) -> tuple[
+        tuple[str, str, str, frozenset[str]],
+        tuple[str, str, tuple[str, ...], str],
+    ]:
+        fingerprint = self.artifact_fingerprint(candidate)
+        return (
+            (
+                candidate.link.url,
+                fingerprint,
+                str(candidate.version),
+                requested_extras,
+            ),
+            (
+                candidate.link.url,
+                str(candidate.version),
+                tuple(sorted(requested_extras)),
+                fingerprint,
+            ),
+        )
+
+    def has_cached_metadata(
+        self,
+        candidate: CandidateRecord,
+        requested_extras: frozenset[str],
+    ) -> bool:
+        memory_key, persistent_key = self.metadata_cache_keys(
+            candidate,
+            requested_extras,
+        )
+        return memory_key in self.metadata_cache or (
+            self.persistent_candidate_metadata_cache is not None
+            and self.persistent_candidate_metadata_cache.contains(persistent_key)
+        )
+
+    def prefetch_metadata(
+        self,
+        records: tuple[CandidateRecord, ...],
+        *,
+        requirement: Requirement | None = None,
+    ) -> None:
         if self.session is None:
+            return
+        requested_extras = frozenset(requirement.extras if requirement else ())
+        pending: list[tuple[str, str]] = []
+        for candidate in records:
+            if candidate.link.kind is not ArtifactKind.WHEEL:
+                continue
+            metadata_link = candidate.link.metadata_link()
+            if metadata_link is None:
+                continue
+            if self.has_cached_metadata(candidate, requested_extras):
+                continue
+            pending.append((metadata_link.url, metadata_link.url))
+        if not pending:
             return
         with self.metadata_prefetch_lock:
             if self.metadata_prefetcher is None:
@@ -522,16 +608,8 @@ class CandidateMaterializer:
                     self.session.get,
                     max_workers=_METADATA_WORKERS,
                 )
-            for candidate in records:
-                if candidate.link.kind is not ArtifactKind.WHEEL:
-                    continue
-                metadata_link = candidate.link.metadata_link()
-                if metadata_link is None:
-                    continue
-                if self.metadata_prefetcher.submit(
-                    metadata_link.url,
-                    metadata_link.url,
-                ):
+            for key, url in pending:
+                if self.metadata_prefetcher.submit(key, url):
                     self.metadata_prefetches += 1
 
     def take_prefetched_metadata(self, url: str) -> Any:
@@ -553,11 +631,8 @@ class CandidateMaterializer:
         requirement: Requirement,
     ) -> LazyCandidateMetadata:
         requested_extras = frozenset(requirement.extras)
-        fingerprint = self.artifact_fingerprint(candidate)
-        key = (
-            candidate.link.url,
-            fingerprint,
-            str(candidate.version),
+        key, persistent_key = self.metadata_cache_keys(
+            candidate,
             requested_extras,
         )
 
@@ -567,12 +642,6 @@ class CandidateMaterializer:
             if cached is not None:
                 self.metadata_cache_hits += 1
                 return cached
-            persistent_key = (
-                candidate.link.url,
-                str(candidate.version),
-                tuple(sorted(requested_extras)),
-                fingerprint,
-            )
             if self.persistent_candidate_metadata_cache is not None:
                 cached = self.persistent_candidate_metadata_cache.get(persistent_key)
                 if cached is not None:

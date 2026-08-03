@@ -42,6 +42,9 @@ class KernelUnsatisfiable(Exception):
 _EXTRA_MARKER_RE = re.compile(r"\bextra\b", flags=re.IGNORECASE)
 _KERNEL_FAILURE_CACHE_MAX = 128
 _KERNEL_MAX_CONFLICTS = 4096
+_KERNEL_MAX_ACTIVE_DEPENDENCIES = 64
+_KERNEL_LARGE_GRAPH_DOMAINS = 384
+_KERNEL_LARGE_GRAPH_MAX_CONFLICTS = 8
 _KernelFailureKey = tuple[
     tuple[str, ...],
     tuple[str, ...],
@@ -66,7 +69,9 @@ class _Domain:
     candidates: tuple[WheelCandidate, ...]
     mask: int
     extras: frozenset[str]
-    causes: set[_Assignment]
+    introducer: _Assignment | None
+    restrictions: list[tuple[int, _Assignment | None]]
+    extra_causes: set[_Assignment]
 
 
 _Assignment = tuple[str, str, frozenset[str]]
@@ -121,6 +126,7 @@ class FiniteDomainKernel:
         del source_requirements, source_requirements_by_url
         active_requirements = self.active_requirements(requirements)
         self.pending.extend((requirement, None) for requirement in active_requirements)
+        root_shape_checked = False
 
         while True:
             active_conflict = self.active_selected_nogood()
@@ -137,6 +143,9 @@ class FiniteDomainKernel:
                 checkpoint, conflict_name, causes = conflict
                 self.fail(checkpoint, causes, conflict_name=conflict_name)
                 continue
+            if not root_shape_checked:
+                self.check_root_shape(active_requirements)
+                root_shape_checked = True
 
             name = self.choose_domain()
             if name is None:
@@ -146,11 +155,14 @@ class FiniteDomainKernel:
                 )
             checkpoint = len(self.trail)
             domain = self.domains[name]
-            choices = self.available_indices(name, domain)
+            choices, blockers = self.available_indices(name, domain)
             if not choices:
+                causes = self.domain_blocker_clause(name, domain, blockers)
+                if causes is None:  # pragma: no cover - internal invariant
+                    raise KernelUnsupported
                 self.fail(
                     checkpoint,
-                    frozenset(domain.causes),
+                    causes,
                     conflict_name=name,
                 )
                 continue
@@ -161,6 +173,7 @@ class FiniteDomainKernel:
                 parent_checkpoint=checkpoint,
                 candidate_checkpoint=len(self.trail),
                 extras=domain.extras,
+                blockers=blockers,
             )
             self.decision_positions[name] = len(self.decisions)
             self.decisions.append(decision)
@@ -182,7 +195,11 @@ class FiniteDomainKernel:
             domain = self.add_requirement(requirement, source)
             self.resolver.metrics.propagations += 1
             if not domain.mask:
-                return checkpoint, requirement.canonical_name, frozenset(domain.causes)
+                return (
+                    checkpoint,
+                    requirement.canonical_name,
+                    self.domain_conflict_causes(domain),
+                )
 
             name = requirement.canonical_name
             selected = self.selected.get(name)
@@ -194,8 +211,9 @@ class FiniteDomainKernel:
                     requirement,
                 ),
             ):
-                causes = set(domain.causes)
-                causes.add(self.selected_term(name))
+                causes = {self.selected_term(name)}
+                if source is not None:
+                    causes.add(source)
                 return checkpoint, name, frozenset(causes)
             violated = self.merge_selected_extras(name)
             if violated is not None:
@@ -213,27 +231,40 @@ class FiniteDomainKernel:
         if domain is None:
             candidates = self.load_candidates(requirement)
             mask = self.requirement_mask(requirement, candidates)
-            causes = set() if source is None else {source}
-            domain = _Domain(candidates, mask, frozenset(requirement.extras), causes)
+            universe = (1 << len(candidates)) - 1
+            domain = _Domain(
+                candidates,
+                mask,
+                frozenset(requirement.extras),
+                source,
+                [] if mask == universe else [(mask, source)],
+                (
+                    {source}
+                    if source is not None and requirement.extras
+                    else set()
+                ),
+            )
             self.trail.append(("domain", name, None))
             self.domains[name] = domain
             return domain
 
         merged_extras = domain.extras | frozenset(requirement.extras)
         old_mask = domain.mask
-        mask = old_mask & self.requirement_mask(requirement, domain.candidates)
+        requirement_mask = self.requirement_mask(requirement, domain.candidates)
+        mask = old_mask & requirement_mask
         self.resolver.metrics.release_intersections += 1
+        universe = (1 << len(domain.candidates)) - 1
+        restriction = (requirement_mask, source)
+        if requirement_mask != universe and restriction not in domain.restrictions:
+            self.trail.append(("restriction", name, None))
+            domain.restrictions.append(restriction)
         if (
-            source is not None
-            and source not in domain.causes
-            and (mask != old_mask or merged_extras != domain.extras)
+            merged_extras != domain.extras
+            and source is not None
+            and source not in domain.extra_causes
         ):
-            # Requirements that leave both the version domain and requested
-            # extras unchanged cannot contribute to a later conflict. Keeping
-            # them bloats clauses and can prevent useful incompatibility
-            # learning on highly connected packages such as protobuf.
-            self.trail.append(("cause", name, source))
-            domain.causes.add(source)
+            self.trail.append(("extra_cause", name, source))
+            domain.extra_causes.add(source)
         if merged_extras != domain.extras:
             self.trail.append(("extras", name, domain.extras))
             domain.extras = merged_extras
@@ -241,6 +272,36 @@ class FiniteDomainKernel:
             self.trail.append(("mask", name, old_mask))
             domain.mask = mask
         return domain
+
+    @staticmethod
+    def domain_restriction_causes(domain: _Domain) -> _Clause:
+        """Return a compact reason for the domain's current candidate mask."""
+        universe = (1 << len(domain.candidates)) - 1
+        by_source: dict[_Assignment | None, int] = {}
+        for allowed, source in domain.restrictions:
+            by_source[source] = by_source.get(source, universe) & allowed
+        causes = set() if domain.introducer is None else {domain.introducer}
+        remaining = universe
+        ordered = sorted(
+            by_source.items(),
+            key=lambda item: (item[0] is not None, item[1].bit_count()),
+        )
+        for source, allowed in ordered:
+            narrowed = remaining & allowed
+            if narrowed == remaining:
+                continue
+            remaining = narrowed
+            if source is not None:
+                causes.add(source)
+            if not remaining:
+                break
+        return frozenset(causes)
+
+    def domain_conflict_causes(self, domain: _Domain) -> _Clause:
+        """Return the assignments whose requirements emptied a domain."""
+        if domain.mask:  # pragma: no cover - internal invariant
+            raise AssertionError("domain is not empty")
+        return self.domain_restriction_causes(domain)
 
     def requirement_mask(
         self,
@@ -486,8 +547,43 @@ class FiniteDomainKernel:
                     continue
             active.append(dependency)
         dependencies = tuple(active)
+        if len(dependencies) > _KERNEL_MAX_ACTIVE_DEPENDENCIES:
+            # Wide candidate fan-out is propagation work rather than search.
+            # The generic agenda maintains that shape with substantially less
+            # trail and clause state, while the finite kernel is most useful
+            # for narrow domains whose conflicts can amortize that machinery.
+            raise KernelUnsupported
         self.dependencies_cache[key] = dependencies
         return dependencies
+
+    def check_root_shape(self, requirements: list[Requirement]) -> None:
+        """Probe selected root metadata before exploring a transitive branch.
+
+        Metadata is cached by ``dependencies``, so a supported workload pays no
+        duplicate parsing when the candidate is selected.  An unsupported wide
+        graph can hand off before fail-first ordering explores a narrower root.
+        """
+        seen: set[str] = set()
+        for requirement in requirements:
+            name = requirement.canonical_name
+            if name in seen:
+                continue
+            seen.add(name)
+            domain = self.domains[name]
+            mask = domain.mask
+            while mask:
+                bit = mask & -mask
+                index = bit.bit_length() - 1
+                candidate = self.candidate_with_extras(
+                    domain.candidates[index],
+                    domain.extras,
+                )
+                if self.resolver.ignore_requires_python or (
+                    self.resolver.candidate_matches_python(candidate)
+                ):
+                    self.dependencies(candidate)
+                    break
+                mask ^= bit
 
     @staticmethod
     def marker_supported(marker: str) -> bool:
@@ -520,25 +616,27 @@ class FiniteDomainKernel:
                     break
         return best_name
 
-    def available_indices(self, name: str, domain: _Domain) -> tuple[int, ...]:
-        """Return candidates not ruled out by unconditional learned clauses."""
+    def available_indices(
+        self,
+        name: str,
+        domain: _Domain,
+    ) -> tuple[tuple[int, ...], dict[int, _Clause]]:
+        """Unit-propagate active incompatibilities into one candidate domain."""
         result: list[int] = []
+        blockers: dict[int, _Clause] = {}
         mask = domain.mask
         while mask:
             bit = mask & -mask
             index = bit.bit_length() - 1
             candidate = domain.candidates[index]
-            blocked = False
-            key = (name, str(candidate.version))
-            for clause in self.unary_nogoods.get(key, ()):
-                term = next(iter(clause))
-                if term[2] <= domain.extras:
-                    blocked = True
-                    break
-            if not blocked:
+            candidate_term = self.assignment(name, candidate, domain.extras)
+            blocker = self.violated_nogood(candidate_term)
+            if blocker is None:
                 result.append(index)
+            else:
+                blockers[index] = blocker
             mask ^= bit
-        return tuple(result)
+        return tuple(result), blockers
 
     def fail(
         self,
@@ -551,10 +649,14 @@ class FiniteDomainKernel:
         self.record_decision_blocker(causes)
         self.resolver.metrics.conflicts += 1
         conflict_count = self.resolver.metrics.conflicts
-        if conflict_count > _KERNEL_MAX_CONFLICTS:
+        if conflict_count > _KERNEL_MAX_CONFLICTS or (
+            conflict_count > _KERNEL_LARGE_GRAPH_MAX_CONFLICTS
+            and len(self.domains) > _KERNEL_LARGE_GRAPH_DOMAINS
+        ):
             # This kernel is an optional accelerator. Bound adversarial or
-            # unexpectedly complex searches and let the authoritative generic
-            # resolver continue instead of turning them into unbounded detours.
+            # unexpectedly complex searches, including very large dependency
+            # graphs where exact-version clauses stop amortizing their state,
+            # and let the authoritative generic resolver continue.
             raise KernelUnsupported
         if self.resolver.debug_internal and (
             conflict_count <= 10 or conflict_count in {100, 1000, 10_000, 100_000}
@@ -568,7 +670,9 @@ class FiniteDomainKernel:
             )
         if not causes:
             self.rollback(checkpoint)
-            raise KernelUnsatisfiable
+            raise KernelUnsatisfiable(
+                f"{conflict_name}: conflict has no active assignments",
+            )
         clause = self.learn_nogood(causes) or causes
         self.resolve_conflict(clause)
 
@@ -614,10 +718,12 @@ class FiniteDomainKernel:
             if skipped:
                 self.resolver.metrics.backjumps += 1
             if not derived:
-                raise KernelUnsatisfiable
+                raise KernelUnsatisfiable(
+                    f"{target.name}: every root-compatible candidate is blocked",
+                )
             clause = self.learn_nogood(derived) or derived
 
-        raise KernelUnsatisfiable
+        raise KernelUnsatisfiable("conflict resolution produced an empty clause")
 
     def latest_clause_decision(self, clause: _Clause) -> int | None:
         latest = -1
@@ -661,7 +767,8 @@ class FiniteDomainKernel:
                 latest = position, decision
         if latest is not None:
             decision = latest[1]
-            decision.blockers[decision.next_choice] = clause
+            candidate_index = decision.choices[decision.next_choice]
+            decision.blockers[candidate_index] = clause
 
     def normalize_causes(self, causes: _Clause) -> _Clause:
         """Resolve extras-expanded assignments to their decision reasons."""
@@ -685,7 +792,7 @@ class FiniteDomainKernel:
                 normalized.add(term)
                 continue
             normalized.add((term[0], term[1], decision.extras))
-            for source in self.domains[term[0]].causes:
+            for source in self.domains[term[0]].extra_causes:
                 if source[:2] == term[:2]:
                     continue
                 pending.append(source)
@@ -694,25 +801,36 @@ class FiniteDomainKernel:
     def exhausted_domain_clause(self, decision: _Decision) -> _Clause | None:
         """Resolve candidate blockers into a package-level conflict clause."""
         domain = self.domains[decision.name]
-        causes = set(domain.causes)
-        for position, index in enumerate(decision.choices):
+        return self.domain_blocker_clause(decision.name, domain, decision.blockers)
+
+    def domain_blocker_clause(
+        self,
+        name: str,
+        domain: _Domain,
+        blockers: Mapping[int, _Clause],
+    ) -> _Clause | None:
+        """Resolve blockers for every allowed release into one incompatibility."""
+        causes = set(self.domain_restriction_causes(domain))
+        mask = domain.mask
+        while mask:
+            bit = mask & -mask
+            index = bit.bit_length() - 1
             candidate = domain.candidates[index]
             candidate_term = self.assignment(
-                decision.name,
+                name,
                 candidate,
                 domain.extras,
             )
-            blocker = decision.blockers.get(position)
+            blocker = blockers.get(index)
             if blocker is None:
                 blocker = self.violated_nogood(candidate_term)
             if blocker is None:
                 return None
             for term in blocker:
-                if (
-                    term[:2] == candidate_term[:2]
-                ):
+                if term[:2] == candidate_term[:2]:
                     continue
                 causes.add(term)
+            mask ^= bit
         return frozenset(causes)
 
     def learn_nogood(
@@ -788,8 +906,10 @@ class FiniteDomainKernel:
                     "frozenset[str]",
                     value,
                 )
-            elif kind == "cause":
-                self.domains[cast("str", key)].causes.remove(
+            elif kind == "restriction":
+                self.domains[cast("str", key)].restrictions.pop()
+            elif kind == "extra_cause":
+                self.domains[cast("str", key)].extra_causes.remove(
                     cast("_Assignment", value),
                 )
             elif kind == "selected":
@@ -1226,8 +1346,9 @@ def try_resolve(
             )
         except (KernelUnsupported, KernelUnsatisfiable) as exc:
             if resolver.debug_internal:
+                detail = f": {exc}" if str(exc) else ""
                 print(
-                    f"finite-domain kernel declined: {type(exc).__name__}",
+                    f"finite-domain kernel declined: {type(exc).__name__}{detail}",
                     flush=True,
                 )
         else:

@@ -45,20 +45,15 @@ class ValidationOperations:
         self: ConfigurationContext,
         requirement: Requirement,
     ) -> bool:
-        key = (
-            requirement.canonical_name,
-            requirement.specifier.text_internal,
-            requirement.url,
-            requirement.raw,
-        )
+        key = id(requirement)
         cached = self.allow_prereleases_cache.get(key)
-        if cached is not None:
-            return cached
+        if cached is not None and cached[0] is requirement:
+            return cached[1]
         controlled = self.provider.release_control
         if controlled is not None:
             value = controlled.allows_prereleases(requirement.name)
             if value is not None:
-                self.allow_prereleases_cache[key] = value
+                self.allow_prereleases_cache[key] = requirement, value
                 return value
         mentions_prerelease = any(
             spec.operator != "==="
@@ -71,7 +66,7 @@ class ValidationOperations:
             or is_direct_requirement(requirement)
             or mentions_prerelease
         )
-        self.allow_prereleases_cache[key] = result
+        self.allow_prereleases_cache[key] = requirement, result
         return result
 
     @staticmethod

@@ -6,7 +6,7 @@ import ntpath
 import os
 import urllib.parse
 from functools import lru_cache
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from cpip.core.packaging import Requirement, canonicalize_name
 from cpip.core.urls import path_to_url, url_to_path
@@ -16,6 +16,9 @@ from cpip.index.directory_index import (
 )
 from cpip.index.links import SUPPORTED_EXTENSIONS, Link
 from cpip.index.source_models import ArtifactKind
+
+if TYPE_CHECKING:
+    from cpip.index.catalog_cache import CatalogData, CatalogSummary
 
 SUPPORTED_SCHEMES = frozenset(("http", "https", "file", "ftp"))
 VCS_SCHEMES = frozenset(("git", "hg", "svn", "bzr"))
@@ -180,15 +183,53 @@ class SimpleIndexSource:
         if self.session is None:
             return None
         project_url = self.project_page_url(self.index_url, requirement.canonical_name)
-        if not getattr(self.session, "has_fresh_cached_response", lambda _: False)(
-            project_url
-        ):
+        if not self.has_fresh_cached_page(requirement):
             return None
         from cpip.index.catalog_cache import load_records
 
         return load_records(getattr(self.session, "cache", None), project_url)
 
+    def collect_cached_catalog(
+        self,
+        requirement: Requirement,
+    ) -> CatalogData | None:
+        """Return compiled cached records when the HTTP page is still fresh."""
+        if self.session is None:
+            return None
+        project_url = self.project_page_url(self.index_url, requirement.canonical_name)
+        if not self.has_fresh_cached_page(requirement):
+            return None
+        from cpip.index.catalog_cache import load_catalog
+
+        return load_catalog(getattr(self.session, "cache", None), project_url)
+
+    def collect_cached_catalog_summary(
+        self,
+        requirement: Requirement,
+    ) -> CatalogSummary | None:
+        """Return the compact release view when the HTTP page is fresh."""
+        if self.session is None:
+            return None
+        project_url = self.project_page_url(self.index_url, requirement.canonical_name)
+        if not self.has_fresh_cached_page(requirement):
+            return None
+        from cpip.index.catalog_cache import load_summary
+
+        return load_summary(getattr(self.session, "cache", None), project_url)
+
+    def has_fresh_cached_page(self, requirement: Requirement) -> bool:
+        """Return whether catalog discovery can avoid remote I/O."""
+        if self.session is None:
+            return False
+        project_url = self.project_page_url(self.index_url, requirement.canonical_name)
+        return bool(
+            getattr(self.session, "has_fresh_cached_response", lambda _: False)(
+                project_url,
+            ),
+        )
+
     @staticmethod
+    @lru_cache(maxsize=16384)
     def project_page_url(index_url: str, canonical_name: str) -> str:
         return urllib.parse.urljoin(
             index_url if index_url.endswith("/") else index_url + "/",

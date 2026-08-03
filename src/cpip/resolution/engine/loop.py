@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Generator, Mapping
 from typing import TYPE_CHECKING
 
 from cpip.core.errors import DistributionNotFound, ResolutionError
@@ -171,7 +171,15 @@ class SearchEngine:
         # There is no failed state to consult on the first pass.  Defer key
         # construction until a search actually fails; later branches will
         # still build the key before consulting the populated memo.
-        if self.failed_search_states:
+        if self.failed_search_states and (
+            not selected or len(self.failed_search_states) >= 8
+        ):
+            # Exact-state memoization pays off after a search develops a real
+            # failed-state frontier.  A single deep failure followed by a
+            # mostly linear solve would otherwise hash the entire selected
+            # graph at every frame without a realistic chance of a hit.  Root
+            # lookups stay enabled so repeated top-level resolutions retain
+            # the public diagnostic/testing behavior.
             fingerprint = self.search_state_fingerprint_internal(
                 pending,
                 selected,
@@ -328,8 +336,36 @@ class SearchEngine:
         source_requirements: Mapping[str, RequirementInput],
         source_requirements_by_url: Mapping[str, RequirementInput],
     ) -> SearchFrame:
-        if not pending:
-            return self.satisfied_dependencies_are_consistent(selected, satisfied)
+        while pending:
+            result = yield from self.search_step(
+                pending,
+                selected,
+                selected_extras,
+                satisfied,
+                graph,
+                source_requirements=source_requirements,
+                source_requirements_by_url=source_requirements_by_url,
+            )
+            if result is None:
+                continue
+            return result
+        return self.satisfied_dependencies_are_consistent(selected, satisfied)
+
+    def search_step(
+        self: EngineContext,
+        pending: PendingAgenda,
+        selected: dict[str, WheelCandidate],
+        selected_extras: dict[str, frozenset[str]],
+        satisfied: dict[str, SatisfiedRequirement],
+        graph: dict[str, set[str]],
+        *,
+        source_requirements: Mapping[str, RequirementInput],
+        source_requirements_by_url: Mapping[str, RequirementInput],
+    ) -> Generator[
+        SearchRequest,
+        bool | SearchFailure,
+        bool | SearchFailure | None,
+    ]:
         entry_id, requirement = self.choose_requirement(pending, selected)
         self.metrics.propagations += 1
         pending.remove(entry_id)
@@ -345,18 +381,7 @@ class SearchEngine:
                 allow_prereleases=self.allow_prereleases_internal(requirement),
             ):
                 return False
-            return (
-                yield SearchRequest(
-                    remaining,
-                    selected,
-                    selected_extras,
-                    satisfied,
-                    graph,
-                    source_requirements,
-                    source_requirements_by_url,
-                    checkpoint=remaining.checkpoint(),
-                )
-            )
+            return None
 
         if name in selected:
             selected_candidate = selected[name]
@@ -368,7 +393,6 @@ class SearchEngine:
                 selected_candidate.version,
                 allow_prereleases=self.allow_prereleases_internal(requirement),
             ):
-                branch_checkpoint = remaining.checkpoint()
                 merged_extras = selected_extras.get(name, frozenset()) | frozenset(
                     constrained.extras,
                 )
@@ -391,18 +415,7 @@ class SearchEngine:
                             graph[name].add(dep.canonical_name)
                             extra_pending.append(dep)
                         remaining.prepend(extra_pending)
-                return (
-                    yield SearchRequest(
-                        remaining,
-                        selected,
-                        selected_extras,
-                        satisfied,
-                        graph,
-                        source_requirements,
-                        source_requirements_by_url,
-                        checkpoint=branch_checkpoint,
-                    )
-                )
+                return None
             previous_candidate = selected.pop(name)
             self.remove_candidate_dependencies(name, previous_candidate)
             previous_extras = selected_extras.pop(name, frozenset())

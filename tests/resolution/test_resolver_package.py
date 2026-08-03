@@ -23,6 +23,7 @@ from cpip.index.cache import wheel_cache_path
 from cpip.index.candidate_materialization import CandidateStream, LazyWheelCandidate
 from cpip.index.provider import CandidateProvider
 from cpip.index.source_models import CandidateSummary
+from cpip.resolution.engine import propagation
 from cpip.resolution.engine import ResolutionEngine
 from cpip.resolution.engine.algorithms import is_pypi_hosted_url
 from cpip.resolution.engine.input.requirements import (
@@ -127,6 +128,89 @@ def test_finite_domain_kernel_matches_generic_on_wide_roots(tmp_path: Path) -> N
         (candidate.canonical_name, str(candidate.version))
         for candidate in baseline.candidates
     }
+
+
+def test_finite_domain_kernel_omits_redundant_domain_causes() -> None:
+    candidates = tuple(
+        WheelCandidate("shared", Version(f"{version}.0"), "unused.whl", ())
+        for version in range(1, 4)
+    )
+    introducer = ("root", "1.0", frozenset())
+    first = ("first", "1.0", frozenset())
+    redundant = ("redundant", "1.0", frozenset())
+    last = ("last", "1.0", frozenset())
+    domain = propagation._Domain(
+        candidates=candidates,
+        mask=0,
+        extras=frozenset(),
+        introducer=introducer,
+        restrictions=[
+            (0b110, first),
+            (0b110, redundant),
+            (0b001, last),
+        ],
+        extra_causes=set(),
+    )
+
+    causes = propagation.FiniteDomainKernel.domain_restriction_causes(domain)
+
+    assert causes == frozenset((introducer, first, last))
+
+
+def test_finite_domain_kernel_unit_propagates_candidate_blockers() -> None:
+    kernel = propagation.FiniteDomainKernel(object())  # type: ignore[arg-type]
+    parent = WheelCandidate("parent", Version("1.0"), "unused.whl", ())
+    candidates = tuple(
+        WheelCandidate("child", Version(f"{version}.0"), "unused.whl", ())
+        for version in range(1, 3)
+    )
+    parent_term = ("parent", "1.0", frozenset())
+    kernel.selected["parent"] = parent
+    kernel.selected_extras["parent"] = frozenset()
+    clauses = tuple(
+        frozenset(
+            (
+                parent_term,
+                ("child", str(candidate.version), frozenset()),
+            ),
+        )
+        for candidate in candidates
+    )
+    for clause in clauses:
+        kernel.index_nogood(clause)
+    domain = propagation._Domain(
+        candidates=candidates,
+        mask=0b11,
+        extras=frozenset(),
+        introducer=parent_term,
+        restrictions=[],
+        extra_causes=set(),
+    )
+
+    choices, blockers = kernel.available_indices("child", domain)
+
+    assert choices == ()
+    assert blockers == {0: clauses[0], 1: clauses[1]}
+    assert kernel.domain_blocker_clause("child", domain, blockers) == frozenset(
+        (parent_term,),
+    )
+
+
+def test_finite_domain_kernel_declines_wide_candidate_fanout() -> None:
+    dependencies = tuple(
+        parse_requirement(f"dependency-{index}")
+        for index in range(propagation._KERNEL_MAX_ACTIVE_DEPENDENCIES + 1)
+    )
+    candidate = WheelCandidate(
+        "wide-root",
+        Version("1.0"),
+        "unused.whl",
+        dependencies,
+    )
+    kernel = propagation.FiniteDomainKernel(object())  # type: ignore[arg-type]
+
+    with pytest.raises(propagation.KernelUnsupported):
+        kernel.dependencies(candidate)
 
 
 def test_finite_domain_kernel_backtracks_and_matches_generic(
@@ -280,6 +364,44 @@ def test_finite_domain_kernel_supports_root_extras(
     assert kernel_names == baseline_names
     assert "extra-all" in kernel_names
     assert "extra-dev" in kernel_names
+
+
+def test_generic_resolver_merges_extras_without_materializing_wheel(
+    tmp_path: Path,
+) -> None:
+    wheelhouse = tmp_path / "lazy-extra-merge"
+    wheelhouse.mkdir()
+    make_wheel(
+        wheelhouse,
+        "shared",
+        "shared",
+        "1.0",
+        requires=["extra-leaf>=1; extra == 'feature'"],
+        provides_extra=["feature"],
+    )
+    make_wheel(wheelhouse, "extra-leaf", "extra_leaf", "1.0")
+    provider = CandidateProvider.from_options(
+        find_links=[str(wheelhouse)],
+        no_index=True,
+        dry_run=True,
+    )
+    resolver = ResolutionEngine(provider=provider, ignore_installed=True)
+    resolver.kernel_enabled = False
+
+    base = parse_requirement("shared>=1")
+    candidate = resolver.find_candidates_internal(base)[0]
+    merged = resolver.candidate_with_extras(
+        candidate,
+        parse_requirement("shared[feature]>=1"),
+        frozenset(("feature",)),
+    )
+
+    assert isinstance(candidate, LazyWheelCandidate)
+    assert isinstance(merged, LazyWheelCandidate)
+    assert {dependency.canonical_name for dependency in merged.dependencies} == {
+        "extra-leaf",
+    }
+    assert provider.get_materializer_internal().artifact_materializations == 0
 
 
 def test_finite_domain_kernel_resolves_lazy_index_domains(tmp_path: Path) -> None:
@@ -942,6 +1064,41 @@ def test_resolver_ranks_each_pending_package_once(
     assert ranked == ["demo", "other"]
 
 
+def test_resolver_consumes_wide_conflict_free_agenda_in_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    resolver = ResolutionEngine(no_index=True)
+    requirements = [
+        parse_requirement(f"wide-{index}")
+        for index in range(64)
+    ]
+    selected = {
+        requirements[0].canonical_name: WheelCandidate(
+            requirements[0].name,
+            Version("1.0"),
+            "unused.whl",
+            (),
+        ),
+    }
+    prefetched: list[tuple[Requirement, ...]] = []
+    monkeypatch.setattr(
+        resolver.provider,
+        "prefetch_available_versions",
+        prefetched.append,
+    )
+
+    entry_id, chosen = resolver.choose_requirement(
+        PendingAgenda(requirements),
+        selected,
+    )
+
+    assert entry_id == 0
+    assert chosen is requirements[0]
+    assert len(prefetched) == 1
+    assert len(prefetched[0]) == 16
+    assert requirements[0] not in prefetched[0]
+
+
 def test_resolver_reuses_version_masks_for_reversible_domains(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -969,6 +1126,51 @@ def test_resolver_reuses_version_masks_for_reversible_domains(
     assert resolver.requirements_version_mask((broad, exclusion, narrowed)) == 1
     assert resolver.requirements_version_mask((broad, exclusion)) == original
     assert calls == 1
+
+
+@pytest.mark.parametrize(
+    "specifier, allow_prereleases",
+    [
+        ("", True),
+        ("", False),
+        (">=1,<3", True),
+        (">1,<=3", False),
+        ("==2", False),
+        ("~=1.2", True),
+        (">=1.0rc1,<2", False),
+        ("!=2", True),
+        ("==1.*", True),
+        ("===2", True),
+    ],
+)
+def test_resolver_version_masks_match_specifier_oracle(
+    specifier: str,
+    allow_prereleases: bool,
+) -> None:
+    resolver = ResolutionEngine(no_index=True)
+    versions = tuple(
+        sorted(
+            Version(value)
+            for value in ("1.0.dev1", "1.0rc1", "1.0", "1.2", "2", "3")
+        ),
+    )
+    requirement = parse_requirement(f"demo{specifier}")
+
+    actual = resolver.requirement_version_mask(
+        requirement,
+        versions,
+        allow_prereleases=allow_prereleases,
+    )
+    expected = sum(
+        1 << index
+        for index, version in enumerate(versions)
+        if requirement.is_satisfied_by(
+            version,
+            allow_prereleases=allow_prereleases,
+        )
+    )
+
+    assert actual == expected
 
 
 def test_resolver_restores_domain_mask_after_dependency_backtrack(

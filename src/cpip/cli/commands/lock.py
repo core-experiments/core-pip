@@ -289,6 +289,7 @@ def run_lock(args: list[str]) -> int:
             no_index=options.no_index,
             format_control=format_control,
             build_isolation=not options.no_build_isolation,
+            wheel_cache_dir=cache_dir,
             session=resolution_session,
             dry_run=True,
         )

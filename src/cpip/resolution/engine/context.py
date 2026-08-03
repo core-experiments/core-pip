@@ -53,12 +53,13 @@ class SearchState(Protocol):
         int,
     ]
     domain_viability_cache: dict[tuple[str, tuple[str, ...]], bool]
+    specifier_intersection_cache: dict[tuple[str, ...], bool]
     version_tables: dict[str, tuple[Version, ...]]
     version_indexes: dict[str, dict[Version, int]]
     version_masks: dict[tuple[str, str, bool], int]
     active_version_masks: dict[tuple[str, tuple[tuple[str, bool], ...]], int]
     allowed_versions_cache: dict[tuple[str, int], frozenset[Version]]
-    allow_prereleases_cache: dict[tuple[str, str, str | None, str], bool]
+    allow_prereleases_cache: dict[int, tuple[Requirement, bool]]
     incoming_requirements: dict[str, dict[str, tuple[Requirement, ...]]]
     domains_internal: dict[str, PackageDomain]
     unavailable_requirements: dict[str, Requirement]
@@ -163,6 +164,7 @@ class EngineOperations(Protocol):
     def requirement_version_mask(self, *args: Any, **kwargs: Any) -> Any: ...
     def search_frame_inner(self, *args: Any, **kwargs: Any) -> Any: ...
     def search_frame_internal(self, *args: Any, **kwargs: Any) -> Any: ...
+    def search_step(self, *args: Any, **kwargs: Any) -> Any: ...
     def search_state_key_internal(self, *args: Any, **kwargs: Any) -> Any: ...
     def search_state_fingerprint_internal(self, *args: Any, **kwargs: Any) -> Any: ...
     def search_uncached(self, *args: Any, **kwargs: Any) -> Any: ...
@@ -218,6 +220,7 @@ class SelectionContext(EngineConfiguration, SearchState, EngineOperations, Proto
     """Candidate-selection contract over configuration and search state."""
 
     conflict_activity: list[int]
+    package_ids: dict[str, int]
 
 
 class ConflictContext(

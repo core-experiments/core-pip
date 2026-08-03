@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from bisect import bisect_left, bisect_right
 from typing import TYPE_CHECKING
 
 from cpip.core.packaging import Requirement, Version, canonicalize_name, marker_applies
@@ -547,10 +548,26 @@ class ConflictLearning:
         domain: PackageDomain | None = None,
     ) -> bool:
         dependency_version = exact_pinned_version(dependency)
+        versions_cached = dependency.canonical_name in self.version_tables
+        package_id = self.package_ids.get(dependency.canonical_name)
+        has_conflict_activity = (
+            package_id is not None and bool(self.conflict_activity[package_id])
+        )
+        use_domain_mask = (
+            domain is not None
+            and len(active) >= 2
+            and (
+                versions_cached
+                or (
+                    len(active) >= INCREMENTAL_STATE_KEY_THRESHOLD
+                    and has_conflict_activity
+                )
+            )
+        )
         if (
             dependency_version is not None
+            and use_domain_mask
             and domain is not None
-            and len(active) >= INCREMENTAL_STATE_KEY_THRESHOLD
         ):
             versions = self.version_table(dependency)
             active_mask = self.domain_version_mask(domain)
@@ -584,11 +601,8 @@ class ConflictLearning:
                 return True
             if any(version is not None for version in active_versions):
                 return False
-        if domain is not None and len(active) >= INCREMENTAL_STATE_KEY_THRESHOLD:
-            active_mask = domain.constrained_version_mask
-            if active_mask is None:
-                active_mask = self.requirements_version_mask(active)
-                domain.constrained_version_mask = active_mask
+        if use_domain_mask and domain is not None:
+            active_mask = self.domain_version_mask(domain)
             versions = self.version_tables.get(dependency.canonical_name)
             if versions is not None and active_mask is not None:
                 allow_prereleases = self.allow_prereleases_internal(dependency)
@@ -607,20 +621,30 @@ class ConflictLearning:
         requirements = (dependency, *active)
         if any(requirement.url is not None for requirement in requirements):
             return False
-        version_mask = None
-        if dependency.canonical_name in self.version_tables:
-            version_mask = self.requirements_version_mask(requirements)
-            if version_mask is not None:
-                return version_mask == 0
-        if specifier_intersection_is_empty(requirements):
+        specifier_key = tuple(
+            sorted(item.specifier.text_internal for item in requirements)
+        )
+        intersection_empty = self.specifier_intersection_cache.get(specifier_key)
+        if intersection_empty is None:
+            intersection_empty = specifier_intersection_is_empty(requirements)
+            self.specifier_intersection_cache[specifier_key] = intersection_empty
+        if intersection_empty:
             return True
-        if version_mask is None:
-            version_mask = self.requirements_version_mask(requirements)
+        # A logically compatible pair does not need a complete published-version
+        # table yet.  Candidate selection remains the source of truth and will
+        # report an empty index domain if no release exists.  Build the bitset
+        # only after a domain is already using masks or has accumulated enough
+        # independent constraints to make eager pruning worthwhile.  This keeps
+        # ordinary propagation lazy without weakening conflict handling on hard
+        # graphs.
+        if not versions_cached and not use_domain_mask:
+            return False
+        version_mask = self.requirements_version_mask(requirements)
         if version_mask is not None:
             return version_mask == 0
         domain_key = (
             dependency.canonical_name,
-            tuple(sorted(str(item.specifier) for item in requirements)),
+            specifier_key,
         )
         viable = self.domain_viability_cache.get(domain_key)
         if viable is None:
@@ -670,11 +694,55 @@ class ConflictLearning:
         cached = self.version_masks.get(key)
         if cached is not None:
             return cached
-        mask = sum(
-            1 << index
-            for index, version in enumerate(versions)
-            if requirement.is_satisfied_by(version, allow_prereleases=allow_prereleases)
+        lower, upper = requirement.specifier.bounds()
+        start = 0
+        stop = len(versions)
+        if lower is not None:
+            start = (
+                bisect_left(versions, lower[0])
+                if lower[1]
+                else bisect_right(versions, lower[0])
+            )
+        if upper is not None:
+            stop = (
+                bisect_right(versions, upper[0])
+                if upper[1]
+                else bisect_left(versions, upper[0])
+            )
+        start = min(start, stop)
+        bounded_only = all(
+            specifier.operator in {"==", ">=", ">", "<=", "<", "~="}
+            and not specifier.version.endswith(".*")
+            for specifier in requirement.specifier.specifiers
         )
+        explicitly_allows_prereleases = any(
+            specifier.operator != "==="
+            and not specifier.version.endswith(".*")
+            and specifier.parsed_version.is_prerelease
+            for specifier in requirement.specifier.specifiers
+        )
+        if bounded_only:
+            mask = ((1 << stop) - 1) ^ ((1 << start) - 1)
+            if not allow_prereleases and not explicitly_allows_prereleases:
+                stable_key = requirement.canonical_name, "<stable>", False
+                stable_mask = self.version_masks.get(stable_key)
+                if stable_mask is None:
+                    stable_mask = sum(
+                        1 << index
+                        for index, version in enumerate(versions)
+                        if not version.is_prerelease
+                    )
+                    self.version_masks[stable_key] = stable_mask
+                mask &= stable_mask
+        else:
+            mask = sum(
+                1 << index
+                for index in range(start, stop)
+                if requirement.is_satisfied_by(
+                    versions[index],
+                    allow_prereleases=allow_prereleases,
+                )
+            )
         self.version_masks[key] = mask
         return mask
 
@@ -687,6 +755,21 @@ class ConflictLearning:
         versions = self.version_table(requirements[0])
         if versions is None:
             return None
+        if len(requirements) == 1:
+            requirement = requirements[0]
+            allow_prereleases = self.allow_prereleases_internal(requirement)
+            mask = self.requirement_version_mask(
+                requirement,
+                versions,
+                allow_prereleases=allow_prereleases,
+            )
+            if not mask and not allow_prereleases:
+                mask = self.requirement_version_mask(
+                    requirement,
+                    versions,
+                    allow_prereleases=True,
+                )
+            return mask
         parts = tuple(
             (
                 requirement.specifier.text_internal,
@@ -766,6 +849,15 @@ class ConflictLearning:
         active = domain.constrained_requirements(self.apply_constraints)
         if len(active) < 2:
             return None, None
+        if requirement.canonical_name not in self.version_tables:
+            package_id = self.package_ids.get(requirement.canonical_name)
+            if package_id is None or not self.conflict_activity[package_id]:
+                # Candidate selection and subsequent constraint propagation
+                # remain the correctness boundary.  Build the complete release
+                # bitset only after this package has participated in a real
+                # conflict; on ordinary linear solves it is cheaper to test the
+                # few candidates that are actually consumed.
+                return None, None
         mask = self.domain_version_mask(domain)
         versions = self.version_table(requirement)
         if mask is None or versions is None:

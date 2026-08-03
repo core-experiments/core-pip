@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 from cpip.core.packaging import (
+    Requirement,
     SpecifierSet,
     Version,
     canonicalize_name,
@@ -50,6 +51,22 @@ def test_parse_requirement_reuses_immutable_result() -> None:
     assert cache.hits == 1
 
 
+def test_requirement_cache_state_roundtrip() -> None:
+    original = parse_requirement(
+        'Demo-Pkg[PDF,SSL]~=1.2,!=1.5; python_version >= "3.11"',
+    )
+    state = original.cache_state_internal()
+
+    restored = Requirement.from_cache_state(state)
+    restored_again = Requirement.from_cache_state(state)
+
+    assert restored_again is restored
+    assert restored == original
+    assert restored.canonical_name == "demo-pkg"
+    assert restored.is_satisfied_by("1.4")
+    assert not restored.is_satisfied_by("1.5")
+
+
 def test_canonicalize_requirement() -> None:
     assert (
         canonicalize_requirement('Demo_Pkg[SSL,PDF] >= 1.0; python_version >= "3.11"')
@@ -84,6 +101,23 @@ def test_version_accepts_pep440_separator_forms(raw: str, normalized: str) -> No
 def test_version_orders_epoch_and_dev_releases() -> None:
     assert Version("1!1.0") > Version("2.0")
     assert Version("1.0.dev1") < Version("1.0a1.dev1") < Version("1.0a1")
+
+
+@pytest.mark.parametrize(
+    "raw",
+    ["1.2.3", "1!2.0rc1.post2.dev3+linux-x86_64", "0.0.0"],
+)
+def test_version_cache_state_roundtrip(raw: str) -> None:
+    original = Version(raw)
+    restored = Version.from_cache_state(original.cache_state_internal())
+    restored_again = Version.from_cache_state(original.cache_state_internal())
+
+    assert restored == original
+    assert restored_again is restored
+    assert hash(restored) == hash(original)
+    assert str(restored) == str(original)
+    assert restored.release == original.release
+    assert restored.is_prerelease == original.is_prerelease
 
 
 @pytest.mark.parametrize(

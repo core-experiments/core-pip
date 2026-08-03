@@ -14,7 +14,6 @@ class PackageDomain:
         "active_version_mask",
         "constrained_internal",
         "constrained_roots_internal",
-        "constrained_version_mask",
         "decision_count",
         "incoming",
         "incoming_version_masks",
@@ -36,7 +35,6 @@ class PackageDomain:
         self.root_version_mask: int | None = None
         self.incoming_version_masks: dict[str, int] = {}
         self.active_version_mask: int | None = None
-        self.constrained_version_mask: int | None = None
         self.decision_count: int | None = None
 
     def requirements(self) -> tuple[Requirement, ...]:
@@ -75,7 +73,6 @@ class PackageDomain:
         self.constrained_internal = None
         self.incoming_version_masks.pop(source, None)
         self.active_version_mask = None
-        self.constrained_version_mask = None
         self.decision_count = None
 
     def remove_incoming(self, source: str) -> None:
@@ -84,7 +81,6 @@ class PackageDomain:
         self.constrained_internal = None
         self.incoming_version_masks.pop(source, None)
         self.active_version_mask = None
-        self.constrained_version_mask = None
         self.decision_count = None
 
 

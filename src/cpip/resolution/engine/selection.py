@@ -31,6 +31,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+_WIDE_AGENDA_THRESHOLD = 64
+_WIDE_AGENDA_PREFETCH = 16
+
 
 def iter_installed_distributions() -> list[InstalledDistribution]:
     from cpip.core.metadata import iter_installed_distributions as iterate
@@ -139,24 +142,19 @@ class SelectionOperations:
         extras: frozenset[str],
     ) -> WheelCandidate:
         if isinstance(candidate, LazyWheelCandidate):
-            if candidate.materializer_internal.dry_run and candidate.source_kind in {
-                "sdist",
-                "source-tree",
-                "vcs",
-            }:
-                merged_requirement = requirement.copy_with(extras=extras)
-                record = candidate.record_internal.copy_with(
-                    metadata_loader=candidate.materializer_internal.metadata_loader(
-                        candidate.record_internal,
-                        merged_requirement,
-                    ),
-                )
-                return LazyWheelCandidate(
-                    record,
+            merged_requirement = requirement.copy_with(extras=extras)
+            record = candidate.record_internal.copy_with(
+                name=candidate.record_internal.metadata().name,
+                metadata_loader=candidate.materializer_internal.metadata_loader(
+                    candidate.record_internal,
                     merged_requirement,
-                    candidate.materializer_internal,
-                )
-            candidate = candidate.materialize()
+                ),
+            )
+            return LazyWheelCandidate(
+                record,
+                merged_requirement,
+                candidate.materializer_internal,
+            )
         try:
             enriched = wheel_candidate(candidate.path, set(extras))
         except (OSError, ValueError):
@@ -287,6 +285,32 @@ class SelectionOperations:
     ) -> tuple[int, Requirement]:
         if len(pending) == 1:
             return pending.first()
+        if (
+            len(pending) >= _WIDE_AGENDA_THRESHOLD
+            and self.metrics.conflicts == 0
+        ):
+            # A wide, conflict-free agenda is propagation dominated.  A full
+            # fail-first scan on every step becomes quadratic while all fresh
+            # domains have the same unknown score.  Consume constraints in
+            # agenda order and keep only a bounded catalog look-ahead; if a
+            # conflict appears, the branch below restores exact domain ranking.
+            prefetch: list[Requirement] = []
+            seen: set[str] = set()
+            for _entry_id, requirement in pending.iter_entries():
+                name = requirement.canonical_name
+                if (
+                    name in selected
+                    or name in seen
+                    or requirement.url is not None
+                    or looks_like_path_requirement(requirement.raw)
+                ):
+                    continue
+                seen.add(name)
+                prefetch.append(requirement)
+                if len(prefetch) == _WIDE_AGENDA_PREFETCH:
+                    break
+            self.provider.prefetch_available_versions(tuple(prefetch))
+            return pending.first()
         # Start remote version-map work before the agenda becomes large
         # enough to force a full preference scan.  Prefetcher itself remains
         # bounded and deduplicates requests, so this overlaps latency without
@@ -397,6 +421,12 @@ class SelectionOperations:
                 return domain.decision_count
             active = domain.constrained_requirements(self.apply_constraints)
             if len(active) > 1:
+                name = requirement.canonical_name
+                package_id = self.package_ids.get(name)
+                if name not in self.version_tables and (
+                    package_id is None or not self.conflict_activity[package_id]
+                ):
+                    return 10**9
                 active_mask = self.domain_version_mask(domain)
                 if active_mask is not None:
                     domain.decision_count = active_mask.bit_count()

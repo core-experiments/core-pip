@@ -190,6 +190,6 @@ def project_version_from_filename(filename: str) -> tuple[str, Version] | None:
     if not sep or not name or not version:
         return None
     try:
-        return name.replace("_", "-"), Version(version)
+        return canonicalize_name(name), Version(version)
     except ValueError:
         return None

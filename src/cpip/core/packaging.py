@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 import urllib.parse
 from functools import lru_cache
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -81,6 +81,7 @@ class InvalidVersion(ValueError):
 
 class Version:
     __slots__ = (
+        "_hash",
         "comparison_key",
         "dev",
         "epoch",
@@ -103,6 +104,7 @@ class Version:
             self.local = None
             self.public = self.format_public()
             self.comparison_key = self.build_comparison_key()
+            self._hash = hash(self.comparison_key)
             return
         match = VERSION_RE.match(raw)
         if match is None:
@@ -138,6 +140,35 @@ class Version:
         )
         self.public = self.format_public()
         self.comparison_key = self.build_comparison_key()
+        self._hash = hash(self.comparison_key)
+
+    @classmethod
+    @lru_cache(maxsize=65536)
+    def from_cache_state(cls, state: tuple[object, ...]) -> Version:
+        """Restore a previously validated parsed version without reparsing it."""
+        value = cls.__new__(cls)
+        value.epoch = state[0]
+        value.release = state[1]
+        value.pre = state[2]
+        value.post = state[3]
+        value.dev = state[4]
+        value.local = state[5]
+        value.public = state[6]
+        value.comparison_key = state[7]
+        value._hash = hash(value.comparison_key)
+        return value
+
+    def cache_state_internal(self) -> tuple[object, ...]:
+        return (
+            self.epoch,
+            self.release,
+            self.pre,
+            self.post,
+            self.dev,
+            self.local,
+            self.public,
+            self.comparison_key,
+        )
 
     @property
     def is_prerelease(self) -> bool:
@@ -200,7 +231,7 @@ class Version:
         return self.comparison_key == other.comparison_key
 
     def __hash__(self) -> int:
-        return hash(self.key_internal())
+        return self._hash
 
     def __lt__(self, other: object) -> bool:
         if not isinstance(other, Version):
@@ -258,6 +289,30 @@ class Specifier:
         validated = Version(self.version.rstrip(".*"))
         if not self.version.endswith(".*"):
             self._parsed_version = validated
+
+    @classmethod
+    def from_cache_state(cls, state: tuple[object, ...]) -> Specifier:
+        """Restore a previously validated specifier without reparsing its version."""
+        value = cls.__new__(cls)
+        value.operator = state[0]
+        value.version = state[1]
+        parsed_state = state[2]
+        value._parsed_version = (
+            None
+            if parsed_state is None
+            else Version.from_cache_state(parsed_state)
+        )
+        value._compatible_upper_bound = None
+        return value
+
+    def cache_state_internal(self) -> tuple[object, ...]:
+        return (
+            self.operator,
+            self.version,
+            None
+            if self._parsed_version is None
+            else self._parsed_version.cache_state_internal(),
+        )
 
     @property
     def parsed_version(self) -> Version:
@@ -320,7 +375,13 @@ def compatible_upper_bound_internal(version: Version) -> Version:
 
 
 class SpecifierSet:
-    __slots__ = ("raw", "specifiers", "text_internal")
+    __slots__ = (
+        "_contains_cache",
+        "_explicitly_allows_prereleases",
+        "raw",
+        "specifiers",
+        "text_internal",
+    )
 
     def __init__(self, value: str = ""):
         self.raw = value.strip()
@@ -333,6 +394,34 @@ class SpecifierSet:
         self.text_internal = ",".join(
             f"{specifier.operator}{specifier.version}" for specifier in self.specifiers
         )
+        self._explicitly_allows_prereleases: bool | None = None
+        self._contains_cache: dict[tuple[Version, bool], bool] = {}
+
+    @classmethod
+    def from_cache_state(cls, state: tuple[object, ...]) -> SpecifierSet:
+        """Restore a previously validated set without rerunning its parser."""
+        value = cls.__new__(cls)
+        value.raw = state[0]
+        value.specifiers = tuple(
+            Specifier.from_cache_state(specifier_state)
+            for specifier_state in cast(
+                "tuple[tuple[object, ...], ...]",
+                state[1],
+            )
+        )
+        value.text_internal = state[2]
+        value._explicitly_allows_prereleases = None
+        value._contains_cache = {}
+        return value
+
+    def cache_state_internal(self) -> tuple[object, ...]:
+        return (
+            self.raw,
+            tuple(
+                specifier.cache_state_internal() for specifier in self.specifiers
+            ),
+            self.text_internal,
+        )
 
     def contains(
         self,
@@ -341,17 +430,26 @@ class SpecifierSet:
         allow_prereleases: bool = False,
     ) -> bool:
         parsed = version if isinstance(version, Version) else Version(version)
-        if (
-            parsed.is_prerelease
-            and not allow_prereleases
-            and not any(
-                spec.parsed_version.is_prerelease
-                for spec in self.specifiers
-                if spec.operator != "===" and not spec.version.endswith(".*")
-            )
-        ):
-            return False
-        return all(spec.contains(parsed) for spec in self.specifiers)
+        key = parsed, allow_prereleases
+        cached = self._contains_cache.get(key)
+        if cached is not None:
+            return cached
+        if parsed.is_prerelease and not allow_prereleases:
+            explicitly_allowed = self._explicitly_allows_prereleases
+            if explicitly_allowed is None:
+                explicitly_allowed = any(
+                    specifier.operator != "==="
+                    and not specifier.version.endswith(".*")
+                    and specifier.parsed_version.is_prerelease
+                    for specifier in self.specifiers
+                )
+                self._explicitly_allows_prereleases = explicitly_allowed
+            if not explicitly_allowed:
+                self._contains_cache[key] = False
+                return False
+        result = all(spec.contains(parsed) for spec in self.specifiers)
+        self._contains_cache[key] = result
+        return result
 
     def bounds(
         self,
@@ -430,6 +528,31 @@ class Requirement:
         self.marker = marker
         self.raw = raw
         self._canonical_name: str | None = None
+
+    @classmethod
+    @lru_cache(maxsize=16384)
+    def from_cache_state(cls, state: tuple[object, ...]) -> Requirement:
+        """Restore a previously validated requirement without reparsing it."""
+        return cls(
+            name=cast("str", state[0]),
+            specifier=SpecifierSet.from_cache_state(
+                cast("tuple[object, ...]", state[1]),
+            ),
+            extras=frozenset(cast("tuple[str, ...]", state[2])),
+            url=cast("str | None", state[3]),
+            marker=cast("str | None", state[4]),
+            raw=cast("str", state[5]),
+        )
+
+    def cache_state_internal(self) -> tuple[object, ...]:
+        return (
+            self.name,
+            self.specifier.cache_state_internal(),
+            tuple(sorted(self.extras)),
+            self.url,
+            self.marker,
+            self.raw,
+        )
 
     @property
     def canonical_name(self) -> str:

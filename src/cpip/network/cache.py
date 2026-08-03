@@ -69,6 +69,14 @@ class SafeFileCache:
             metadata = contents
         return metadata
 
+    def get_atomic(self, key: str) -> bytes | None:
+        """Read a self-contained entry written with one atomic replacement."""
+        path = self.get_cache_path(key) + ".atomic"
+        with suppressed_cache_errors():
+            with open(path, "rb") as file:
+                return file.read()
+        return None
+
     def write_to_file(self, path: str, writer_func: Callable[[BinaryIO], Any]) -> None:
         """Common file writing logic with proper permissions and atomic replacement."""
         with suppressed_cache_errors():
@@ -97,12 +105,18 @@ class SafeFileCache:
         path = self.get_cache_path(key)
         self.write_internal(path, value)
 
+    def set_atomic(self, key: str, value: bytes) -> None:
+        """Write a self-contained entry that needs no companion body file."""
+        self.write_internal(self.get_cache_path(key) + ".atomic", value)
+
     def delete(self, key: str) -> None:
         path = self.get_cache_path(key)
         with suppressed_cache_errors():
             os.remove(path)
         with suppressed_cache_errors():
             os.remove(path + ".body")
+        with suppressed_cache_errors():
+            os.remove(path + ".atomic")
 
     def get_body(self, key: str) -> BinaryIO | None:
         # The cache entry is only valid if both metadata and body exist.

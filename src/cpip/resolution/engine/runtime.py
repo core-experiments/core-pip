@@ -135,6 +135,7 @@ class ResolutionRuntime(
             int,
         ] = {}
         self.domain_viability_cache: dict[tuple[str, tuple[str, ...]], bool] = {}
+        self.specifier_intersection_cache: dict[tuple[str, ...], bool] = {}
         self.version_tables: dict[str, tuple[Version, ...]] = {}
         self.version_indexes: dict[str, dict[Version, int]] = {}
         self.version_masks: dict[tuple[str, str, bool], int] = {}
@@ -143,7 +144,7 @@ class ResolutionRuntime(
             int,
         ] = {}
         self.allowed_versions_cache: dict[tuple[str, int], frozenset[Version]] = {}
-        self.allow_prereleases_cache: dict[tuple[str, str, str | None, str], bool] = {}
+        self.allow_prereleases_cache: dict[int, tuple[Requirement, bool]] = {}
         self.last_graph: dict[str, set[str]] | None = None
         self.incoming_requirements: dict[str, dict[str, tuple[Requirement, ...]]] = {}
         self.domains_internal: dict[str, PackageDomain] = {}
@@ -280,11 +281,13 @@ class ResolutionRuntime(
         self.candidate_dependency_groups.clear()
         self.candidate_count_cache.clear()
         self.domain_viability_cache.clear()
+        self.specifier_intersection_cache.clear()
         self.version_tables.clear()
         self.version_indexes.clear()
         self.version_masks.clear()
         self.active_version_masks.clear()
         self.allowed_versions_cache.clear()
+        self.allow_prereleases_cache.clear()
         self.incoming_requirements.clear()
         self.domains_internal.clear()
         self.root_incompatibilities.clear()

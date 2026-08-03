@@ -1,8 +1,26 @@
 from __future__ import annotations
 
+import hashlib
+import marshal
+import urllib.parse
 from pathlib import Path
 
-from cpip.index.catalog_cache import load_links, save_links
+from cpip.core.packaging import Version
+from cpip.index.catalog_cache import (
+    CatalogChoices,
+    LEGACY_PREFIX,
+    LEGACY_SUMMARY_HEADER,
+    LEGACY_SUMMARY_PREFIX,
+    WHEEL_RECORD,
+    cache_key,
+    load_choices,
+    load_catalog,
+    load_links,
+    load_summary,
+    save_choices,
+    save_links,
+    summary_key,
+)
 from cpip.index.links import Link
 from cpip.index.source_models import MetadataFile
 from cpip.network.cache import SafeFileCache
@@ -21,8 +39,35 @@ def test_catalog_cache_roundtrip(tmp_path: Path) -> None:
 
     save_links(cache, "https://example.test/simple/demo/", [original])
     loaded = load_links(cache, "https://example.test/simple/demo/")
+    catalog = load_catalog(cache, "https://example.test/simple/demo/")
+    summary = load_summary(cache, "https://example.test/simple/demo/")
 
     assert loaded is not None
+    assert catalog is not None
+    assert summary is not None
+    assert [
+        (name, version, [kind for kind, _record in artifacts], facts)
+        for name, version, artifacts, facts in catalog[0]
+    ] == [
+        (
+            "demo",
+            "1.2.3",
+            [WHEEL_RECORD],
+            [(WHEEL_RECORD, ">=3.9", "broken release")],
+        ),
+    ]
+    assert catalog[1] == []
+    assert [
+        (name, version, str(Version.from_cache_state(version_state)), facts)
+        for name, version, version_state, facts in summary[1]
+    ] == [
+        (
+            "demo",
+            "1.2.3",
+            "1.2.3",
+            [(WHEEL_RECORD, ">=3.9", "broken release")],
+        ),
+    ]
     assert loaded[0].url == original.url
     assert loaded[0].comes_from == original.comes_from
     assert loaded[0].hashes == original.hashes
@@ -31,10 +76,109 @@ def test_catalog_cache_roundtrip(tmp_path: Path) -> None:
     assert loaded[0].metadata_file == original.metadata_file
 
 
+def test_catalog_choices_are_scoped_to_generation(tmp_path: Path) -> None:
+    cache = SafeFileCache(str(tmp_path))
+    page_url = "https://example.test/simple/demo/"
+    link = Link.from_url(
+        "https://files.example.test/demo-1.0-py3-none-any.whl",
+        source_url=page_url,
+    )
+    save_links(cache, page_url, [link])
+    catalog = load_catalog(cache, page_url)
+    summary = load_summary(cache, page_url)
+
+    assert catalog is not None
+    assert summary is not None
+    record = catalog[0][0][2][0][1]
+    choices: CatalogChoices = {"1.0": (record, WHEEL_RECORD, 0)}
+    save_choices(cache, page_url, summary[0], "target", True, True, choices)
+
+    embedded = load_summary(cache, page_url)
+    assert embedded is not None
+    assert embedded[3][("target", True, True)] == choices
+    assert load_choices(
+        cache,
+        page_url,
+        summary[0],
+        "target",
+        True,
+        True,
+    ) == choices
+    assert load_choices(
+        cache,
+        page_url,
+        "different-generation",
+        "target",
+        True,
+        True,
+    ) == {}
+
+
+def test_catalog_summary_migrates_v2_in_version_order(tmp_path: Path) -> None:
+    cache = SafeFileCache(str(tmp_path))
+    page_url = "https://example.test/simple/demo/"
+    groups = [
+        (
+            "demo",
+            version,
+            Version(version).cache_state_internal(),
+            [(WHEEL_RECORD, None, None)],
+        )
+        for version in ("2.0", "1.0")
+    ]
+    body = marshal.dumps(("generation", groups, False))
+    cache.set_atomic(
+        LEGACY_SUMMARY_PREFIX + page_url,
+        LEGACY_SUMMARY_HEADER + hashlib.sha256(body).digest() + body,
+    )
+
+    summary = load_summary(cache, page_url)
+
+    assert summary is not None
+    assert [group[1] for group in summary[1]] == ["1.0", "2.0"]
+    assert cache.get_atomic(summary_key(page_url)) is not None
+
+
 def test_catalog_cache_ignores_corrupt_entries(tmp_path: Path) -> None:
     cache = SafeFileCache(str(tmp_path))
-    key = "cpip-index-catalog-v2:https://example.test/simple/demo/"
+    key = cache_key("https://example.test/simple/demo/")
     cache.set(key, b"not marshal")
     cache.set_body(key, b"1")
 
     assert load_links(cache, "https://example.test/simple/demo/") is None
+
+
+def test_catalog_cache_migrates_v2_records_locally(tmp_path: Path) -> None:
+    cache = SafeFileCache(str(tmp_path))
+    page_url = "https://example.test/simple/demo/"
+    artifact_url = "https://files.example.test/demo-1.2.3-py3-none-any.whl"
+    parsed_url = urllib.parse.urlsplit(artifact_url)
+    legacy_record = (
+        artifact_url,
+        tuple(parsed_url),
+        page_url,
+        "demo-1.2.3-py3-none-any.whl",
+        {"sha256": "abc"},
+        ">=3.9",
+        "",
+        {"sha256": "def"},
+        None,
+    )
+    legacy_key = LEGACY_PREFIX + page_url
+    cache.set(
+        legacy_key,
+        marshal.dumps(("cpip-index-catalog", 2, [legacy_record])),
+    )
+    cache.set_body(legacy_key, b"1")
+
+    catalog = load_catalog(cache, page_url)
+
+    assert catalog is not None
+    assert [
+        (name, version, facts)
+        for name, version, _artifacts, facts in catalog[0]
+    ] == [("demo", "1.2.3", [(WHEEL_RECORD, ">=3.9", "")])]
+    assert cache.get_atomic(cache_key(page_url)) is not None
+    loaded = load_links(cache, page_url)
+    assert loaded is not None
+    assert loaded[0].is_yanked
