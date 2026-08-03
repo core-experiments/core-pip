@@ -14,6 +14,15 @@ def toml_string(value: str) -> str:
     return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
+def read_requirement_lines(filename: str) -> list[str]:
+    with open(filename, encoding="utf-8") as requirement_file:
+        return [
+            line.strip()
+            for line in requirement_file.read().splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        ]
+
+
 def render_lock(packages: list[dict[str, object]]) -> str:
     lines = ['created-by = "cpip"', 'lock-version = "1.0"', ""]
     for package in packages:
@@ -82,6 +91,14 @@ def create_parser() -> ArgumentParser:
     parser.add_argument("requirements", nargs="*")
     parser.add_argument("-e", "--editable", action="append", default=[])
     parser.add_argument("-r", "--requirement", action="append", default=[])
+    parser.add_argument(
+        "-c",
+        "--constraint",
+        dest="constraints",
+        metavar="CONSTRAINT",
+        action="append",
+        default=[],
+    )
     parser.add_argument("-f", "--find-links", action="append", default=[])
     parser.add_argument("--no-index", action="store_true")
     parser.add_argument("--no-binary", action="append", default=[])
@@ -238,12 +255,12 @@ def run_lock(args: list[str]) -> int:
                     ),
                 )
         else:
-            with open(filename, encoding="utf-8") as requirement_file:
-                requirements.extend(
-                    line.strip()
-                    for line in requirement_file.read().splitlines()
-                    if line.strip() and not line.lstrip().startswith("#")
-                )
+            requirements.extend(read_requirement_lines(filename))
+    constraints = [
+        requirement
+        for filename in options.constraints
+        for requirement in read_requirement_lines(filename)
+    ]
     if not requirements and not archive_packages and not directory_packages:
         from cpip.core.errors import CommandError
 
@@ -262,6 +279,7 @@ def run_lock(args: list[str]) -> int:
         plan = ResolutionEngine.resolve_wheelhouse(
             options.find_links,
             string_requirements,
+            constraints=constraints,
         )
     if plan is None and requirements:
         from cpip.index.provider import CandidateProvider
@@ -285,6 +303,7 @@ def run_lock(args: list[str]) -> int:
             provider=provider,
             no_deps=False,
             ignore_installed=True,
+            constraints=constraints,
         ).resolve(install_requirements)
     packages: list[dict] = [
         *editable_packages,

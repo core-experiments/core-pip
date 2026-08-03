@@ -120,11 +120,17 @@ class ResolutionEngine(ResolutionRuntime):
         requirements: list[str],
         *,
         cache_dir: str | None = None,
+        constraints: list[str] | None = None,
     ) -> ResolutionResult | None:
         """Resolve a pure-wheel directory through the same result boundary."""
         from cpip.resolution.engine.sources.wheelhouse.engine import resolve
 
-        candidates = resolve(find_links, requirements, cache_dir=cache_dir)
+        candidates = resolve(
+            find_links,
+            requirements,
+            cache_dir=cache_dir,
+            constraints=constraints,
+        )
         return (
             None if candidates is None else ResolutionResult.from_candidates(candidates)
         )

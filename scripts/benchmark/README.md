@@ -13,6 +13,36 @@ Run from this directory:
 uv run cpip-bench --workload offline --benchmark startup-help --benchmark lock-warm
 ```
 
+The default `offline` workload is generated locally and never touches the
+network. List the mirrored official uv workloads and their capabilities with:
+
+```console
+uv run cpip-bench --list-workloads
+```
+
+Run Jupyter's cold and warm resolver and installer comparisons:
+
+```console
+uv run cpip-bench --workload jupyter
+```
+
+Run every official uv workload. Resolver-only workloads run the cold and warm
+lock cases; workloads with an upstream `compiled/*.txt` fixture also run cold
+and warm installation cases:
+
+```console
+uv run cpip-bench --workload live
+```
+
+To limit the complete corpus to resolver benchmarks:
+
+```console
+uv run cpip-bench \
+  --workload live \
+  --benchmark lock-cold \
+  --benchmark lock-warm
+```
+
 By default, cpip is measured as `python -m cpip`. To measure the direct
 console-script style launcher, pass `--cpip-launcher direct`:
 
@@ -35,12 +65,19 @@ uv run cpip-bench \
   --benchmark startup-fast-install
 ```
 
-The default workload is generated locally and does not touch the network. To run
-the Trio/PyPI workload used by uv's public benchmark documentation:
+To run the Trio/PyPI workload used by uv's public benchmark documentation:
 
 ```console
-uv run cpip-bench --workload live --benchmark lock-cold --benchmark install-cold
+uv run cpip-bench --workload trio --benchmark lock-cold --benchmark install-cold
 ```
 
-Live benchmarks are intentionally opt-in because they depend on network latency,
-PyPI state, and cache behavior outside this repository.
+`live` is the suite selector for the complete official corpus; concrete names
+such as `trio` select one workload. The corpus is mirrored in
+[`requirements`](requirements/README.md), including source inputs, compiled
+installer inputs, Airflow constraints, explicit backtracking cases, and the
+Transformers project fixture.
+
+Official uv workloads are intentionally opt-in because they can depend on
+network latency, current PyPI state, VCS availability, target Python, platform
+wheels, and cache behavior outside this repository. `--list-workloads` reports
+cases with an upstream recommended Python version.
