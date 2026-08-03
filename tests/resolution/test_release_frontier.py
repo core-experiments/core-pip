@@ -39,13 +39,14 @@ def test_release_frontier_reuses_catalog_and_intersects_versions(
 def test_resolution_reports_release_frontier_metrics(tmp_path: Path) -> None:
     wheelhouse = tmp_path / "packages"
     wheelhouse.mkdir()
-    make_wheel(
-        wheelhouse,
-        "frontier-root",
-        "frontier_root",
-        "1.0",
-        requires=["frontier-leaf"],
-    )
+    for index in range(8):
+        make_wheel(
+            wheelhouse,
+            "frontier-root",
+            "frontier_root",
+            f"1.{index}",
+            requires=["frontier-leaf"],
+        )
     make_wheel(wheelhouse, "frontier-leaf", "frontier_leaf", "1.0")
 
     provider = CandidateProvider.from_options(

@@ -125,6 +125,21 @@ def test_local_resolution_narrows_range_domain(tmp_path: Path) -> None:
     assert [str(candidate.version) for candidate in plan.candidates] == ["1.9"]
 
 
+def test_local_resolution_declines_mixed_wheelhouse(tmp_path: Path) -> None:
+    wheelhouse = tmp_path / "wheelhouse"
+    wheelhouse.mkdir()
+    write_wheel(wheelhouse / "demo-1.0-py3-none-any.whl", purelib=True)
+    (wheelhouse / "demo-2.0.tar.gz").write_bytes(b"not needed by compact resolution")
+
+    plan = ResolutionEngine.resolve_wheelhouse(
+        [str(wheelhouse)],
+        ["demo"],
+        cache_dir=str(tmp_path / "cache"),
+    )
+
+    assert plan is None
+
+
 def test_local_resolution_catalog_cache_invalidates_on_wheel_changes(
     tmp_path: Path,
 ) -> None:

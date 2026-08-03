@@ -371,4 +371,5 @@ def reset_caches() -> None:
     wheel_module.parsed_wheel_tags.cache_clear()
     wheel_module.wheel_tag_rank.cache_clear()
     wheel_module.wheel_metadata_cache.clear()
+    wheel_module.preloaded_wheel_metadata_cache.clear()
     wheel_module.wheel_dependency_cache.clear()

@@ -627,6 +627,12 @@ class CandidateProvider:
                     candidate = parsed.to_record()
                     self.candidate_record_cache[link] = candidate
                 parsed = candidate
+            if (
+                allowed_versions is not None
+                and isinstance(parsed, CandidateRecord)
+                and parsed.version not in allowed_versions
+            ):
+                continue
             result = (
                 self.evaluate_catalog_candidate(
                     parsed,
@@ -690,12 +696,6 @@ class CandidateProvider:
                 ).hostname
                 if host not in PYPI_HOSTS:
                     raise InstallationError(upload_rejection.detail)
-        if allowed_versions is not None:
-            accepted = tuple(
-                candidate
-                for candidate in accepted
-                if candidate.version in allowed_versions
-            )
         if requirement.url is None and any(
             candidate.version.is_prerelease for candidate in accepted
         ):

@@ -15,6 +15,7 @@ from cpip.index.source_locations import looks_like_path_requirement
 from cpip.resolution.engine.algorithms import (
     exact_pinned_version,
 )
+from cpip.resolution.engine.frontier import MIN_SEARCH_FRONTIER_RELEASES
 from cpip.resolution.engine.state.agenda import PendingAgenda
 from cpip.resolution.engine.state.domains import PackageDomain
 from cpip.resolution.engine.state.plans import SatisfiedRequirement
@@ -518,10 +519,16 @@ class SelectionOperations:
             if requirement.url is None and not looks_like_path_requirement(
                 requirement.raw,
             ):
-                frontier_versions = self.release_frontier.allowed_versions(
+                frontier_domain = self.release_frontier.domain_for(
                     requirement,
-                    allow_prereleases=self.allow_prereleases_internal(requirement),
+                    minimum_releases=MIN_SEARCH_FRONTIER_RELEASES,
                 )
+                if frontier_domain is not None:
+                    frontier_versions = self.release_frontier.allowed_versions(
+                        requirement,
+                        allow_prereleases=self.allow_prereleases_internal(requirement),
+                        domain=frontier_domain,
+                    )
             effective_versions = allowed_versions
             if frontier_versions is not None:
                 effective_versions = (
@@ -529,22 +536,18 @@ class SelectionOperations:
                     if effective_versions is None
                     else effective_versions & frontier_versions
                 )
-            provider_method = self.provider.find_candidates
-            provider_function = getattr(provider_method, "__func__", None)
-            provider_supports_versions = (
-                getattr(provider_function, "__name__", None) == "find_candidates"
-            )
-            if (
-                effective_versions
-                and requirement.url is None
-                and provider_supports_versions
-            ):
-                candidates = provider_method(
-                    requirement,
-                    allowed_versions=effective_versions,
-                )
+            if effective_versions and requirement.url is None:
+                provider_method = self.provider.find_candidates
+                provider_function = getattr(provider_method, "__func__", None)
+                if getattr(provider_function, "__name__", None) == "find_candidates":
+                    candidates = provider_method(
+                        requirement,
+                        allowed_versions=effective_versions,
+                    )
+                else:
+                    candidates = provider_method(requirement)
             else:
-                candidates = provider_method(requirement)
+                candidates = self.provider.find_candidates(requirement)
             if (
                 source_req is not None
                 and provider_hashes is not None

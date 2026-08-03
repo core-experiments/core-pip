@@ -247,7 +247,10 @@ class ResolutionRuntime(
         if self.debug_internal:
             print("Reporter.starting()", file=sys.stdout)
         conflicting_root = (
-            None if self.constraints else self.conflicting_root_bounds(requirements)
+            self.conflicting_root_bounds(requirements)
+            if not self.constraints
+            and len(self.root_requirement_names) < len(requirements)
+            else None
         )
         if conflicting_root is not None:
             if self.debug_internal:

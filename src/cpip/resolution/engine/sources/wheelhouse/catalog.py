@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, cast
 
 from cpip.core.marshal_cache import load_snapshot, save_snapshot
 from cpip.index.directory_index import local_source_snapshot
+from cpip.index.links import SOURCE_ARCHIVE_SUFFIXES
 from cpip.resolution.engine.sources.wheelhouse.archive import WheelhouseUnavailable
 from cpip.resolution.engine.sources.wheelhouse.cache import (
     _CATALOG_CACHE_VERSION,
@@ -504,12 +505,25 @@ def scan_catalog(find_links: list[str]) -> CatalogRecords | None:
             )
             records.setdefault(parsed[0], []).append((directory, parsed[1]))
             continue
-        snapshot = local_source_snapshot(directory, suffixes=(".whl",))
+        snapshot = local_source_snapshot(
+            directory,
+            suffixes=(
+                ".html",
+                ".htm",
+                ".html.gz",
+                ".htm.gz",
+                ".whl",
+                *SOURCE_ARCHIVE_SUFFIXES,
+            ),
+        )
         if snapshot is not None:
             for item in snapshot.entries:
                 filename = os.path.basename(item.path)
                 if not filename.endswith(".whl"):
-                    continue
+                    # A wheel-only catalog is complete only when the generic
+                    # source cannot discover a page or source archive beside
+                    # it. Mixed sources must stay on generic resolution.
+                    return None
                 path = item.path
                 artifact_identity_cache[path] = item.stat_identity
                 parsed = parse_wheel_filename(filename)

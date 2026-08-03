@@ -55,7 +55,7 @@ SharedPreflightCache = dict[
     tuple[int, int, frozenset[str]],
     tuple[ExactIndex, LocalWheelCandidate, bool],
 ]
-_CATALOG_CACHE_VERSION = 2
+_CATALOG_CACHE_VERSION = 3
 metadata_cache_store: MetadataCacheStore = {}
 metadata_cache_paths: dict[int, str] = {}
 metadata_cache_dirty: set[str] = set()

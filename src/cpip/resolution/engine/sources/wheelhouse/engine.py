@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from cpip.core.python import CURRENT_PYTHON_VERSION_FULL, CURRENT_PYTHON_VERSION_INFO
 from cpip.resolution.engine.sources.wheelhouse.cache import (
+    CatalogRecords,
     DomainCache,
     PreflightCache,
     shared_preflight_cache,
@@ -42,6 +43,8 @@ def resolve(
     stats: dict[str, int] | None = None,
     compute_source_hashes: bool = False,
     constraints: list[str] | None = None,
+    fallback_candidates: list[LocalWheelCandidate] | None = None,
+    fallback_catalog: list[CatalogRecords] | None = None,
 ) -> list[LocalWheelCandidate] | None:
     requirements: list[LocalWheelRequirement] = []
     for value in values:
@@ -106,6 +109,12 @@ def resolve(
     finally:
         save_metadata_cache(cache_path, metadata_cache)
     if selected is None:
+        if fallback_candidates is not None:
+            fallback_candidates.extend(
+                candidate for candidate in loaded.values() if candidate is not None
+            )
+        if fallback_catalog is not None:
+            fallback_catalog.append(records)
         return None
     for candidate in selected.values():
         candidate.source_url = "file://" + quote_path(os.path.abspath(candidate.path))

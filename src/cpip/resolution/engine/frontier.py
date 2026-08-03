@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from cpip.index.provider import CandidateProvider
 
 MAX_COMPACT_RELEASES = 128
+MIN_SEARCH_FRONTIER_RELEASES = 8
 
 
 @dataclass(slots=True)
@@ -92,7 +93,12 @@ class ReleaseFrontier:
         self.metrics.catalogs_loaded += 1
         return catalog
 
-    def domain_for(self, requirement: Requirement) -> ReleaseDomain | None:
+    def domain_for(
+        self,
+        requirement: Requirement,
+        *,
+        minimum_releases: int = 0,
+    ) -> ReleaseDomain | None:
         allowed = self.provider.allowed_formats_internal(requirement)
         key = (requirement.canonical_name, *allowed)
         domain = self.domains.get(key)
@@ -101,6 +107,8 @@ class ReleaseFrontier:
             return domain
         catalog = self.catalog_for(requirement)
         if catalog is None:
+            return None
+        if len(catalog.summary_versions) < minimum_releases:
             return None
         versions = tuple(catalog.summary_versions)
         domain = ReleaseDomain(
@@ -117,8 +125,14 @@ class ReleaseFrontier:
         requirement: Requirement,
         *,
         allow_prereleases: bool,
+        minimum_releases: int = 0,
+        domain: ReleaseDomain | None = None,
     ) -> frozenset[Version] | None:
-        domain = self.domain_for(requirement)
+        if domain is None:
+            domain = self.domain_for(
+                requirement,
+                minimum_releases=minimum_releases,
+            )
         if domain is None:
             return None
         cache_key = (
