@@ -61,6 +61,7 @@ def preflight_exact_dependencies(
     metadata_cache: MetadataCache | None,
     persistent_cache: WheelMetadataCache | None,
     extras: frozenset[str],
+    compute_source_hashes: bool = False,
 ) -> bool:
     """Reject exact dependency fan-outs with an impossible shared domain.
 
@@ -129,6 +130,7 @@ def preflight_exact_dependencies(
                     (dependency.canonical_name, version),
                     persistent_cache,
                     path_is_absolute=True,
+                    compute_source_hashes=compute_source_hashes,
                 )
             except WheelhouseUnavailable:
                 loaded[path] = None

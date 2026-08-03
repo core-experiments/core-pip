@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 class InstallPlan:
     """Resolved candidates plus dependency graph and installed requirements."""
 
-    __slots__ = ("candidates", "conflicts", "graph", "satisfied")
+    __slots__ = ("candidates", "conflicts", "graph", "metrics", "satisfied")
 
     def __init__(
         self,
@@ -22,11 +22,13 @@ class InstallPlan:
         graph: dict[str, set[str]] | None = None,
         conflicts: list[str] | None = None,
         satisfied: list[SatisfiedRequirement] | None = None,
+        metrics: dict[str, int | float] | None = None,
     ) -> None:
         self.candidates = candidates
         self.graph = {} if graph is None else graph
         self.conflicts = [] if conflicts is None else conflicts
         self.satisfied = [] if satisfied is None else satisfied
+        self.metrics = {} if metrics is None else metrics
 
 
 class SatisfiedRequirement:

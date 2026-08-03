@@ -17,6 +17,17 @@ class CacheManager:
         self.cache_dir = os.path.normcase(cache_dir or user_cache_dir("cpip"))
         self.http_dir = os.path.join(self.cache_dir, "http-v2")
         self.wheel_dir = os.path.join(self.cache_dir, "wheels")
+        self.archive_dir = os.path.join(self.cache_dir, "archive-v1")
+        self.artifact_dir = os.path.join(self.cache_dir, "artifacts-v1")
+        self.fast_install_tree_dir = os.path.join(
+            self.cache_dir,
+            "fast-install-trees-v1",
+        )
+        self.resolution_dir = os.path.join(self.cache_dir, "resolution-v2")
+        self.legacy_resolution_dir = os.path.join(
+            self.cache_dir,
+            "resolution-v1",
+        )
 
     def wheel_files(self) -> builtins.list[str]:
         wheel_dir = self.wheel_dir
@@ -72,10 +83,25 @@ class CacheManager:
                 for root in (
                     self.http_dir,
                     self.wheel_dir,
+                    self.archive_dir,
+                    self.artifact_dir,
+                    self.fast_install_tree_dir,
+                    self.resolution_dir,
+                    self.legacy_resolution_dir,
                     os.path.join(self.cache_dir, "http"),
                 )
                 for path in self._files_under(root)
             ]
+            files.extend(
+                path
+                for version in (1, 2, 3)
+                if os.path.isfile(
+                    path := os.path.join(
+                        self.cache_dir,
+                        f"fast-install-v{version}.marshal",
+                    ),
+                )
+            )
         else:
             files = [
                 path

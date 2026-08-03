@@ -74,7 +74,7 @@ default-groups = ["typing"]
 module-name = "cpip"
 
 [tool.ruff]
-extend-exclude = ["tests/cli/data"]
+extend-exclude = ["tests/cli/data", "src/cpip/_vendor"]
 
 [tool.pytest.ini_options]
 markers = [
@@ -92,3 +92,36 @@ markers = [
 
 [tool.ty.environment]
 python-version = "3.14"
+
+[tool.cpip.architecture]
+domains = [
+    "core",
+    "platform",
+    "network",
+    "build",
+    "index",
+    "resolution",
+    "install",
+    "vcs",
+    "cli",
+]
+
+[tool.cpip.architecture.dependencies]
+core = []
+platform = ["core"]
+build = ["core", "platform"]
+index = ["core", "build", "platform"]
+network = ["core", "platform", "build", "index"]
+vcs = ["core"]
+resolution = ["core", "index", "network", "vcs"]
+install = ["core", "platform", "network", "build", "index", "resolution", "vcs"]
+cli = [
+    "core",
+    "platform",
+    "network",
+    "build",
+    "index",
+    "resolution",
+    "install",
+    "vcs",
+]

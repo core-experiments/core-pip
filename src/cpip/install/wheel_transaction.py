@@ -227,6 +227,7 @@ def install_wheel_internal(
         direct_contents: dict[str, bytes] = {}
         direct_metadata: dict[str, tuple[str, str]] = {}
         direct_content_size = 0
+        clone_sources: set[str] = set()
 
         def write_direct(
             destination: str,
@@ -246,7 +247,11 @@ def install_wheel_internal(
             archive = cast("Any", archive)
             if validated_dist_info is None:
                 layout = getattr(candidate, "wheel_layout", None)
-                if layout is not None:
+                from cpip.install.wheel_archive_cache import CachedWheelArchive
+
+                if isinstance(layout, CachedWheelArchive):
+                    validated_dist_info = layout.dist_info
+                elif layout is not None:
                     validated_dist_info = layout[0]
                 else:
                     validated_dist_info, _ = parse_wheel(
@@ -284,7 +289,8 @@ def install_wheel_internal(
                 )
                 is_record = relative_name == "RECORD" and bool(relative_parts)
                 direct_content = (
-                    not rewrite_metadata
+                    getattr(member, "source_path", None) is None
+                    and not rewrite_metadata
                     and not script_member
                     and not is_record
                     and member.file_size <= DIRECT_CONTENT_LIMIT
@@ -320,12 +326,34 @@ def install_wheel_internal(
                         assert transaction is not None
                         os.makedirs(os.path.dirname(destination_text), exist_ok=True)
                         transaction.record_created(destination_text)
-                    metadata = copy_member_with_metadata(
-                        archive,
-                        member,
-                        destination_text if direct else source_text,
-                        metadata=metadata,
+                    cached_source = getattr(member, "source_path", None)
+                    cached_clone = (
+                        cached_source is not None
+                        and not direct
+                        and not rewrite_metadata
+                        and not script_member
+                        and not is_record
+                        and relative_name != "entry_points.txt"
+                        and (
+                            not pycompile or os.path.splitext(relative_name)[1] != ".py"
+                        )
                     )
+                    if cached_clone:
+                        source_text = cached_source
+                        clone_sources.add(source_text)
+                        metadata = getattr(member, "record_metadata", metadata)
+                    elif cached_source is not None and not direct:
+                        from cpip.platform.clone import clone_path
+
+                        clone_path(cached_source, source_text)
+                        metadata = getattr(member, "record_metadata", metadata)
+                    else:
+                        metadata = copy_member_with_metadata(
+                            archive,
+                            member,
+                            destination_text if direct else source_text,
+                            metadata=metadata,
+                        )
                     if direct:
                         direct_metadata[destination_text] = metadata
                     else:
@@ -591,11 +619,12 @@ def install_wheel_internal(
                         mode=mode,
                     )
                 else:
-                    active_transaction.add(
-                        source,
-                        destination_text,
-                        mode=mode,
+                    operation = (
+                        active_transaction.add_clone
+                        if source in clone_sources
+                        else active_transaction.add
                     )
+                    operation(source, destination_text, mode=mode)
             for old_path in old_path_texts - new_destinations:
                 active_transaction.delete(old_path)
             if transaction is None:
@@ -664,6 +693,7 @@ def install_wheels_transactionally(
     script_executable: str | None = None,
     lookup_existing: bool = True,
     candidates: Iterable[WheelCandidate] | None = None,
+    cache_dir: str | None = None,
 ) -> tuple[WheelCandidate, ...]:
     """Install a wheel batch with rollback across every wheel in the batch."""
     requests = tuple(items)
@@ -682,6 +712,28 @@ def install_wheels_transactionally(
     )
     if len(planned_candidates) != len(requests):
         raise ValueError("candidate count does not match wheel request count")
+    if (
+        cache_dir is not None
+        and not pycompile
+        and all(
+            candidate.source_kind in {None, "wheel"} for candidate in planned_candidates
+        )
+    ):
+        from cpip.install.wheel_archive_cache import (
+            install_wheels_from_archive_cache,
+        )
+
+        cached_result = install_wheels_from_archive_cache(
+            requests,
+            planned_candidates,
+            target=target,
+            cache_dir=cache_dir,
+            script_executable=script_executable,
+            force=force,
+            preserve_existing=preserve_existing,
+        )
+        if cached_result is not None:
+            return cached_result
     target_inventory = (
         InstalledTargetInventory.from_target(
             target,

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+import os
+import sys
 from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -95,7 +98,13 @@ class ResolutionEngine(ResolutionRuntime):
         | Iterable[InstallRequirement]
         | list[str],
     ) -> ResolutionResult:
-        return ResolutionResult.from_plan(super().resolve_plan(requirements_input))
+        result = ResolutionResult.from_plan(super().resolve_plan(requirements_input))
+        if os.environ.get("CPIP_RESOLUTION_STATS") == "1":
+            print(
+                json.dumps({"cpip_resolution": dict(result.metrics)}, sort_keys=True),
+                file=sys.stderr,
+            )
+        return result
 
     def resolve_requirement_set(
         self,

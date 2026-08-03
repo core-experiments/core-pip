@@ -240,6 +240,16 @@ class Downloader:
                 raise e
 
             logger.warning("Connection interrupted while downloading.")
+        except self._request_error_types() as e:
+            if download.size is None:
+                raise e
+            logger.warning("Connection interrupted while downloading.")
+
+    @staticmethod
+    def _request_error_types() -> tuple[type[BaseException], ...]:
+        from cpip._vendor import requests
+
+        return (requests.exceptions.RequestException,)
 
     def attempt_resumes_or_redownloads(
         self,

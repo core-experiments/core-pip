@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime
 import os
+import posixpath
 import stat
 import time
 import urllib.parse
@@ -41,9 +42,13 @@ from cpip.index.source_models import (
 if TYPE_CHECKING:
     from cpip.core.format_control import FormatControl
     from cpip.core.wheel import TargetContext
-    from cpip.index.candidate_materialization import CandidateStream
+    from cpip.index.candidate_materialization import (
+        CandidateMaterializer,
+        CandidateStream,
+    )
 
 PYPI_HOSTS = frozenset(("pypi.org", "pypi.python.org"))
+_CATALOG_WORKERS = 32
 
 
 def is_unnamed_direct_requirement_internal(requirement: Requirement) -> bool:
@@ -101,6 +106,8 @@ class CandidateProvider:
         self.find_links_cache = None
         self.find_links_by_name_cache = None
         self.parsed_link_cache = {}
+        self.catalog_link_cache: dict[str, Link] = {}
+        self.candidate_record_cache: dict[Link, CandidateRecord] = {}
         self.candidate_selection_cache = {}
         self.matching_versions_cache = {}
         self.package_catalog_cache = {}
@@ -278,6 +285,86 @@ class CandidateProvider:
         self.link_cache[requirement.canonical_name] = result
         return result
 
+    def catalog_records(
+        self,
+        requirement: Requirement,
+    ) -> tuple[tuple[object, ...], ...] | None:
+        if (
+            self.find_links
+            or requirement.url is not None
+            or looks_like_path_requirement(requirement.raw)
+            or not self.index_sources
+        ):
+            return None
+        records: list[tuple[object, ...]] = []
+        seen: set[object] = set()
+        for source in self.index_sources:
+            cached = source.collect_cached_records(requirement)
+            if cached is None:
+                return None
+            for record in cached:
+                url = record[0] if record else None
+                if url in seen:
+                    continue
+                seen.add(url)
+                records.append(record)
+        return tuple(records)
+
+    def link_from_catalog_record(self, record: tuple[object, ...]) -> Link:
+        from cpip.index.catalog_cache import link_from_record
+
+        url = record[0]
+        if isinstance(url, str):
+            cached = self.catalog_link_cache.get(url)
+            if cached is not None:
+                return cached
+        link = link_from_record(record)
+        if isinstance(url, str):
+            self.catalog_link_cache[url] = link
+        return link
+
+    @staticmethod
+    def evaluate_catalog_candidate(
+        candidate: CandidateRecord,
+        requirement: Requirement,
+        *,
+        allow_yanked: bool,
+        allow_binary: bool,
+        allow_source: bool,
+    ) -> CandidateRecord | RejectedCandidate:
+        link = candidate.link
+        if link.kind is ArtifactKind.WHEEL and not allow_binary:
+            return RejectedCandidate(
+                link,
+                RejectionReason.UNSUPPORTED_ARTIFACT,
+                "binary distributions are disabled",
+            )
+        if link.kind in SOURCE_ARTIFACT_KINDS and not allow_source:
+            return RejectedCandidate(
+                link,
+                RejectionReason.UNSUPPORTED_ARTIFACT,
+                "source distributions are disabled",
+            )
+        if link.is_yanked and not (
+            allow_yanked
+            or any(
+                spec.operator in {"==", "==="} and not spec.version.endswith(".*")
+                for spec in requirement.specifier.specifiers
+            )
+        ):
+            return RejectedCandidate(
+                link,
+                RejectionReason.YANKED,
+                link.yanked_reason or "yanked",
+            )
+        if link.kind is ArtifactKind.WHEEL and candidate.tag_rank is None:
+            return RejectedCandidate(
+                link,
+                RejectionReason.UNSUPPORTED_WHEEL,
+                "wheel tags are not supported by this interpreter",
+            )
+        return candidate
+
     def collect_index_links(self, requirement: Requirement) -> tuple[list[Link], ...]:
         """Fetch configured index pages concurrently, preserving source order."""
         if len(self.index_sources) <= 1 or self.session is None:
@@ -295,7 +382,12 @@ class CandidateProvider:
             ),
         )
 
-    def evaluate_links(self, requirement: Requirement) -> CandidateSelection:
+    def evaluate_links(
+        self,
+        requirement: Requirement,
+        *,
+        allowed_versions: frozenset[Version] | None = None,
+    ) -> CandidateSelection:
         accepted: list[CandidateRecord] = []
         rejected: list[RejectedCandidate] = []
         allow_binary, allow_source = self.allowed_formats_internal(requirement)
@@ -310,6 +402,8 @@ class CandidateProvider:
             allow_source,
             self.allow_yanked,
             self.prefer_binary,
+            self.uploaded_prior_to,
+            tuple(sorted(str(version) for version in allowed_versions or ())),
         )
         cached_selection = self.candidate_selection_cache.get(selection_key)
         if cached_selection is not None:
@@ -320,26 +414,80 @@ class CandidateProvider:
             allow_source,
         )
         links: tuple[Link, ...] | None = None
+        catalog_candidates: tuple[CandidateRecord, ...] | None = None
         exact_version = self.exact_version_internal(requirement)
         catalog = self.package_catalog_cache.get(catalog_key)
+        if (
+            catalog is None
+            and requirement.url is None
+            and not self.find_links
+            and self.session is not None
+            and self.index_sources
+        ):
+            self.available_versions(requirement)
+            catalog = self.package_catalog_cache.get(catalog_key)
+        if (
+            catalog is None
+            and requirement.url is None
+            and self.prefetcher is not None
+            and self.prefetcher.pending(catalog_key)
+        ):
+            self.available_versions(requirement)
+            catalog = self.package_catalog_cache.get(catalog_key)
         if (
             requirement.url is None
             and exact_version is not None
             and catalog is not None
         ):
-            links = catalog.links_by_version.get(exact_version, ())
+            if catalog.records_by_version is not None:
+                links = ()
+                catalog_candidates = catalog.candidates_by_version.get(
+                    exact_version,
+                    (),
+                )
+            else:
+                links = catalog.links_by_version.get(exact_version, ())
+                catalog_candidates = catalog.candidates_by_version.get(
+                    exact_version,
+                    (),
+                )
         elif requirement.url is None and catalog is not None:
             matching_versions = self.matching_versions(
                 requirement,
                 allow_prereleases=True,
             )
-            matching_links = tuple(
-                link
-                for summary in matching_versions
-                for link in catalog.links_by_version.get(summary.version, ())
-            )
-            if matching_links:
+            if allowed_versions is not None:
+                matching_versions = tuple(
+                    summary
+                    for summary in matching_versions
+                    if summary.version in allowed_versions
+                )
+            if catalog.records_by_version is not None:
+                links = ()
+                catalog_candidates = tuple(
+                    candidate
+                    for summary in matching_versions
+                    for candidate in catalog.candidates_by_version.get(
+                        summary.version,
+                        (),
+                    )
+                )
+            else:
+                matching_links = tuple(
+                    link
+                    for summary in matching_versions
+                    for link in catalog.links_by_version.get(summary.version, ())
+                )
+            if catalog.records_by_version is None and matching_links:
                 links = tuple(dict.fromkeys(matching_links))
+                catalog_candidates = tuple(
+                    candidate
+                    for summary in matching_versions
+                    for candidate in catalog.candidates_by_version.get(
+                        summary.version,
+                        (),
+                    )
+                )
         if links is None:
             links = self.catalog_links(requirement)
         if (
@@ -367,6 +515,18 @@ class CandidateProvider:
                     except ValueError:
                         continue
                     self.parsed_link_cache[link] = parsed
+                if isinstance(parsed, InstallationCandidate):
+                    candidate = self.candidate_record_cache.get(link)
+                    if candidate is None:
+                        candidate = parsed.to_record()
+                        self.candidate_record_cache[link] = candidate
+                    parsed = candidate
+                if (
+                    allowed_versions is not None
+                    and isinstance(parsed, CandidateRecord)
+                    and parsed.version not in allowed_versions
+                ):
+                    continue
                 result = CandidateEvaluator.evaluate_parsed_link(
                     link,
                     parsed,
@@ -375,8 +535,8 @@ class CandidateProvider:
                     allow_binary=allow_binary,
                     allow_source=allow_source,
                 )
-                if isinstance(result, InstallationCandidate):
-                    accepted.append(result.to_record())
+                if isinstance(result, CandidateRecord):
+                    accepted.append(result)
                 else:
                     rejected.append(result)
             accepted.sort(
@@ -390,7 +550,30 @@ class CandidateProvider:
             return selection
         from cpip.index.candidate_evaluators import CandidateEvaluator
 
-        for link in links:
+        cached_catalog_candidates = (
+            catalog is not None and catalog.records_by_version is not None
+        )
+        candidate_items: tuple[Link | CandidateRecord, ...] = (
+            catalog_candidates if catalog_candidates is not None else tuple(links)
+        )
+        for item in candidate_items:
+            if isinstance(item, CandidateRecord):
+                link = item.link
+                parsed: CandidateRecord | RejectedCandidate = item
+            elif isinstance(item, RejectedCandidate):
+                link = item.link
+                parsed = item
+                rejected.append(item)
+                continue
+            else:
+                link = item
+                parsed = self.parsed_link_cache.get(link)
+            if (
+                allowed_versions is not None
+                and isinstance(parsed, CandidateRecord)
+                and parsed.version not in allowed_versions
+            ):
+                continue
             if self.uploaded_prior_to is not None:
                 # Upload timestamps describe index-hosted artifacts. Local
                 # files, directories, and VCS checkouts are already under the
@@ -424,10 +607,6 @@ class CandidateProvider:
                         ),
                     )
                     continue
-            cache_parsed = not CandidateEvaluator.is_unnamed_direct_requirement(
-                requirement,
-            )
-            parsed = self.parsed_link_cache.get(link) if cache_parsed else None
             if parsed is None:
                 try:
                     parsed = InstallationCandidate.from_link(link, target=self.target)
@@ -440,18 +619,34 @@ class CandidateProvider:
                         ),
                     )
                     continue
-                if cache_parsed:
+                if not CandidateEvaluator.is_unnamed_direct_requirement(requirement):
                     self.parsed_link_cache[link] = parsed
-            result = CandidateEvaluator.evaluate_parsed_link(
-                link,
-                parsed,
-                requirement,
-                allow_yanked=self.allow_yanked,
-                allow_binary=allow_binary,
-                allow_source=allow_source,
+            if isinstance(parsed, InstallationCandidate):
+                candidate = self.candidate_record_cache.get(link)
+                if candidate is None:
+                    candidate = parsed.to_record()
+                    self.candidate_record_cache[link] = candidate
+                parsed = candidate
+            result = (
+                self.evaluate_catalog_candidate(
+                    parsed,
+                    requirement,
+                    allow_yanked=self.allow_yanked,
+                    allow_binary=allow_binary,
+                    allow_source=allow_source,
+                )
+                if cached_catalog_candidates and isinstance(parsed, CandidateRecord)
+                else CandidateEvaluator.evaluate_parsed_link(
+                    link,
+                    parsed,
+                    requirement,
+                    allow_yanked=self.allow_yanked,
+                    allow_binary=allow_binary,
+                    allow_source=allow_source,
+                )
             )
-            if isinstance(result, InstallationCandidate):
-                accepted.append(result.to_record())
+            if isinstance(result, CandidateRecord):
+                accepted.append(result)
             else:
                 rejected.append(result)
         accepted.sort(
@@ -468,9 +663,10 @@ class CandidateProvider:
         *,
         allowed_versions: frozenset[Version] | None = None,
     ) -> CandidateStream:
-        from cpip.index.candidate_materialization import CandidateMaterializer
-
-        selection = self.evaluate_links(requirement)
+        selection = self.evaluate_links(
+            requirement,
+            allowed_versions=allowed_versions,
+        )
         accepted = selection.accepted
         if (
             not accepted
@@ -539,17 +735,28 @@ class CandidateProvider:
         ordered = preferred + tuple(
             candidate for candidate in accepted if candidate not in preferred_set
         )
-        if self.materializer_internal is None:
-            self.materializer_internal = CandidateMaterializer(
-                build_options=self.build_options,
-                build_constraints=self.build_constraints,
-                wheel_cache_dir=self.wheel_cache_dir,
-                build_isolation=self.build_isolation,
-                dry_run=self.dry_run,
-                compute_source_hashes=self.compute_source_hashes,
-                session=self.session,
-            )
-        return self.materializer_internal.materialize(requirement, ordered)
+        return self.get_materializer_internal().materialize(requirement, ordered)
+
+    def get_materializer_internal(self) -> CandidateMaterializer:
+        materializer = self.materializer_internal
+        if materializer is not None:
+            return materializer
+        from cpip.index.candidate_materialization import CandidateMaterializer
+
+        with self.cache_lock:
+            materializer = self.materializer_internal
+            if materializer is None:
+                materializer = CandidateMaterializer(
+                    build_options=self.build_options,
+                    build_constraints=self.build_constraints,
+                    wheel_cache_dir=self.wheel_cache_dir,
+                    build_isolation=self.build_isolation,
+                    dry_run=self.dry_run,
+                    compute_source_hashes=self.compute_source_hashes,
+                    session=self.session,
+                )
+                self.materializer_internal = materializer
+        return materializer
 
     def available_versions(
         self,
@@ -586,7 +793,102 @@ class CandidateProvider:
             )
         versions: dict[tuple[str, bool], CandidateSummary] = {}
         links_by_version: dict[Version, list[Link]] = {}
-        for link in self.catalog_links(requirement):
+        candidates_by_version: dict[Version, list[CandidateRecord]] = {}
+        unsupported_wheels_by_version: dict[Version, CandidateRecord] = {}
+        cached_records = self.catalog_records(requirement)
+        catalog_links = (
+            () if cached_records is not None else self.catalog_links(requirement)
+        )
+        if cached_records is not None:
+            from cpip.core.wheel import (
+                parse_wheel_file,
+                supported_wheel_tags,
+                wheel_tag_rank,
+            )
+            from cpip.index.directory_index import project_version_from_filename
+
+            supported_tags = supported_wheel_tags(self.target)
+
+            for record in cached_records:
+                if (
+                    not isinstance(record, tuple)
+                    or len(record) != 9
+                    or not isinstance(record[0], str)
+                    or not isinstance(record[1], tuple)
+                    or len(record[1]) != 5
+                    or not all(isinstance(value, str) for value in record[1])
+                ):
+                    continue
+                filename = posixpath.basename(
+                    urllib.parse.unquote(record[1][2].rstrip("/")),
+                )
+                kind = Link.artifact_kind_from_filename(filename)
+                if kind is ArtifactKind.WHEEL:
+                    parsed = parse_wheel_file(filename)
+                    parsed_name_version = (
+                        None if parsed is None else (parsed.name, parsed.version)
+                    )
+                elif kind is ArtifactKind.SDIST:
+                    parsed_name_version = project_version_from_filename(filename)
+                else:
+                    continue
+                if parsed_name_version is None:
+                    continue
+                name, version = parsed_name_version
+                if not is_unnamed_direct_requirement_internal(requirement) and (
+                    name != requirement.canonical_name
+                ):
+                    continue
+                requires_python = record[5]
+                if isinstance(requires_python, str):
+                    try:
+                        from cpip.index.candidate_evaluators import CandidateEvaluator
+
+                        if not CandidateEvaluator.requires_python_matches(
+                            requires_python
+                        ):
+                            continue
+                    except ValueError:
+                        continue
+                if kind is ArtifactKind.WHEEL:
+                    assert parsed is not None
+                    tag_rank = wheel_tag_rank(parsed.tags, supported_tags)
+                    if tag_rank is None:
+                        if version not in unsupported_wheels_by_version:
+                            link = self.link_from_catalog_record(record)
+                            unsupported_wheels_by_version[version] = CandidateRecord(
+                                name=name,
+                                version=version,
+                                link=link,
+                                wheel=parsed,
+                                tag_rank=None,
+                            )
+                    else:
+                        link = self.link_from_catalog_record(record)
+                        candidate = CandidateRecord(
+                            name=name,
+                            version=version,
+                            link=link,
+                            wheel=parsed,
+                            tag_rank=tag_rank,
+                        )
+                        candidates_by_version.setdefault(version, []).append(candidate)
+                else:
+                    link = self.link_from_catalog_record(record)
+                    candidate = CandidateRecord(
+                        name=name,
+                        version=version,
+                        link=link,
+                    )
+                    candidates_by_version.setdefault(version, []).append(candidate)
+                versions[(str(version), bool(record[6]))] = CandidateSummary(
+                    version=version,
+                    is_yanked=bool(record[6]),
+                    yanked_reason=record[6] if isinstance(record[6], str) else None,
+                )
+            for version, candidate in unsupported_wheels_by_version.items():
+                candidates_by_version.setdefault(version, []).append(candidate)
+        for link in catalog_links:
             if link.kind is ArtifactKind.WHEEL and not allow_binary:
                 continue
             if link.kind in SOURCE_ARTIFACT_KINDS and not allow_source:
@@ -619,6 +921,11 @@ class CandidateProvider:
             ):
                 continue
             links_by_version.setdefault(parsed.version, []).append(link)
+            candidate = self.candidate_record_cache.get(link)
+            if candidate is None:
+                candidate = parsed.to_record()
+                self.candidate_record_cache[link] = candidate
+            candidates_by_version.setdefault(parsed.version, []).append(candidate)
             key = (str(parsed.version), link.is_yanked)
             versions[key] = CandidateSummary(
                 version=parsed.version,
@@ -633,6 +940,12 @@ class CandidateProvider:
             summaries_by_version.setdefault(summary.version, []).append(summary)
         catalog = PackageCatalog(
             links=tuple(link for links in links_by_version.values() for link in links),
+            candidates_by_version=MappingProxyType(
+                {
+                    version: tuple(candidates)
+                    for version, candidates in candidates_by_version.items()
+                },
+            ),
             summaries=result,
             summary_versions=tuple(summary.version for summary in result),
             summaries_by_version=MappingProxyType(
@@ -643,6 +956,9 @@ class CandidateProvider:
             ),
             links_by_version=MappingProxyType(
                 {version: tuple(links) for version, links in links_by_version.items()},
+            ),
+            records_by_version=(
+                None if cached_records is None else MappingProxyType({})
             ),
         )
         with self.cache_lock:
@@ -656,6 +972,9 @@ class CandidateProvider:
         requirement, cache_key = value
         started = time.perf_counter()
         result = self.load_available_versions(requirement, cache_key)
+        if self.exact_version_internal(requirement) is not None:
+            selection = self.evaluate_links(requirement)
+            self.get_materializer_internal().prefetch_metadata(selection.accepted[:2])
         elapsed = time.perf_counter() - started
         self.prefetch_policy.observe(cache_key, elapsed, len(result))
         return result
@@ -685,7 +1004,10 @@ class CandidateProvider:
         if not unique:
             return
         if self.prefetcher is None:
-            self.prefetcher = Prefetcher(self.load_prefetched_versions, max_workers=8)
+            self.prefetcher = Prefetcher(
+                self.load_prefetched_versions,
+                max_workers=_CATALOG_WORKERS,
+            )
         for key, requirement in sorted(
             unique.items(),
             key=lambda item: self.prefetch_policy.priority(item[0]),

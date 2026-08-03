@@ -4,10 +4,7 @@ from __future__ import annotations
 
 import json
 import os
-import ssl
-import urllib.error
 import urllib.parse
-import urllib.request
 from html.parser import HTMLParser
 from typing import Any, Callable
 
@@ -47,8 +44,13 @@ class IndexPageParser:
     def links_from_url(self, url: str) -> list[Link]:
         try:
             content = self.read(url)
-        except (OSError, urllib.error.URLError):
+        except OSError:
             return []
+        except Exception as exc:
+            response = getattr(exc, "response", None)
+            if getattr(response, "status_code", None) == 404:
+                return []
+            raise
         if content.from_cache:
             cached = load_links(getattr(self.session, "cache", None), url)
             if cached is not None:
@@ -85,27 +87,18 @@ class IndexPageParser:
                 "text/html;q=0.2, application/vnd.pypi.simple.v1+html;q=0.2"
             ),
         }
-        if self.session is not None:
-            response = self.session.get(url, headers=headers)
-            response.raise_for_status()
-            return IndexContent(
-                response.text,
-                response.headers.get("Content-Type", "text/html").split(";", 1)[0],
-                response.from_cache,
-            )
-        request = urllib.request.Request(url, headers=headers)
-        parsed = urllib.parse.urlsplit(url)
-        context = (
-            ssl._create_unverified_context()
-            if parsed.hostname and parsed.hostname.lower() in self.trusted_hosts
-            else None
+        if self.session is None:
+            from cpip._vendor import requests
+
+            self.session = requests.Session()
+            self.artifacts.session = self.session
+        response = self.session.get(url, headers=headers)
+        response.raise_for_status()
+        return IndexContent(
+            response.text,
+            response.headers.get("Content-Type", "text/html").split(";", 1)[0],
+            getattr(response, "from_cache", False),
         )
-        with urllib.request.urlopen(request, context=context) as response:
-            content_type = response.headers.get_content_type()
-            return IndexContent(
-                response.read().decode("utf-8", "replace"),
-                content_type,
-            )
 
     def links_from_html(self, body: str, url: str) -> list[Link]:
         parser = LinkParser(url, self.link_factory)

@@ -57,6 +57,7 @@ class ResolutionResult:
     conflicts: tuple[str, ...] = ()
     satisfied: tuple[ResolvedRequirement, ...] = ()
     normalized_candidates: tuple[ResolutionCandidate, ...] = ()
+    metrics: Mapping[str, int | float] = MappingProxyType({})
 
     @classmethod
     def from_plan(cls, plan: Any) -> ResolutionResult:
@@ -78,6 +79,7 @@ class ResolutionResult:
             conflicts=tuple(getattr(plan, "conflicts", ())),
             satisfied=satisfied,
             normalized_candidates=normalized,
+            metrics=MappingProxyType(dict(getattr(plan, "metrics", {}))),
         )
 
     @classmethod

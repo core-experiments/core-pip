@@ -289,6 +289,7 @@ class ConflictLearning:
         incompatibility: LearnedIncompatibility,
     ) -> None:
         self.learned_incompatibilities.append(incompatibility)
+        self.metrics.learned_incompatibilities += 1
         self.learned_incompatibility_terms.add(incompatibility.terms)
         self.last_candidate_conflict = incompatibility
         incompatibility_id = len(self.learned_incompatibilities) - 1

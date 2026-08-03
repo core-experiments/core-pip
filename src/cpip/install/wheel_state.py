@@ -5,7 +5,7 @@ from __future__ import annotations
 import csv
 import os
 import stat
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from typing import TYPE_CHECKING
 
 from cpip.core.errors import InstallationError
@@ -13,6 +13,150 @@ from cpip.core.errors import InstallationError
 if TYPE_CHECKING:
     from cpip.build.metadata import InstalledMetadataDistribution
     from cpip.install.target import InstallTarget
+
+
+def _canonicalize_installed_name(value: str) -> str:
+    result: list[str] = []
+    separator = False
+    for character in value:
+        if character in "-_.":
+            separator = bool(result)
+            continue
+        if separator:
+            result.append("-")
+            separator = False
+        result.append(character.lower())
+    return "".join(result)
+
+
+class InstalledWheelDistribution:
+    """Minimal installed-wheel metadata used by replacement transactions."""
+
+    __slots__ = (
+        "canonical_name",
+        "info_location",
+        "location",
+        "raw_name",
+        "raw_version",
+        "version",
+    )
+
+    def __init__(
+        self,
+        *,
+        location: str,
+        info_location: str,
+        name: str,
+        version: str,
+    ) -> None:
+        self.location = location
+        self.info_location = info_location
+        self.raw_name = name
+        self.raw_version = version
+        self.version = version
+        self.canonical_name = _canonicalize_installed_name(name)
+
+    def read_text(self, path: str) -> str:
+        with open(os.path.join(self.info_location, path), encoding="utf-8") as file:
+            return file.read()
+
+
+def _wheel_metadata_identity(path: str) -> tuple[str, str] | None:
+    name = None
+    version = None
+    try:
+        with open(path, encoding="utf-8") as file:
+            for raw_line in file:
+                if raw_line in {"\n", "\r\n"}:
+                    break
+                key, separator, value = raw_line.partition(":")
+                if not separator:
+                    continue
+                key = key.casefold()
+                if key == "name" and name is None:
+                    name = value.strip()
+                elif key == "version" and version is None:
+                    version = value.strip()
+                if name and version:
+                    return name, version
+    except (OSError, UnicodeDecodeError):
+        return None
+    return None
+
+
+def _metadata_entry_might_match(
+    filename: str,
+    suffix: str,
+    requested: set[str],
+) -> bool:
+    """Conservatively match an installed metadata filename to requested names."""
+    stem = _canonicalize_installed_name(filename[: -len(suffix)])
+    return any(stem == name or stem.startswith(f"{name}-") for name in requested)
+
+
+def discover_installed_wheels(
+    paths: Iterable[str],
+    *,
+    names: set[str] | None = None,
+) -> dict[str, InstalledWheelDistribution] | None:
+    """Discover ordinary dist-info installs without loading packaging metadata.
+
+    ``None`` requests the authoritative metadata scanner.  It is returned for
+    legacy, malformed, or ambiguous layouts rather than guessing about file
+    ownership during an upgrade.
+    """
+    requested = names
+    result: dict[str, InstalledWheelDistribution] = {}
+    scanned: set[str] = set()
+    for value in paths:
+        root = os.path.abspath(os.fspath(value))
+        if root in scanned:
+            continue
+        scanned.add(root)
+        try:
+            with os.scandir(root) as entries:
+                for entry in entries:
+                    if entry.name.endswith(".dist-info"):
+                        suffix = ".dist-info"
+                    elif entry.name.endswith(".egg-info"):
+                        suffix = ".egg-info"
+                    elif entry.name.endswith(".egg-link"):
+                        suffix = ".egg-link"
+                    else:
+                        continue
+                    if requested is not None and not _metadata_entry_might_match(
+                        entry.name,
+                        suffix,
+                        requested,
+                    ):
+                        continue
+                    if suffix != ".dist-info":
+                        return None
+                    if not entry.is_dir(follow_symlinks=False):
+                        return None
+                    identity = _wheel_metadata_identity(
+                        os.path.join(entry.path, "METADATA")
+                    )
+                    if identity is None:
+                        return None
+                    name, version = identity
+                    canonical_name = _canonicalize_installed_name(name)
+                    if requested is not None and canonical_name not in requested:
+                        # A matching filename with different metadata is ambiguous.
+                        return None
+                    if canonical_name in result:
+                        return None
+                    result[canonical_name] = InstalledWheelDistribution(
+                        location=root,
+                        info_location=entry.path,
+                        name=name,
+                        version=version,
+                    )
+        except FileNotFoundError:
+            continue
+        except OSError:
+            return None
+    return result
 
 
 def compiled_files(
@@ -57,7 +201,7 @@ def compiled_files(
 
 
 def existing_paths(
-    distribution: InstalledMetadataDistribution | None,
+    distribution: InstalledMetadataDistribution | InstalledWheelDistribution | None,
 ) -> tuple[set[str], set[str]]:
     if distribution is None:
         return set(), set()
@@ -73,10 +217,23 @@ def existing_paths(
                 f"Cannot replace {distribution.raw_name} {distribution.version}: "
                 "no RECORD file was found",
             ) from exc
+    elif isinstance(distribution, InstalledWheelDistribution):
+        raise InstallationError(
+            f"Cannot replace {distribution.raw_name} {distribution.version}: "
+            "the installed wheel has no dist-info RECORD",
+        )
     else:
         entries = distribution.iter_declared_entries()
     root = os.fspath(distribution.location)
     existing: set[str] = set()
+    if distribution.info_location and distribution.info_location.endswith(".dist-info"):
+        entries.extend(
+            os.path.relpath(
+                os.path.join(distribution.info_location, name),
+                root,
+            )
+            for name in ("INSTALLER", "REQUESTED", "direct_url.json", "RECORD")
+        )
     for entry in entries:
         path = os.path.join(root, entry)
         try:
@@ -98,9 +255,12 @@ class InstalledTargetInventory:
 
     def __init__(
         self,
-        distributions: dict[str, InstalledMetadataDistribution],
+        distributions: Mapping[
+            str,
+            InstalledMetadataDistribution | InstalledWheelDistribution,
+        ],
     ) -> None:
-        self.distributions = distributions
+        self.distributions = dict(distributions)
 
     @classmethod
     def from_target(
@@ -108,6 +268,10 @@ class InstalledTargetInventory:
         target: InstallTarget,
         names: set[str] | None = None,
     ) -> InstalledTargetInventory:
+        lightweight = discover_installed_wheels(target.library_roots, names=names)
+        if lightweight is not None:
+            return cls(lightweight)
+
         from cpip.build.metadata import InstalledDistributionStore
 
         distributions = InstalledDistributionStore(
@@ -120,7 +284,10 @@ class InstalledTargetInventory:
             },
         )
 
-    def find(self, name: str) -> InstalledMetadataDistribution | None:
+    def find(
+        self,
+        name: str,
+    ) -> InstalledMetadataDistribution | InstalledWheelDistribution | None:
         return self.distributions.get(name)
 
 

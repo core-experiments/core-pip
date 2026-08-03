@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 from cpip.cli.fast_install import is_safe_member
+from cpip.cli.fast_install import run_cached_remote
 from cpip.cli.fast_install import run as run_fast_install
 from cpip.resolution.engine import ResolutionEngine
 from cpip.resolution.engine.sources.wheelhouse.catalog import build_catalog_indexes
@@ -300,6 +301,266 @@ def test_fast_install_falls_back_for_non_pure_wheels(tmp_path: Path) -> None:
     assert not target.exists()
 
 
+def test_fast_install_falls_back_for_wheel_data_schemes(tmp_path: Path) -> None:
+    wheelhouse = tmp_path / "wheelhouse"
+    wheelhouse.mkdir()
+    wheel = wheelhouse / "demo-1.0-py3-none-any.whl"
+    write_wheel(wheel, purelib=True)
+    with zipfile.ZipFile(wheel, "a") as archive:
+        archive.writestr("demo-1.0.data/data/demo.conf", "value=true\n")
+    target = tmp_path / "target"
+
+    status = run_fast_install(
+        [
+            "--no-index",
+            "--ignore-installed",
+            "--no-compile",
+            "--quiet",
+            "--find-links",
+            str(wheelhouse),
+            "--target",
+            str(target),
+            "demo",
+        ],
+    )
+
+    assert status is None
+    assert not target.exists()
+
+
+def test_fast_install_reuses_warm_wheel_metadata_cache(tmp_path: Path) -> None:
+    wheelhouse = tmp_path / "wheelhouse"
+    wheelhouse.mkdir()
+    write_wheel(wheelhouse / "demo-1.0-py3-none-any.whl", purelib=True)
+    requirements = tmp_path / "requirements.in"
+    requirements.write_text("demo\n", encoding="utf-8")
+    cache = tmp_path / "cache"
+
+    arguments = [
+        "--no-index",
+        "--ignore-installed",
+        "--no-compile",
+        "--quiet",
+        "--find-links",
+        str(wheelhouse),
+        "-r",
+        str(requirements),
+        "--cache-dir",
+        str(cache),
+    ]
+    first = run_fast_install([*arguments, "--target", str(tmp_path / "first")])
+    second = run_fast_install([*arguments, "--target", str(tmp_path / "second")])
+
+    assert first == 0
+    assert second == 0
+    assert (cache / "fast-install-v3.marshal").is_file()
+
+
+def test_fast_install_metadata_cache_persists_verified_digest(tmp_path: Path) -> None:
+    from cpip.cli.fast_install_cache import FastInstallMetadataCache
+
+    wheel = tmp_path / "demo.whl"
+    wheel.write_bytes(b"wheel")
+    cache_root = tmp_path / "cache"
+    cache = FastInstallMetadataCache(cache_root)
+    identity = cache.identity(str(wheel))
+    assert identity is not None
+    digest = "a" * 64
+
+    cache.put(identity, (("dependency==1",), True))
+    cache.put_digest(identity, digest, (("dependency==1",), True))
+    cache.flush()
+
+    restored = FastInstallMetadataCache(cache_root)
+    assert restored.get(identity) == (("dependency==1",), True)
+    assert restored.get_digest(identity) == digest
+
+
+def test_fast_install_reuses_warm_resolved_plan(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    wheelhouse = tmp_path / "wheelhouse"
+    wheelhouse.mkdir()
+    write_wheel(wheelhouse / "demo-1.0-py3-none-any.whl", purelib=True)
+    cache = tmp_path / "cache"
+    arguments = [
+        "--no-index",
+        "--ignore-installed",
+        "--no-compile",
+        "--quiet",
+        "--find-links",
+        str(wheelhouse),
+        "demo",
+        "--cache-dir",
+        str(cache),
+    ]
+
+    assert run_fast_install([*arguments, "--target", str(tmp_path / "first")]) == 0
+    monkeypatch.setattr(
+        "cpip.cli.fast_install.wheel_metadata",
+        lambda *_args, **_kwargs: pytest.fail("warm plan rescanned wheel metadata"),
+    )
+
+    assert run_fast_install([*arguments, "--target", str(tmp_path / "second")]) == 0
+
+
+def test_fast_install_reuses_copy_on_write_install_tree(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    wheelhouse = tmp_path / "wheelhouse"
+    wheelhouse.mkdir()
+    write_wheel(wheelhouse / "demo-1.0-py3-none-any.whl", purelib=True)
+    cache = tmp_path / "cache"
+    arguments = [
+        "--no-index",
+        "--ignore-installed",
+        "--no-compile",
+        "--quiet",
+        "--find-links",
+        str(wheelhouse),
+        "demo",
+        "--cache-dir",
+        str(cache),
+    ]
+
+    assert run_fast_install([*arguments, "--target", str(tmp_path / "first")]) == 0
+    assert not (cache / "fast-install-trees-v1").exists()
+    assert run_fast_install([*arguments, "--target", str(tmp_path / "second")]) == 0
+    assert (cache / "fast-install-trees-v1").is_dir()
+    monkeypatch.setattr(
+        "cpip.cli.fast_install.install_resolved_pure_wheels",
+        lambda *_args, **_kwargs: pytest.fail("warm install did not clone its tree"),
+    )
+
+    third = tmp_path / "third"
+    assert run_fast_install([*arguments, "--target", str(third)]) == 0
+    (third / "demo" / "__init__.py").write_text("changed", encoding="utf-8")
+    fourth = tmp_path / "fourth"
+    assert run_fast_install([*arguments, "--target", str(fourth)]) == 0
+    assert (fourth / "demo" / "__init__.py").read_text(encoding="utf-8") == ""
+
+
+def test_fast_install_invalidates_plan_when_wheelhouse_changes(tmp_path: Path) -> None:
+    wheelhouse = tmp_path / "wheelhouse"
+    wheelhouse.mkdir()
+    write_wheel(
+        wheelhouse / "demo-1.0-py3-none-any.whl",
+        purelib=True,
+        version="1.0",
+    )
+    cache = tmp_path / "cache"
+    arguments = [
+        "--no-index",
+        "--ignore-installed",
+        "--no-compile",
+        "--quiet",
+        "--find-links",
+        str(wheelhouse),
+        "demo",
+        "--cache-dir",
+        str(cache),
+    ]
+
+    assert run_fast_install([*arguments, "--target", str(tmp_path / "first")]) == 0
+    assert run_fast_install([*arguments, "--target", str(tmp_path / "second")]) == 0
+    assert (cache / "fast-install-trees-v1").is_dir()
+    write_wheel(
+        wheelhouse / "demo-2.0-py3-none-any.whl",
+        purelib=True,
+        version="2.0",
+    )
+
+    assert run_fast_install([*arguments, "--target", str(tmp_path / "third")]) == 0
+    assert (tmp_path / "third" / "demo-2.0.dist-info").is_dir()
+
+
+def test_fast_install_invalidates_plan_when_selected_wheel_changes(
+    tmp_path: Path,
+) -> None:
+    wheelhouse = tmp_path / "wheelhouse"
+    wheelhouse.mkdir()
+    wheel = wheelhouse / "demo-1.0-py3-none-any.whl"
+    write_wheel(wheel, purelib=True)
+    cache = tmp_path / "cache"
+    arguments = [
+        "--no-index",
+        "--ignore-installed",
+        "--no-compile",
+        "--quiet",
+        "--find-links",
+        str(wheelhouse),
+        "demo",
+        "--cache-dir",
+        str(cache),
+    ]
+
+    assert run_fast_install([*arguments, "--target", str(tmp_path / "first")]) == 0
+    assert run_fast_install([*arguments, "--target", str(tmp_path / "second")]) == 0
+    assert (cache / "fast-install-trees-v1").is_dir()
+    old_mtime = wheel.stat().st_mtime_ns
+    write_wheel(wheel, purelib=True, requires_dist=("missing",))
+    os.utime(wheel, ns=(old_mtime + 1, old_mtime + 1))
+
+    target = tmp_path / "third"
+    assert run_fast_install([*arguments, "--target", str(target)]) is None
+    assert not target.exists()
+
+
+def test_fast_install_reuses_validated_remote_receipt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from cpip.core.wheel import wheel_candidate
+    from cpip.install.wheel_archive_cache import (
+        exact_install_plan_key_from_strings,
+        prepare_cached_wheel,
+        save_cached_install_plan,
+    )
+
+    wheel = tmp_path / "demo-1.0-py3-none-any.whl"
+    write_wheel(wheel, purelib=True)
+    cache = tmp_path / "cache"
+    candidate = wheel_candidate(str(wheel)).copy_with(source_kind="wheel")
+    prepare_cached_wheel(candidate, str(cache))
+    context = (
+        "remote-exact-v1",
+        "https://pypi.org/simple",
+        (),
+        (),
+        None,
+        f"{sys.version_info.major}{sys.version_info.minor}",
+        (),
+        "only-if-needed",
+        False,
+    )
+    keyed = exact_install_plan_key_from_strings(("demo==1.0",), context)
+    assert keyed is not None
+    assert save_cached_install_plan(str(cache), keyed[0], (candidate,), {})
+    monkeypatch.setattr(
+        "cpip.cli.fast_install._remote_index_url",
+        lambda: "https://pypi.org/simple",
+    )
+    target = tmp_path / "target"
+
+    status = run_cached_remote(
+        [
+            "--quiet",
+            "--ignore-installed",
+            "--no-compile",
+            "--cache-dir",
+            str(cache),
+            "--target",
+            str(target),
+            "demo==1.0",
+        ],
+    )
+
+    assert status == 0
+    assert (target / "demo" / "__init__.py").is_file()
+
+
 def test_fast_install_skips_resolution_for_nonempty_target(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -498,6 +759,59 @@ for module in (
 
     subprocess.run([sys.executable, "-c", script], check=True)
     assert (target / "demo" / "__init__.py").exists()
+
+
+def test_entrypoint_uses_light_local_fallback_for_exact_upgrade(
+    tmp_path: Path,
+) -> None:
+    wheelhouse = tmp_path / "wheelhouse"
+    wheelhouse.mkdir()
+    write_wheel(wheelhouse / "demo-1.0-py3-none-any.whl", purelib=True)
+    write_wheel(
+        wheelhouse / "demo-2.0-py3-none-any.whl",
+        purelib=True,
+        version="2.0",
+    )
+    target = tmp_path / "target"
+    cache = tmp_path / "cache"
+    assert (
+        run_fast_install(
+            [
+                "--quiet",
+                "--no-index",
+                "--ignore-installed",
+                "--no-compile",
+                "--cache-dir",
+                str(cache),
+                "--target",
+                str(target),
+                "--find-links",
+                str(wheelhouse),
+                "demo==1.0",
+            ],
+        )
+        == 0
+    )
+    script = f"""
+import sys
+from cpip.cli.entrypoint import main
+
+assert main([
+    "install", "--quiet", "--upgrade", "--no-index", "--no-compile",
+    "--cache-dir", {str(cache)!r}, "--target", {str(target)!r},
+    "--find-links", {str(wheelhouse)!r}, "demo==2.0",
+]) == 0
+for module in (
+    "cpip.cli._main_fallback",
+    "cpip.cli.commands.registry",
+    "cpip.cli.requirements",
+):
+    assert module not in sys.modules, module
+"""
+
+    subprocess.run([sys.executable, "-c", script], check=True)
+    assert (target / "demo" / "__init__.py").exists()
+    assert (target / "demo-2.0.dist-info").exists()
 
 
 def test_entrypoint_keeps_upgrade_on_empty_target_on_fast_path(

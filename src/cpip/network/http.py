@@ -1,21 +1,17 @@
-"""Small standard-library HTTP primitives used by cpip."""
+"""HTTP primitives used by cpip."""
 
 from __future__ import annotations
 
 import base64
 import email.message
 import email.utils
-import gzip
 import io
 import json
 import logging
 import os
-import ssl
 import threading
 import time
-import urllib.error
 import urllib.parse
-import urllib.request
 from collections.abc import Iterator, Mapping, Sequence
 from typing import Any
 
@@ -23,12 +19,12 @@ from cpip.network.exceptions import (
     ConnectionFailedError,
     ConnectionTimeoutError,
     NetworkConnectionError,
+    ProxyConnectionError,
     SSLVerificationError,
 )
 
 logger = logging.getLogger(__name__)
 RETRY_STATUS_CODES = frozenset((500, 502, 503, 520, 527))
-MAX_IDLE_CONNECTIONS_PER_ORIGIN = 8
 
 
 class HttpRequest:
@@ -58,6 +54,9 @@ class HttpResponse:
         url: str,
         headers: Mapping[str, str] | email.message.Message,
         raw: Any,
+        transport_response: Any = None,
+        streaming: bool = False,
+        content_internal: bytes | None = None,
         request: HttpRequest | None = None,
         history: list[HttpResponse] | None = None,
         from_cache: bool = False,
@@ -67,15 +66,20 @@ class HttpResponse:
         self.url = url
         self.headers = headers
         self.raw = raw
+        self.transport_response = transport_response
+        self.streaming = streaming
         self.request = request
         self.history = history or []
         self.from_cache = from_cache
-        self.content_internal: bytes | None = None
+        self.content_internal = content_internal
 
     @property
     def content(self) -> bytes:
         if self.content_internal is None:
-            self.content_internal = self.raw.read()
+            if self.transport_response is not None:
+                self.content_internal = self.transport_response.content
+            else:
+                self.content_internal = self.raw.read()
         return self.content_internal
 
     @property
@@ -90,6 +94,9 @@ class HttpResponse:
         return self.content.decode(charset, "replace")
 
     def iter_content(self, chunk_size: int = 1024 * 1024) -> Iterator[bytes]:
+        if self.transport_response is not None:
+            yield from self.transport_response.iter_content(chunk_size=chunk_size)
+            return
         while True:
             chunk = self.raw.read(chunk_size)
             if not chunk:
@@ -106,54 +113,11 @@ class HttpResponse:
         )
 
     def close(self) -> None:
-        close = getattr(self.raw, "close", None)
+        close = getattr(self.transport_response, "close", None)
+        if close is None:
+            close = getattr(self.raw, "close", None)
         if close is not None:
             close()
-
-
-class PersistentConnectionPool:
-    """A bounded pool of reusable connections for one HTTP origin."""
-
-    def __init__(self, create_connection: Any, max_connections: int) -> None:
-        self.create_connection = create_connection
-        self.max_connections = max_connections
-        self.condition = threading.Condition()
-        self.idle: list[Any] = []
-        self.created = 0
-
-    def acquire(self) -> Any:
-        with self.condition:
-            while not self.idle and self.created >= self.max_connections:
-                self.condition.wait()
-            if self.idle:
-                return self.idle.pop()
-            self.created += 1
-        try:
-            return self.create_connection()
-        except BaseException:
-            with self.condition:
-                self.created -= 1
-                self.condition.notify()
-            raise
-
-    def release(self, connection: Any) -> None:
-        with self.condition:
-            self.idle.append(connection)
-            self.condition.notify()
-
-    def discard(self, connection: Any) -> None:
-        del connection
-        with self.condition:
-            self.created -= 1
-            self.condition.notify()
-
-    def close(self) -> None:
-        with self.condition:
-            idle = self.idle
-            self.idle = []
-            self.created -= len(idle)
-        for connection in idle:
-            connection.close()
 
 
 class InFlightRequest:
@@ -218,15 +182,6 @@ def request_kind(url: str) -> str:
     return "other"
 
 
-def decode_response_body(body: bytes, headers: Any) -> bytes:
-    if str(headers.get("Content-Encoding", "")).lower() != "gzip":
-        return body
-    body = gzip.decompress(body)
-    del headers["Content-Encoding"]
-    headers["Content-Length"] = str(len(body))
-    return body
-
-
 def timeout_value(
     timeout: float | tuple[float | None, float | None] | None,
 ) -> float | None:
@@ -236,7 +191,7 @@ def timeout_value(
 
 
 class NetworkSession:
-    """HTTP(S) client implemented entirely with Python's standard library."""
+    """Requests-backed HTTP(S) client with cpip-specific policy."""
 
     timeout: float | tuple[float | None, float | None] | None = None
 
@@ -265,6 +220,9 @@ class NetworkSession:
         from cpip.network.auth import MultiDomainBasicAuth
 
         self.auth: Any = MultiDomainBasicAuth(index_urls=index_urls)
+        self.requests_session: Any | None = None
+        self.requests_exceptions: Any | None = None
+        self.requests_backend_lock = threading.Lock()
         if isinstance(cache, str):
             from cpip.network.cache import SafeFileCache
 
@@ -272,8 +230,6 @@ class NetworkSession:
         else:
             self.cache = cache
         self.trusted_hosts = {host.lower().split(":", 1)[0] for host in trusted_hosts}
-        self.connection_pools: dict[tuple[Any, ...], PersistentConnectionPool] = {}
-        self.connection_pools_lock = threading.Lock()
         self.inflight_requests: dict[tuple[Any, ...], InFlightRequest] = {}
         self.inflight_requests_lock = threading.Lock()
         self.network_stats = (
@@ -281,6 +237,18 @@ class NetworkSession:
             if os.environ.get("CPIP_BENCH_NETWORK_STATS") == "1"
             else None
         )
+
+    def ensure_requests_backend(self) -> None:
+        """Initialize the HTTP transport only after the first cache miss."""
+        if self.requests_session is not None:
+            return
+        with self.requests_backend_lock:
+            if self.requests_session is not None:
+                return
+            from cpip._vendor import requests
+
+            self.requests_session = requests.Session()
+            self.requests_exceptions = requests.exceptions
 
     @staticmethod
     def user_agent() -> str:
@@ -355,11 +323,14 @@ class NetworkSession:
                     if value:
                         request_headers[name.title()] = str(value)
                 request.headers = request_headers
+        self.ensure_requests_backend()
+        requests_exceptions = self.requests_exceptions
+        assert requests_exceptions is not None
         attempts = self.retries + 1
         for attempt in range(attempts):
             try:
                 response = self.open_coalesced(request, timeout=timeout, stream=stream)
-            except TimeoutError as exc:
+            except requests_exceptions.Timeout as exc:
                 if attempt + 1 == attempts:
                     raise ConnectionTimeoutError(
                         redact_auth_from_url(request_url),
@@ -369,13 +340,27 @@ class NetworkSession:
                     ) from exc
                 time.sleep(0.25 * (2**attempt))
                 continue
-            except ssl.SSLError as exc:
+            except requests_exceptions.SSLError as exc:
                 raise SSLVerificationError(
                     redact_auth_from_url(request_url),
                     urllib.parse.urlsplit(request_url).hostname or "unknown host",
                     exc,
                 ) from exc
-            except (urllib.error.URLError, OSError) as exc:
+            except requests_exceptions.ProxyError as exc:
+                if attempt + 1 == attempts:
+                    proxy = (
+                        next(iter(self.proxies.values()), "configured proxy")
+                        if self.proxies
+                        else "configured proxy"
+                    )
+                    raise ProxyConnectionError(
+                        redact_auth_from_url(request_url),
+                        proxy,
+                        exc,
+                    ) from exc
+                time.sleep(0.25 * (2**attempt))
+                continue
+            except (requests_exceptions.ConnectionError, OSError) as exc:
                 if attempt + 1 == attempts:
                     raise ConnectionFailedError(
                         redact_auth_from_url(request_url),
@@ -509,6 +494,20 @@ class NetworkSession:
             from_cache=True,
         )
 
+    def has_fresh_cached_response(self, url: str) -> bool:
+        """Check cache freshness without reading the cached response body."""
+        if self.cache is None or not hasattr(self.cache, "get_body_path"):
+            return False
+        metadata = self.cache.get(url)
+        if metadata is None or self.cache.get_body_path(url) is None:
+            return False
+        try:
+            values = json.loads(metadata.decode("utf-8"))
+            expires_at = values.get("expires_at")
+            return expires_at is None or float(expires_at) > time.time()
+        except (AttributeError, TypeError, ValueError, json.JSONDecodeError):
+            return False
+
     def stale_cache_metadata(self, request: HttpRequest) -> dict[str, Any] | None:
         if self.cache is None:
             return None
@@ -606,6 +605,7 @@ class NetworkSession:
         self.cache.set_body(response.url, body)
         response.raw = io.BytesIO(body)
         response.content_internal = body
+        response.transport_response = None
 
     def open_internal(
         self,
@@ -614,149 +614,85 @@ class NetworkSession:
         *,
         stream: bool = False,
     ) -> HttpResponse:
+        if urllib.parse.urlsplit(request.url).scheme == "file":
+            return self.open_file(request)
+
+        self.ensure_requests_backend()
+        assert self.requests_session is not None
+
         parsed = urllib.parse.urlsplit(request.url)
-        if not stream and parsed.scheme in {"http", "https"} and self.proxies is None:
-            return self.open_persistent(request, parsed, timeout)
-        return self.open_with_urllib(request, timeout, stream=stream)
-
-    def open_persistent(
-        self,
-        request: HttpRequest,
-        parsed: urllib.parse.SplitResult,
-        timeout: Any,
-    ) -> HttpResponse:
-        import http.client
-
-        hostname = parsed.hostname
-        if hostname is None:
-            return self.open_with_urllib(request, timeout)
-        port = parsed.port or (443 if parsed.scheme == "https" else 80)
-        key = (parsed.scheme, hostname, port, str(self.verify), self.cert)
-
-        def create_connection() -> Any:
-            if parsed.scheme == "https":
-                if hostname.lower() in self.trusted_hosts or self.verify is False:
-                    context = ssl._create_unverified_context()
-                else:
-                    context = ssl.create_default_context(
-                        cafile=self.verify if isinstance(self.verify, str) else None,
-                    )
-                    if self.cert:
-                        context.load_cert_chain(self.cert)
-                return http.client.HTTPSConnection(
-                    hostname,
-                    port,
-                    context=context,
-                    timeout=timeout_value(timeout or self.timeout),
-                )
-            return http.client.HTTPConnection(
-                hostname,
-                port,
-                timeout=timeout_value(timeout or self.timeout),
-            )
-
-        with self.connection_pools_lock:
-            pool = self.connection_pools.get(key)
-            if pool is None:
-                pool = PersistentConnectionPool(
-                    create_connection,
-                    MAX_IDLE_CONNECTIONS_PER_ORIGIN,
-                )
-                self.connection_pools[key] = pool
-        connection = pool.acquire()
-        connection.timeout = timeout_value(timeout or self.timeout)
-        target = parsed.path or "/"
-        if parsed.query:
-            target = f"{target}?{parsed.query}"
-        try:
-            connection.request(
-                request.method,
-                target,
-                body=request.body,
-                headers=request.headers,
-            )
-            raw = connection.getresponse()
-            body = raw.read()
-            body = decode_response_body(body, raw.msg)
-            if raw.status in range(300, 400):
-                connection.close()
-                pool.discard(connection)
-                return self.open_with_urllib(request, timeout)
-            if raw.will_close:
-                connection.close()
-                pool.discard(connection)
-            else:
-                pool.release(connection)
-            return HttpResponse(
-                status_code=raw.status,
-                reason=raw.reason,
-                url=request.url,
-                headers=raw.msg,
-                raw=io.BytesIO(body),
-                request=request,
-            )
-        except (http.client.HTTPException, OSError) as exc:
-            connection.close()
-            pool.discard(connection)
-            raise urllib.error.URLError(exc) from exc
-
-    def open_with_urllib(
-        self,
-        request: HttpRequest,
-        timeout: Any,
-        *,
-        stream: bool = False,
-    ) -> HttpResponse:
-        parsed = urllib.parse.urlsplit(request.url)
-        context = None
-        if (
-            parsed.hostname and parsed.hostname.lower() in self.trusted_hosts
-        ) or self.verify is False:
-            context = ssl._create_unverified_context()
-        else:
-            context = ssl.create_default_context(
-                cafile=self.verify if isinstance(self.verify, str) else None,
-            )
-            if self.cert:
-                context.load_cert_chain(self.cert)
-        opener_handlers: list[Any] = []
+        verify: bool | str = self.verify
+        if parsed.hostname and parsed.hostname.lower() in self.trusted_hosts:
+            verify = False
+        kwargs: dict[str, Any] = {
+            "headers": request.headers,
+            "data": request.body,
+            "stream": stream,
+            "timeout": timeout if timeout is not None else self.timeout,
+            "allow_redirects": True,
+            "verify": verify,
+        }
         if self.proxies is not None:
-            opener_handlers.append(urllib.request.ProxyHandler(self.proxies))
-        if parsed.scheme == "https":
-            opener_handlers.append(urllib.request.HTTPSHandler(context=context))
-        opener = urllib.request.build_opener(*opener_handlers)
-        req = urllib.request.Request(
-            request.url,
-            data=request.body,
-            headers=request.headers,
-            method=request.method,
+            kwargs["proxies"] = self.proxies
+        if self.cert is not None:
+            kwargs["cert"] = self.cert
+        raw = self.requests_session.request(request.method, request.url, **kwargs)
+        content: bytes | None = None
+        if not stream:
+            content = raw.content
+            if str(raw.headers.get("Content-Encoding", "")).lower() == "gzip":
+                del raw.headers["Content-Encoding"]
+                raw.headers["Content-Length"] = str(len(content))
+        return HttpResponse(
+            status_code=raw.status_code,
+            reason=raw.reason,
+            url=raw.url,
+            headers=raw.headers,
+            raw=raw.raw,
+            transport_response=raw,
+            streaming=stream,
+            content_internal=content,
+            request=request,
+            history=[
+                HttpResponse(
+                    status_code=item.status_code,
+                    reason=item.reason,
+                    url=item.url,
+                    headers=item.headers,
+                    raw=item.raw,
+                    transport_response=item,
+                    request=request,
+                )
+                for item in raw.history
+            ],
         )
+
+    @staticmethod
+    def open_file(request: HttpRequest) -> HttpResponse:
+        from cpip.core.urls import url_to_path
+
         try:
-            raw = opener.open(req, timeout=timeout_value(timeout or self.timeout))
-        except urllib.error.HTTPError as exc:
-            raw = exc
-        except urllib.error.URLError as exc:
-            if parsed.scheme != "file":
-                raise
-            reason = type(exc.reason).__name__
+            with open(url_to_path(request.url), "rb") as file:
+                body = file.read()
+        except OSError as exc:
             headers = email.message.Message()
-            raw = io.BytesIO(f"{reason}: {exc.reason}".encode())
             return HttpResponse(
                 status_code=404,
-                reason=reason,
+                reason=type(exc).__name__,
                 url=request.url,
                 headers=headers,
-                raw=raw,
+                raw=io.BytesIO(f"{type(exc).__name__}: {exc}".encode()),
                 request=request,
             )
-        headers = raw.headers
-        body = raw if stream else io.BytesIO(decode_response_body(raw.read(), headers))
+        headers = email.message.Message()
+        headers["Content-Length"] = str(len(body))
         return HttpResponse(
-            status_code=getattr(raw, "status", getattr(raw, "code", 200)),
-            reason=getattr(raw, "reason", "OK"),
-            url=raw.geturl(),
+            status_code=200,
+            reason="OK",
+            url=request.url,
             headers=headers,
-            raw=body,
+            raw=io.BytesIO(body),
+            content_internal=body,
             request=request,
         )
 

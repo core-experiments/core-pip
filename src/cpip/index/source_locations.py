@@ -173,6 +173,21 @@ class SimpleIndexSource:
             session=self.session,
         ).links_from_url(project_url)
 
+    def collect_cached_records(
+        self, requirement: Requirement
+    ) -> list[tuple[object, ...]] | None:
+        """Return raw cached records when the HTTP page is still fresh."""
+        if self.session is None:
+            return None
+        project_url = self.project_page_url(self.index_url, requirement.canonical_name)
+        if not getattr(self.session, "has_fresh_cached_response", lambda _: False)(
+            project_url
+        ):
+            return None
+        from cpip.index.catalog_cache import load_records
+
+        return load_records(getattr(self.session, "cache", None), project_url)
+
     @staticmethod
     def project_page_url(index_url: str, canonical_name: str) -> str:
         return urllib.parse.urljoin(

@@ -35,7 +35,7 @@ def direct_batch_preflight(
     member_sets: list[tuple[tuple[str, int, int, int, int, int], ...]] = []
     total_size = 0
     for request, candidate in zip(requests, candidates):
-        if request[2] is not None or candidate.wheel_layout is None:
+        if request[2] is not None or not isinstance(candidate.wheel_layout, tuple):
             return None
         _, raw_members, _ = cast(
             "tuple[str, tuple[tuple[str, int, int, int, int, int], ...], bool]",

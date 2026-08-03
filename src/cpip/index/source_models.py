@@ -209,8 +209,10 @@ class PackageCatalog:
     """Immutable package metadata shared by candidate and resolver queries."""
 
     __slots__ = (
+        "candidates_by_version",
         "links",
         "links_by_version",
+        "records_by_version",
         "summaries",
         "summaries_by_version",
         "summary_versions",
@@ -219,16 +221,20 @@ class PackageCatalog:
     def __init__(
         self,
         links: tuple[Link, ...],
+        candidates_by_version: Mapping[Version, tuple[CandidateRecord, ...]],
         summaries: tuple[CandidateSummary, ...],
         summary_versions: tuple[Version, ...],
         summaries_by_version: Mapping[Version, tuple[CandidateSummary, ...]],
         links_by_version: Mapping[Version, tuple[Link, ...]],
+        records_by_version: Mapping[Version, tuple[object, ...]] | None = None,
     ) -> None:
         self.links = links
+        self.candidates_by_version = candidates_by_version
         self.summaries = summaries
         self.summary_versions = summary_versions
         self.summaries_by_version = summaries_by_version
         self.links_by_version = links_by_version
+        self.records_by_version = records_by_version
 
 
 class PackageSource(Protocol):

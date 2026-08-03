@@ -1,5 +1,7 @@
+import hashlib
 import importlib.util
 import os
+import shutil
 import sysconfig
 import zipfile
 from pathlib import Path
@@ -9,6 +11,7 @@ import pytest
 from cpip.build.metadata import InstalledDistributionStore
 from cpip.core.errors import InstallationError
 from cpip.core.metadata import default_lib_path
+from cpip.core.packaging import parse_requirement
 from cpip.core.wheel import wheel_candidate
 from cpip.install.requirements import RequirementInstaller
 from cpip.install.target import InstallTarget
@@ -282,6 +285,262 @@ def test_batch_install_rolls_back_when_destinations_overlap(tmp_path: Path) -> N
             target=InstallTarget.from_options("owner-demo", target=str(target)),
             pycompile=False,
             lookup_existing=False,
+        )
+
+    assert not target.exists()
+
+
+def test_fresh_target_reuses_copy_on_write_wheel_archive(tmp_path: Path) -> None:
+    wheel = make_wheel_internal(
+        tmp_path,
+        extra_files={
+            "owner_demo.data/scripts/raw-tool": "#!python\nprint('raw')\n",
+        },
+        entry_points="[console_scripts]\nowner-demo = owner_demo:main\n",
+    )
+    digest = hashlib.sha256(wheel.read_bytes()).hexdigest()
+    candidate = wheel_candidate(wheel).copy_with(
+        source_hashes={"sha256": digest},
+        source_kind="wheel",
+    )
+    target = tmp_path / "target"
+    cache = tmp_path / "cache"
+    install_target = InstallTarget.from_options("owner-demo", target=str(target))
+
+    install_wheels_transactionally(
+        [(wheel, True, None)],
+        target=install_target,
+        pycompile=False,
+        force=True,
+        preserve_existing=True,
+        lookup_existing=False,
+        candidates=[candidate],
+        cache_dir=str(cache),
+        script_executable="/target/python",
+    )
+
+    assert (target / "owner_demo" / "__init__.py").read_text() == "VALUE = '1.0'\n"
+    assert (target / "owner_demo-1.0.dist-info" / "INSTALLER").read_text() == "cpip\n"
+    assert (target / "owner_demo-1.0.dist-info" / "REQUESTED").exists()
+    assert (target / "bin" / "owner-demo").read_text().startswith("#!/target/python\n")
+    assert (target / "bin" / "raw-tool").read_text().startswith("#!/target/python\n")
+    cache_tree = cache / "archive-v1" / digest[:2] / digest / "tree"
+    assert (
+        (cache_tree / "owner_demo.data" / "scripts" / "raw-tool")
+        .read_text()
+        .startswith(
+            "#!python\n",
+        )
+    )
+
+    (target / "owner_demo" / "__init__.py").write_text("changed\n")
+    assert (cache_tree / "owner_demo" / "__init__.py").read_text() == "VALUE = '1.0'\n"
+    shutil.rmtree(target)
+    wheel.unlink()
+
+    install_wheels_transactionally(
+        [(wheel, True, None)],
+        target=install_target,
+        pycompile=False,
+        force=True,
+        preserve_existing=True,
+        lookup_existing=False,
+        candidates=[candidate],
+        cache_dir=str(cache),
+        script_executable="/target/python",
+    )
+
+    assert (target / "owner_demo" / "__init__.py").read_text() == "VALUE = '1.0'\n"
+    record = (target / "owner_demo-1.0.dist-info" / "RECORD").read_text()
+    assert "bin/owner-demo,sha256=" in record
+    assert "owner_demo-1.0.dist-info/INSTALLER,sha256=" in record
+    assert "owner_demo-1.0.dist-info/REQUESTED,sha256=" in record
+
+
+def test_cached_archive_upgrades_nonempty_target_without_original_wheel(
+    tmp_path: Path,
+) -> None:
+    from cpip.install.wheel_archive_cache import prepare_cached_wheel
+
+    old = make_wheel_internal(tmp_path, version="1.0")
+    new = make_wheel_internal(
+        tmp_path,
+        version="2.0",
+        extra_files={"owner_demo/addition.py": "ADDED = True\n"},
+        entry_points="[console_scripts]\nowner-demo = owner_demo:main\n",
+    )
+    target = tmp_path / "target"
+    install_target = InstallTarget.from_options("owner-demo", target=str(target))
+    WheelInstaller(install_target, pycompile=False).install(old, requested=True)
+    sentinel = target / "unrelated.txt"
+    sentinel.write_text("keep")
+
+    candidate = wheel_candidate(new).copy_with(source_kind="wheel")
+    archive = prepare_cached_wheel(candidate, str(tmp_path / "cache"))
+    prepared = candidate.copy_with(wheel_layout=archive)
+    new.unlink()
+
+    install_wheels_transactionally(
+        [(new, True, None)],
+        target=install_target,
+        pycompile=True,
+        candidates=[prepared],
+        cache_dir=str(tmp_path / "cache"),
+    )
+
+    assert sentinel.read_text() == "keep"
+    assert (target / "owner_demo" / "__init__.py").read_text() == "VALUE = '2.0'\n"
+    assert (target / "owner_demo" / "addition.py").exists()
+    assert list((target / "owner_demo" / "__pycache__").glob("*.pyc"))
+    assert not (target / "owner_demo-1.0.dist-info").exists()
+    assert (target / "owner_demo-2.0.dist-info" / "REQUESTED").exists()
+    assert (target / "bin" / "owner-demo").exists()
+    assert (Path(archive.tree) / "owner_demo" / "__init__.py").read_text() == (
+        "VALUE = '2.0'\n"
+    )
+
+
+def test_cached_archive_swaps_self_contained_target_for_upgrade(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from cpip.install.wheel_archive_cache import prepare_cached_wheel
+
+    old = make_wheel_internal(tmp_path, version="1.0")
+    new = make_wheel_internal(tmp_path, version="2.0")
+    target = tmp_path / "target"
+    install_target = InstallTarget.from_options("owner-demo", target=str(target))
+    WheelInstaller(install_target, pycompile=False).install(old, requested=True)
+    (target / "unrelated.txt").write_text("keep")
+    candidate = wheel_candidate(new).copy_with(source_kind="wheel")
+    archive = prepare_cached_wheel(candidate, str(tmp_path / "cache"))
+    prepared = candidate.copy_with(wheel_layout=archive)
+    new.unlink()
+
+    def reject_file_transaction(*args: object, **kwargs: object) -> None:
+        raise AssertionError("self-contained upgrade should swap a staged target")
+
+    monkeypatch.setattr(InstallTransaction, "commit", reject_file_transaction)
+    install_wheels_transactionally(
+        [(new, True, None)],
+        target=install_target,
+        pycompile=False,
+        candidates=[prepared],
+        cache_dir=str(tmp_path / "cache"),
+    )
+
+    assert (target / "unrelated.txt").read_text() == "keep"
+    assert (target / "owner_demo" / "__init__.py").read_text() == "VALUE = '2.0'\n"
+    assert not (target / "owner_demo-1.0.dist-info").exists()
+    assert (target / "owner_demo-2.0.dist-info").exists()
+
+
+def test_invalid_unpacked_wheel_cache_is_rebuilt(tmp_path: Path) -> None:
+    wheel = make_wheel_internal(tmp_path)
+    digest = hashlib.sha256(wheel.read_bytes()).hexdigest()
+    candidate = wheel_candidate(wheel).copy_with(
+        source_hashes={"sha256": digest},
+        source_kind="wheel",
+    )
+    cache = tmp_path / "cache"
+
+    for index in range(2):
+        target = tmp_path / f"target-{index}"
+        install_wheels_transactionally(
+            [(wheel, True, None)],
+            target=InstallTarget.from_options("owner-demo", target=str(target)),
+            pycompile=False,
+            lookup_existing=False,
+            candidates=[candidate],
+            cache_dir=str(cache),
+        )
+        assert (target / "owner_demo" / "__init__.py").exists()
+        if index == 0:
+            manifest = cache / "archive-v1" / digest[:2] / digest / "manifest.bin"
+            manifest.write_bytes(b"invalid")
+
+
+def test_exact_install_plan_receipt_reuses_cached_archives(tmp_path: Path) -> None:
+    from cpip.install.wheel_archive_cache import (
+        exact_install_plan_key,
+        exact_install_plan_key_from_strings,
+        load_cached_install_plan,
+        save_cached_install_plan,
+    )
+
+    wheel = make_wheel_internal(tmp_path)
+    digest = hashlib.sha256(wheel.read_bytes()).hexdigest()
+    candidate = wheel_candidate(wheel).copy_with(
+        source_hashes={"sha256": digest},
+        source_kind="wheel",
+    )
+    cache = tmp_path / "cache"
+    target = tmp_path / "target"
+    install_wheels_transactionally(
+        [(wheel, True, None)],
+        target=InstallTarget.from_options("owner-demo", target=str(target)),
+        pycompile=False,
+        lookup_existing=False,
+        candidates=[candidate],
+        cache_dir=str(cache),
+    )
+    requirement = SimpleNamespace(
+        req=parse_requirement("owner-demo==1.0"),
+        link=None,
+        hash_options={},
+        config_settings={},
+    )
+    key = exact_install_plan_key((requirement,), ("test-context",))
+    assert key is not None
+    assert exact_install_plan_key_from_strings(
+        ("owner-demo==1.0",),
+        ("test-context",),
+    ) == (key, frozenset(("owner-demo",)))
+    assert (
+        exact_install_plan_key(
+            (
+                SimpleNamespace(
+                    req=parse_requirement("owner-demo>=1.0"),
+                    link=None,
+                    hash_options={},
+                    config_settings={},
+                ),
+            ),
+            ("test-context",),
+        )
+        is None
+    )
+    assert save_cached_install_plan(str(cache), key, (candidate,), {})
+
+    wheel.unlink()
+    loaded = load_cached_install_plan(str(cache), key)
+
+    assert loaded is not None
+    assert len(loaded.candidates) == 1
+    assert loaded.candidates[0].name == "owner-demo"
+    assert loaded.candidates[0].source_hashes == {"sha256": digest}
+    assert Path(loaded.candidates[0].path).is_dir()
+
+    receipt = cache / "resolution-v2" / key[:2] / f"{key}.bin"
+    os.utime(receipt, (0, 0))
+    assert load_cached_install_plan(str(cache), key) is None
+
+
+def test_cached_batch_rejects_duplicates_before_publishing_target(
+    tmp_path: Path,
+) -> None:
+    wheel = make_wheel_internal(tmp_path)
+    candidate = wheel_candidate(wheel)
+    target = tmp_path / "target"
+
+    with pytest.raises(InstallationError, match="duplicate installation destination"):
+        install_wheels_transactionally(
+            [(wheel, True, None), (wheel, False, None)],
+            target=InstallTarget.from_options("owner-demo", target=str(target)),
+            pycompile=False,
+            lookup_existing=False,
+            candidates=[candidate, candidate],
+            cache_dir=str(tmp_path / "cache"),
         )
 
     assert not target.exists()

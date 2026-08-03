@@ -21,6 +21,7 @@ def _read_staged_source(path: str | None) -> bytes:
 
 class StagedFile:
     __slots__ = (
+        "clone",
         "contents",
         "destination_text",
         "mode",
@@ -33,10 +34,12 @@ class StagedFile:
         destination_text: str,
         mode: int | None = None,
         contents: bytes | None = None,
+        clone: bool = False,
     ) -> None:
         if source_text is None and contents is None:
             raise ValueError("staged file needs a source or contents")
         self.contents = contents
+        self.clone = clone
         self.source_text = source_text
         self.destination_text = destination_text
         self.mode = mode
@@ -94,6 +97,27 @@ class InstallTransaction:
         )
         self.staged_destinations.add(destination_text)
 
+    def add_clone(
+        self,
+        source: str,
+        destination: str,
+        *,
+        mode: int | None = None,
+    ) -> None:
+        """Stage an immutable cache source without consuming it at commit."""
+        source_text = source if isinstance(source, str) else os.fspath(source)
+        destination_text = (
+            destination if isinstance(destination, str) else os.fspath(destination)
+        )
+        if destination_text in self.staged_destinations:
+            raise InstallationError(
+                f"duplicate installation destination: {destination_text}",
+            )
+        self.staged_internal.append(
+            StagedFile(source_text, destination_text, mode, clone=True),
+        )
+        self.staged_destinations.add(destination_text)
+
     def delete(self, path: str) -> None:
         self.deletions.add(os.fspath(path))
 
@@ -104,7 +128,8 @@ class InstallTransaction:
         for item in other.staged_internal:
             if item.contents is None:
                 assert item.source_text is not None
-                self.add(item.source_text, item.destination_text, mode=item.mode)
+                operation = self.add_clone if item.clone else self.add
+                operation(item.source_text, item.destination_text, mode=item.mode)
             else:
                 self.add_contents(item.destination_text, item.contents, mode=item.mode)
         self.deletions.update(other.deletions)
@@ -177,12 +202,17 @@ class InstallTransaction:
                     created_directories.add(destination_parent_text)
                 if item.contents is None:
                     assert item.source_text is not None
-                    try:
-                        replace(item.source_text, item.destination_text)
-                    except OSError as exc:
-                        if exc.errno != errno.EXDEV:
-                            raise
-                        shutil.move(item.source_text, item.destination_text)
+                    if item.clone:
+                        from cpip.platform.clone import clone_path
+
+                        clone_path(item.source_text, item.destination_text)
+                    else:
+                        try:
+                            replace(item.source_text, item.destination_text)
+                        except OSError as exc:
+                            if exc.errno != errno.EXDEV:
+                                raise
+                            shutil.move(item.source_text, item.destination_text)
                 else:
                     # Mark the path before writing: a short write must still
                     # be removed by rollback before any backup is restored.

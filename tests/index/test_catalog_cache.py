@@ -33,7 +33,7 @@ def test_catalog_cache_roundtrip(tmp_path: Path) -> None:
 
 def test_catalog_cache_ignores_corrupt_entries(tmp_path: Path) -> None:
     cache = SafeFileCache(str(tmp_path))
-    key = "cpip-index-catalog-v1:https://example.test/simple/demo/"
+    key = "cpip-index-catalog-v2:https://example.test/simple/demo/"
     cache.set(key, b"not marshal")
     cache.set_body(key, b"1")
 

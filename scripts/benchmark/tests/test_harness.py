@@ -103,7 +103,35 @@ def test_offline_workload_contains_installable_wheels(tmp_path: Path) -> None:
 
     assert requirements.read_text(encoding="utf-8").strip() == "application"
     assert (wheelhouse / "application-1.0.0-py3-none-any.whl").is_file()
+    assert (
+        Path(manifest["incremental_wheelhouse"])
+        / "incremental_application-2.0.0-py3-none-any.whl"
+    ).is_file()
     assert len(list(wheelhouse.glob("*.whl"))) > 20
+
+
+def test_incremental_install_restores_old_target_before_each_run(
+    tmp_path: Path,
+) -> None:
+    commands = build_commands(
+        "install-incremental-warm",
+        workload="offline",
+        workspace=tmp_path,
+        cpip_python=sys.executable,
+        cpip_console=None,
+        cpip_launcher="module",
+        uv_path="uv",
+        python=sys.executable,
+    )
+
+    assert all(command.prepare is not None for command in commands)
+    assert all(
+        "incremental-base.txt" in (command.prepare or "") for command in commands
+    )
+    assert all(
+        "incremental-update.txt" in " ".join(command.command) for command in commands
+    )
+    assert all("--upgrade" in command.command for command in commands)
 
 
 def test_live_workload_writes_trio_files(tmp_path: Path) -> None:
@@ -113,3 +141,20 @@ def test_live_workload_writes_trio_files(tmp_path: Path) -> None:
     assert "sphinx==" in Path(manifest["install_requirements"]).read_text(
         encoding="utf-8"
     )
+
+
+def test_live_install_uses_the_prepared_cpip_cache(tmp_path: Path) -> None:
+    commands = build_commands(
+        "install-warm",
+        workload="live",
+        workspace=tmp_path,
+        cpip_python=sys.executable,
+        cpip_console=None,
+        cpip_launcher="module",
+        uv_path="uv",
+        python=sys.executable,
+    )
+
+    cpip = commands[0].command
+    cache_option = cpip.index("--cache-dir")
+    assert cpip[cache_option + 1] == str(tmp_path / "cache" / "cpip")

@@ -114,6 +114,18 @@ class SafeFileCache:
             return open(body_path, "rb")
         return None
 
+    def get_body_path(self, key: str) -> str | None:
+        """Return the immutable body path without opening or copying it."""
+        metadata_path = self.get_cache_path(key)
+        body_path = metadata_path + ".body"
+        with suppressed_cache_errors():
+            with open(metadata_path, "rb"):
+                pass
+            with open(body_path, "rb"):
+                pass
+            return body_path
+        return None
+
     def set_body(self, key: str, body: bytes) -> None:
         path = self.get_cache_path(key) + ".body"
         self.write_internal(path, body)

@@ -6,6 +6,9 @@ from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 from cpip.cli.commands.install_plan import (
+    cached_remote_plan_key as _cached_remote_plan_key,
+)
+from cpip.cli.commands.install_plan import (
     try_local_wheelhouse_plan as _try_local_wheelhouse_plan,
 )
 from cpip.cli.commands.install_reporting import warn_about_install_conflicts
@@ -210,6 +213,13 @@ def run_install(args: list[str]) -> int:
         elif token == "--pre":
             release_control_args.append(("pre", ":all:"))
         index += 1
+    cache_dir = (
+        None
+        if options.no_cache_dir
+        else options.cache_dir
+        or os.environ.get("CPIP_CACHE_DIR")
+        or user_cache_dir("cpip")
+    )
     bundle = collect_requirements(
         requirements=[
             *options.requirements,
@@ -240,13 +250,7 @@ def run_install(args: list[str]) -> int:
         no_input=options.no_input,
         keyring_provider=options.keyring_provider,
         proxy=options.proxy,
-        cache_dir=(
-            None
-            if options.no_cache_dir
-            else options.cache_dir
-            or os.environ.get("CPIP_CACHE_DIR")
-            or user_cache_dir("cpip")
-        ),
+        cache_dir=cache_dir,
     )
     if bundle.find_links:
         os.environ["CPIP_FIND_LINKS"] = " ".join(bundle.find_links)
@@ -376,13 +380,7 @@ def run_install(args: list[str]) -> int:
             requirements,
             build_options,
             target,
-            cache_dir=(
-                None
-                if options.no_cache_dir
-                else options.cache_dir
-                or os.environ.get("CPIP_CACHE_DIR")
-                or user_cache_dir("cpip")
-            ),
+            cache_dir=cache_dir,
         )
 
     if options.verbose and bundle.no_index:
@@ -454,20 +452,27 @@ def run_install(args: list[str]) -> int:
 
     if bundle.find_links and not quiet:
         print(f"Looking in links: {', '.join(bundle.find_links)}")
+    plan: Any | None = None
     if bundle.requirements:
-        cache_dir = (
-            None
-            if options.no_cache_dir
-            else options.cache_dir
-            or os.environ.get("CPIP_CACHE_DIR")
-            or user_cache_dir("cpip")
-        )
-        plan = _try_local_wheelhouse_plan(
+        plan_cache_key = _cached_remote_plan_key(
             options,
             bundle,
             requirements,
-            cache_dir=cache_dir,
+            target,
         )
+        plan = None
+        if plan_cache_key is not None and cache_dir is not None:
+            from cpip.install.wheel_archive_cache import load_cached_install_plan
+
+            plan = load_cached_install_plan(cache_dir, plan_cache_key)
+        resolved_fresh = False
+        if plan is None:
+            plan = _try_local_wheelhouse_plan(
+                options,
+                bundle,
+                requirements,
+                cache_dir=cache_dir,
+            )
         if plan is None:
             try:
                 from cpip.resolution.engine import ResolutionEngine
@@ -485,6 +490,7 @@ def run_install(args: list[str]) -> int:
                     ignore_requires_python=options.ignore_requires_python,
                     python_version=python_version,
                 ).resolve(requirements)
+                resolved_fresh = True
             except DistributionNotFound as exc:
                 if options.verbose:
                     message = str(exc)
@@ -502,12 +508,23 @@ def run_install(args: list[str]) -> int:
         unique_candidates: dict[str, Any] = {}
         for candidate in plan.candidates:
             unique_candidates.setdefault(candidate.canonical_name, candidate)
-        from cpip.resolution.engine.model import ResolutionResult
-
-        if isinstance(plan, ResolutionResult):
+        if resolved_fresh:
             plan = replace(plan, candidates=tuple(unique_candidates.values()))
         else:
             plan.candidates = list(unique_candidates.values())
+        if plan.candidates and not options.dry_run:
+            from cpip.install.wheel_archive_cache import prepare_cached_wheel
+            from cpip.resolution.engine.output import prepare_install_candidates
+
+            materialized_candidates = prepare_install_candidates(
+                plan.candidates,
+                cache_dir,
+                prepare_cached_wheel,
+            )
+            if resolved_fresh:
+                plan = replace(plan, candidates=tuple(materialized_candidates))
+            else:
+                plan.candidates = materialized_candidates
         for item in plan.satisfied:
             requested = item.requirement.raw or item.requirement.name
             if not quiet:
@@ -550,10 +567,16 @@ def run_install(args: list[str]) -> int:
                     from cpip.install.direct_url import direct_url_from_link
 
                     direct_url = direct_url_from_link(source_requirement.link)
-                candidate_direct_urls[candidate.path] = direct_url
+                candidate_direct_urls[candidate.canonical_name] = direct_url
             if not options.dry_run:
                 hybrid_installed = False
                 target_is_empty = target_library_is_empty(batch_target)
+                from cpip.install.wheel_archive_cache import CachedWheelArchive
+
+                prepared_archives = all(
+                    isinstance(candidate.wheel_layout, CachedWheelArchive)
+                    for candidate in plan.candidates
+                )
                 if (
                     options.target is not None
                     and options.ignore_installed
@@ -564,6 +587,7 @@ def run_install(args: list[str]) -> int:
                     and not options.user
                     and options.prefix is None
                     and target_is_empty
+                    and not prepared_archives
                     and all(
                         candidate.source_kind == "wheel"
                         for candidate in plan.candidates
@@ -589,7 +613,7 @@ def run_install(args: list[str]) -> int:
                                 (
                                     candidate.path,
                                     candidate.canonical_name in requested_roots,
-                                    candidate_direct_urls[candidate.path],
+                                    candidate_direct_urls[candidate.canonical_name],
                                 )
                                 for candidate in plan.candidates
                             ],
@@ -603,6 +627,7 @@ def run_install(args: list[str]) -> int:
                                 and target_is_empty
                             ),
                             candidates=plan.candidates,
+                            cache_dir=cache_dir,
                         )
                     except InstallationError as exc:
                         prefix = "Cannot install "
@@ -616,6 +641,21 @@ def run_install(args: list[str]) -> int:
                                         f"{candidate.version}",
                                     )
                         raise
+                if (
+                    resolved_fresh
+                    and plan_cache_key is not None
+                    and cache_dir is not None
+                ):
+                    from cpip.install.wheel_archive_cache import (
+                        save_cached_install_plan,
+                    )
+
+                    save_cached_install_plan(
+                        cache_dir,
+                        plan_cache_key,
+                        tuple(plan.candidates),
+                        plan.graph,
+                    )
         plan_order = {
             id(candidate): index for index, candidate in enumerate(plan.candidates)
         }
@@ -874,6 +914,11 @@ def run_install(args: list[str]) -> int:
                 bundle.session.network_stats.as_dict()
                 if bundle.session is not None
                 and bundle.session.network_stats is not None
+                else None
+            ),
+            resolution_metrics=(
+                dict(plan.metrics)
+                if plan is not None and hasattr(plan, "metrics")
                 else None
             ),
         )

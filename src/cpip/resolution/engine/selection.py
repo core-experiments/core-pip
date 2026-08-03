@@ -497,6 +497,7 @@ class SelectionOperations:
             provider_hash_key,
         )
         if key not in self.candidate_cache:
+            self.metrics.candidate_queries += 1
             logger.debug(
                 f"candidate cache miss requirement={requirement.raw or requirement.name}",
             )
@@ -513,14 +514,38 @@ class SelectionOperations:
             # An empty active intersection is useful for conflict detection, but
             # must not discard every candidate before the resolver can explain
             # which requirement conflicts with the selected version.
-            candidates = (
-                self.provider.find_candidates(
+            frontier_versions = None
+            if requirement.url is None and not looks_like_path_requirement(
+                requirement.raw,
+            ):
+                frontier_versions = self.release_frontier.allowed_versions(
                     requirement,
-                    allowed_versions=allowed_versions,
+                    allow_prereleases=self.allow_prereleases_internal(requirement),
                 )
-                if allowed_versions and requirement.url is None
-                else self.provider.find_candidates(requirement)
+            effective_versions = allowed_versions
+            if frontier_versions is not None:
+                effective_versions = (
+                    frontier_versions
+                    if effective_versions is None
+                    else effective_versions & frontier_versions
+                )
+            provider_method = self.provider.find_candidates
+            provider_supports_versions = (
+                getattr(provider_method, "__func__", None) is not None
+                and getattr(provider_method, "__func__", None).__name__
+                == "find_candidates"
             )
+            if (
+                effective_versions
+                and requirement.url is None
+                and provider_supports_versions
+            ):
+                candidates = provider_method(
+                    requirement,
+                    allowed_versions=effective_versions,
+                )
+            else:
+                candidates = provider_method(requirement)
             if (
                 source_req is not None
                 and provider_hashes is not None
@@ -616,6 +641,7 @@ class SelectionOperations:
                 candidates = candidates.prefer(keep, decisive=decisive)
             self.candidate_cache[key] = candidates
         else:
+            self.metrics.candidate_cache_hits += 1
             logger.debug(
                 f"candidate cache hit requirement={requirement.raw or requirement.name}",
             )

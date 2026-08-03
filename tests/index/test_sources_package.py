@@ -21,6 +21,7 @@ from cpip.index.source_models import (
     ArtifactKind,
     CandidateMetadata,
     CandidateRecord,
+    CandidateSelection,
     MetadataFile,
     RejectionReason,
 )
@@ -268,6 +269,49 @@ def test_local_find_links_do_not_start_catalog_prefetcher(tmp_path: Path) -> Non
     assert provider.prefetcher is None
 
 
+def test_exact_catalog_prefetch_starts_wheel_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+
+    class Session:
+        def get(self, url: str) -> object:
+            calls.append(url)
+            return object()
+
+    link = Link.from_url(
+        "https://packages.invalid/demo-1.0-py3-none-any.whl",
+        source_url=None,
+        metadata_file=MetadataFile(None),
+    )
+    record = CandidateRecord("demo", Version("1.0"), link)
+    provider = CandidateProvider.from_options(
+        index_url="https://index.invalid/simple",
+        session=Session(),
+    )
+    monkeypatch.setattr(
+        provider,
+        "load_available_versions",
+        lambda requirement, cache_key: (),
+    )
+    monkeypatch.setattr(
+        provider,
+        "evaluate_links",
+        lambda requirement: CandidateSelection((record,), ()),
+    )
+
+    try:
+        provider.load_prefetched_versions(
+            (parse_requirement("demo==1.0"), ("demo", True, True)),
+        )
+    finally:
+        provider.close()
+
+    metadata_link = link.metadata_link()
+    assert metadata_link is not None
+    assert calls == [metadata_link.url]
+
+
 def test_remote_index_fanout_preserves_order_and_deduplicates(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -418,7 +462,9 @@ def test_candidate_materializer_reuses_stable_wheel_metadata(
     assert len(provider.materializer_internal.wheel_candidates) == 1
 
 
-def test_dry_run_uses_pypi_metadata_before_building_sdist(
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_pypi_metadata_precedes_sdist_build(
+    dry_run: bool,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     candidate = CandidateRecord(
@@ -429,7 +475,7 @@ def test_dry_run_uses_pypi_metadata_before_building_sdist(
             source_url="https://pypi.org/simple/demo/",
         ),
     )
-    materializer = CandidateMaterializer(dry_run=True)
+    materializer = CandidateMaterializer(dry_run=dry_run)
     expected = CandidateMetadata(
         name="demo",
         version=Version("1.0"),
@@ -494,7 +540,9 @@ def test_pypi_release_metadata_is_shared_by_artifacts() -> None:
     assert [item.name for item in second_metadata.dependencies] == ["base", "extra"]
 
 
-def test_dry_run_reads_detached_wheel_metadata_without_download(
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_reads_detached_wheel_metadata_without_download(
+    dry_run: bool,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     candidate = CandidateRecord(
@@ -520,7 +568,7 @@ def test_dry_run_reads_detached_wheel_metadata_without_download(
                 ),
             )
 
-    materializer = CandidateMaterializer(dry_run=True, session=Session())
+    materializer = CandidateMaterializer(dry_run=dry_run, session=Session())
     monkeypatch.setattr(
         materializer,
         "ensure_local",

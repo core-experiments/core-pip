@@ -52,6 +52,7 @@ def write_install_report(
     path: str,
     items: list[ReportItem],
     network_stats: dict[str, int] | None = None,
+    resolution_metrics: dict[str, int | float] | None = None,
 ) -> None:
     install_entries: list[dict[str, object]] = []
     seen: set[tuple[str, str, bool]] = set()
@@ -107,6 +108,8 @@ def write_install_report(
     report_values: dict[str, object] = {"version": "1", "install": install_entries}
     if network_stats is not None:
         report_values["cpip_network"] = network_stats
+    if resolution_metrics is not None:
+        report_values["cpip_resolution"] = resolution_metrics
     report = json.dumps(report_values)
     if path == "-":
         print(report)

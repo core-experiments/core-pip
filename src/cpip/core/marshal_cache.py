@@ -4,23 +4,6 @@ from __future__ import annotations
 
 import marshal
 import os
-from typing import TypeAlias
-
-Marshallable: TypeAlias = (
-    None
-    | bool
-    | int
-    | float
-    | complex
-    | str
-    | bytes
-    | bytearray
-    | tuple
-    | list
-    | dict
-    | set
-    | frozenset
-)
 
 
 def load_snapshot(path: str | os.PathLike[str]) -> object | None:
@@ -32,7 +15,7 @@ def load_snapshot(path: str | os.PathLike[str]) -> object | None:
         return None
 
 
-def save_snapshot(path: str | os.PathLike[str], payload: Marshallable) -> bool:
+def save_snapshot(path: str | os.PathLike[str], payload: object) -> bool:
     """Atomically write a marshal snapshot and report whether it succeeded."""
     path = os.fspath(path)
     temporary = f"{path}.{os.getpid()}.tmp"
@@ -41,7 +24,7 @@ def save_snapshot(path: str | os.PathLike[str], payload: Marshallable) -> bool:
         if parent:
             os.makedirs(parent, exist_ok=True)
         with open(temporary, "wb") as stream:
-            marshal.dump(payload, stream)
+            marshal.dump(payload, stream)  # ty: ignore[invalid-argument-type]
         os.replace(temporary, path)
         return True
     except (OSError, TypeError, ValueError):

@@ -39,6 +39,9 @@ def resolve(
     values: list[str],
     *,
     cache_dir: str | None = None,
+    stats: dict[str, int] | None = None,
+    compute_source_hashes: bool = False,
+    constraints: list[str] | None = None,
 ) -> list[LocalWheelCandidate] | None:
     requirements: list[LocalWheelRequirement] = []
     for value in values:
@@ -48,6 +51,16 @@ def resolve(
         ):
             return None
         requirements.append(requirement)
+    global_constraints: dict[str, list[LocalWheelRequirement]] = {}
+    for value in constraints or ():
+        constraint = parse_requirement(value)
+        if (
+            constraint is None
+            or constraint.marker is not None
+            or constraint.extras
+        ):
+            return None
+        global_constraints.setdefault(constraint.canonical_name, []).append(constraint)
     catalog_path, records = load_catalog(cache_dir, find_links)
     if records is None:
         records = scan_catalog(find_links)
@@ -74,6 +87,10 @@ def resolve(
             requirements,
             {},
             {},
+            {
+                name: tuple(package_constraints)
+                for name, package_constraints in global_constraints.items()
+            },
             {},
             exact_index,
             exact_masks,
@@ -87,6 +104,8 @@ def resolve(
             persistent_cache,
             [],
             [],
+            stats,
+            compute_source_hashes,
         )
     finally:
         save_metadata_cache(cache_path, metadata_cache)

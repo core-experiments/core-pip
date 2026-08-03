@@ -1,9 +1,10 @@
 import pytest
-from cpip.core.packaging import SpecifierSet
+from cpip.core.packaging import SpecifierSet, Version, parse_requirement
 from cpip.core.wheel import WheelTag
 from cpip.index.candidate_evaluators import CandidateEvaluator
 from cpip.index.candidates import InstallationCandidate
 from cpip.index.links import Link
+from cpip.index.source_models import CandidateRecord, RejectedCandidate
 
 
 def test_sort_key_uses_best_supported_tag_rank() -> None:
@@ -66,3 +67,26 @@ def test_sort_key_marks_unsupported_wheel_tag() -> None:
     )
 
     assert evaluator.sort_key_internal(candidate)[6] == -1_000_000
+
+
+def test_unnamed_direct_archive_uses_materializable_record() -> None:
+    link = Link.from_url(
+        "https://example.invalid/archive/master.zip",
+        source_url=None,
+    )
+    parsed = InstallationCandidate.from_link(link)
+    assert isinstance(parsed, RejectedCandidate)
+    requirement = parse_requirement(f"source @ {link.url}")
+    assert requirement is not None
+
+    candidate = CandidateEvaluator.evaluate_parsed_link(
+        link,
+        parsed,
+        requirement,
+        allow_yanked=True,
+        allow_binary=True,
+        allow_source=True,
+    )
+
+    assert type(candidate) is CandidateRecord
+    assert candidate.version == Version("0")
