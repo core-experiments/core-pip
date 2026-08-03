@@ -10,14 +10,15 @@ import urllib.parse
 from typing import Any, cast
 
 from cpip.core.packaging import Version
-from cpip.core.wheel import parse_wheel_file
+from cpip.core.wheel import WheelFile, WheelTag, parse_wheel_file
 from cpip.index.datetime import parse_iso_datetime
 from cpip.index.directory_index import project_version_from_filename
 from cpip.index.links import Link
 from cpip.index.source_models import ArtifactKind, MetadataFile
 
-VERSION = 6
-PREFIX = "cpip-index-catalog-v6:"
+VERSION = 7
+PREFIX = "cpip-index-catalog-v7:"
+V6_PREFIX = "cpip-index-catalog-v6:"
 LEGACY_PREFIX = "cpip-index-catalog-v2:"
 SUMMARY_VERSION = 3
 SUMMARY_PREFIX = "cpip-index-summary-v3:"
@@ -33,6 +34,11 @@ WHEEL_RECORD = 1
 SDIST_RECORD = 2
 RECORD_REQUIRES_PYTHON = 3
 RECORD_YANKED = 4
+RECORD_WHEEL_IDENTITY = 7
+WHEEL_IDENTITY_NAME = 0
+WHEEL_IDENTITY_VERSION = 1
+WHEEL_IDENTITY_BUILD_TAG = 2
+WHEEL_IDENTITY_TAGS = 3
 
 CatalogRecord = tuple[object, ...]
 CatalogArtifact = tuple[int, CatalogRecord]
@@ -50,6 +56,9 @@ CatalogSummary = tuple[
     CatalogChoiceProfiles,
 ]
 
+_PENDING_CATALOGS_ATTRIBUTE = "_cpip_pending_catalogs"
+_PENDING_CATALOGS_LIMIT = 64
+
 
 def cache_key(url: str) -> str:
     return PREFIX + url
@@ -65,9 +74,7 @@ def choice_key(
     allow_binary: bool,
     allow_source: bool,
 ) -> str:
-    return (
-        f"{CHOICE_PREFIX}{target_key}:{int(allow_binary)}:{int(allow_source)}:{url}"
-    )
+    return f"{CHOICE_PREFIX}{target_key}:{int(allow_binary)}:{int(allow_source)}:{url}"
 
 
 def load_links(cache: Any, url: str) -> list[Link] | None:
@@ -85,25 +92,63 @@ def load_records(cache: Any, url: str) -> list[tuple[object, ...]] | None:
         return None
     groups, unparsed = catalog
     return [
-        *(
-            record
-            for _name, _version, artifacts, _facts in groups
-            for _kind, record in artifacts
-        ),
+        *(record for _name, _version, artifacts, _facts in groups for _kind, record in artifacts),
         *unparsed,
     ]
 
 
 def load_catalog(cache: Any, url: str) -> CatalogData | None:
+    pending = _pending_catalogs(cache)
+    if pending is not None:
+        catalog = pending.pop(url, None)
+        if catalog is not None:
+            return catalog
+    loaded = _load_catalog_uncached(cache, url)
+    return None if loaded is None else loaded[0]
+
+
+def _pending_catalogs(cache: Any) -> dict[str, CatalogData] | None:
+    """Return the per-cache handoff used between summary and catalog loads."""
+    try:
+        attributes = vars(cache)
+    except TypeError:
+        return None
+    pending = attributes.get(_PENDING_CATALOGS_ATTRIBUTE)
+    if pending is None:
+        pending = {}
+        attributes[_PENDING_CATALOGS_ATTRIBUTE] = pending
+    return pending
+
+
+def _remember_pending_catalog(
+    cache: Any,
+    url: str,
+    catalog: CatalogData,
+) -> None:
+    pending = _pending_catalogs(cache)
+    if pending is None:
+        return
+    pending[url] = catalog
+    while len(pending) > _PENDING_CATALOGS_LIMIT:
+        pending.pop(next(iter(pending)))
+
+
+def _load_catalog_uncached(
+    cache: Any,
+    url: str,
+) -> tuple[CatalogData, bytes | None] | None:
     """Load compact records grouped by their target-independent release."""
     if cache is None:
         return None
     raw = get_cache_entry(cache, cache_key(url))
     if raw is None:
-        migrated = migrate_legacy_catalog(cache, url)
+        migrated = migrate_v6_catalog(cache, url)
         if migrated is not None:
-            save_catalog(cache, url, migrated)
-        return migrated
+            return migrated, None
+        legacy = migrate_legacy_catalog(cache, url)
+        if legacy is not None:
+            save_catalog(cache, url, legacy)
+        return None if legacy is None else (legacy, None)
     try:
         payload = marshal.loads(raw)
         if (
@@ -121,7 +166,7 @@ def load_catalog(cache: Any, url: str) -> CatalogData | None:
             valid_record(record) for record in unparsed
         ):
             return None
-        return cast("CatalogData", (groups, unparsed))
+        return cast("CatalogData", (groups, unparsed)), raw
     except (EOFError, TypeError, ValueError, KeyError, IndexError):
         return None
 
@@ -143,10 +188,18 @@ def load_summary(cache: Any, url: str) -> CatalogSummary | None:
         if summary is not None:
             save_summary_value(cache, url, summary)
             return summary
-    catalog = load_catalog(cache, url)
+    pending = _pending_catalogs(cache)
+    catalog = pending.pop(url, None) if pending is not None else None
+    catalog_raw: bytes | None = None
+    if catalog is None:
+        loaded = _load_catalog_uncached(cache, url)
+        if loaded is not None:
+            catalog, catalog_raw = loaded
     if catalog is None:
         return None
-    catalog_raw = get_cache_entry(cache, cache_key(url))
+    _remember_pending_catalog(cache, url, catalog)
+    if catalog_raw is None:
+        catalog_raw = get_cache_entry(cache, cache_key(url))
     if catalog_raw is None:
         return None
     generation = catalog_generation(catalog_raw)
@@ -390,7 +443,28 @@ def valid_summary_group(value: object) -> bool:
 
 
 def valid_record(value: object) -> bool:
-    return isinstance(value, tuple) and len(value) == 7
+    if not isinstance(value, tuple) or len(value) != 8:
+        return False
+    identity = value[RECORD_WHEEL_IDENTITY]
+    if identity is None:
+        return True
+    if not isinstance(identity, tuple) or len(identity) != 4:
+        return False
+    tags = identity[WHEEL_IDENTITY_TAGS]
+    if not isinstance(tags, tuple):
+        return False
+    return (
+        isinstance(identity[WHEEL_IDENTITY_NAME], str)
+        and isinstance(identity[WHEEL_IDENTITY_VERSION], str)
+        and (
+            identity[WHEEL_IDENTITY_BUILD_TAG] is None
+            or isinstance(identity[WHEEL_IDENTITY_BUILD_TAG], str)
+        )
+        and all(
+            isinstance(tag, tuple) and len(tag) == 3 and all(isinstance(part, str) for part in tag)
+            for tag in tags
+        )
+    )
 
 
 def valid_fact(value: object) -> bool:
@@ -443,8 +517,9 @@ def save_links(cache: Any, url: str, links: list[Link]) -> None:
     grouped: dict[tuple[str, str], list[CatalogArtifact]] = {}
     unparsed: list[CatalogRecord] = []
     for link in links:
-        record = link_record(link)
-        identity = artifact_identity(link)
+        parsed_wheel = parsed_wheel_from_link(link)
+        record = link_record(link, parsed_wheel=parsed_wheel)
+        identity = artifact_identity(link, parsed_wheel=parsed_wheel)
         if identity is None:
             unparsed.append(record)
             continue
@@ -634,6 +709,77 @@ def migrate_legacy_catalog(cache: Any, url: str) -> CatalogData | None:
     )
 
 
+def migrate_v6_catalog(cache: Any, url: str) -> CatalogData | None:
+    """Upgrade a v6 catalog by embedding parsed wheel identities once."""
+    raw = get_cache_entry(cache, V6_PREFIX + url)
+    if raw is None:
+        return None
+    try:
+        payload = marshal.loads(raw)
+    except (EOFError, TypeError, ValueError):
+        return None
+    if (
+        not isinstance(payload, tuple)
+        or len(payload) != 4
+        or payload[0] != "cpip-index-catalog"
+        or payload[1] != 6
+        or not isinstance(payload[2], list)
+        or not isinstance(payload[3], list)
+    ):
+        return None
+    groups: list[CatalogGroup] = []
+    for group in payload[2]:
+        if not isinstance(group, tuple) or len(group) != 4:
+            return None
+        name, version_text, artifacts, facts = group
+        if not isinstance(artifacts, list):
+            return None
+        migrated_artifacts: list[CatalogArtifact] = []
+        for kind, record in artifacts:
+            if kind == WHEEL_RECORD:
+                migrated = migrate_v6_record(record)
+                if migrated is None:
+                    return None
+                record = migrated
+            migrated_artifacts.append((kind, record))
+        groups.append((name, version_text, migrated_artifacts, facts))
+    unparsed: list[CatalogRecord] = []
+    for record in payload[3]:
+        if not isinstance(record, tuple) or len(record) != 7:
+            return None
+        migrated = migrate_v6_record(record)
+        if migrated is None:
+            return None
+        unparsed.append(migrated)
+    catalog = (groups, unparsed)
+    if not all(valid_group(group) for group in groups) or not all(
+        valid_record(record) for record in unparsed
+    ):
+        return None
+    save_catalog(cache, url, catalog)
+    return catalog
+
+
+def migrate_v6_record(record: tuple[object, ...]) -> CatalogRecord | None:
+    """Append a wheel's parsed identity to a v6 catalog record."""
+    filename = record_filename(record)
+    if filename is None or not filename.endswith(".whl"):
+        return record + (None,)
+    parsed_wheel = parse_wheel_file(filename)
+    return record + (wheel_identity(parsed_wheel),)
+
+
+def record_filename(record: tuple[object, ...]) -> str | None:
+    """Recover an artifact filename from a catalog record without parsing."""
+    text = record[1]
+    if isinstance(text, str) and text.endswith(".whl"):
+        return text
+    url = record[0]
+    if not isinstance(url, str):
+        return None
+    return urllib.parse.unquote(urllib.parse.urlsplit(url).path).rsplit("/", 1)[-1]
+
+
 def migrate_legacy_record(value: object) -> tuple[CatalogRecord, str] | None:
     if not isinstance(value, tuple) or len(value) != 9:
         return None
@@ -656,17 +802,10 @@ def migrate_legacy_record(value: object) -> tuple[CatalogRecord, str] | None:
             value[6],
             value[7],
             value[8],
+            wheel_identity(parse_wheel_file(filename)),
         ),
         filename,
     )
-
-
-def artifact_identity(link: Link) -> tuple[int, str, str] | None:
-    """Compile the artifact identity once when its Simple API page changes."""
-    filename = posixpath.basename(
-        urllib.parse.unquote(link.parsed_url_internal.path).rstrip("/"),
-    )
-    return artifact_identity_from_filename(filename, kind=link.kind)
 
 
 def artifact_identity_from_filename(
@@ -688,7 +827,113 @@ def artifact_identity_from_filename(
     return None
 
 
-def link_record(link: Link) -> tuple[object, ...]:
+def artifact_identity(
+    link: Link,
+    *,
+    parsed_wheel: WheelFile | None = None,
+) -> tuple[int, str, str] | None:
+    """Compile the artifact identity once when its Simple API page changes."""
+    if parsed_wheel is None:
+        parsed_wheel = parsed_wheel_from_link(link)
+    if parsed_wheel is not None:
+        return WHEEL_RECORD, parsed_wheel.name, str(parsed_wheel.version)
+    if link.kind is not ArtifactKind.SDIST:
+        return None
+    filename = posixpath.basename(
+        urllib.parse.unquote(link.parsed_url_internal.path).rstrip("/"),
+    )
+    parsed_identity = project_version_from_filename(filename)
+    if parsed_identity is None:
+        return None
+    name, version = parsed_identity
+    return SDIST_RECORD, name, str(version)
+
+
+def parsed_wheel_from_link(link: Link) -> WheelFile | None:
+    """Parse a wheel link's filename exactly once at catalog build time."""
+    if link.kind is not ArtifactKind.WHEEL:
+        return None
+    filename = posixpath.basename(
+        urllib.parse.unquote(link.parsed_url_internal.path).rstrip("/"),
+    )
+    return parse_wheel_file(filename)
+
+
+def wheel_identity(parsed_wheel: WheelFile | None) -> tuple[object, ...] | None:
+    """Marshal-safe parsed identity embedded in a wheel catalog record."""
+    if parsed_wheel is None:
+        return None
+    return (
+        parsed_wheel.name,
+        str(parsed_wheel.version),
+        parsed_wheel.build_tag,
+        tuple((tag.interpreter, tag.abi, tag.platform) for tag in parsed_wheel.tags),
+    )
+
+
+def wheel_file_from_identity(
+    identity: object,
+    *,
+    name: str,
+    version: Version,
+) -> WheelFile | None:
+    """Reconstruct a wheel from its cached identity without reparsing a name."""
+    if not isinstance(identity, tuple) or len(identity) != 4:
+        return None
+    identity_name = identity[WHEEL_IDENTITY_NAME]
+    version_text = identity[WHEEL_IDENTITY_VERSION]
+    build_tag = identity[WHEEL_IDENTITY_BUILD_TAG]
+    tag_triples = identity[WHEEL_IDENTITY_TAGS]
+    if (
+        not isinstance(identity_name, str)
+        or not isinstance(version_text, str)
+        or (build_tag is not None and not isinstance(build_tag, str))
+        or not isinstance(tag_triples, tuple)
+    ):
+        return None
+    if identity_name != name or version_text != str(version):
+        return None
+    tags: list[WheelTag] = []
+    for tag in tag_triples:
+        if not isinstance(tag, tuple) or len(tag) != 3:
+            continue
+        interpreter, abi, platform = tag
+        if (
+            not isinstance(interpreter, str)
+            or not isinstance(abi, str)
+            or not isinstance(platform, str)
+        ):
+            continue
+        tags.append(WheelTag(interpreter, abi, platform))
+    if not tags:
+        return None
+    return WheelFile(
+        name=identity_name,
+        version=version,
+        build_tag=build_tag,
+        tags=tuple(tags),
+    )
+
+
+def wheel_file_from_record(
+    record: tuple[object, ...],
+    *,
+    name: str,
+    version: Version,
+) -> WheelFile | None:
+    """Reconstruct a wheel from its catalog record's cached identity."""
+    return wheel_file_from_identity(
+        record[RECORD_WHEEL_IDENTITY],
+        name=name,
+        version=version,
+    )
+
+
+def link_record(
+    link: Link,
+    *,
+    parsed_wheel: WheelFile | None = None,
+) -> tuple[object, ...]:
     metadata = link.metadata_file
     upload_time = link.upload_time
     return (
@@ -699,11 +944,12 @@ def link_record(link: Link) -> tuple[object, ...]:
         link.yanked_reason,
         None if metadata is None else dict(metadata.hashes or {}),
         None if upload_time is None else upload_time.isoformat(),
+        wheel_identity(parsed_wheel),
     )
 
 
 def link_from_record(record: object, *, source_url: str | None = None) -> Link:
-    if not isinstance(record, tuple) or len(record) != 7:
+    if not isinstance(record, tuple) or len(record) != 8:
         raise ValueError("invalid catalog record")
     (
         url,
@@ -713,6 +959,7 @@ def link_from_record(record: object, *, source_url: str | None = None) -> Link:
         yanked,
         metadata,
         upload_time,
+        _wheel_identity,
     ) = record
     if not isinstance(url, str) or not isinstance(text, str):
         raise ValueError("invalid catalog link")
@@ -731,9 +978,7 @@ def link_from_record(record: object, *, source_url: str | None = None) -> Link:
     ):
         raise ValueError("invalid catalog metadata")
     hashes_value = cast("dict[str, str]", hashes) if isinstance(hashes, dict) else None
-    metadata_value = (
-        cast("dict[str, str]", metadata) if isinstance(metadata, dict) else None
-    )
+    metadata_value = cast("dict[str, str]", metadata) if isinstance(metadata, dict) else None
     parsed_upload_time: datetime.datetime | None = None
     if upload_time is not None:
         if not isinstance(upload_time, str):
@@ -747,8 +992,6 @@ def link_from_record(record: object, *, source_url: str | None = None) -> Link:
         hashes=hashes_value or {},
         requires_python=requires_python if isinstance(requires_python, str) else None,
         yanked_reason=yanked if isinstance(yanked, str) else None,
-        metadata_file=(
-            MetadataFile(metadata_value) if metadata_value is not None else None
-        ),
+        metadata_file=(MetadataFile(metadata_value) if metadata_value is not None else None),
         upload_time=parsed_upload_time,
     )

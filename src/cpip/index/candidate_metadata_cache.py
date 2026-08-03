@@ -117,9 +117,7 @@ class CandidateMetadataCache:
         if decoded is not None:
             return decoded
         value = self.entries.get(key)
-        if value is None or (
-            key not in self.validated and not self.valid_value(value)
-        ):
+        if value is None or (key not in self.validated and not self.valid_value(value)):
             if value is not None:
                 self.entries.pop(key, None)
                 self.dirty = True

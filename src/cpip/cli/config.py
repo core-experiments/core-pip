@@ -127,9 +127,7 @@ class ConfigurationStore:
         env_vars = sorted(
             (key, value)
             for key, value in os.environ.items()
-            if key.startswith("CPIP_")
-            and key not in NON_CONFIG_KEYS
-            and key != "CPIP_CONFIG_FILE"
+            if key.startswith("CPIP_") and key not in NON_CONFIG_KEYS and key != "CPIP_CONFIG_FILE"
         )
         return ConfigDebugView(
             env_vars=tuple(env_vars),

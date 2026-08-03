@@ -4,7 +4,7 @@ from collections.abc import Iterable, Mapping
 from enum import Enum
 from typing import TYPE_CHECKING, Callable, Protocol
 
-from cpip.core.packaging import Requirement, Version
+from cpip.core.packaging import Requirement, Version, canonicalize_name
 
 if TYPE_CHECKING:
     from cpip.core.wheel import WheelFile
@@ -14,14 +14,20 @@ if TYPE_CHECKING:
 
 class ArtifactKind(Enum):
     WHEEL = "wheel"
+
     SDIST = "sdist"
+
     SOURCE_TREE = "source-tree"
+
     METADATA = "metadata"
+
     ATTESTATION = "attestation"
+
     UNKNOWN = "unknown"
 
 
 SOURCE_ARTIFACT_KINDS = frozenset((ArtifactKind.SDIST, ArtifactKind.SOURCE_TREE))
+
 INSTALLABLE_ARTIFACT_KINDS = frozenset(
     (ArtifactKind.WHEEL, ArtifactKind.SDIST, ArtifactKind.SOURCE_TREE),
 )
@@ -29,13 +35,21 @@ INSTALLABLE_ARTIFACT_KINDS = frozenset(
 
 class RejectionReason(Enum):
     DIFFERENT_PROJECT = "different-project"
+
     INVALID_VERSION = "invalid-version"
+
     VERSION_MISMATCH = "version-mismatch"
+
     REQUIRES_PYTHON = "requires-python"
+
     YANKED = "yanked"
+
     UNSUPPORTED_WHEEL = "unsupported-wheel"
+
     UNSUPPORTED_ARTIFACT = "unsupported-artifact"
+
     INVALID_WHEEL = "invalid-wheel"
+
     MISSING_ARTIFACT = "missing-artifact"
 
 
@@ -54,7 +68,9 @@ class VcsReference:
 
     def __init__(self, vcs: str, repo_url: str, requested_revision: str | None) -> None:
         self.vcs = vcs
+
         self.repo_url = repo_url
+
         self.requested_revision = requested_revision
 
 
@@ -63,7 +79,9 @@ class RejectedCandidate:
 
     def __init__(self, link: Link, reason: RejectionReason, detail: str) -> None:
         self.link = link
+
         self.reason = reason
+
         self.detail = detail
 
 
@@ -76,6 +94,7 @@ class CandidateSelection:
         rejected: tuple[RejectedCandidate, ...],
     ) -> None:
         self.accepted = accepted
+
         self.rejected = rejected
 
 
@@ -89,7 +108,9 @@ class CandidateSummary:
         yanked_reason: str | None,
     ) -> None:
         self.version = version
+
         self.is_yanked = is_yanked
+
         self.yanked_reason = yanked_reason
 
 
@@ -113,9 +134,13 @@ class CandidateMetadata:
         requires_python: str | None,
     ) -> None:
         self.name = name
+
         self.version = version
+
         self.dependencies = dependencies
+
         self.provided_extras = provided_extras
+
         self.requires_python = requires_python
 
 
@@ -126,20 +151,32 @@ class LazyCandidateMetadata:
 
     def __init__(self, loader: Callable[[], CandidateMetadata]) -> None:
         self.loader = loader
+
         self.value: CandidateMetadata | None = None
 
     def load(self) -> CandidateMetadata:
         metadata = self.value
+
         if metadata is None:
             metadata = self.loader()
+
             self.value = metadata
+
         return metadata
 
 
 class CandidateRecord:
     """Immutable discovery result that does not imply artifact materialization."""
 
-    __slots__ = ("link", "metadata_loader", "name", "tag_rank", "version", "wheel")
+    __slots__ = (
+        "_canonical_name",
+        "link",
+        "metadata_loader",
+        "name",
+        "tag_rank",
+        "version",
+        "wheel",
+    )
 
     def __init__(
         self,
@@ -151,11 +188,18 @@ class CandidateRecord:
         metadata_loader: LazyCandidateMetadata | None = None,
     ) -> None:
         self.name = name
+
         self.version = version
+
         self.link = link
+
         self.wheel = wheel
+
         self.tag_rank = tag_rank
+
         self.metadata_loader = metadata_loader
+
+        self._canonical_name: str | None = None
 
     def __eq__(self, other: object) -> bool:
         return isinstance(other, CandidateRecord) and (
@@ -178,30 +222,47 @@ class CandidateRecord:
             "tag_rank": self.tag_rank,
             "metadata_loader": self.metadata_loader,
         }
+
         values.update(changes)
+
         return type(self)(**values)
 
     @property
     def canonical_name(self) -> str:
-        from cpip.core.packaging import canonicalize_name
+        cached = self._canonical_name
 
-        return canonicalize_name(self.name)
+        if cached is not None:
+            return cached
+
+        cached = canonicalize_name(self.name)
+
+        self._canonical_name = cached
+
+        return cached
 
     def sort_key(self, *, prefer_binary: bool) -> tuple[object, object, object, int]:
         wheel_rank = 1 if self.link.kind is ArtifactKind.WHEEL else 0
+
         tag_rank = -(self.tag_rank if self.tag_rank is not None else 1_000_000)
+
         yanked_rank = 0 if self.link.is_yanked else 1
+
         if prefer_binary:
             return (yanked_rank, wheel_rank, self.version, tag_rank)
+
         return (yanked_rank, self.version, wheel_rank, tag_rank)
 
     def metadata(self) -> CandidateMetadata:
         loader = self.metadata_loader
+
         if loader is None:
             raise RuntimeError("candidate metadata loader is not configured")
+
         metadata = loader.value
+
         if metadata is None:
             metadata = loader.load()
+
         return metadata
 
 
@@ -227,10 +288,15 @@ class PackageCatalog:
         records_by_version: Mapping[Version, tuple[object, ...]] | None = None,
     ) -> None:
         self.links = links
+
         self.candidates_by_version = candidates_by_version
+
         self.summaries = summaries
+
         self.summary_versions = summary_versions
+
         self.links_by_version = links_by_version
+
         self.records_by_version = records_by_version
 
 

@@ -85,7 +85,7 @@ class TestUploadedPriorTo:
             "requests==2.0.0",
             expect_error=True,
         )
-        assert "Could not find a version that satisfies" in result.stderr
+        assert "because no versions of requests 2.0.0 are available" in result.stderr
 
         # Test with future cutoff date - should find the package
         result = script.cpip(

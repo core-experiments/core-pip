@@ -13,9 +13,10 @@ from cpip.core.packaging import SpecifierSet, canonicalize_name
 from cpip.core.python import CURRENT_PYTHON_VERSION_FULL
 from cpip.core.temp_dir import remove_temp_directory
 from cpip.core.urls import path_to_url
+from cpip.build.build_backend import BackendSpec, prepare_project_metadata
 from cpip.index.artifacts import ArtifactLocator
 from cpip.install.direct_url import direct_url_from_link
-from cpip.resolution.engine.input.requirements import install_req_from_editable
+from cpip.resolution.input_requirements import install_req_from_editable
 
 if TYPE_CHECKING:
     from cpip.build.build_backend import ProjectMetadata
@@ -77,8 +78,6 @@ def prepare_editable_source(
         )
 
     if prepare_metadata:
-        from cpip.build.build_backend import BackendSpec, prepare_project_metadata
-
         try:
             metadata = prepare_project_metadata(
                 source_path,
@@ -97,8 +96,7 @@ def prepare_editable_source(
                     metadata = None
                 else:
                     raise BuildError(
-                        f"Build backend for {source_path} is missing the "
-                        "'build_editable' hook",
+                        f"Build backend for {source_path} is missing the 'build_editable' hook",
                     ) from exc
             if not build_isolation and (
                 "Cannot import 'setuptools.build_meta'" in str(exc)

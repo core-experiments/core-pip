@@ -20,17 +20,11 @@ def build_wheel_from_source(
     build_isolation: bool = True,
 ) -> str:
     source_text = os.fspath(source)
-    output_text = (
-        os.fspath(wheel_dir) if wheel_dir is not None else default_wheel_dir_internal()
-    )
+    output_text = os.fspath(wheel_dir) if wheel_dir is not None else default_wheel_dir_internal()
     os.makedirs(output_text, exist_ok=True)
     source_is_dir = os.path.isdir(source_text)
     with tempfile.TemporaryDirectory(prefix="pip-build-") as temp_dir:
-        project = (
-            source_text
-            if source_is_dir
-            else unpack_source_internal(source_text, temp_dir)
-        )
+        project = source_text if source_is_dir else unpack_source_internal(source_text, temp_dir)
         if source_is_dir:
             os.makedirs(os.path.join(project, "build"), exist_ok=True)
         wheel_name = ProjectBuilder(
@@ -52,17 +46,11 @@ def build_editable_from_source(
     build_isolation: bool = True,
 ) -> str:
     source_text = os.fspath(source)
-    output_text = (
-        os.fspath(wheel_dir) if wheel_dir is not None else default_wheel_dir_internal()
-    )
+    output_text = os.fspath(wheel_dir) if wheel_dir is not None else default_wheel_dir_internal()
     os.makedirs(output_text, exist_ok=True)
     source_is_dir = os.path.isdir(source_text)
     with tempfile.TemporaryDirectory(prefix="pip-build-editable-") as temp_dir:
-        project = (
-            source_text
-            if source_is_dir
-            else unpack_source_internal(source_text, temp_dir)
-        )
+        project = source_text if source_is_dir else unpack_source_internal(source_text, temp_dir)
         builder = ProjectBuilder(
             project,
             build_constraints=build_constraints,
@@ -93,9 +81,7 @@ def build_editable_from_source(
             raise BuildError(
                 f"Build backend for {source_text} is missing the 'build_editable' hook",
             ) from exc
-        wheel_name = builder.build_editable(
-            output_text, config_settings=config_settings
-        )
+        wheel_name = builder.build_editable(output_text, config_settings=config_settings)
     wheel_path = os.path.join(output_text, wheel_name)
     if not os.path.isfile(wheel_path):
         raise BuildError(f"Build backend did not create expected wheel: {wheel_name}")
@@ -130,12 +116,14 @@ def unpack_source_internal(source: str, destination: str) -> str:
     ):
         with tarfile.open(source_text) as archive:
             archive.extractall(destination_text)
+    elif zipfile.is_zipfile(source_text):
+        with zipfile.ZipFile(source_text) as archive:
+            archive.extractall(destination_text)
+    elif tarfile.is_tarfile(source_text):
+        with tarfile.open(source_text) as archive:
+            archive.extractall(destination_text)
     else:
         raise BuildError(f"Unsupported source archive: {source}")
-    return single_project_root_internal(destination)
-
-
-def single_project_root(destination: str) -> str:
     return single_project_root_internal(destination)
 
 

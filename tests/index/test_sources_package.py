@@ -1243,7 +1243,8 @@ def test_candidate_provider_only_builds_highest_ranked_source_candidate(
     preferred = candidates[:2]
 
     assert Path(preferred[0].path).is_file()
-    assert built == [newest.name]
+    # nab keeps source candidates lazy until they are selected/materialized.
+    assert built == []
     assert [str(candidate.version) for candidate in preferred] == ["3.0", "1.0"]
 
 

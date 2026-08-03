@@ -11,7 +11,7 @@ from cpip.index.candidate_materialization import (
 )
 from cpip.index.links import Link
 from cpip.index.source_models import CandidateRecord
-from cpip.resolution.engine.output import (
+from cpip.install.output import (
     finalize_candidates,
     prepare_install_candidates,
 )

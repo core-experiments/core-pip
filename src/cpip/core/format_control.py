@@ -22,9 +22,7 @@ class FormatControl:
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, FormatControl):
             return NotImplemented
-        return (
-            self.no_binary == other.no_binary and self.only_binary == other.only_binary
-        )
+        return self.no_binary == other.no_binary and self.only_binary == other.only_binary
 
     def apply(self, kind: str, value: str) -> None:
         if kind not in FORMAT_CONTROL_KINDS:
@@ -37,9 +35,7 @@ class FormatControl:
         opposite = self.no_binary if only_binary else self.only_binary
         for entry in entries:
             normalized = (
-                canonicalize_name(entry)
-                if entry not in FORMAT_CONTROL_SENTINELS
-                else entry
+                canonicalize_name(entry) if entry not in FORMAT_CONTROL_SENTINELS else entry
             )
             if normalized == ":none:":
                 target.clear()
@@ -61,9 +57,7 @@ class FormatControl:
         entries = [item.strip() for item in value.split(",") if item.strip()]
         for entry in entries:
             normalized = (
-                canonicalize_name(entry)
-                if entry not in FORMAT_CONTROL_SENTINELS
-                else entry
+                canonicalize_name(entry) if entry not in FORMAT_CONTROL_SENTINELS else entry
             )
             if normalized == ":none:":
                 target.clear()

@@ -40,8 +40,7 @@ def change_root(new_root: str, pathname: str) -> str:
         return os.path.join(new_root, path)
 
     raise InstallationError(
-        f"Unknown platform: {os.name}\n"
-        "Can not change root path prefix on unknown platform.",
+        f"Unknown platform: {os.name}\nCan not change root path prefix on unknown platform.",
     )
 
 

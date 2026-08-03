@@ -8,8 +8,8 @@ from pathlib import Path
 import pytest
 from cpip.core.errors import InstallationError
 from cpip.network.http import HttpResponse
-from cpip.resolution.engine.input.files.models import RequirementsFileParseError
-from cpip.resolution.engine.input.files.parser import parse_requirements
+from cpip.resolution.files.models import RequirementsFileParseError
+from cpip.resolution.files.parser import parse_requirements
 
 
 def test_deep_requirement_includes_without_recursion(tmp_path: Path) -> None:

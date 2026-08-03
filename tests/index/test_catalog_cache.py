@@ -11,6 +11,8 @@ from cpip.index.catalog_cache import (
     LEGACY_PREFIX,
     LEGACY_SUMMARY_HEADER,
     LEGACY_SUMMARY_PREFIX,
+    RECORD_WHEEL_IDENTITY,
+    V6_PREFIX,
     WHEEL_RECORD,
     cache_key,
     load_choices,
@@ -20,6 +22,7 @@ from cpip.index.catalog_cache import (
     save_choices,
     save_links,
     summary_key,
+    wheel_file_from_record,
 )
 from cpip.index.links import Link
 from cpip.index.source_models import MetadataFile
@@ -74,6 +77,23 @@ def test_catalog_cache_roundtrip(tmp_path: Path) -> None:
     assert loaded[0].requires_python == original.requires_python
     assert loaded[0].yanked_reason == original.yanked_reason
     assert loaded[0].metadata_file == original.metadata_file
+
+
+def test_catalog_summary_hands_off_decoded_catalog(tmp_path: Path) -> None:
+    cache = SafeFileCache(str(tmp_path))
+    page_url = "https://example.test/simple/demo/"
+    link = Link.from_url(
+        "https://files.example.test/demo-1.0-py3-none-any.whl",
+        source_url=page_url,
+    )
+    save_links(cache, page_url, [link])
+    cache.delete(summary_key(page_url))
+
+    assert load_summary(cache, page_url) is not None
+    pending = getattr(cache, "_cpip_pending_catalogs")
+    assert page_url in pending
+    assert load_catalog(cache, page_url) is not None
+    assert page_url not in pending
 
 
 def test_catalog_choices_are_scoped_to_generation(tmp_path: Path) -> None:
@@ -182,3 +202,66 @@ def test_catalog_cache_migrates_v2_records_locally(tmp_path: Path) -> None:
     loaded = load_links(cache, page_url)
     assert loaded is not None
     assert loaded[0].is_yanked
+
+
+def test_catalog_cache_migrates_v6_wheels_with_identity(tmp_path: Path) -> None:
+    cache = SafeFileCache(str(tmp_path))
+    page_url = "https://example.test/simple/demo/"
+    artifact_url = "https://files.example.test/demo-1.2.3-py3-none-any.whl"
+    v6_record = (
+        artifact_url,
+        "demo-1.2.3-py3-none-any.whl",
+        {"sha256": "abc"},
+        ">=3.9",
+        None,
+        {"sha256": "def"},
+        None,
+    )
+    v6_key = V6_PREFIX + page_url
+    cache.set(
+        v6_key,
+        marshal.dumps(
+            (
+                "cpip-index-catalog",
+                6,
+                [
+                    (
+                        "demo",
+                        "1.2.3",
+                        [(WHEEL_RECORD, v6_record)],
+                        [(WHEEL_RECORD, ">=3.9", None)],
+                    )
+                ],
+                [],
+            ),
+        ),
+    )
+    cache.set_body(v6_key, b"1")
+
+    catalog = load_catalog(cache, page_url)
+
+    assert catalog is not None
+    name, version, artifacts, facts = catalog[0][0]
+    assert (name, version) == ("demo", "1.2.3")
+    assert [kind for kind, _record in artifacts] == [WHEEL_RECORD]
+    assert facts == [(WHEEL_RECORD, ">=3.9", None)]
+    record = artifacts[0][1]
+    assert len(record) == 8
+    assert record[RECORD_WHEEL_IDENTITY] == (
+        "demo",
+        "1.2.3",
+        None,
+        (("py3", "none", "any"),),
+    )
+    assert cache.get_atomic(cache_key(page_url)) is not None
+    wheel = wheel_file_from_record(
+        record,
+        name="demo",
+        version=Version("1.2.3"),
+    )
+    assert wheel is not None
+    assert wheel.name == "demo"
+    assert str(wheel.version) == "1.2.3"
+    assert [(tag.interpreter, tag.abi, tag.platform) for tag in wheel.tags] == [
+        ("py3", "none", "any")
+    ]

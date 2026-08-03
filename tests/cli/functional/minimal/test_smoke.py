@@ -33,7 +33,7 @@ def test_install_local_wheel_with_dependency(script: CpipTestEnvironment) -> Non
         find_links=script.scratch_path,
     )
 
-    assert "Successfully installed smokedep-1.0 smokeparent-1.0" in result.stdout
+    assert "Successfully installed smokeparent-1.0 smokedep-1.0" in result.stdout
     assert script.site_packages_path.joinpath("smokedep", "__init__.py").is_file()
     assert script.site_packages_path.joinpath("smokeparent", "__init__.py").is_file()
 
@@ -88,7 +88,7 @@ def test_install_mixed_states_and_missing_package(script: CpipTestEnvironment) -
 
     assert "Successfully installed smokeinstalled-1.0" in preinstall.stdout
     assert "Requirement already satisfied: smokeinstalled==1.0" in mixed.stdout
-    assert "Successfully installed smokemixeddep-1.0 smokemixednew-1.0" in mixed.stdout
+    assert "Successfully installed smokemixednew-1.0 smokemixeddep-1.0" in mixed.stdout
     assert script.site_packages_path.joinpath("smokemixeddep", "__init__.py").is_file()
     assert script.site_packages_path.joinpath("smokemixednew", "__init__.py").is_file()
 
@@ -134,7 +134,7 @@ def test_install_local_sdist_with_dependency(script: CpipTestEnvironment) -> Non
         find_links=script.scratch_path,
     )
 
-    assert "Successfully installed smokesdistdep-1.0 smokesdist-1.0" in result.stdout
+    assert "Successfully installed smokesdist-1.0 smokesdistdep-1.0" in result.stdout
     assert script.site_packages_path.joinpath("smokesdist", "__init__.py").is_file()
     assert script.site_packages_path.joinpath("smokesdistdep", "__init__.py").is_file()
 

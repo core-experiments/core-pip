@@ -26,6 +26,13 @@ def test_parse_requirement_with_extras_specifier_and_marker() -> None:
     assert requirement.is_satisfied_by("1.2")
 
 
+def test_unconstrained_requirement_preserves_prerelease_filtering() -> None:
+    requirement = parse_requirement("demo-pkg")
+
+    assert requirement.is_satisfied_by("1.0rc1")
+    assert not requirement.is_satisfied_by("1.0rc1", allow_prereleases=False)
+
+
 def test_standard_requirement_skips_url_parsing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -137,6 +144,20 @@ def test_specifier_set_bounds(
     expected_upper: tuple[Version, bool] | None,
 ) -> None:
     assert SpecifierSet(specifier).bounds() == (expected_lower, expected_upper)
+
+
+def test_specifier_set_bounds_are_memoized() -> None:
+    specifier = SpecifierSet(">=1,<2")
+    first = specifier.bounds()
+    assert specifier.bounds() is first
+
+
+def test_empty_specifier_set_preserves_prerelease_filtering() -> None:
+    specifier = SpecifierSet()
+
+    assert specifier.contains("1.0")
+    assert not specifier.contains("1.0rc1")
+    assert specifier.contains("1.0rc1", allow_prereleases=True)
 
 
 @pytest.mark.parametrize(

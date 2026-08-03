@@ -4,11 +4,12 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from cpip.core.packaging import Version
+from cpip.core.packaging import Version, parse_requirement
 from cpip.core.wheel import WheelCandidate
 from cpip.index.candidate_materialization import (
     CandidateMaterializer,
     CandidateStream,
+    LazyWheelCandidate,
     candidate_metadata_fingerprint,
 )
 from cpip.index.links import Link
@@ -65,6 +66,34 @@ def test_candidate_stream_replays_terminal_error() -> None:
         list(stream)
     assert first.value is error
     assert second.value is error
+
+
+def test_lazy_wheel_candidate_loads_release_record_once() -> None:
+    record = CandidateRecord(
+        name="demo",
+        version=Version("1.0"),
+        link=Link.from_url(
+            "https://example.invalid/demo-1.0-py3-none-any.whl",
+            source_url=None,
+        ),
+    )
+    calls = 0
+
+    def load_record() -> CandidateRecord:
+        nonlocal calls
+        calls += 1
+        return record
+
+    candidate = LazyWheelCandidate(
+        None,
+        parse_requirement("demo"),
+        CandidateMaterializer(),
+        record_loader=load_record,
+    )
+
+    assert candidate.version == Version("1.0")
+    assert candidate.source_url.endswith("demo-1.0-py3-none-any.whl")
+    assert calls == 1
 
 
 def test_candidate_stream_preference_is_lazy_and_has_fallback() -> None:

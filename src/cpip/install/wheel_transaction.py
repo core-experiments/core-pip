@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any, cast
 from cpip.core.errors import InstallationError
 from cpip.core.packaging import canonicalize_name
 from cpip.core.wheel import WheelCandidate, parse_wheel, wheel_candidate
+from cpip.build.metadata import InstalledDistributionStore
 from cpip.install.target import InstallTarget
 from cpip.install.transaction import InstallTransaction, normalized_internal
 from cpip.install.wheel_archive import (
@@ -31,7 +32,15 @@ from cpip.install.wheel_archive import (
     validate_member_parts,
     zip_mode,
 )
+from cpip.install.wheel_archive_cache import CachedWheelArchive, install_wheels_from_archive_cache
 from cpip.install.wheel_archive_runtime import CachedWheelInfo, open_wheel_archive
+from cpip.install.wheel_scripts import (
+    entry_point_scripts,
+    rewrite_shebang,
+    script_matches,
+    script_text,
+    write_windows_script,
+)
 from cpip.install.wheel_state import (
     InstalledTargetInventory,
     compiled_files,
@@ -42,11 +51,14 @@ from cpip.install.wheel_transaction_direct import (
     direct_batch_preflight,
     install_wheels_directly,
 )
+from cpip.platform.clone import clone_path
 
 if TYPE_CHECKING:
-    from cpip.build.metadata import InstalledMetadataDistribution
+    from cpip.build.metadata import InstalledDistributionStore, InstalledMetadataDistribution
     from cpip.core.direct_url import DirectUrl
+
     from cpip.install.wheel_state import InstalledWheelDistribution
+
 
     ExistingDistribution = InstalledMetadataDistribution | InstalledWheelDistribution
 
@@ -171,8 +183,6 @@ def install_wheel_internal(
         if target_inventory is not None:
             existing = target_inventory.find(candidate.canonical_name)
         elif _target_has_distribution_metadata(target):
-            from cpip.build.metadata import InstalledDistributionStore
-
             existing = InstalledDistributionStore(
                 paths=[os.fspath(root) for root in target.library_roots],
             ).find(candidate.name)
@@ -190,14 +200,6 @@ def install_wheel_internal(
         print(f"Uninstalling {existing.raw_name}-{existing.raw_version}")
     if direct and transaction is None:
         raise ValueError("direct wheel installation needs a transaction")
-    if not direct:
-        from cpip.install.wheel_scripts import (
-            entry_point_scripts,
-            rewrite_shebang,
-            script_matches,
-            script_text,
-            write_windows_script,
-        )
 
     stage_context = (
         nullcontext(target.purelib)
@@ -222,9 +224,7 @@ def install_wheel_internal(
         record_destination: str | None = None
         dist_info: str | None = None
         stage_directories: set[str] = set()
-        resolved_directories = (
-            destination_cache if destination_cache is not None else {}
-        )
+        resolved_directories = destination_cache if destination_cache is not None else {}
         resolved_roots: ResolvedRoots = {}
         record_metadata: dict[str, tuple[str, str]] = {}
         direct_contents: dict[str, bytes] = {}
@@ -250,8 +250,6 @@ def install_wheel_internal(
             archive = cast("Any", archive)
             if validated_dist_info is None:
                 layout = getattr(candidate, "wheel_layout", None)
-                from cpip.install.wheel_archive_cache import CachedWheelArchive
-
                 if isinstance(layout, CachedWheelArchive):
                     validated_dist_info = layout.dist_info
                 elif layout is not None:
@@ -270,11 +268,7 @@ def install_wheel_internal(
                 pass
             else:
                 for row in csv.reader(io.StringIO(record_text)):
-                    if (
-                        len(row) >= 3
-                        and row[1].startswith("sha256=")
-                        and row[2].isdigit()
-                    ):
+                    if len(row) >= 3 and row[1].startswith("sha256=") and row[2].isdigit():
                         wheel_record_metadata[row[0]] = (row[1], row[2])
             for member in archive.infolist():
                 if member.is_dir():
@@ -284,12 +278,8 @@ def install_wheel_internal(
                 if relative_parts and relative_parts[0].endswith(".dist-info"):
                     dist_info = relative_parts[0]
                 source_text = os.path.join(stage_root_text, *relative_parts)
-                rewrite_metadata = (
-                    relative_name == "METADATA" and candidate.name.isalpha()
-                )
-                script_member = (
-                    len(relative_parts) >= 2 and relative_parts[-2] == "scripts"
-                )
+                rewrite_metadata = relative_name == "METADATA" and candidate.name.isalpha()
+                script_member = len(relative_parts) >= 2 and relative_parts[-2] == "scripts"
                 is_record = relative_name == "RECORD" and bool(relative_parts)
                 direct_content = (
                     getattr(member, "source_path", None) is None
@@ -297,8 +287,7 @@ def install_wheel_internal(
                     and not script_member
                     and not is_record
                     and member.file_size <= DIRECT_CONTENT_LIMIT
-                    and direct_content_size + member.file_size
-                    <= DIRECT_CONTENT_BATCH_LIMIT
+                    and direct_content_size + member.file_size <= DIRECT_CONTENT_BATCH_LIMIT
                     and (not pycompile or os.path.splitext(relative_name)[1] != ".py")
                     and relative_name != "entry_points.txt"
                 )
@@ -329,23 +318,17 @@ def install_wheel_internal(
                         assert transaction is not None
                         os.makedirs(os.path.dirname(destination_text), exist_ok=True)
                         transaction.record_created(destination_text)
-                    cached_member = (
-                        member if isinstance(member, CachedWheelInfo) else None
-                    )
+                    cached_member = member if isinstance(member, CachedWheelInfo) else None
                     if (
                         cached_member is not None
                         and not direct
                         and relative_name != "entry_points.txt"
-                        and (
-                            not pycompile or os.path.splitext(relative_name)[1] != ".py"
-                        )
+                        and (not pycompile or os.path.splitext(relative_name)[1] != ".py")
                     ):
                         source_text = cached_member.source_path
                         clone_sources.add(source_text)
                         metadata = cached_member.record_metadata
                     elif cached_member is not None and not direct:
-                        from cpip.platform.clone import clone_path
-
                         clone_path(cached_member.source_path, source_text)
                         metadata = cached_member.record_metadata
                     else:
@@ -632,9 +615,7 @@ def install_wheel_internal(
                 active_transaction.commit(finalize=transaction_sink is None)
         if transaction_sink is not None and transaction is None:
             transaction_sink.append(active_transaction)
-        if existing is not None and (
-            existing.version != str(candidate.version) or force
-        ):
+        if existing is not None and (existing.version != str(candidate.version) or force):
             print(
                 f"Successfully uninstalled {existing.raw_name}-{existing.raw_version}",
             )
@@ -716,14 +697,8 @@ def install_wheels_transactionally(
     if (
         cache_dir is not None
         and not pycompile
-        and all(
-            candidate.source_kind in {None, "wheel"} for candidate in planned_candidates
-        )
+        and all(candidate.source_kind in {None, "wheel"} for candidate in planned_candidates)
     ):
-        from cpip.install.wheel_archive_cache import (
-            install_wheels_from_archive_cache,
-        )
-
         cached_result = install_wheels_from_archive_cache(
             requests,
             planned_candidates,
@@ -743,9 +718,7 @@ def install_wheels_transactionally(
         if lookup_existing
         else None
     )
-    existing_distributions = (
-        {} if target_inventory is None else target_inventory.distributions
-    )
+    existing_distributions = {} if target_inventory is None else target_inventory.distributions
     installer.target_inventory = target_inventory
     direct_destination_cache = None
     if not pycompile and not force and not existing_distributions:

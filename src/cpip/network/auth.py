@@ -169,14 +169,9 @@ class KeyRingCliProvider(KeyRingBaseProvider):
         # Detect if the user is running an outdated version of keyring without support
         # for querying credentials without username
         errs = res.stderr.decode("utf-8")
-        if (
-            res.returncode == 2
-            and "unrecognized arguments" in errs
-            and "--mode=creds" in errs
-        ):
+        if res.returncode == 2 and "unrecognized arguments" in errs and "--mode=creds" in errs:
             raise RuntimeError(
-                "Keyring util is outdated; must be at least version 25.2.1, "
-                "please upgrade it",
+                "Keyring util is outdated; must be at least version 25.2.1, please upgrade it",
             )
 
         if res.returncode:
@@ -214,9 +209,7 @@ def get_keyring_provider(provider: str) -> KeyRingBaseProvider:
         provider = "disabled"
     cli = shutil.which("keyring")
     scripts = sysconfig.get_path("scripts")
-    external_cli = (
-        cli is not None and scripts is not None and not cli.startswith(scripts)
-    )
+    external_cli = cli is not None and scripts is not None and not cli.startswith(scripts)
     if provider == "import" or (provider == "auto" and not external_cli):
         try:
             if provider == "auto":
@@ -518,11 +511,7 @@ class MultiDomainBasicAuth:
 
     # Factored out to allow for easy patching in tests
     def should_save_password_to_keyring_internal(self) -> bool:
-        if (
-            not self.prompting
-            or not self.use_keyring
-            or not self.keyring_provider.has_keyring
-        ):
+        if not self.prompting or not self.use_keyring or not self.keyring_provider.has_keyring:
             return False
         return ask("Save credentials to keyring [y/N]: ", ["y", "n"]) == "y"
 
@@ -622,9 +611,7 @@ class MultiDomainBasicAuth:
 
     def save_credentials(self, resp: Any, **kwargs: Any) -> None:
         """Response callback to save credentials on success."""
-        assert self.keyring_provider.has_keyring, (
-            "should never reach here without keyring"
-        )
+        assert self.keyring_provider.has_keyring, "should never reach here without keyring"
 
         creds = self.credentials_to_save
         self.credentials_to_save = None

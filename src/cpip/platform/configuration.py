@@ -218,9 +218,7 @@ class Configuration:
 
         if parser is not None:
             section, name = disassemble_key(key)
-            if not (
-                parser.has_section(section) and parser.remove_option(section, name)
-            ):
+            if not (parser.has_section(section) and parser.remove_option(section, name)):
                 # The option was not removed.
                 raise ConfigurationError(
                     "Fatal Internal error [id=1]. Please report as a bug.",
@@ -251,8 +249,7 @@ class Configuration:
                     parser.write(f)
             except OSError as error:
                 raise ConfigurationError(
-                    f"An error occurred while writing to the configuration file "
-                    f"{fname}: {error}",
+                    f"An error occurred while writing to the configuration file {fname}: {error}",
                 )
 
     #

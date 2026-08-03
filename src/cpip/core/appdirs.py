@@ -26,9 +26,7 @@ def site_config_dirs(appname: str) -> list[str]:
     if sys.platform == "darwin":
         xdg_data_dirs = os.environ.get("XDG_DATA_DIRS")
         if xdg_data_dirs:
-            return [
-                os.path.join(path, appname) for path in xdg_data_dirs.split(os.pathsep)
-            ]
+            return [os.path.join(path, appname) for path in xdg_data_dirs.split(os.pathsep)]
         paths: list[str] = []
         prefix = sys.prefix
         if prefix.startswith("/opt/homebrew/opt/python@"):
@@ -36,11 +34,7 @@ def site_config_dirs(appname: str) -> list[str]:
         paths.append(f"/Library/Application Support/{appname}")
         return paths
     xdg_config_dirs = os.environ.get("XDG_CONFIG_DIRS") or "/etc/xdg"
-    paths = [
-        os.path.join(path, appname)
-        for path in xdg_config_dirs.split(os.pathsep)
-        if path
-    ]
+    paths = [os.path.join(path, appname) for path in xdg_config_dirs.split(os.pathsep) if path]
     return paths + ["/etc"]
 
 

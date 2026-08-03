@@ -59,9 +59,7 @@ class ArchiveInfo:
                 expect_type(hashes, dict, "archive_info.hashes")
                 raise AssertionError("unreachable")
             hash_map = cast("dict[object, object]", hashes)
-            normalized_hashes = {
-                str(name): str(value) for name, value in hash_map.items()
-            }
+            normalized_hashes = {str(name): str(value) for name, value in hash_map.items()}
         return cls(
             hash=hash_value if isinstance(hash_value, str) else None,
             hashes=normalized_hashes,

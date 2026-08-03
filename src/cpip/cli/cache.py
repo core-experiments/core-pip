@@ -54,21 +54,15 @@ class CacheManager:
     def list(self, pattern: str | None, *, absolute: bool) -> builtins.list[str]:
         wheels = self.wheel_files()
         if pattern:
-            expression = (
-                pattern if any(char in pattern for char in "*?[]") else f"*{pattern}*"
-            )
+            expression = pattern if any(char in pattern for char in "*?[]") else f"*{pattern}*"
             wheels = [
-                path
-                for path in wheels
-                if fnmatch.fnmatch(os.path.basename(path), expression)
+                path for path in wheels if fnmatch.fnmatch(os.path.basename(path), expression)
             ]
         if absolute:
             return wheels
         if not wheels:
             return []
-        return [
-            f" - {os.path.basename(path)} ({os.path.dirname(path)})" for path in wheels
-        ]
+        return [f" - {os.path.basename(path)} ({os.path.dirname(path)})" for path in wheels]
 
     def remove(
         self,
@@ -109,9 +103,7 @@ class CacheManager:
                 if pattern is not None
                 and fnmatch.fnmatch(
                     os.path.basename(path),
-                    pattern
-                    if any(char in pattern for char in "*?[]")
-                    else f"*{pattern}*",
+                    pattern if any(char in pattern for char in "*?[]") else f"*{pattern}*",
                 )
             ]
 

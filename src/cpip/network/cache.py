@@ -77,6 +77,18 @@ class SafeFileCache:
                 return file.read()
         return None
 
+    def get_metadata_if_body_exists(self, key: str) -> bytes | None:
+        """Read metadata once while verifying that its body is present."""
+        metadata_path = self.get_cache_path(key)
+        body_path = metadata_path + ".body"
+        with suppressed_cache_errors():
+            with open(metadata_path, "rb") as file:
+                metadata = file.read()
+            with open(body_path, "rb"):
+                pass
+            return metadata
+        return None
+
     def write_to_file(self, path: str, writer_func: Callable[[BinaryIO], Any]) -> None:
         """Common file writing logic with proper permissions and atomic replacement."""
         with suppressed_cache_errors():

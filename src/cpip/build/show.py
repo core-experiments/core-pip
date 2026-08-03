@@ -32,9 +32,7 @@ def iter_installed_package_info(
     include_files: bool = False,
 ) -> Iterator[InstalledPackageInfo]:
     """Collect presentation-neutral information for named distributions."""
-    installed = {
-        dist.canonical_name: dist for dist in InstalledDistributionStore().iter()
-    }
+    installed = {dist.canonical_name: dist for dist in InstalledDistributionStore().iter()}
     query_names = [canonicalize_name(name) for name in query]
     for query_name in query_names:
         dist = installed.get(query_name)
@@ -52,9 +50,7 @@ def iter_installed_package_info(
         required_by: list[str] = []
         for candidate in installed.values():
             try:
-                names = {
-                    requirement.name for requirement in candidate.iter_dependencies()
-                }
+                names = {requirement.name for requirement in candidate.iter_dependencies()}
             except ValueError:
                 required_by = ["#N/A"]
                 break

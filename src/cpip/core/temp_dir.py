@@ -110,9 +110,7 @@ class TempDirectory:
 
     @property
     def path(self) -> str:
-        assert not self.deleted_internal, (
-            f"Attempted to access deleted path: {self.path_internal}"
-        )
+        assert not self.deleted_internal, f"Attempted to access deleted path: {self.path_internal}"
         return self.path_internal
 
     def __repr__(self) -> str:

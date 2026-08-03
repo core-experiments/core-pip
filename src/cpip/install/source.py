@@ -205,9 +205,7 @@ class SourceMetadataPreparation:
         raise InstallationError(error_message)
 
     def raise_missing_reqs(self, missing: set[str]) -> None:
-        format_string = (
-            "Some build dependencies for {requirement} are missing: {missing}."
-        )
+        format_string = "Some build dependencies for {requirement} are missing: {missing}."
         error_message = format_string.format(
             requirement=self.req,
             missing=", ".join(map(repr, sorted(missing))),
