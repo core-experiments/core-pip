@@ -9,6 +9,8 @@ from tempfile import NamedTemporaryFile
 from time import perf_counter, sleep
 from typing import Any, BinaryIO, Callable, ParamSpec, TypeVar, cast
 
+from cpip.platform.clone import clone_path as clone_path
+
 P = ParamSpec("P")
 R = TypeVar("R")
 

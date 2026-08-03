@@ -65,8 +65,7 @@ class ConfiguredBuildBackend:
             env=env,
             input=json.dumps(payload),
             text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
             check=False,
         )
         if process.returncode != 0:

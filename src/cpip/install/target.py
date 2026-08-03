@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import os
 
-from cpip.platform.locations.sysconfig import get_scheme
 from cpip.platform.scheme import Scheme
 
 
@@ -89,6 +88,8 @@ class InstallTarget:
             if root is not None:
                 scheme = apply_root(scheme, root)
             return cls.from_scheme(scheme)
+        from cpip.platform.locations.sysconfig import get_scheme
+
         return cls.from_scheme(
             get_scheme(
                 name,

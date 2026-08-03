@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import io
 import os
+import stat
 import sys
-import zipfile
-from importlib.resources import files
+
+from cpip.core.errors import InstallationError
 
 
 def rewrite_shebang(path: str, executable: str | None) -> None:
@@ -56,6 +56,10 @@ def script_text(target_ref: str, executable: str | None) -> str:
 
 def write_windows_script(path: str, script: str, *, gui: bool) -> None:
     """Create a distlib-compatible Windows launcher without importing distlib."""
+    import io
+    import zipfile
+    from importlib.resources import files
+
     machine = os.environ.get("PROCESSOR_ARCHITECTURE", "").lower()
     suffix = "-arm" if "arm" in machine else ""
     bits = "64" if sys.maxsize > 2**32 else "32"
@@ -66,6 +70,87 @@ def write_windows_script(path: str, script: str, *, gui: bool) -> None:
         package.writestr("__main__.py", script.encode("utf-8"))
     with open(path, "wb") as file:
         file.write(launcher + archive.getvalue())
+
+
+def generate_entry_point_files(
+    scripts: dict[str, tuple[str, bool]],
+    destination: str,
+    executable: str | None = None,
+) -> tuple[tuple[str, int], ...]:
+    """Generate console entry points and return their paths and modes."""
+    if not scripts:
+        return ()
+    os.makedirs(destination, exist_ok=True)
+    script_maker_type = None
+    try:
+        from distlib.scripts import ScriptMaker
+    except ImportError:
+        pass
+    else:
+        script_maker_type = ScriptMaker
+
+    explicit_modes: dict[str, int] = {}
+    for name, (target_ref, gui) in scripts.items():
+        if os.path.basename(name) != name or name in {".", ".."}:
+            raise InstallationError(
+                f"console script {name!r} is outside the scripts directory",
+            )
+        if script_maker_type is None:
+            if os.name == "nt":
+                path = os.path.join(destination, f"{name}.exe")
+                write_windows_script(
+                    path,
+                    script_text(target_ref, executable),
+                    gui=gui,
+                )
+            else:
+                path = os.path.join(destination, name)
+                with open(path, "w", encoding="utf-8") as file:
+                    file.write(script_text(target_ref, executable))
+                    file.flush()
+                    mode = (
+                        os.fstat(file.fileno()).st_mode
+                        | stat.S_IXUSR
+                        | stat.S_IXGRP
+                        | stat.S_IXOTH
+                    )
+                os.chmod(path, mode)
+                explicit_modes[path] = mode
+        else:
+            maker = script_maker_type(None, destination)
+            maker.clobber = True
+            maker.variants = {""}
+            if executable is not None:
+                maker.executable = executable
+            maker.make(f"{name} = {target_ref}", options={"gui": gui})
+            if os.name == "nt":
+                # Retain the script-text form for callers that inspect it.
+                path = os.path.join(destination, name)
+                with open(path, "w", encoding="utf-8") as file:
+                    file.write(script_text(target_ref, executable))
+                    file.flush()
+                    mode = (
+                        os.fstat(file.fileno()).st_mode
+                        | stat.S_IXUSR
+                        | stat.S_IXGRP
+                        | stat.S_IXOTH
+                    )
+                os.chmod(path, mode)
+                explicit_modes[path] = mode
+
+    with os.scandir(destination) as entries:
+        generated = tuple(
+            (
+                os.path.join(destination, entry.name),
+                explicit_modes.get(
+                    os.path.join(destination, entry.name),
+                    entry.stat(follow_symlinks=False).st_mode,
+                ),
+            )
+            for entry in entries
+            if entry.is_file(follow_symlinks=False)
+        )
+    return generated
 
 
 def script_matches(
@@ -84,13 +169,19 @@ def script_matches(
     entry = attribute or "main"
     try:
         if is_executable:
-            with open(path, "rb") as file:
-                contents = file.read()
-            with zipfile.ZipFile(io.BytesIO(contents)) as archive:
-                text = archive.read("__main__.py").decode("utf-8")
+            import io
+            import zipfile
+
+            try:
+                with open(path, "rb") as file:
+                    contents = file.read()
+                with zipfile.ZipFile(io.BytesIO(contents)) as archive:
+                    text = archive.read("__main__.py").decode("utf-8")
+            except zipfile.BadZipFile:
+                return False
         else:
             with open(path, encoding="utf-8") as file:
                 text = file.read()
-    except (OSError, KeyError, UnicodeDecodeError, zipfile.BadZipFile):
+    except (OSError, KeyError, UnicodeDecodeError):
         return False
     return f"from {module} import {entry}" in text

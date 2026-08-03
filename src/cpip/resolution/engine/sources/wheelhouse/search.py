@@ -70,6 +70,7 @@ def search_candidates(
     pending: list[LocalWheelRequirement],
     selected: dict[str, LocalWheelCandidate],
     constraints: dict[str, list[LocalWheelRequirement]],
+    global_constraints: dict[str, tuple[LocalWheelRequirement, ...]],
     domains: dict[str, Domain],
     exact_index: dict[str, dict[tuple[int, ...], list[tuple[str, LocalWheelVersion]]]],
     exact_masks: dict[str, dict[tuple[int, ...], Domain]],
@@ -83,11 +84,20 @@ def search_candidates(
     persistent_cache: WheelMetadataCache | None,
     trail: list[tuple[str, LocalWheelRequirement]],
     domain_trail: list[tuple[str, Domain | None]],
+    stats: dict[str, int] | None = None,
+    compute_source_hashes: bool = False,
 ) -> dict[str, LocalWheelCandidate] | None:
     match_domain = matching_domain
     load = load_candidate
     dependencies = dependencies_for_extras
     preflight = preflight_exact_dependencies
+
+    def reject_branch(selected_name: str | None) -> None:
+        if selected_name is None:
+            return
+        selected.pop(selected_name, None)
+        if stats is not None and frames and frames[-1].domain:
+            stats["backtracks"] = stats.get("backtracks", 0) + 1
 
     def rollback(checkpoint: int, domain_checkpoint: int) -> None:
         while len(domain_trail) > domain_checkpoint:
@@ -124,6 +134,14 @@ def search_candidates(
                 range_index,
                 matching_domains,
             )
+            for constraint in global_constraints.get(name, ()):
+                domain &= match_domain(
+                    name,
+                    constraint,
+                    exact_masks,
+                    range_index,
+                    matching_domains,
+                )
             if previous_domain is not None:
                 domain &= previous_domain
             domains[name] = domain
@@ -136,15 +154,13 @@ def search_candidates(
                 if not requirement.is_satisfied_by(existing.version):
                     rollback(frame.checkpoint, frame.domain_checkpoint)
                     frames.pop()
-                    if frame.selected_name is not None:
-                        selected.pop(frame.selected_name, None)
+                    reject_branch(frame.selected_name)
                     continue
                 continue
             if not domain:
                 rollback(frame.checkpoint, frame.domain_checkpoint)
                 frames.pop()
-                if frame.selected_name is not None:
-                    selected.pop(frame.selected_name, None)
+                reject_branch(frame.selected_name)
                 continue
             frame.requirement = requirement
             frame.name = name
@@ -153,8 +169,7 @@ def search_candidates(
         if not frame.domain:
             rollback(frame.checkpoint, frame.domain_checkpoint)
             frames.pop()
-            if frame.selected_name is not None:
-                selected.pop(frame.selected_name, None)
+            reject_branch(frame.selected_name)
             continue
         index = frame.domain.bit_length() - 1
         frame.domain &= ~(1 << index)
@@ -170,6 +185,7 @@ def search_candidates(
                     (name, version),
                     persistent_cache,
                     path_is_absolute=True,
+                    compute_source_hashes=compute_source_hashes,
                 )
             except WheelhouseUnavailable:
                 loaded[path] = None
@@ -195,6 +211,7 @@ def search_candidates(
             metadata_cache,
             persistent_cache,
             requirement.extras,
+            compute_source_hashes,
         ):
             continue
         selected[name] = candidate

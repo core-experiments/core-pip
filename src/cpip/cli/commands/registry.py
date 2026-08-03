@@ -101,7 +101,6 @@ COMMAND_SPECS = (
         "cpip.cli.commands.freeze",
         "run_freeze",
         "create_parser",
-        needs_logging=False,
         needs_tempdir=False,
     ),
     CommandSpec(

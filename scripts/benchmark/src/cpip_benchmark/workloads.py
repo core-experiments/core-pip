@@ -58,7 +58,32 @@ def make_wheel(
     return path
 
 
-def write_offline_workload(root: Path) -> tuple[Path, Path]:
+def write_incremental_workload(
+    root: Path,
+    wheelhouse: Path,
+) -> tuple[Path, Path]:
+    base = root / "incremental-base.txt"
+    update = root / "incremental-update.txt"
+    make_wheel(
+        wheelhouse,
+        "incremental-application",
+        "1.0.0",
+        payload_files=64,
+    )
+    make_wheel(
+        wheelhouse,
+        "incremental-application",
+        "2.0.0",
+        payload_files=96,
+    )
+    base.write_text("incremental-application==1.0.0\n", encoding="utf-8")
+    update.write_text("incremental-application==2.0.0\n", encoding="utf-8")
+    return base, update
+
+
+def write_offline_workload(
+    root: Path,
+) -> tuple[Path, Path, Path, Path, Path]:
     wheelhouse = root / "wheelhouse"
     wheelhouse.mkdir(parents=True, exist_ok=True)
     requirements = root / "requirements.in"
@@ -84,7 +109,19 @@ def write_offline_workload(root: Path) -> tuple[Path, Path]:
         payload_files=24,
     )
     requirements.write_text("application\n", encoding="utf-8")
-    return wheelhouse, requirements
+    incremental_wheelhouse = root / "incremental-wheelhouse"
+    incremental_wheelhouse.mkdir()
+    incremental_base, incremental_update = write_incremental_workload(
+        root,
+        incremental_wheelhouse,
+    )
+    return (
+        wheelhouse,
+        requirements,
+        incremental_wheelhouse,
+        incremental_base,
+        incremental_update,
+    )
 
 
 def write_live_workload(root: Path) -> tuple[Path, Path]:
@@ -104,14 +141,32 @@ def write_live_workload(root: Path) -> tuple[Path, Path]:
 def workload_manifest(root: Path, *, workload: str) -> dict[str, str]:
     root.mkdir(parents=True, exist_ok=True)
     if workload == "offline":
-        wheelhouse, requirements = write_offline_workload(root)
+        (
+            wheelhouse,
+            requirements,
+            incremental_wheelhouse,
+            incremental_base,
+            incremental_update,
+        ) = write_offline_workload(root)
         return {
             "wheelhouse": str(wheelhouse),
             "source_requirements": str(requirements),
             "install_requirements": str(requirements),
+            "incremental_wheelhouse": str(incremental_wheelhouse),
+            "incremental_base_requirements": str(incremental_base),
+            "incremental_update_requirements": str(incremental_update),
         }
     source, compiled = write_live_workload(root)
+    incremental_wheelhouse = root / "incremental-wheelhouse"
+    incremental_wheelhouse.mkdir()
+    incremental_base, incremental_update = write_incremental_workload(
+        root,
+        incremental_wheelhouse,
+    )
     return {
         "source_requirements": str(source),
         "install_requirements": str(compiled),
+        "incremental_wheelhouse": str(incremental_wheelhouse),
+        "incremental_base_requirements": str(incremental_base),
+        "incremental_update_requirements": str(incremental_update),
     }

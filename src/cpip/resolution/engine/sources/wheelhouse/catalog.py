@@ -9,10 +9,11 @@ from functools import lru_cache
 from typing import TYPE_CHECKING, cast
 
 from cpip.core.marshal_cache import load_snapshot, save_snapshot
+from cpip.index.directory_index import local_source_snapshot
+from cpip.index.links import SOURCE_ARCHIVE_SUFFIXES
 from cpip.resolution.engine.sources.wheelhouse.archive import WheelhouseUnavailable
 from cpip.resolution.engine.sources.wheelhouse.cache import (
     _CATALOG_CACHE_VERSION,
-    artifact_identity_cache,
     CatalogIndexes,
     CatalogRecords,
     CatalogSignatures,
@@ -25,6 +26,7 @@ from cpip.resolution.engine.sources.wheelhouse.cache import (
     PreflightCache,
     RangeIndex,
     SharedPreflightCache,
+    artifact_identity_cache,
     cache_preflight_result,
     catalog_indexes_cache,
     catalog_snapshot_store,
@@ -43,7 +45,6 @@ from cpip.resolution.engine.sources.wheelhouse.models import (
     LocalWheelRequirement,
     LocalWheelVersion,
 )
-from cpip.index.directory_index import local_source_snapshot
 
 if TYPE_CHECKING:
     from cpip.index.metadata_cache import WheelMetadataCache
@@ -61,6 +62,7 @@ def preflight_exact_dependencies(
     metadata_cache: MetadataCache | None,
     persistent_cache: WheelMetadataCache | None,
     extras: frozenset[str],
+    compute_source_hashes: bool = False,
 ) -> bool:
     """Reject exact dependency fan-outs with an impossible shared domain.
 
@@ -129,6 +131,7 @@ def preflight_exact_dependencies(
                     (dependency.canonical_name, version),
                     persistent_cache,
                     path_is_absolute=True,
+                    compute_source_hashes=compute_source_hashes,
                 )
             except WheelhouseUnavailable:
                 loaded[path] = None
@@ -502,12 +505,25 @@ def scan_catalog(find_links: list[str]) -> CatalogRecords | None:
             )
             records.setdefault(parsed[0], []).append((directory, parsed[1]))
             continue
-        snapshot = local_source_snapshot(directory, suffixes=(".whl",))
+        snapshot = local_source_snapshot(
+            directory,
+            suffixes=(
+                ".html",
+                ".htm",
+                ".html.gz",
+                ".htm.gz",
+                ".whl",
+                *SOURCE_ARCHIVE_SUFFIXES,
+            ),
+        )
         if snapshot is not None:
             for item in snapshot.entries:
                 filename = os.path.basename(item.path)
                 if not filename.endswith(".whl"):
-                    continue
+                    # A wheel-only catalog is complete only when the generic
+                    # source cannot discover a page or source archive beside
+                    # it. Mixed sources must stay on generic resolution.
+                    return None
                 path = item.path
                 artifact_identity_cache[path] = item.stat_identity
                 parsed = parse_wheel_filename(filename)

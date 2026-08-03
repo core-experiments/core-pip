@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import threading
 from typing import TYPE_CHECKING, Any, cast
 
 from cpip.core.errors import ConfigurationError, InstallationError
@@ -87,6 +88,112 @@ class RequirementsBundle:
         )
         self.require_hashes = require_hashes
         self.session = session
+
+
+class DeferredNetworkSession:
+    """Delay transport policy and cache setup until a session attribute is used."""
+
+    __slots__ = (
+        "cache_dir",
+        "cert",
+        "client_cert",
+        "index_urls",
+        "keyring_provider",
+        "lock",
+        "no_input",
+        "proxy",
+        "session",
+    )
+
+    def __init__(
+        self,
+        *,
+        index_urls: list[str],
+        cache_dir: str | None,
+        cert: str | None,
+        client_cert: str | None,
+        no_input: bool,
+        keyring_provider: str,
+        proxy: str | None,
+    ) -> None:
+        self.index_urls = index_urls
+        self.cache_dir = cache_dir
+        self.cert = cert
+        self.client_cert = client_cert
+        self.no_input = no_input
+        self.keyring_provider = keyring_provider
+        self.proxy = proxy
+        self.session: Any = None
+        self.lock = threading.Lock()
+
+    def materialize(self) -> Any:
+        if self.session is not None:
+            return self.session
+        with self.lock:
+            if self.session is not None:
+                return self.session
+            from cpip.network.http import NetworkSession
+
+            session = NetworkSession(
+                index_urls=self.index_urls,
+                cache=(
+                    os.path.join(self.cache_dir, "http-v1") if self.cache_dir else None
+                ),
+            )
+            session.auth.prompting = not self.no_input
+            session.auth.keyring_provider = self.keyring_provider
+            if self.cert:
+                session.verify = self.cert
+            if self.client_cert:
+                session.cert = self.client_cert
+            if self.proxy is not None:
+                session.proxies = (
+                    {"http": self.proxy, "https": self.proxy} if self.proxy else {}
+                )
+            self.session = session
+            return session
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.materialize(), name)
+
+    @property
+    def auth(self) -> Any:
+        return self.materialize().auth
+
+    @property
+    def trusted_hosts(self) -> Any:
+        return self.materialize().trusted_hosts
+
+    def get(self, *args: Any, **kwargs: Any) -> Any:
+        return self.materialize().get(*args, **kwargs)
+
+
+class RequirementSourceState:
+    """Requirement-file source options without constructing an index provider."""
+
+    __slots__ = (
+        "find_links",
+        "format_control",
+        "index_urls",
+        "locked_links",
+        "no_index",
+        "release_control",
+    )
+
+    def __init__(
+        self,
+        *,
+        find_links: list[str],
+        index_urls: list[str],
+        no_index: bool,
+        format_control: FormatControl,
+    ) -> None:
+        self.find_links = find_links
+        self.index_urls = index_urls
+        self.no_index = no_index
+        self.format_control = format_control
+        self.release_control = ReleaseControl()
+        self.locked_links: dict[str, Any] = {}
 
 
 class SourceConfig:
@@ -240,7 +347,6 @@ def collect_requirements(
     cache_dir: str | None = None,
 ) -> RequirementsBundle:
     from cpip.index.links import Link
-    from cpip.index.provider import CandidateProvider
     from cpip.index.source_locations import resolve_source_location
 
     if index_url is None:
@@ -295,36 +401,32 @@ def collect_requirements(
     if local_only:
         session = None
     else:
-        from cpip.network.http import NetworkSession
-
-        session = NetworkSession(
+        session = DeferredNetworkSession(
             index_urls=[
                 url for url in (bundle_index_url, *bundle_extra_index_urls) if url
             ],
-            cache=(os.path.join(cache_dir, "http-v1") if cache_dir else None),
+            cache_dir=cache_dir,
+            cert=cert,
+            client_cert=client_cert,
+            no_input=no_input,
+            keyring_provider=keyring_provider,
+            proxy=proxy,
         )
-        session.auth.prompting = not no_input
-        session.auth.keyring_provider = keyring_provider
-        if cert:
-            session.verify = cert
-        if client_cert:
-            session.cert = client_cert
-        if proxy is not None:
-            session.proxies = {"http": proxy, "https": proxy} if proxy else {}
-    provider = CandidateProvider.from_options(
+    provider = RequirementSourceState(
         find_links=bundle_find_links,
-        index_url=bundle_index_url,
-        extra_index_urls=bundle_extra_index_urls,
+        index_urls=(
+            [url for url in (bundle_index_url, *bundle_extra_index_urls) if url]
+            if not bundle_no_index
+            else []
+        ),
         no_index=bundle_no_index,
         format_control=bundle_format_control,
-        session=session,
     )
-    if provider.release_control is not None:
-        for kind, value in release_control_args or []:
-            provider.release_control.apply(
-                "all_releases" if kind in RELEASE_OPTIONS else "only_final",
-                value,
-            )
+    for kind, value in release_control_args or []:
+        provider.release_control.apply(
+            "all_releases" if kind in RELEASE_OPTIONS else "only_final",
+            value,
+        )
 
     if requirement_files or constraint_files:
         from cpip.resolution.engine.input.files import parse_requirements

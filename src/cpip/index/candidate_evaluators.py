@@ -166,7 +166,7 @@ class CandidateEvaluator:
         allow_binary: bool,
         allow_source: bool,
         target: TargetContext | None,
-    ) -> InstallationCandidate | RejectedCandidate:
+    ) -> CandidateRecord | RejectedCandidate:
         parsed = InstallationCandidate.from_link(link, target=target)
         return CandidateEvaluator.evaluate_parsed_link(
             link,
@@ -180,13 +180,13 @@ class CandidateEvaluator:
     @staticmethod
     def evaluate_parsed_link(
         link: Link,
-        parsed: InstallationCandidate | RejectedCandidate,
+        parsed: CandidateRecord | RejectedCandidate,
         requirement: Requirement,
         *,
         allow_yanked: bool,
         allow_binary: bool,
         allow_source: bool,
-    ) -> InstallationCandidate | RejectedCandidate:
+    ) -> CandidateRecord | RejectedCandidate:
         """Apply requirement-specific policy to an already parsed link."""
         if link.kind is ArtifactKind.WHEEL and not allow_binary:
             return CandidateEvaluator.reject(
@@ -210,9 +210,9 @@ class CandidateEvaluator:
                 and link.kind is ArtifactKind.SDIST
                 and parsed.reason is RejectionReason.INVALID_VERSION
             ):
-                parsed = InstallationCandidate(
+                parsed = CandidateRecord(
                     name=requirement.name,
-                    version="0",
+                    version=Version("0"),
                     link=link,
                 )
             else:

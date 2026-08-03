@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
 from collections.abc import Mapping
+from typing import TYPE_CHECKING
 
 from cpip.core.errors import DistributionNotFound, ResolutionError
 from cpip.core.packaging import Requirement, Version, marker_applies
@@ -45,6 +45,7 @@ class SearchEngine:
             conflict = self.learned_incompatibilities[-1]
         if conflict is None:
             return None
+        self.metrics.conflicts += 1
         self.backjump_conflict = None
         if not conflict.decision_levels:
             return None
@@ -62,6 +63,7 @@ class SearchEngine:
         if target_level >= decision_level:
             return None
         failure = SearchFailure(conflict, target_level)
+        self.metrics.backjumps += 1
         self.backjump_conflict = conflict
         return failure
 
@@ -262,6 +264,7 @@ class SearchEngine:
         if not pending:
             return self.satisfied_dependencies_are_consistent(selected, satisfied)
         entry_id, requirement = self.choose_requirement(pending, selected)
+        self.metrics.propagations += 1
         pending.remove(entry_id)
         remaining = pending
         name = requirement.canonical_name
@@ -536,6 +539,7 @@ class SearchEngine:
         learned_start = len(self.learned_incompatibilities)
         decision_level = len(selected)
         for candidate in candidates:
+            self.metrics.candidates_consumed += 1
             if not constrained.is_satisfied_by(
                 candidate.version,
                 allow_prereleases=allow_prereleases,
@@ -545,6 +549,7 @@ class SearchEngine:
             self.validate_candidate_policy(candidate)
             self.validate_candidate_constraints(candidate)
             attempted_candidates += 1
+            self.metrics.decisions += 1
             self.last_candidate_conflict = None
             incompatibility_key: tuple[int, frozenset[str]] | None = None
             if self.root_incompatibilities:

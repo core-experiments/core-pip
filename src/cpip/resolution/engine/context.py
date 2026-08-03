@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from cpip.index.provider import CandidateProvider
     from cpip.resolution.engine.constraints import ConstraintStore
     from cpip.resolution.engine.input.models import RequirementInput
+    from cpip.resolution.engine.metrics import ResolutionMetrics
     from cpip.resolution.engine.state.domains import (
         Assignment,
         LearnedIncompatibility,
@@ -84,6 +85,8 @@ class SearchState(Protocol):
     backjump_conflict: LearnedIncompatibility | None
     last_candidate_conflict: LearnedIncompatibility | None
     kernel_enabled: bool
+    metrics: ResolutionMetrics
+    release_frontier: Any
 
 
 class ConflictState(Protocol):

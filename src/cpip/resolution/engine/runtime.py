@@ -5,6 +5,7 @@ import os
 import sys
 import urllib.parse  # noqa: F401 - compatibility monkeypatch seam
 from collections.abc import Collection, Iterable
+from time import perf_counter
 from typing import TYPE_CHECKING, cast
 
 from cpip.core.errors import (
@@ -14,6 +15,7 @@ from cpip.core.errors import (
 from cpip.core.packaging import (
     Requirement,
     Version,
+    marker_applies,
     parse_requirement,
 )
 from cpip.core.python import CURRENT_PYTHON_VERSION_FULL
@@ -25,7 +27,9 @@ from cpip.resolution.engine.algorithms import (
 )
 from cpip.resolution.engine.conflict_learning import ConflictLearning
 from cpip.resolution.engine.constraints import ConstraintStore
+from cpip.resolution.engine.frontier import ReleaseFrontier
 from cpip.resolution.engine.loop import SearchLoop
+from cpip.resolution.engine.metrics import ResolutionMetrics
 from cpip.resolution.engine.policy import PolicyChecks
 from cpip.resolution.engine.state.domains import (
     Assignment,
@@ -42,8 +46,7 @@ if TYPE_CHECKING:
     from cpip.core.metadata import InstalledDistribution
     from cpip.core.wheel import WheelCandidate
     from cpip.index.candidate_materialization import CandidateStream
-    from cpip.resolution.engine.context import EngineContext
-    from cpip.resolution.engine.context import ConfigurationContext
+    from cpip.resolution.engine.context import ConfigurationContext, EngineContext
     from cpip.resolution.engine.state.requirement_set import RequirementSet
     from cpip.resolution.req_install import InstallRequirement
 
@@ -94,6 +97,8 @@ class ResolutionRuntime(
                 no_index=no_index,
             )
         self.provider = provider
+        self.metrics = ResolutionMetrics()
+        self.release_frontier = ReleaseFrontier(provider)
         self.no_deps = no_deps
         self.upgrade = upgrade
         self.ignore_installed = ignore_installed
@@ -190,10 +195,29 @@ class ResolutionRuntime(
         | Iterable[InstallRequirement]
         | list[str],
     ) -> InstallPlan:
+        self.metrics = ResolutionMetrics()
+        self.release_frontier.reset()
+        started = perf_counter()
         try:
-            return self.resolve_internal(requirements_input)
+            plan = self.resolve_internal(requirements_input)
         finally:
             self.provider.close()
+        self.metrics.resolution_seconds = perf_counter() - started
+        frontier_metrics = self.release_frontier.metrics
+        self.metrics.catalogs_loaded = frontier_metrics.catalogs_loaded
+        self.metrics.catalog_cache_hits = frontier_metrics.catalog_hits
+        self.metrics.release_masks_built = frontier_metrics.release_masks_built
+        self.metrics.release_intersections = frontier_metrics.release_intersections
+        materializer = self.provider.materializer_internal
+        if materializer is not None:
+            self.metrics.metadata_loads = materializer.metadata_loads
+            self.metrics.metadata_cache_hits = materializer.metadata_cache_hits
+            self.metrics.metadata_prefetches = materializer.metadata_prefetches
+            self.metrics.artifact_materializations = (
+                materializer.artifact_materializations
+            )
+        plan.metrics = self.metrics.as_dict()
+        return plan
 
     def resolve_internal(
         self,
@@ -222,6 +246,22 @@ class ResolutionRuntime(
             direct_by_name[requirement.canonical_name] = requirement.url
         if self.debug_internal:
             print("Reporter.starting()", file=sys.stdout)
+        conflicting_root = (
+            self.conflicting_root_bounds(requirements)
+            if not self.constraints
+            and len(self.root_requirement_names) < len(requirements)
+            else None
+        )
+        if conflicting_root is not None:
+            if self.debug_internal:
+                print(
+                    "conflict is caused by: mutually exclusive root requirements",
+                    file=sys.stdout,
+                )
+            raise ResolutionError(
+                f"Cannot install {conflicting_root} because these package versions "
+                "have conflicting dependencies.",
+            )
         source_requirements, source_requirements_by_url = self.source_requirement_map(
             requirements_input,
         )
@@ -351,20 +391,19 @@ class ResolutionRuntime(
                 "package versions have conflicting dependencies: " + detail,
             )
         ordered = self.installation_order(selected, graph)
+        candidates = [selected[name] for name in ordered]
+        if self.compute_source_hashes:
+            from cpip.resolution.engine.output import finalize_candidates
+
+            candidates = finalize_candidates(candidates, self.finalize_source_hashes)
         plan = InstallPlan(
-            candidates=[
-                (
-                    self.finalize_source_hashes(selected[name])
-                    if self.compute_source_hashes
-                    else selected[name]
-                )
-                for name in ordered
-            ],
+            candidates=candidates,
             graph=graph,
             conflicts=list(self.conflicts),
             satisfied=[
                 satisfied[name] for name in sorted(satisfied) if name not in selected
             ],
+            metrics=self.metrics.as_dict(),
         )
         self.resolution_seed = {
             name: (str(candidate.version), candidate.source_url or "")
@@ -372,6 +411,75 @@ class ResolutionRuntime(
         }
         self.last_graph = graph
         return plan
+
+    def conflicting_root_bounds(
+        self,
+        requirements: list[Requirement],
+    ) -> str | None:
+        """Return a root project whose active version bounds cannot intersect."""
+        requirements_by_name: dict[str, list[Requirement]] = {}
+        direct_names: set[str] = set()
+        for requirement in requirements:
+            if requirement.url is not None:
+                direct_names.add(requirement.canonical_name)
+                continue
+            if requirement.marker is not None and not marker_applies(
+                requirement.marker,
+                extras=requirement.extras,
+            ):
+                continue
+            requirements_by_name.setdefault(requirement.canonical_name, []).append(
+                requirement,
+            )
+
+        for name, roots in requirements_by_name.items():
+            if name in direct_names:
+                continue
+            active = [
+                *roots,
+                *(
+                    constraint
+                    for constraint in self.constraints_by_name.get(name, ())
+                    if constraint.marker is None
+                    or marker_applies(constraint.marker, extras=constraint.extras)
+                ),
+            ]
+            lower: tuple[Version, bool] | None = None
+            upper: tuple[Version, bool] | None = None
+            for requirement in active:
+                requirement_lower, requirement_upper = requirement.specifier.bounds()
+                if requirement_lower is not None and (
+                    lower is None
+                    or requirement_lower[0] > lower[0]
+                    or (
+                        requirement_lower[0] == lower[0]
+                        and not requirement_lower[1]
+                        and lower[1]
+                    )
+                ):
+                    lower = requirement_lower
+                if requirement_upper is not None and (
+                    upper is None
+                    or requirement_upper[0] < upper[0]
+                    or (
+                        requirement_upper[0] == upper[0]
+                        and not requirement_upper[1]
+                        and upper[1]
+                    )
+                ):
+                    upper = requirement_upper
+            if lower is None or upper is None:
+                continue
+            if lower[0] > upper[0] or (
+                lower[0] == upper[0] and not (lower[1] and upper[1])
+            ):
+                return name
+            if lower[0] == upper[0] and not all(
+                bound_requirement.is_satisfied_by(lower[0], allow_prereleases=True)
+                for bound_requirement in active
+            ):
+                return name
+        return None
 
     @staticmethod
     def finalize_source_hashes(candidate: WheelCandidate) -> WheelCandidate:

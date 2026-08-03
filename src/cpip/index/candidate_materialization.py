@@ -10,9 +10,9 @@ import re
 import sys
 import tempfile
 import urllib.parse
-import urllib.request
 import zipfile
 from collections.abc import Generator, Iterator
+from threading import RLock
 from typing import Any
 
 from cpip.core.errors import BuildError, InstallationError, UnsupportedWheel
@@ -40,6 +40,7 @@ from cpip.index.candidate_metadata_cache import get_candidate_metadata_cache
 from cpip.index.candidate_stream import CandidateStream
 from cpip.index.metadata_cache import get_wheel_metadata_cache
 from cpip.index.prefetch import Prefetcher
+from cpip.index.release_facts_cache import get_release_facts_cache
 from cpip.index.source_models import (
     SOURCE_ARTIFACT_KINDS,
     ArtifactKind,
@@ -51,6 +52,7 @@ from cpip.index.source_models import (
 logger = logging.getLogger(__name__)
 
 _EXTRA_MARKER_RE = re.compile(r"extra\s*(?:==|in)\s*['\"]([^'\"]+)['\"]")
+_METADATA_WORKERS = 32
 
 
 def project_provided_extras(project: object) -> frozenset[str]:
@@ -256,6 +258,11 @@ class CandidateMaterializer:
             if wheel_cache_dir is not None
             else None
         )
+        self.persistent_release_facts_cache = (
+            get_release_facts_cache(wheel_cache_dir)
+            if wheel_cache_dir is not None
+            else None
+        )
         self.artifacts = None
         self.invalid_links: set[str] = set()
         self.wheel_candidates: dict[
@@ -277,11 +284,20 @@ class CandidateMaterializer:
             ]
             | None,
         ] = {}
+        self.prepared_record_cache: dict[
+            tuple[str, tuple[str, ...], tuple[tuple[str, str], ...]],
+            tuple[CandidateRecord, ...],
+        ] = {}
         self.artifact_fingerprint_cache: dict[str, str] = {}
         self.source_hash_cache: dict[str, dict[str, str] | None] = {}
         self.local_artifacts: dict[str, str] = {}
         self.vcs_revisions: dict[str, str] = {}
         self.metadata_prefetcher: Prefetcher[Any, str] | None = None
+        self.metadata_prefetch_lock = RLock()
+        self.metadata_loads = 0
+        self.metadata_cache_hits = 0
+        self.metadata_prefetches = 0
+        self.artifact_materializations = 0
 
     def local_path_for(self, candidate: CandidateRecord) -> str | None:
         if not candidate.link.is_file:
@@ -323,11 +339,15 @@ class CandidateMaterializer:
         if self.artifacts is None:
             from cpip.index.artifacts import ArtifactLocator
 
-            self.artifacts = ArtifactLocator(self.session)
+            self.artifacts = ArtifactLocator(
+                self.session,
+                cache_dir=self.wheel_cache_dir,
+            )
         path = self.artifacts.ensure_local_text(
             candidate.link.url,
             is_vcs=candidate.link.is_vcs,
             local_path=local_path,
+            hashes=(candidate.link.hashes if not candidate.link.is_vcs else None),
         )
         if candidate.link.is_vcs:
             from cpip.index.vcs import git_revision
@@ -386,18 +406,30 @@ class CandidateMaterializer:
         requirement: Requirement,
         accepted: tuple[CandidateRecord, ...],
     ) -> CandidateStream:
-        records = tuple(
-            candidate.copy_with(
-                metadata_loader=self.metadata_loader(candidate, requirement),
-            )
-            for candidate in accepted
+        record_key = (
+            requirement.canonical_name,
+            tuple(sorted(requirement.extras)),
+            tuple(
+                (candidate.link.url, str(candidate.version)) for candidate in accepted
+            ),
         )
+        records = self.prepared_record_cache.get(record_key)
+        if records is None:
+            if len(self.prepared_record_cache) >= 4096:
+                self.prepared_record_cache.pop(next(iter(self.prepared_record_cache)))
+            records = tuple(
+                candidate.copy_with(
+                    metadata_loader=self.metadata_loader(candidate, requirement),
+                )
+                for candidate in accepted
+            )
+            self.prepared_record_cache[record_key] = records
         # Keep the speculative window bounded, but widen it for large remote
         # candidate sets.  The resolver usually consumes candidates in order;
         # overlapping metadata-only requests for the first few candidates
         # avoids serial latency without downloading artifacts or building
         # sdists.  Small sets retain the old two-request footprint.
-        prefetch_count = min(8, max(2, len(records) // 8))
+        prefetch_count = 2
         self.prefetch_metadata(records[:prefetch_count])
 
         def generate() -> Iterator[WheelCandidate]:
@@ -405,6 +437,15 @@ class CandidateMaterializer:
             for candidate in records:
                 identity = (candidate.canonical_name, candidate.version)
                 if identity in invalid_versions:
+                    continue
+                negative_key = self.negative_fact_key(candidate)
+                if (
+                    self.persistent_release_facts_cache is not None
+                    and self.persistent_release_facts_cache.get(negative_key)
+                    is not None
+                ):
+                    self.invalid_links.add(candidate.link.url)
+                    invalid_versions.add(identity)
                     continue
                 if candidate.link.kind is ArtifactKind.WHEEL:
                     try:
@@ -414,10 +455,15 @@ class CandidateMaterializer:
                             yield LazyWheelCandidate(candidate, requirement, self)
                             continue
                         self.invalid_links.add(candidate.link.url)
+                        self.remember_negative_fact(negative_key, str(exc))
                         invalid_versions.add(identity)
                         continue
                     except (OSError, ValueError):
                         self.invalid_links.add(candidate.link.url)
+                        self.remember_negative_fact(
+                            negative_key,
+                            "invalid wheel metadata",
+                        )
                         invalid_versions.add(identity)
                         print(
                             f"WARNING: Ignoring version {candidate.version} of "
@@ -437,35 +483,60 @@ class CandidateMaterializer:
                                 f"but installing version {metadata.version}",
                             )
                         self.invalid_links.add(candidate.link.url)
+                        self.remember_negative_fact(
+                            negative_key,
+                            "inconsistent wheel version metadata",
+                        )
                         invalid_versions.add(identity)
                         continue
                 yield LazyWheelCandidate(candidate, requirement, self)
 
         return CandidateStream(generate())
 
+    def negative_fact_key(self, candidate: CandidateRecord) -> tuple[str, str, str]:
+        return (
+            candidate.canonical_name,
+            str(candidate.version),
+            self.artifact_fingerprint(candidate),
+        )
+
+    def remember_negative_fact(self, key: tuple[str, str, str], reason: str) -> None:
+        if self.persistent_release_facts_cache is not None:
+            self.persistent_release_facts_cache.put(key, reason)
+
     def prefetch_metadata(self, records: tuple[CandidateRecord, ...]) -> None:
-        if not self.dry_run or self.session is None:
+        if self.session is None:
             return
-        for candidate in records:
-            if candidate.link.kind is not ArtifactKind.WHEEL:
-                continue
-            metadata_link = candidate.link.metadata_link()
-            if metadata_link is None:
-                continue
+        with self.metadata_prefetch_lock:
             if self.metadata_prefetcher is None:
-                self.metadata_prefetcher = Prefetcher(self.session.get, max_workers=8)
-            self.metadata_prefetcher.submit(metadata_link.url, metadata_link.url)
+                self.metadata_prefetcher = Prefetcher(
+                    self.session.get,
+                    max_workers=_METADATA_WORKERS,
+                )
+            for candidate in records:
+                if candidate.link.kind is not ArtifactKind.WHEEL:
+                    continue
+                metadata_link = candidate.link.metadata_link()
+                if metadata_link is None:
+                    continue
+                if self.metadata_prefetcher.submit(
+                    metadata_link.url,
+                    metadata_link.url,
+                ):
+                    self.metadata_prefetches += 1
 
     def take_prefetched_metadata(self, url: str) -> Any:
-        if self.metadata_prefetcher is None:
-            return None
-        future = self.metadata_prefetcher.take(url)
+        with self.metadata_prefetch_lock:
+            prefetcher = self.metadata_prefetcher
+            future = None if prefetcher is None else prefetcher.take(url)
         return future.result() if future is not None else None
 
     def close(self) -> None:
-        if self.metadata_prefetcher is not None:
-            self.metadata_prefetcher.close()
+        with self.metadata_prefetch_lock:
+            prefetcher = self.metadata_prefetcher
             self.metadata_prefetcher = None
+        if prefetcher is not None:
+            prefetcher.close()
 
     def metadata_loader(
         self,
@@ -482,8 +553,10 @@ class CandidateMaterializer:
         )
 
         def load() -> CandidateMetadata:
+            self.metadata_loads += 1
             cached = self.metadata_cache.get(key)
             if cached is not None:
+                self.metadata_cache_hits += 1
                 return cached
             persistent_key = (
                 candidate.link.url,
@@ -494,9 +567,10 @@ class CandidateMaterializer:
             if self.persistent_candidate_metadata_cache is not None:
                 cached = self.persistent_candidate_metadata_cache.get(persistent_key)
                 if cached is not None:
+                    self.metadata_cache_hits += 1
                     self.metadata_cache[key] = cached
                     return cached
-            if candidate.link.kind in SOURCE_ARTIFACT_KINDS and self.dry_run:
+            if candidate.link.kind in SOURCE_ARTIFACT_KINDS:
                 metadata = self.pypi_metadata(candidate, requested_extras)
                 if (
                     metadata is not None
@@ -509,7 +583,7 @@ class CandidateMaterializer:
                             metadata,
                         )
                     return metadata
-            if candidate.link.kind is ArtifactKind.WHEEL and self.dry_run:
+            if candidate.link.kind is ArtifactKind.WHEEL:
                 metadata_link = candidate.link.metadata_link()
                 metadata = self.remote_wheel_metadata(
                     candidate,
@@ -680,13 +754,13 @@ class CandidateMaterializer:
             f"{urllib.parse.quote(str(candidate.version))}/json"
         )
         try:
-            if self.session is not None:
-                response = self.session.get(url)
-                response.raise_for_status()
-                data = json.loads(response.text)
-            else:
-                with urllib.request.urlopen(url) as response:
-                    data = json.loads(response.read())
+            if self.session is None:
+                from cpip._vendor import requests
+
+                self.session = requests.Session()
+            response = self.session.get(url)
+            response.raise_for_status()
+            data = json.loads(response.text)
             info = data["info"]
             dependencies = tuple(
                 requirement
@@ -729,11 +803,16 @@ class CandidateMaterializer:
         seen: set[tuple[str, str, str]] = set()
         requested_extras = frozenset(requirement.extras)
         for candidate in accepted:
+            self.artifact_materializations += 1
             from_cache = False
             cache_hashes: dict[str, str] | None = None
             local_path = self.local_path_for(candidate)
             path = self.ensure_local_text(candidate, local_path=local_path)
             source_hashes = dict(candidate.link.hashes)
+            if not source_hashes and self.artifacts is not None:
+                cached_hashes = self.artifacts.hashes_for(candidate.link.url)
+                if cached_hashes is not None:
+                    source_hashes.update(cached_hashes)
             if (
                 self.compute_source_hashes
                 and not source_hashes

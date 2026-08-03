@@ -401,6 +401,31 @@ def test_cache_purge(
     assert remove_matches_wheel("zzz-7.8.9", result)
 
 
+def test_cache_purge_removes_fast_install_snapshots(
+    script: CpipTestEnvironment,
+    cache_dir: str,
+) -> None:
+    snapshot = os.path.join(cache_dir, "fast-install-v3.marshal")
+    tree_file = os.path.join(
+        cache_dir,
+        "fast-install-trees-v1",
+        "aa",
+        "digest",
+        "tree",
+        "demo.py",
+    )
+    os.makedirs(os.path.dirname(tree_file))
+    with open(snapshot, "wb") as file:
+        file.write(b"snapshot")
+    with open(tree_file, "wb") as file:
+        file.write(b"tree")
+
+    script.cpip("cache", "purge", "--verbose")
+
+    assert not os.path.exists(snapshot)
+    assert not os.path.exists(tree_file)
+
+
 @pytest.mark.usefixtures("populate_http_cache", "populate_wheel_cache")
 def test_cache_purge_too_many_args(
     script: CpipTestEnvironment,

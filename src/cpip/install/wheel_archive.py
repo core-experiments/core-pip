@@ -6,10 +6,14 @@ import base64
 import hashlib
 import os
 import stat
-import zipfile
+from typing import TYPE_CHECKING
 
 from cpip.core.errors import InstallationError
-from cpip.install.target import InstallTarget
+
+if TYPE_CHECKING:
+    import zipfile
+
+    from cpip.install.target import InstallTarget
 
 DestinationCache = dict[tuple[str, str], str]
 ResolvedRoots = dict[str, str]

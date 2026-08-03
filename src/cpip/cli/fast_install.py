@@ -3,30 +3,68 @@
 from __future__ import annotations
 
 import os
+import sys
 from collections.abc import Sequence
-from typing import Protocol
 
 
-class PureWheelCandidate(Protocol):
+class PureWheelCandidate:
+    __slots__ = ()
+
     canonical_name: str
     path: str
 
 
-class FastCandidate:
-    __slots__ = ("canonical_name", "dependencies", "name", "path", "version")
+class FastCandidate(PureWheelCandidate):
+    """Lightweight candidate shared by local resolution and installation.
+
+    Metadata is loaded only after resolution selects a filename candidate.  The
+    remaining attributes intentionally match the cached-wheel installer
+    boundary so local resolution does not need to materialize the much heavier
+    general resolver candidate type before installing.
+    """
+
+    __slots__ = (
+        "archive_members",
+        "canonical_name",
+        "dependencies",
+        "from_cache",
+        "name",
+        "path",
+        "provided_extras",
+        "pure",
+        "requires_python",
+        "source_hashes",
+        "source_kind",
+        "source_url",
+        "source_vcs",
+        "version",
+        "wheel_layout",
+        "yanked_reason",
+    )
 
     def __init__(
         self,
         name: str,
         version: str,
         path: str,
-        dependencies: list[str],
+        dependencies: list[str] | None = None,
     ) -> None:
         self.name = name
         self.version = version
         self.path = path
+        self.archive_members: dict[str, tuple[int, int, int, int, int]] | None = None
         self.dependencies = dependencies
         self.canonical_name = normalize_name(name)
+        self.pure: bool | None = None
+        self.provided_extras: frozenset[str] = frozenset()
+        self.requires_python: str | None = None
+        self.source_hashes: dict[str, str] | None = None
+        self.source_kind: str | None = "wheel"
+        self.source_url: str | None = None
+        self.source_vcs: str | None = None
+        self.from_cache = False
+        self.yanked_reason: str | None = None
+        self.wheel_layout: object | None = None
 
 
 class InstallOptions:
@@ -39,6 +77,7 @@ class InstallOptions:
         "quiet",
         "requirements",
         "target",
+        "upgrade",
     )
 
     def __init__(self) -> None:
@@ -50,6 +89,7 @@ class InstallOptions:
         self.ignore_installed = False
         self.no_compile = False
         self.quiet = False
+        self.upgrade = False
 
 
 def option_value(args: list[str], index: int) -> str | None:
@@ -91,6 +131,8 @@ def parse_arguments(args: list[str]) -> InstallOptions | None:
                 options.no_compile = True
             elif token == "--quiet":
                 options.quiet = True
+            elif token == "--upgrade":
+                options.upgrade = True
             # An empty target has no installed versions to upgrade.  The local
             # resolver already selects the newest compatible wheel, so this
             # flag is safe to accept here.  A non-empty target still falls back
@@ -138,6 +180,120 @@ def parse_arguments(args: list[str]) -> InstallOptions | None:
             options.requirements.append(token)
         index += 1
     return options
+
+
+def _remote_index_url() -> str | None:
+    """Return the effective sole index, or decline non-default source shapes."""
+    from cpip.cli.config import ConfigurationStore
+    from cpip.core.errors import ConfigurationError
+    from cpip.index.config import DEFAULT_INDEX_URL
+
+    store = ConfigurationStore()
+    try:
+        store.load()
+    except ConfigurationError:
+        index_url = DEFAULT_INDEX_URL
+        find_links = None
+        extra_index_urls = None
+        no_index = None
+    else:
+
+        def configured(option: str) -> str | None:
+            value = store.get_optional(f"install.{option}")
+            if value is not None:
+                return value
+            return store.get_optional(f"global.{option}")
+
+        index_url = configured("index-url") or DEFAULT_INDEX_URL
+        find_links = configured("find-links")
+        extra_index_urls = configured("extra-index-url")
+        no_index = configured("no-index")
+
+    if (value := os.environ.get("CPIP_INDEX_URL")) is not None:
+        index_url = value
+    if (value := os.environ.get("CPIP_FIND_LINKS")) is not None:
+        find_links = value
+    if (value := os.environ.get("CPIP_EXTRA_INDEX_URL")) is not None:
+        extra_index_urls = value
+    if (value := os.environ.get("CPIP_NO_INDEX")) is not None:
+        no_index = value
+    if (
+        find_links
+        or extra_index_urls
+        or (no_index and no_index.strip().lower() in {"1", "true", "yes", "on"})
+    ):
+        return None
+    return index_url
+
+
+def run_cached_remote(args: list[str]) -> int | None:
+    """Install a previously validated exact-pin plan without CLI initialization."""
+    options = parse_arguments(args)
+    if (
+        options is None
+        or not options.quiet
+        or not options.ignore_installed
+        or not options.no_compile
+        or options.no_index
+        or options.find_links
+        or options.upgrade
+        or options.target is None
+        or os.path.lexists(options.target)
+    ):
+        return None
+    cache_dir = options.cache_dir or os.environ.get("CPIP_CACHE_DIR")
+    if cache_dir is None:
+        from cpip.core.appdirs import user_cache_dir
+
+        cache_dir = user_cache_dir("cpip")
+    index_url = _remote_index_url()
+    if index_url is None:
+        return None
+
+    from cpip.install.wheel_archive_cache import (
+        exact_install_plan_key_from_strings,
+        install_wheels_from_archive_cache,
+        load_cached_install_plan,
+    )
+
+    keyed = exact_install_plan_key_from_strings(
+        tuple(options.requirements),
+        (
+            "remote-exact-v1",
+            index_url,
+            (),
+            (),
+            None,
+            f"{sys.version_info.major}{sys.version_info.minor}",
+            (),
+            "only-if-needed",
+            False,
+        ),
+    )
+    if keyed is None:
+        return None
+    key, requested_roots = keyed
+    plan = load_cached_install_plan(cache_dir, key)
+    if plan is None:
+        return None
+
+    from cpip.install.target import InstallTarget
+
+    installed = install_wheels_from_archive_cache(
+        tuple(
+            (
+                candidate.path,
+                candidate.canonical_name in requested_roots,
+                None,
+            )
+            for candidate in plan.candidates
+        ),
+        tuple(plan.candidates),
+        target=InstallTarget.from_options("cpip", target=options.target),
+        cache_dir=cache_dir,
+        report=not options.quiet,
+    )
+    return 0 if installed is not None else None
 
 
 def is_safe_member(name: str) -> bool:
@@ -219,24 +375,38 @@ def requirement_satisfied(
     return False
 
 
-def wheel_metadata(path: str) -> tuple[list[str], bool] | None:
-    import zipfile
+def wheel_metadata(
+    candidate: FastCandidate,
+    cache=None,
+) -> tuple[list[str], bool] | None:
+    from cpip.resolution.engine.sources.wheelhouse.archive import (
+        WheelArchive,
+        WheelhouseUnavailable,
+    )
 
+    path = candidate.path
+    identity = cache.identity(path) if cache is not None else None
+    if identity is not None and cache is not None:
+        cached = cache.get(identity)
+        if cached is not None:
+            dependencies, pure = cached
+            return list(dependencies), pure
     try:
-        with zipfile.ZipFile(path) as archive:
+        with open(path, "rb") as wheel_file:
+            archive = WheelArchive(wheel_file)
+            names = archive.namelist()
+            candidate.archive_members = archive.members
             metadata_members = [
-                name
-                for name in archive.namelist()
-                if name.endswith(".dist-info/METADATA")
+                name for name in names if name.endswith(".dist-info/METADATA")
             ]
             wheel_members = [
-                name for name in archive.namelist() if name.endswith(".dist-info/WHEEL")
+                name for name in names if name.endswith(".dist-info/WHEEL")
             ]
             if len(metadata_members) != 1 or len(wheel_members) != 1:
                 return None
             metadata = archive.read(metadata_members[0]).decode("utf-8")
             wheel = archive.read(wheel_members[0]).decode("utf-8")
-    except (OSError, UnicodeDecodeError, zipfile.BadZipFile):
+    except (OSError, UnicodeDecodeError, WheelhouseUnavailable):
         return None
     dependencies = []
     for line in metadata.splitlines():
@@ -246,7 +416,10 @@ def wheel_metadata(path: str) -> tuple[list[str], bool] | None:
         line.casefold().strip() == "root-is-purelib: true"
         for line in wheel.splitlines()
     )
-    return dependencies, pure
+    result = (dependencies, pure)
+    if identity is not None and cache is not None:
+        cache.put(identity, (tuple(dependencies), pure))
+    return result
 
 
 def iter_wheel_paths(find_links: list[str]) -> list[str] | None:
@@ -270,7 +443,23 @@ def iter_wheel_paths(find_links: list[str]) -> list[str] | None:
 def resolve_simple_wheelhouse(
     find_links: list[str],
     requirements: list[str],
+    metadata_cache: object | None = None,
 ) -> list[FastCandidate] | None:
+    get_plan = (
+        getattr(metadata_cache, "get_plan", None)
+        if metadata_cache is not None
+        else None
+    )
+    if get_plan is not None:
+        cached_plan = get_plan(find_links, requirements)
+        if cached_plan is not None:
+            result = []
+            for name, version, path, dependencies in cached_plan:
+                candidate = FastCandidate(name, version, path, list(dependencies))
+                candidate.pure = True
+                result.append(candidate)
+            return result
+
     paths = iter_wheel_paths(find_links)
     if paths is None:
         return None
@@ -280,13 +469,7 @@ def resolve_simple_wheelhouse(
         if parsed is None:
             return None
         name, version = parsed
-        metadata = wheel_metadata(path)
-        if metadata is None:
-            return None
-        dependencies, pure = metadata
-        if not pure:
-            return None
-        candidate = FastCandidate(name, version, path, dependencies)
+        candidate = FastCandidate(name, version, path)
         candidates_by_name.setdefault(candidate.canonical_name, []).append(candidate)
     for candidates in candidates_by_name.values():
         candidates.sort(
@@ -317,6 +500,15 @@ def resolve_simple_wheelhouse(
         )
         if selected is None:
             return False
+        if selected.dependencies is None:
+            metadata = wheel_metadata(selected, metadata_cache)
+            if metadata is None:
+                return False
+            dependencies, pure = metadata
+            selected.dependencies = dependencies
+            selected.pure = pure
+        if not selected.pure:
+            return False
         visiting.add(name)
         for dependency in selected.dependencies:
             if not add_requirement(dependency):
@@ -328,7 +520,27 @@ def resolve_simple_wheelhouse(
     for requirement in requirements:
         if not add_requirement(requirement):
             return None
-    return list(resolved.values())
+    result = list(resolved.values())
+    put_plan = (
+        getattr(metadata_cache, "put_plan", None)
+        if metadata_cache is not None
+        else None
+    )
+    if put_plan is not None:
+        put_plan(
+            find_links,
+            requirements,
+            tuple(
+                (
+                    candidate.name,
+                    candidate.version,
+                    candidate.path,
+                    tuple(candidate.dependencies or ()),
+                )
+                for candidate in result
+            ),
+        )
+    return result
 
 
 def install_resolved_pure_wheels(
@@ -337,7 +549,10 @@ def install_resolved_pure_wheels(
     requested_roots: set[str],
 ) -> bool:
     """Install an already-resolved pure-wheel plan into an empty target."""
-    import zipfile
+    from cpip.resolution.engine.sources.wheelhouse.archive import (
+        WheelArchive,
+        WheelhouseUnavailable,
+    )
 
     target = os.path.abspath(target)
     separator = os.sep
@@ -351,11 +566,15 @@ def install_resolved_pure_wheels(
     elif os.path.exists(target):
         return False
 
-    prepared: list[tuple[str, bool, list[tuple[str, str, bytes]]]] = []
+    prepared: list[tuple[str, bool, bool, list[tuple[str, str, bytes]]]] = []
     destinations: set[str] = set()
     for candidate in candidates:
         try:
-            with zipfile.ZipFile(os.fspath(candidate.path)) as archive:
+            with open(os.fspath(candidate.path), "rb") as wheel_file:
+                archive = WheelArchive(
+                    wheel_file,
+                    members=getattr(candidate, "archive_members", None),
+                )
                 archive_names = archive.namelist()
                 names = []
                 destinations_for_wheel = []
@@ -363,7 +582,12 @@ def install_resolved_pure_wheels(
                 for name in archive_names:
                     if name.endswith("/"):
                         continue
-                    if not is_safe_member(name) or name.endswith("/entry_points.txt"):
+                    top_level = name.split("/", 1)[0]
+                    if (
+                        not is_safe_member(name)
+                        or top_level.endswith(".data")
+                        or name.endswith("/entry_points.txt")
+                    ):
                         return False
                     destination = os.path.join(
                         target,
@@ -380,7 +604,8 @@ def install_resolved_pure_wheels(
                 ]
                 if len(wheel_members) != 1:
                     return False
-                wheel_contents = archive.read(wheel_members[0])
+                contents = archive.read_many(names)
+                wheel_contents = contents[names.index(wheel_members[0])]
                 wheel_text = wheel_contents.decode("utf-8")
                 if not any(
                     line.casefold().strip() == "root-is-purelib: true"
@@ -392,22 +617,25 @@ def install_resolved_pure_wheels(
                     (
                         destination,
                         directory,
-                        wheel_contents
-                        if name == wheel_members[0]
-                        else archive.read(name),
+                        contents,
                     )
-                    for name, destination, directory in zip(
-                        names,
+                    for destination, directory, contents in zip(
                         destinations_for_wheel,
                         directories_for_wheel,
+                        contents,
                     )
                 ]
-        except (OSError, ValueError, zipfile.BadZipFile, UnicodeDecodeError):
+        except (OSError, ValueError, UnicodeDecodeError, WheelhouseUnavailable):
             return False
         prepared.append(
             (
                 dist_info,
                 candidate.canonical_name in requested_roots,
+                any(
+                    destination == os.path.join(target, dist_info, "RECORD")
+                    and bool(contents.strip())
+                    for destination, _, contents in members
+                ),
                 members,
             ),
         )
@@ -416,7 +644,13 @@ def install_resolved_pure_wheels(
     created_directories = {target}
     created_files: list[str] = []
     try:
-        for dist_info, requested, members in prepared:
+        for dist_info, requested, reuse_record, members in prepared:
+            record_relative = f"{dist_info}/RECORD"
+            record_rows: dict[str, tuple[str, str, str]] = {}
+            if not reuse_record:
+                import base64
+                import csv
+                import hashlib
             for destination, directory, contents in members:
                 if directory not in created_directories:
                     os.makedirs(directory, exist_ok=True)
@@ -424,16 +658,64 @@ def install_resolved_pure_wheels(
                 with open(destination, "wb", buffering=0) as output:
                     output.write(contents)
                 created_files.append(destination)
+                if not reuse_record:
+                    relative = os.path.relpath(destination, target).replace(
+                        os.sep,
+                        "/",
+                    )
+                if not reuse_record and relative != record_relative:
+                    digest = base64.urlsafe_b64encode(
+                        hashlib.sha256(contents).digest(),
+                    ).rstrip(b"=")
+                    record_rows[relative] = (
+                        relative,
+                        f"sha256={digest.decode('ascii')}",
+                        str(len(contents)),
+                    )
             installer = os.path.join(target, dist_info, "INSTALLER")
             with open(installer, "w", encoding="utf-8") as output:
                 output.write("cpip\n")
             created_files.append(installer)
+            if not reuse_record:
+                installer_relative = f"{dist_info}/INSTALLER"
+                installer_digest = base64.urlsafe_b64encode(
+                    hashlib.sha256(b"cpip\n").digest(),
+                ).rstrip(b"=")
+                record_rows[installer_relative] = (
+                    installer_relative,
+                    f"sha256={installer_digest.decode('ascii')}",
+                    "5",
+                )
             if requested:
                 requested_path = os.path.join(target, dist_info, "REQUESTED")
                 with open(requested_path, "w"):
                     pass
                 created_files.append(requested_path)
-    except (OSError, ValueError, zipfile.BadZipFile):
+                if not reuse_record:
+                    requested_relative = f"{dist_info}/REQUESTED"
+                    empty_digest = base64.urlsafe_b64encode(
+                        hashlib.sha256(b"").digest(),
+                    ).rstrip(b"=")
+                    record_rows[requested_relative] = (
+                        requested_relative,
+                        f"sha256={empty_digest.decode('ascii')}",
+                        "0",
+                    )
+            if not reuse_record:
+                record_rows[record_relative] = (record_relative, "", "")
+                record_path = os.path.join(target, dist_info, "RECORD")
+                with open(
+                    record_path,
+                    "w",
+                    encoding="utf-8",
+                    newline="",
+                ) as output:
+                    csv.writer(output).writerows(
+                        record_rows[name] for name in sorted(record_rows)
+                    )
+                if record_path not in created_files:
+                    created_files.append(record_path)
+    except (OSError, ValueError):
         for path in reversed(created_files):
             try:
                 os.unlink(path)
@@ -459,6 +741,24 @@ def _target_is_empty(target: str) -> bool:
     return not os.path.exists(target)
 
 
+def _install_cached_tree(tree: str, target: str) -> bool:
+    from cpip.platform.clone import clone_path
+
+    target_existed = os.path.isdir(target)
+    try:
+        if target_existed:
+            os.rmdir(target)
+        clone_path(tree, target)
+    except OSError:
+        if target_existed and not os.path.lexists(target):
+            try:
+                os.makedirs(target)
+            except OSError:
+                pass
+        return False
+    return True
+
+
 def run(args: list[str]) -> int | None:
     """Install pure local wheels, or return ``None`` for normal cpip install."""
     options = parse_arguments(args)
@@ -478,7 +778,16 @@ def run(args: list[str]) -> int | None:
     if not _target_is_empty(options.target):
         return None
 
-    candidates = resolve_simple_wheelhouse(options.find_links, options.requirements)
+    metadata_cache = None
+    if options.cache_dir is not None:
+        from cpip.cli.fast_install_cache import FastInstallMetadataCache
+
+        metadata_cache = FastInstallMetadataCache(options.cache_dir)
+    candidates = resolve_simple_wheelhouse(
+        options.find_links,
+        options.requirements,
+        metadata_cache,
+    )
     if candidates is None:
         return None
 
@@ -500,8 +809,23 @@ def run(args: list[str]) -> int | None:
                 "Installing collected packages: "
                 + ", ".join(candidate.name for candidate in candidates),
             )
-    if not install_resolved_pure_wheels(candidates, options.target, roots):
-        return None
+    installed = False
+    if metadata_cache is not None:
+        tree = metadata_cache.get_install_tree(
+            options.find_links,
+            options.requirements,
+        )
+        if tree is not None:
+            installed = _install_cached_tree(tree, options.target)
+    if not installed:
+        if not install_resolved_pure_wheels(candidates, options.target, roots):
+            return None
+        if metadata_cache is not None:
+            metadata_cache.put_install_tree(
+                options.find_links,
+                options.requirements,
+                options.target,
+            )
     if candidates and not options.quiet:
         print(
             "Successfully installed "
@@ -509,6 +833,8 @@ def run(args: list[str]) -> int | None:
                 f"{candidate.name}-{candidate.version}" for candidate in candidates
             ),
         )
+    if metadata_cache is not None:
+        metadata_cache.flush()
     return 0
 
 
@@ -518,7 +844,7 @@ def run_local_fallback(args: list[str]) -> int | None:
     if (
         options is None
         or not options.no_index
-        or not options.ignore_installed
+        or not (options.ignore_installed or options.upgrade)
         or not options.no_compile
         or options.target is None
         or not options.find_links
@@ -528,55 +854,75 @@ def run_local_fallback(args: list[str]) -> int | None:
     ):
         return None
 
-    from cpip.core.packaging import Version
-    from cpip.core.wheel import WheelCandidate, parse_wheel, wheel_candidate
-    from cpip.install.target import InstallTarget
-    from cpip.install.wheel_transaction import install_wheels_transactionally
-    from cpip.resolution.engine import ResolutionEngine
+    if options.upgrade and not options.ignore_installed:
+        for requirement in options.requirements:
+            name, separator, version = requirement.partition("==")
+            if (
+                not separator
+                or not name.strip()
+                or not version.strip()
+                or "*" in version
+                or any(character in requirement for character in "[];@<>,!")
+            ):
+                return None
 
-    plan = ResolutionEngine.resolve_wheelhouse(
+    from cpip.install.target import InstallTarget
+
+    metadata_cache = None
+    if options.cache_dir is not None:
+        from cpip.cli.fast_install_cache import FastInstallMetadataCache
+
+        metadata_cache = FastInstallMetadataCache(options.cache_dir)
+    local_candidates = resolve_simple_wheelhouse(
         options.find_links,
         options.requirements,
-        cache_dir=options.cache_dir,
+        metadata_cache,
     )
-    if plan is None:
+    if local_candidates is None:
         return None
-
-    candidates: list[WheelCandidate] = []
-    try:
-        for local_candidate in plan.candidates:
-            candidates.append(
-                WheelCandidate(
-                    name=local_candidate.name,
-                    version=Version(str(local_candidate.version)),
-                    path=local_candidate.path,
-                    dependencies=(),
-                    provided_extras=local_candidate.provided_extras,
-                    requires_python=local_candidate.requires_python,
-                    source_kind="wheel",
-                ),
-            )
-    except (OSError, TypeError, ValueError):
-        return None
-
     if (
-        sum(os.stat(candidate.path).st_size for candidate in candidates)
-        > 4 * 1024 * 1024
+        options.upgrade
+        and not options.ignore_installed
+        and any(candidate.dependencies for candidate in local_candidates)
     ):
-        import zipfile
+        return None
 
-        for index, candidate in enumerate(candidates):
-            with zipfile.ZipFile(candidate.path) as archive:
-                dist_info, _ = parse_wheel(
-                    archive,
-                    os.path.basename(candidate.path)[:-4].split("-", 1)[0],
+    candidates = local_candidates
+
+    if options.cache_dir is not None:
+        from cpip.install.wheel_archive_cache import (
+            install_wheels_from_archive_cache,
+            prepare_cached_wheel,
+        )
+
+        try:
+            for candidate in candidates:
+                identity = (
+                    metadata_cache.identity(candidate.path)
+                    if metadata_cache is not None
+                    else None
                 )
-                layout = wheel_candidate(
-                    candidate.path,
-                    archive=archive,
-                    dist_info_dir=dist_info,
-                ).wheel_layout
-            candidates[index] = candidate.copy_with(wheel_layout=layout)
+                digest = (
+                    metadata_cache.get_digest(identity)
+                    if metadata_cache is not None and identity is not None
+                    else None
+                )
+                if digest is not None:
+                    candidate.source_hashes = {"sha256": digest}
+                archive = prepare_cached_wheel(
+                    candidate,
+                    options.cache_dir,
+                )
+                candidate.wheel_layout = archive
+                candidate.source_hashes = {"sha256": archive.digest}
+                if metadata_cache is not None and identity is not None:
+                    metadata_cache.put_digest(
+                        identity,
+                        archive.digest,
+                        (tuple(candidate.dependencies or ()), bool(candidate.pure)),
+                    )
+        except OSError:
+            return None
 
     requested_roots = {
         value.partition("[")[0]
@@ -596,16 +942,48 @@ def run_local_fallback(args: list[str]) -> int | None:
                 "Installing collected packages: "
                 + ", ".join(candidate.name for candidate in candidates),
             )
-    install_wheels_transactionally(
-        [
-            (candidate.path, candidate.canonical_name in requested_roots, None)
-            for candidate in candidates
-        ],
-        target=InstallTarget.from_options("cpip", target=options.target),
-        pycompile=False,
-        preserve_existing=True,
-        candidates=candidates,
+    requests = tuple(
+        (candidate.path, candidate.canonical_name in requested_roots, None)
+        for candidate in candidates
     )
+    target = InstallTarget.from_options("cpip", target=options.target)
+    if options.cache_dir is not None:
+        installed = install_wheels_from_archive_cache(
+            requests,
+            tuple(candidates),
+            target=target,
+            cache_dir=options.cache_dir,
+            force=options.ignore_installed,
+            preserve_existing=options.ignore_installed,
+            report=not options.quiet,
+        )
+        if installed is None:
+            return None
+    else:
+        from cpip.core.packaging import Version
+        from cpip.core.wheel import WheelCandidate
+        from cpip.install.wheel_transaction import install_wheels_transactionally
+
+        wheel_candidates = [
+            WheelCandidate(
+                name=candidate.name,
+                version=Version(str(candidate.version)),
+                path=candidate.path,
+                dependencies=(),
+                provided_extras=frozenset(),
+                requires_python=None,
+                source_kind="wheel",
+            )
+            for candidate in candidates
+        ]
+        install_wheels_transactionally(
+            requests,
+            target=target,
+            pycompile=False,
+            force=options.ignore_installed,
+            preserve_existing=options.ignore_installed,
+            candidates=wheel_candidates,
+        )
     if candidates and not options.quiet:
         print(
             "Successfully installed "
@@ -613,4 +991,6 @@ def run_local_fallback(args: list[str]) -> int | None:
                 f"{candidate.name}-{candidate.version}" for candidate in candidates
             ),
         )
+    if metadata_cache is not None:
+        metadata_cache.flush()
     return 0

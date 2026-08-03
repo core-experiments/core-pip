@@ -6,7 +6,7 @@ import re
 import sys
 import sysconfig
 import zipfile
-from collections.abc import Collection
+from collections.abc import Callable, Collection
 from functools import cache, lru_cache
 from typing import TYPE_CHECKING, Protocol
 
@@ -28,6 +28,10 @@ from .wheel_metadata import (
 if TYPE_CHECKING:
     from email.message import Message
     from email.parser import Parser as EmailParser
+
+    from cpip.cli.fast_install import PureWheelCandidate
+else:
+    PureWheelCandidate = object
 
 MACOS_COMPATIBLE_ARCHES = {
     "x86_64": frozenset(("x86_64", "intel", "universal")),
@@ -64,7 +68,7 @@ def Parser() -> EmailParser:
     return EmailParser()
 
 
-class WheelCandidate:
+class WheelCandidate(PureWheelCandidate):
     __slots__ = (
         "dependencies",
         "from_cache",
@@ -314,6 +318,15 @@ class WheelResolutionMetadata:
 
 
 wheel_metadata_cache: dict[tuple[str, int, int], WheelResolutionMetadata] = {}
+preloaded_wheel_metadata_cache: dict[
+    str,
+    tuple[
+        int,
+        int,
+        int,
+        WheelResolutionMetadata | Callable[[], WheelResolutionMetadata],
+    ],
+] = {}
 wheel_dependency_cache: dict[
     tuple[tuple[str, int, int], frozenset[str]],
     tuple[Requirement, ...],
@@ -458,6 +471,55 @@ def bounded_cache_put(cache: dict, key: object, value: object) -> None:
     cache[key] = value
 
 
+def preload_wheel_metadata(
+    path: str,
+    metadata: WheelResolutionMetadata | Callable[[], WheelResolutionMetadata],
+    *,
+    identity: tuple[int, int, int] | None = None,
+) -> None:
+    """Share validated metadata with a later resolver without trusting stale files."""
+    path_text = os.fspath(path)
+    absolute = path_text if os.path.isabs(path_text) else os.path.abspath(path_text)
+    if identity is None:
+        try:
+            source_stat = os.stat(absolute)
+        except OSError:
+            return
+        identity = (
+            source_stat.st_ino,
+            source_stat.st_size,
+            source_stat.st_mtime_ns,
+        )
+    if len(preloaded_wheel_metadata_cache) >= WHEEL_METADATA_CACHE_SIZE:
+        preloaded_wheel_metadata_cache.clear()
+    preloaded_wheel_metadata_cache[absolute] = (*identity, metadata)
+
+
+def get_preloaded_wheel_metadata(path: str) -> WheelResolutionMetadata | None:
+    path_text = os.fspath(path)
+    absolute = path_text if os.path.isabs(path_text) else os.path.abspath(path_text)
+    cached = preloaded_wheel_metadata_cache.get(absolute)
+    if cached is None:
+        return None
+    try:
+        source_stat = os.stat(absolute)
+    except OSError:
+        preloaded_wheel_metadata_cache.pop(absolute, None)
+        return None
+    if cached[:3] != (
+        source_stat.st_ino,
+        source_stat.st_size,
+        source_stat.st_mtime_ns,
+    ):
+        preloaded_wheel_metadata_cache.pop(absolute, None)
+        return None
+    metadata = cached[3]
+    if not isinstance(metadata, WheelResolutionMetadata):
+        metadata = metadata()
+        preloaded_wheel_metadata_cache[absolute] = (*cached[:3], metadata)
+    return metadata
+
+
 def project_wheel_dependencies(
     metadata: WheelResolutionMetadata,
     identity: tuple[str, int, int] | None,
@@ -495,6 +557,10 @@ def wheel_candidate(
     name, version = parsed
     identity = wheel_archive_identity(wheel_path, archive, dist_info_dir)
     metadata = wheel_metadata_cache.get(identity) if identity is not None else None
+    if metadata is None and preloaded_wheel_metadata_cache:
+        metadata = get_preloaded_wheel_metadata(wheel_path)
+        if metadata is not None and identity is not None:
+            bounded_cache_put(wheel_metadata_cache, identity, metadata)
     if metadata is None:
         if archive is not None and dist_info_dir is not None:
             headers = (

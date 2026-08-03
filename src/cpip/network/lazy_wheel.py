@@ -35,12 +35,18 @@ def dist_from_wheel_url(
     If such requests are not supported, HTTPRangeRequestUnsupported
     is raised.
     """
-    with LazyZipOverHTTP(url, session) as zf:
-        try:
+    try:
+        with LazyZipOverHTTP(url, session) as zf:
             with ZipFile(zf) as archive:
                 return MetadataDistribution.from_wheel_archive(archive, name, zf.name)
-        except BadZipFile as exc:
-            raise InvalidWheel(zf.name, name) from exc
+    except BadZipFile as exc:
+        raise InvalidWheel(url, name) from exc
+    except Exception as exc:
+        from cpip._vendor import requests
+
+        if isinstance(exc, requests.exceptions.ContentDecodingError):
+            raise InvalidWheel(url, name) from exc
+        raise
 
 
 class LazyZipOverHTTP:

@@ -26,6 +26,7 @@ BENCHMARKS = (
     "lock-warm",
     "install-cold",
     "install-warm",
+    "install-incremental-warm",
 )
 
 
@@ -128,6 +129,9 @@ def build_commands(
     wheelhouse = manifest.get("wheelhouse")
     source_requirements = manifest["source_requirements"]
     install_requirements = manifest["install_requirements"]
+    incremental_wheelhouse = manifest["incremental_wheelhouse"]
+    incremental_base = manifest["incremental_base_requirements"]
+    incremental_update = manifest["incremental_update_requirements"]
 
     def cpip(args: list[str]) -> list[str]:
         return cpip_command(
@@ -251,6 +255,8 @@ def build_commands(
             "--quiet",
             "--ignore-installed",
             "--no-compile",
+            "--cache-dir",
+            str(cpip_cache),
             "--target",
             str(cpip_target),
             "-r",
@@ -269,9 +275,7 @@ def build_commands(
             "-r",
             install_requirements,
         ]
-        cpip_args.extend(
-            ["--no-index", "--find-links", wheelhouse, "--cache-dir", str(cpip_cache)]
-        )
+        cpip_args.extend(["--no-index", "--find-links", wheelhouse])
         uv_args.extend(["--no-index", "--find-links", wheelhouse])
         return [
             Command(
@@ -327,6 +331,74 @@ def build_commands(
             Command(f"uv ({benchmark})", uv_prepare, uv_command(uv_path, uv_args)),
         ]
 
+    if benchmark == "install-incremental-warm":
+        cpip_common = [
+            "--quiet",
+            "--no-compile",
+            "--cache-dir",
+            str(cpip_cache),
+            "--target",
+            str(cpip_target),
+            "--no-index",
+            "--find-links",
+            incremental_wheelhouse,
+        ]
+        uv_common = [
+            "--quiet",
+            "--cache-dir",
+            str(uv_cache),
+            "--target",
+            str(uv_target),
+            "--python",
+            python,
+            "--no-index",
+            "--find-links",
+            incremental_wheelhouse,
+        ]
+        cpip_base = cpip(
+            [
+                "install",
+                "--ignore-installed",
+                *cpip_common,
+                "-r",
+                incremental_base,
+            ],
+        )
+        uv_base = uv_command(
+            uv_path,
+            ["pip", "install", *uv_common, "-r", incremental_base],
+        )
+        cpip_update = cpip(
+            ["install", "--upgrade", *cpip_common, "-r", incremental_update],
+        )
+        uv_update = uv_command(
+            uv_path,
+            [
+                "pip",
+                "install",
+                "--upgrade",
+                *uv_common,
+                "-r",
+                incremental_update,
+            ],
+        )
+        cpip_prepare = " && ".join(
+            (
+                cleanup_command([cpip_target]),
+                shell_command(cpip_base),
+            ),
+        )
+        uv_prepare = " && ".join(
+            (
+                cleanup_command([uv_target]),
+                shell_command(uv_base),
+            ),
+        )
+        return [
+            Command("cpip (install-incremental-warm)", cpip_prepare, cpip_update),
+            Command("uv (install-incremental-warm)", uv_prepare, uv_update),
+        ]
+
     if benchmark.startswith("install-"):
         cold = benchmark.endswith("cold")
         cpip_prepare = prepare_with_cache(
@@ -346,6 +418,8 @@ def build_commands(
             "--quiet",
             "--ignore-installed",
             "--no-compile",
+            "--cache-dir",
+            str(cpip_cache),
             "--target",
             str(cpip_target),
             "-r",
@@ -370,8 +444,6 @@ def build_commands(
                     "--no-index",
                     "--find-links",
                     wheelhouse,
-                    "--cache-dir",
-                    str(cpip_cache),
                 ]
             )
             uv_args.extend(["--no-index", "--find-links", wheelhouse])

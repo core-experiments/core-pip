@@ -190,6 +190,43 @@ def main(
         if (
             argv
             and argv[0] == "install"
+            and "--quiet" in argv[1:]
+            and "--no-index" not in argv[1:]
+            and all(
+                option in argv[1:]
+                for option in ("--ignore-installed", "--no-compile", "--target")
+            )
+        ):
+            from cpip.cli.fast_install import run_cached_remote
+
+            status = run_cached_remote(argv[1:])
+            if status is not None:
+                sys.stdout.flush()
+                sys.stderr.flush()
+                return status
+
+        if (
+            argv
+            and argv[0] == "install"
+            and "--quiet" in argv[1:]
+            and "--no-index" in argv[1:]
+            and "--upgrade" in argv[1:]
+            and "--no-compile" in argv[1:]
+            and "--target" in argv[1:]
+            and "--ignore-installed" not in argv[1:]
+        ):
+            from cpip.cli.fast_install import run_local_fallback
+
+            fast_install_attempted = True
+            status = run_local_fallback(argv[1:])
+            if status is not None:
+                sys.stdout.flush()
+                sys.stderr.flush()
+                return status
+
+        if (
+            argv
+            and argv[0] == "install"
             and all(
                 option in argv[1:]
                 for option in (
@@ -259,9 +296,9 @@ def main(
                 or (
                     argv[0] == "install"
                     and "--no-index" in argv
-                    and "--ignore-installed" in argv
                     and "--no-compile" in argv
                     and "--target" in argv
+                    and ("--ignore-installed" in argv or "--upgrade" in argv)
                 )
             ),
         )

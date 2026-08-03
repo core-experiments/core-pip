@@ -47,11 +47,12 @@ class Prefetcher(Generic[T, V]):
         self.lock = RLock()
         self.closed = False
 
-    def submit(self, key: Hashable, value: V) -> None:
+    def submit(self, key: Hashable, value: V) -> bool:
         with self.lock:
             if self.closed or key in self.futures:
-                return
+                return False
             self.futures[key] = self.executor.submit(self.loader, value)
+            return True
 
     def take(self, key: Hashable) -> Future[T] | None:
         with self.lock:

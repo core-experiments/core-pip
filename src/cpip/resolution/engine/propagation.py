@@ -8,18 +8,27 @@ can provide the authoritative result and diagnostics.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
-from cpip.core.packaging import Requirement, marker_applies
+from cpip.core.packaging import Requirement, Version, marker_applies, parse_requirement
 from cpip.core.wheel import WheelCandidate
 from cpip.index.candidate_materialization import LazyWheelCandidate
 from cpip.index.source_locations import looks_like_path_requirement
 
 if TYPE_CHECKING:
+    from cpip.index.provider import CandidateProvider
     from cpip.resolution.engine.context import EngineContext
     from cpip.resolution.engine.input.models import RequirementInput
+    from cpip.resolution.engine.sources.wheelhouse.cache import (
+        CatalogRecords,
+        CatalogSignatures,
+    )
+    from cpip.resolution.engine.sources.wheelhouse.models import (
+        LocalWheelCandidate,
+        LocalWheelRequirement,
+    )
 
 
 class KernelUnsupported(Exception):
@@ -31,6 +40,18 @@ class KernelUnsatisfiable(Exception):
 
 
 _EXTRA_MARKER_RE = re.compile(r"\bextra\b", flags=re.IGNORECASE)
+_KERNEL_FAILURE_CACHE_MAX = 128
+_KernelFailureKey = tuple[
+    tuple[str, ...],
+    tuple[str, ...],
+    tuple[str, ...],
+    bool,
+    str,
+]
+_kernel_failure_cache: dict[
+    _KernelFailureKey,
+    CatalogSignatures,
+] = {}
 
 
 @dataclass(slots=True)
@@ -453,6 +474,290 @@ class FiniteDomainKernel:
         return graph
 
 
+def local_wheelhouse_eligible(
+    resolver: EngineContext,
+    requirements: list[Requirement],
+    *,
+    source_requirements: Mapping[str, RequirementInput],
+    source_requirements_by_url: Mapping[str, RequirementInput],
+) -> bool:
+    """Return whether the compact local-wheel kernel preserves semantics."""
+    if resolver.no_deps or not resolver.ignore_installed:
+        return False
+    from cpip.index.provider import CandidateProvider
+
+    provider = resolver.provider
+    if type(provider) is not CandidateProvider:
+        return False
+    if (
+        getattr(provider.find_candidates, "__func__", None)
+        is not CandidateProvider.find_candidates
+    ):
+        return False
+    if (
+        resolver.require_hashes
+        or resolver.allow_prereleases
+        or resolver.ignore_requires_python
+        or resolver.upgrade
+    ):
+        return False
+    if (
+        not provider.no_index
+        or provider.index_urls
+        or not provider.find_links
+        or provider.target is not None
+        or provider.locked_links
+        or provider.uploaded_prior_to is not None
+        or provider.hashes_by_name
+        or provider.build_options
+        or provider.build_constraints
+        or provider.prefer_binary
+    ):
+        return False
+    if provider.release_control is not None and provider.release_control.ordered_args:
+        return False
+    if provider.format_control is not None and provider.format_control.no_binary:
+        return False
+    if source_requirements or source_requirements_by_url:
+        # InstallRequirement inputs carry hashes, links, and other policy that
+        # the compact source intentionally does not interpret. String inputs
+        # have no such side channel and are safe to retry through this kernel.
+        return False
+    return not any(
+        requirement.url is not None or looks_like_path_requirement(requirement.raw)
+        for requirement in requirements
+    )
+
+
+def requirement_from_local(requirement: LocalWheelRequirement) -> Requirement:
+    """Convert one compact-wheel requirement into the canonical value type."""
+    extras = f"[{','.join(sorted(requirement.extras))}]" if requirement.extras else ""
+    specifier = ",".join(
+        operator + str(getattr(expected, "text", expected))
+        for operator, expected in requirement.specifier.values
+    )
+    marker_value = requirement.marker
+    marker = (
+        f"; extra {marker_value[0]} '{marker_value[1]}'"
+        if marker_value is not None
+        else ""
+    )
+    return parse_requirement(f"{requirement.name}{extras}{specifier}{marker}")
+
+
+def kernel_failure_key(
+    resolver: EngineContext,
+    requirements: list[Requirement],
+) -> _KernelFailureKey:
+    """Identify one speculative-kernel dispatch without affecting semantics."""
+    return (
+        tuple(resolver.provider.find_links),
+        tuple(requirement.raw for requirement in requirements),
+        tuple(constraint.raw for constraint in resolver.constraints),
+        resolver.compute_source_hashes,
+        resolver.python_version,
+    )
+
+
+def seed_generic_wheelhouse_catalog(
+    provider: CandidateProvider,
+    records: CatalogRecords,
+) -> None:
+    """Reuse complete wheel-only discovery when the generic resolver takes over."""
+    import os
+
+    from cpip.index.candidates import InstallationCandidate
+    from cpip.index.links import Link
+    from cpip.resolution.engine.sources.wheelhouse.cache import artifact_identity_cache
+
+    direct_sources: set[str] = set()
+    directory_sources: dict[str, str] = {}
+    for value in provider.find_links:
+        absolute = value if os.path.isabs(value) else os.path.abspath(value)
+        if absolute.endswith(".whl"):
+            direct_sources.add(absolute)
+        else:
+            directory_sources[absolute] = value
+
+    links: list[Link] = []
+    grouped: dict[str, list[Link]] = {}
+    for name, candidates in records.items():
+        for path, _ in candidates:
+            if path in direct_sources:
+                source_url = None
+            else:
+                source_url = directory_sources.get(os.path.dirname(path))
+                if source_url is None:
+                    return
+            identity = artifact_identity_cache.get(path)
+            local_identity = (
+                None
+                if identity is None
+                else f"stat-fast:{identity[0]}:{identity[1]}:{identity[2]}"
+            )
+            link = Link.from_path(
+                path,
+                source_url=source_url,
+                is_dir=False,
+                local_identity=local_identity,
+            )
+            try:
+                parsed = InstallationCandidate.from_link(link, target=provider.target)
+            except ValueError:
+                return
+            if not isinstance(parsed, InstallationCandidate):
+                return
+            provider.parsed_link_cache[link] = parsed
+            links.append(link)
+            grouped.setdefault(name, []).append(link)
+    provider.find_links_cache = tuple(links)
+    provider.find_links_by_name_cache = {
+        name: tuple(candidate_links) for name, candidate_links in grouped.items()
+    }
+
+
+def try_resolve_local_wheelhouse(
+    resolver: EngineContext,
+    requirements: list[Requirement],
+    *,
+    source_requirements: Mapping[str, RequirementInput],
+    source_requirements_by_url: Mapping[str, RequirementInput],
+) -> KernelResult | None:
+    """Resolve a supported local wheel catalog without index-layer objects."""
+    if not local_wheelhouse_eligible(
+        resolver,
+        requirements,
+        source_requirements=source_requirements,
+        source_requirements_by_url=source_requirements_by_url,
+    ):
+        return None
+
+    from cpip.resolution.engine.sources.wheelhouse.engine import resolve
+    from cpip.resolution.engine.sources.wheelhouse.metadata import (
+        parse_requirement as parse_local_requirement,
+    )
+    from cpip.resolution.engine.sources.wheelhouse.models import (
+        dependencies_for_extras,
+    )
+
+    values = [requirement.raw for requirement in requirements]
+    stats: dict[str, int] = {}
+    compute_source_hashes = resolver.compute_source_hashes
+    if compute_source_hashes:
+        from cpip.resolution.engine.output import default_file_hashes, file_hashes
+
+        # Hash instrumentation is a supported diagnostic seam. Let canonical
+        # finalization call an overridden function instead of bypassing it.
+        compute_source_hashes = file_hashes is default_file_hashes
+    fallback_candidates = []
+    fallback_catalog = []
+    local_candidates = resolve(
+        resolver.provider.find_links,
+        values,
+        stats=stats,
+        compute_source_hashes=compute_source_hashes,
+        constraints=[constraint.raw for constraint in resolver.constraints],
+        fallback_candidates=fallback_candidates,
+        fallback_catalog=fallback_catalog,
+    )
+    if local_candidates is None:
+        if fallback_catalog:
+            seed_generic_wheelhouse_catalog(
+                resolver.provider,
+                fallback_catalog[0],
+            )
+        if fallback_candidates:
+            from functools import partial
+
+            from cpip.core.wheel import (
+                WheelResolutionMetadata,
+                preload_wheel_metadata,
+            )
+            from cpip.resolution.engine.sources.wheelhouse.cache import (
+                artifact_identity_cache,
+            )
+
+            def metadata_from_local(
+                candidate: LocalWheelCandidate,
+            ) -> WheelResolutionMetadata:
+                return WheelResolutionMetadata(
+                    name=candidate.name,
+                    version=Version(str(candidate.version)),
+                    dependencies=tuple(
+                        requirement_from_local(dependency)
+                        for dependency in candidate.dependencies
+                    ),
+                    provided_extras=candidate.provided_extras,
+                    requires_python=candidate.requires_python,
+                )
+
+            for candidate in fallback_candidates:
+                preload_wheel_metadata(
+                    candidate.path,
+                    partial(metadata_from_local, candidate),
+                    identity=artifact_identity_cache.get(candidate.path),
+                )
+        return None
+    resolver.backtrack_count += stats.get("backtracks", 0)
+    resolver.release_frontier.metrics.catalogs_loaded += 1
+    resolver.release_frontier.metrics.release_masks_built += len(local_candidates)
+    resolver.release_frontier.metrics.release_intersections += len(requirements)
+
+    selected_local = {
+        candidate.canonical_name: candidate for candidate in local_candidates
+    }
+    selected = {
+        name: WheelCandidate(
+            name=candidate.name,
+            version=Version(str(candidate.version)),
+            path=candidate.path,
+            dependencies=tuple(
+                requirement_from_local(dependency)
+                for dependency in candidate.dependencies
+            ),
+            provided_extras=candidate.provided_extras,
+            requires_python=candidate.requires_python,
+            source_url=candidate.source_url,
+            source_hashes=candidate.source_hashes,
+            source_kind="wheel",
+            source_vcs=candidate.source_vcs,
+            from_cache=candidate.from_cache,
+            yanked_reason=candidate.yanked_reason,
+        )
+        for name, candidate in selected_local.items()
+    }
+
+    graph: dict[str, set[str]] = {
+        "<root>": {requirement.canonical_name for requirement in requirements},
+    }
+    pending = [
+        local
+        for requirement in requirements
+        if (local := parse_local_requirement(requirement.raw)) is not None
+    ]
+    seen_contexts: set[tuple[str, frozenset[str]]] = set()
+    while pending:
+        requirement = pending.pop()
+        name = requirement.canonical_name
+        context = (name, requirement.extras)
+        if context in seen_contexts:
+            continue
+        seen_contexts.add(context)
+        candidate = selected_local.get(name)
+        if candidate is None:
+            continue
+        dependencies = dependencies_for_extras(candidate, requirement.extras)
+        graph.setdefault(name, set()).update(
+            dependency.canonical_name
+            for dependency in dependencies
+            if dependency.canonical_name in selected_local
+        )
+        pending.extend(dependencies)
+    for name in selected:
+        graph.setdefault(name, set())
+    return KernelResult(selected, graph)
+
+
 def eligible(
     resolver: EngineContext,
     requirements: list[Requirement],
@@ -523,26 +828,78 @@ def try_resolve(
     source_requirements: Mapping[str, RequirementInput],
     source_requirements_by_url: Mapping[str, RequirementInput],
 ) -> KernelResult | None:
-    if not eligible(
+    failure_key: _KernelFailureKey | None = None
+    if _kernel_failure_cache and resolver.provider.find_links:
+        from cpip.resolution.engine.sources.wheelhouse.catalog import source_signatures
+
+        failure_key = kernel_failure_key(resolver, requirements)
+        failed_signatures = _kernel_failure_cache.get(failure_key)
+        if (
+            failed_signatures is not None
+            and source_signatures(resolver.provider.find_links) == failed_signatures
+        ):
+            # Both optional kernels declined this unchanged workload before.
+            # Generic resolution remains authoritative for result and diagnostics.
+            return None
+        if failed_signatures is not None:
+            _kernel_failure_cache.pop(failure_key, None)
+
+    # The existing finite-domain kernel is specifically tuned and covered for
+    # medium-width root sets. Other shapes should probe the compact wheelhouse
+    # source first so its eligibility check does not trigger index catalog work.
+    prefer_finite_domain = 32 <= len(requirements) <= 64
+    if not prefer_finite_domain:
+        local_result = try_resolve_local_wheelhouse(
+            resolver,
+            requirements,
+            source_requirements=source_requirements,
+            source_requirements_by_url=source_requirements_by_url,
+        )
+        if local_result is not None:
+            return local_result
+    if eligible(
         resolver,
         requirements,
         source_requirements=source_requirements,
         source_requirements_by_url=source_requirements_by_url,
     ):
-        return None
-    try:
-        return FiniteDomainKernel(resolver).resolve(
+        try:
+            result = FiniteDomainKernel(resolver).resolve(
+                requirements,
+                source_requirements=source_requirements,
+                source_requirements_by_url=source_requirements_by_url,
+            )
+        except (KernelUnsupported, KernelUnsatisfiable):
+            pass
+        else:
+            return result
+    if prefer_finite_domain:
+        local_result = try_resolve_local_wheelhouse(
+            resolver,
             requirements,
             source_requirements=source_requirements,
             source_requirements_by_url=source_requirements_by_url,
         )
-    except (KernelUnsupported, KernelUnsatisfiable):
-        return None
+        if local_result is not None:
+            return local_result
+
+    if resolver.provider.find_links:
+        from cpip.resolution.engine.sources.wheelhouse.catalog import source_signatures
+
+        signatures = source_signatures(resolver.provider.find_links)
+        if signatures is not None:
+            failure_key = failure_key or kernel_failure_key(resolver, requirements)
+            _kernel_failure_cache[failure_key] = signatures
+            if len(_kernel_failure_cache) > _KERNEL_FAILURE_CACHE_MAX:
+                _kernel_failure_cache.pop(next(iter(_kernel_failure_cache)))
+    return None
 
 
 __all__ = [
     "FiniteDomainKernel",
     "KernelResult",
     "eligible",
+    "local_wheelhouse_eligible",
     "try_resolve",
+    "try_resolve_local_wheelhouse",
 ]

@@ -4,14 +4,15 @@ from __future__ import annotations
 
 import datetime
 import marshal
+import urllib.parse
 from typing import Any, cast
 
 from cpip.index.datetime import parse_iso_datetime
 from cpip.index.links import Link
 from cpip.index.source_models import MetadataFile
 
-VERSION = 1
-PREFIX = "cpip-index-catalog-v1:"
+VERSION = 2
+PREFIX = "cpip-index-catalog-v2:"
 
 
 def cache_key(url: str) -> str:
@@ -19,6 +20,11 @@ def cache_key(url: str) -> str:
 
 
 def load_links(cache: Any, url: str) -> list[Link] | None:
+    records = load_records(cache, url)
+    return None if records is None else [link_from_record(record) for record in records]
+
+
+def load_records(cache: Any, url: str) -> list[tuple[object, ...]] | None:
     if cache is None:
         return None
     raw = cache.get(cache_key(url))
@@ -35,7 +41,9 @@ def load_links(cache: Any, url: str) -> list[Link] | None:
             or not isinstance(records, list)
         ):
             return None
-        return [link_from_record(record) for record in records]
+        if not all(isinstance(record, tuple) for record in records):
+            return None
+        return cast("list[tuple[object, ...]]", records)
     except (EOFError, TypeError, ValueError, KeyError, IndexError):
         return None
 
@@ -59,6 +67,13 @@ def link_record(link: Link) -> tuple[object, ...]:
     upload_time = link.upload_time
     return (
         link.url,
+        (
+            link.parsed_url_internal.scheme,
+            link.parsed_url_internal.netloc,
+            link.parsed_url_internal.path,
+            link.parsed_url_internal.query,
+            link.parsed_url_internal.fragment,
+        ),
         link.comes_from,
         link.text,
         dict(link.hashes),
@@ -70,13 +85,27 @@ def link_record(link: Link) -> tuple[object, ...]:
 
 
 def link_from_record(record: object) -> Link:
-    if not isinstance(record, tuple) or len(record) != 8:
+    if not isinstance(record, tuple) or len(record) != 9:
         raise ValueError("invalid catalog record")
-    url, source_url, text, hashes, requires_python, yanked, metadata, upload_time = (
-        record
-    )
+    (
+        url,
+        parsed_url,
+        source_url,
+        text,
+        hashes,
+        requires_python,
+        yanked,
+        metadata,
+        upload_time,
+    ) = record
     if not isinstance(url, str) or not isinstance(text, str):
         raise ValueError("invalid catalog link")
+    if (
+        not isinstance(parsed_url, tuple)
+        or len(parsed_url) != 5
+        or not all(isinstance(value, str) for value in parsed_url)
+    ):
+        raise ValueError("invalid catalog URL")
     if source_url is not None and not isinstance(source_url, str):
         raise ValueError("invalid catalog source")
     if hashes is not None and (
@@ -91,22 +120,22 @@ def link_from_record(record: object) -> Link:
         or not all(isinstance(value, str) for value in metadata.values())
     ):
         raise ValueError("invalid catalog metadata")
-    hashes_value = (
-        cast("dict[str, object]", hashes) if isinstance(hashes, dict) else None
-    )
+    hashes_value = cast("dict[str, str]", hashes) if isinstance(hashes, dict) else None
     metadata_value = (
         cast("dict[str, str]", metadata) if isinstance(metadata, dict) else None
     )
+    parsed_url_value = cast("tuple[str, str, str, str, str]", parsed_url)
     parsed_upload_time: datetime.datetime | None = None
     if upload_time is not None:
         if not isinstance(upload_time, str):
             raise ValueError("invalid catalog upload time")
         parsed_upload_time = parse_iso_datetime(upload_time)
-    return Link.from_url(
+    return Link.from_cached_record(
         url,
+        parsed_url=urllib.parse.SplitResult(*parsed_url_value),
         source_url=source_url,
         text=text,
-        hashes=hashes_value,
+        hashes=hashes_value or {},
         requires_python=requires_python if isinstance(requires_python, str) else None,
         yanked_reason=yanked if isinstance(yanked, str) else None,
         metadata_file=(

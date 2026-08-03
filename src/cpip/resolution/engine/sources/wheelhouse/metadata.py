@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import struct
 import zlib
@@ -26,10 +27,10 @@ from cpip.resolution.engine.sources.wheelhouse.cache import (
     CachedCandidateParts,
     CachedMetadata,
     MetadataCache,
+    artifact_identity_cache,
     cache_candidate,
     cache_metadata,
     candidate_cache,
-    artifact_identity_cache,
     metadata_cache_dirty,
     metadata_cache_paths,
 )
@@ -292,6 +293,7 @@ def read_wheel_metadata(
     path: str,
     *,
     file_size: int | None = None,
+    source_hashes: dict[str, str] | None = None,
 ) -> dict[str, list[str]]:
     try:
         filename_parts = os.path.basename(path)[:-4].split("-")
@@ -317,6 +319,8 @@ def read_wheel_metadata(
             descriptor = file_descriptor
             try:
                 contents = os.read(descriptor, file_size)
+                if source_hashes is not None and len(contents) == file_size:
+                    source_hashes["sha256"] = hashlib.sha256(contents).hexdigest()
                 metadata = read_small_wheel_metadata(contents, target)
                 if metadata is not None:
                     os.close(descriptor)
@@ -471,12 +475,14 @@ def load_candidate(
     persistent_cache: WheelMetadataCache | None = None,
     *,
     path_is_absolute: bool = False,
+    compute_source_hashes: bool = False,
 ) -> LocalWheelCandidate:
     parsed = parsed or wheel_name(path)
     if parsed is None:
         raise WheelhouseUnavailable
     filename_name, filename_version = parsed
     metadata = None
+    source_hashes: dict[str, str] = {}
     cache_key = (
         path if path_is_absolute or os.path.isabs(path) else os.path.abspath(path)
     )
@@ -533,6 +539,7 @@ def load_candidate(
         metadata = read_wheel_metadata(
             path,
             file_size=file_identity[1] if file_identity is not None else None,
+            source_hashes=source_hashes if compute_source_hashes else None,
         )
         if persistent_cache is not None and identity is not None:
             persistent_cache.put_reference(identity, metadata)
@@ -566,6 +573,7 @@ def load_candidate(
         dependencies=dependencies,
         provided_extras=frozenset(provided_extras),
         requires_python=(requires_python_values[0] if requires_python_values else None),
+        source_hashes=source_hashes or None,
     )
     if metadata_cache is not None and file_identity is not None:
         metadata_cache[cache_key] = (

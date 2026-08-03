@@ -2,7 +2,77 @@ from __future__ import annotations
 
 import os
 import zipfile
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from cpip.resolution.engine.state.plans import InstallPlan
+
+
+def cached_remote_plan_key(
+    options: Any,
+    bundle: Any,
+    requirements: list[Any],
+    target: Any,
+) -> str | None:
+    """Key the narrow, repeatable warm-install shape used by pinned locks."""
+    if (
+        options.no_cache_dir
+        or options.target is None
+        or not options.ignore_installed
+        or not options.no_compile
+        or options.dry_run
+        or options.report
+        or options.user
+        or options.root is not None
+        or options.prefix is not None
+        or options.no_deps
+        or options.upgrade
+        or options.pre
+        or options.require_hashes
+        or options.ignore_requires_python
+        or options.platform
+        or options.implementation
+        or options.python_version
+        or options.abi
+        or options.uploaded_prior_to
+        or options.groups
+        or options.requirements_from_scripts
+        or options.constraint_files
+        or options.build_constraint_files
+        or options.config_settings
+        or options.no_binary
+        or options.only_binary
+        or options.all_releases
+        or options.only_final
+        or bundle.no_index
+        or bundle.find_links
+        or bundle.extra_index_urls
+        or bundle.constraints
+        or bundle.editables
+        or bundle.require_hashes
+        or bundle.locked_links
+        or bundle.requirement_hashes
+        or bundle.constraint_hashes
+        or bundle.format_control.no_binary
+        or bundle.format_control.only_binary
+        or bundle.release_control.all_releases
+        or bundle.release_control.only_final
+    ):
+        return None
+    from cpip.install.wheel_archive_cache import exact_install_plan_key
+
+    context = (
+        "remote-exact-v1",
+        bundle.index_url,
+        tuple(bundle.extra_index_urls),
+        tuple(target.platforms),
+        target.implementation,
+        target.python_version,
+        tuple(target.abis),
+        options.upgrade_strategy,
+        bool(options.force_reinstall),
+    )
+    return exact_install_plan_key(tuple(requirements), context)
 
 
 def try_local_wheelhouse_plan(
@@ -11,7 +81,7 @@ def try_local_wheelhouse_plan(
     requirements: list[Any],
     *,
     cache_dir: str | None,
-) -> Any | None:
+) -> InstallPlan | None:
     """Reuse the local resolver for the narrow pure-wheel install shape."""
     if (
         not bundle.no_index
@@ -27,7 +97,6 @@ def try_local_wheelhouse_plan(
         or options.groups
         or options.constraint_files
         or options.no_deps
-        or options.upgrade
         or options.pre
         or options.all_releases
         or options.only_final
@@ -44,7 +113,7 @@ def try_local_wheelhouse_plan(
         or options.root
         or options.prefix
         or options.target is None
-        or not options.ignore_installed
+        or (not options.ignore_installed and not options.upgrade)
         or not options.no_compile
     ):
         return None
@@ -63,6 +132,14 @@ def try_local_wheelhouse_plan(
         ):
             return None
         values.append(requirement.req.raw)
+        if options.upgrade:
+            specifiers = requirement.req.specifier.specifiers
+            if (
+                len(specifiers) != 1
+                or specifiers[0].operator != "=="
+                or specifiers[0].version.endswith(".*")
+            ):
+                return None
     from cpip.core.packaging import Requirement, SpecifierSet, Version
     from cpip.core.wheel import WheelCandidate, parse_wheel, wheel_candidate
     from cpip.resolution.engine import ResolutionEngine
@@ -117,6 +194,10 @@ def try_local_wheelhouse_plan(
                 dependency.canonical_name for dependency in candidate.dependencies
             }
     except (OSError, TypeError, ValueError):
+        return None
+    if options.upgrade and any(candidate.dependencies for candidate in candidates):
+        # The ordinary resolver must decide whether already-satisfied
+        # dependencies should move under the selected upgrade strategy.
         return None
     if (
         sum(os.stat(candidate.path).st_size for candidate in candidates)

@@ -96,8 +96,11 @@ def run_lock(args: list[str]) -> int:
     from cpip.index.artifacts import ArtifactLocator
     from cpip.network.http import NetworkSession
 
-    resolution_session = NetworkSession()
-    artifact_locator = ArtifactLocator(resolution_session)
+    cache_dir = os.environ.get("CPIP_CACHE_DIR")
+    resolution_session = NetworkSession(
+        cache=(os.path.join(cache_dir, "http-v1") if cache_dir else None),
+    )
+    artifact_locator = ArtifactLocator(resolution_session, cache_dir=cache_dir)
     quiet_environment = os.environ.get("CPIP_QUIET")
     if options.quiet:
         os.environ["CPIP_QUIET"] = "1"
@@ -269,6 +272,7 @@ def run_lock(args: list[str]) -> int:
             format_control=format_control,
             build_isolation=not options.no_build_isolation,
             session=resolution_session,
+            dry_run=True,
         )
         from cpip.resolution.engine import ResolutionEngine
         from cpip.resolution.engine.input.requirements import install_req_from_line
@@ -337,11 +341,13 @@ def run_lock(args: list[str]) -> int:
             continue
         if source_path is None:
             if source.startswith(("http://", "https://")):
-                import hashlib
+                archive_digest = (candidate.source_hashes or {}).get("sha256")
+                if archive_digest is None:
+                    import hashlib
 
-                archive_path = artifact_locator.ensure_local(source)
-                with open(archive_path, "rb") as file:
-                    archive_digest = hashlib.sha256(file.read()).hexdigest()
+                    archive_path = artifact_locator.ensure_local(source)
+                    with open(archive_path, "rb") as file:
+                        archive_digest = hashlib.sha256(file.read()).hexdigest()
                 packages.append(
                     {
                         "name": candidate.name,

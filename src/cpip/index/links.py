@@ -221,6 +221,43 @@ class Link:
         )
 
     @classmethod
+    def from_cached_record(
+        cls,
+        url: str,
+        *,
+        parsed_url: urllib.parse.SplitResult,
+        source_url: str | None,
+        text: str,
+        hashes: dict[str, str],
+        requires_python: str | None,
+        yanked_reason: str | None,
+        metadata_file: MetadataFile | None,
+        upload_time: datetime.datetime | None,
+    ) -> Link:
+        """Restore a link from the trusted on-disk catalog representation."""
+        link = cls.__new__(cls)
+        link.parsed_url_internal = parsed_url
+        link.url_internal = url
+        link.path_internal = urllib.parse.unquote(parsed_url.path)
+        link.filename_internal = None
+        link.file_path_internal = None
+        link.hashes_internal = hashes
+        link.comes_from = source_url
+        link.requires_python = requires_python or None
+        link.yanked_reason = yanked_reason
+        link.metadata_file_data = metadata_file
+        link.upload_time = upload_time
+        link.cache_link_parsing = True
+        link.egg_fragment = None
+        link.text = text
+        link.local_identity_internal = None
+        link.local_is_dir_internal = None
+        link.kind = cls.artifact_kind_from_filename(
+            posixpath.basename(link.path_internal.rstrip("/")),
+        )
+        return link
+
+    @classmethod
     def from_path(
         cls,
         path: str,
