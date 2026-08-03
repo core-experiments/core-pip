@@ -8,8 +8,17 @@ import os
 import shutil
 import tempfile
 from collections.abc import Iterable, Mapping
+from typing import TYPE_CHECKING
 
 from cpip.core.errors import HashMismatch
+
+if TYPE_CHECKING:
+    from typing import Protocol
+
+    class HashDigest(Protocol):
+        def update(self, data: bytes, /) -> None: ...
+
+        def hexdigest(self) -> str: ...
 
 
 ARTIFACT_CACHE_BUCKET = "artifacts-v1"
@@ -91,8 +100,8 @@ class ArtifactCache:
     @staticmethod
     def _digests(
         expected_hashes: Mapping[str, str] | None,
-    ) -> dict[str, object]:
-        result: dict[str, object] = {"sha256": hashlib.sha256()}
+    ) -> dict[str, HashDigest]:
+        result: dict[str, HashDigest] = {"sha256": hashlib.sha256()}
         for algorithm in expected_hashes or ():
             if algorithm in result:
                 continue
@@ -107,14 +116,14 @@ class ArtifactCache:
     @staticmethod
     def _validate_hashes(
         url: str,
-        digests: Mapping[str, object],
+        digests: Mapping[str, HashDigest],
         expected_hashes: Mapping[str, str] | None,
     ) -> None:
         for algorithm, expected in (expected_hashes or {}).items():
             digest = digests.get(algorithm)
             if digest is None:
                 continue
-            actual = digest.hexdigest()  # type: ignore[attr-defined]
+            actual = digest.hexdigest()
             if actual.lower() == expected.lower():
                 continue
             raise HashMismatch(
@@ -199,9 +208,9 @@ class ArtifactCache:
                     file.write(chunk)
                     size += len(chunk)
                     for digest in digests.values():
-                        digest.update(chunk)  # type: ignore[attr-defined]
+                        digest.update(chunk)
             self._validate_hashes(url, digests, expected_hashes)
-            sha256 = digests["sha256"].hexdigest()  # type: ignore[attr-defined]
+            sha256 = digests["sha256"].hexdigest()
             artifact = self._publish_body(temporary, sha256, size)
             temporary = ""
             self._publish_receipt(url, artifact, filename)

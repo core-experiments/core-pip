@@ -27,10 +27,10 @@ from cpip.resolution.engine.sources.wheelhouse.cache import (
     CachedCandidateParts,
     CachedMetadata,
     MetadataCache,
+    artifact_identity_cache,
     cache_candidate,
     cache_metadata,
     candidate_cache,
-    artifact_identity_cache,
     metadata_cache_dirty,
     metadata_cache_paths,
 )

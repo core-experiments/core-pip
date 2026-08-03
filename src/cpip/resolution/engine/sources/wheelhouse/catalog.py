@@ -9,10 +9,10 @@ from functools import lru_cache
 from typing import TYPE_CHECKING, cast
 
 from cpip.core.marshal_cache import load_snapshot, save_snapshot
+from cpip.index.directory_index import local_source_snapshot
 from cpip.resolution.engine.sources.wheelhouse.archive import WheelhouseUnavailable
 from cpip.resolution.engine.sources.wheelhouse.cache import (
     _CATALOG_CACHE_VERSION,
-    artifact_identity_cache,
     CatalogIndexes,
     CatalogRecords,
     CatalogSignatures,
@@ -25,6 +25,7 @@ from cpip.resolution.engine.sources.wheelhouse.cache import (
     PreflightCache,
     RangeIndex,
     SharedPreflightCache,
+    artifact_identity_cache,
     cache_preflight_result,
     catalog_indexes_cache,
     catalog_snapshot_store,
@@ -43,7 +44,6 @@ from cpip.resolution.engine.sources.wheelhouse.models import (
     LocalWheelRequirement,
     LocalWheelVersion,
 )
-from cpip.index.directory_index import local_source_snapshot
 
 if TYPE_CHECKING:
     from cpip.index.metadata_cache import WheelMetadataCache

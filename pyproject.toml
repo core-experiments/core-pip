@@ -1,7 +1,7 @@
 [project]
 name = "cpip"
 version = "0.0.1"
-description = "The PyPA recommended tool for installing Python packages."
+description = "Pip Reimagined for Performance"
 license = "MIT"
 license-files = ["LICENSE.txt"]
 classifiers = [
@@ -89,6 +89,9 @@ markers = [
     "svn: tests requiring Subversion",
     "unit: unit test",
 ]
+
+[tool.ty.src]
+exclude = ["src/cpip/_vendor/**"]
 
 [tool.ty.environment]
 python-version = "3.14"

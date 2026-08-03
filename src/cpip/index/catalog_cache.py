@@ -120,12 +120,11 @@ def link_from_record(record: object) -> Link:
         or not all(isinstance(value, str) for value in metadata.values())
     ):
         raise ValueError("invalid catalog metadata")
-    hashes_value = (
-        cast("dict[str, object]", hashes) if isinstance(hashes, dict) else None
-    )
+    hashes_value = cast("dict[str, str]", hashes) if isinstance(hashes, dict) else None
     metadata_value = (
         cast("dict[str, str]", metadata) if isinstance(metadata, dict) else None
     )
+    parsed_url_value = cast("tuple[str, str, str, str, str]", parsed_url)
     parsed_upload_time: datetime.datetime | None = None
     if upload_time is not None:
         if not isinstance(upload_time, str):
@@ -133,7 +132,7 @@ def link_from_record(record: object) -> Link:
         parsed_upload_time = parse_iso_datetime(upload_time)
     return Link.from_cached_record(
         url,
-        parsed_url=urllib.parse.SplitResult(*parsed_url),
+        parsed_url=urllib.parse.SplitResult(*parsed_url_value),
         source_url=source_url,
         text=text,
         hashes=hashes_value or {},

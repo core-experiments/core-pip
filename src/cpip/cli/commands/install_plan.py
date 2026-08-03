@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import os
 import zipfile
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from cpip.resolution.engine.state.plans import InstallPlan
 
 
 def cached_remote_plan_key(
@@ -78,7 +81,7 @@ def try_local_wheelhouse_plan(
     requirements: list[Any],
     *,
     cache_dir: str | None,
-) -> Any | None:
+) -> InstallPlan | None:
     """Reuse the local resolver for the narrow pure-wheel install shape."""
     if (
         not bundle.no_index

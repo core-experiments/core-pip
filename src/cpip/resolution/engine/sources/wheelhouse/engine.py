@@ -54,11 +54,7 @@ def resolve(
     global_constraints: dict[str, list[LocalWheelRequirement]] = {}
     for value in constraints or ():
         constraint = parse_requirement(value)
-        if (
-            constraint is None
-            or constraint.marker is not None
-            or constraint.extras
-        ):
+        if constraint is None or constraint.marker is not None or constraint.extras:
             return None
         global_constraints.setdefault(constraint.canonical_name, []).append(constraint)
     catalog_path, records = load_catalog(cache_dir, find_links)

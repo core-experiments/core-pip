@@ -29,6 +29,10 @@ if TYPE_CHECKING:
     from email.message import Message
     from email.parser import Parser as EmailParser
 
+    from cpip.cli.fast_install import PureWheelCandidate
+else:
+    PureWheelCandidate = object
+
 MACOS_COMPATIBLE_ARCHES = {
     "x86_64": frozenset(("x86_64", "intel", "universal")),
     "i386": frozenset(("i386", "intel", "universal")),
@@ -64,7 +68,7 @@ def Parser() -> EmailParser:
     return EmailParser()
 
 
-class WheelCandidate:
+class WheelCandidate(PureWheelCandidate):
     __slots__ = (
         "dependencies",
         "from_cache",

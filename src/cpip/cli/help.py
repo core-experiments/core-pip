@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import sys
 import os
+import sys
 
 from cpip.cli.commands.registry import COMMAND_SPECS, get_command, parser_for_command
 from cpip.core.cpip_version import get_cpip_distribution, get_cpip_version

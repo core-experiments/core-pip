@@ -4,9 +4,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from types import MappingProxyType
+from typing import TYPE_CHECKING
 
 from cpip.core.packaging import Requirement, Version
 from cpip.index.source_models import CandidateRecord, PackageCatalog
+
+if TYPE_CHECKING:
+    from cpip.index.provider import CandidateProvider
 
 MAX_COMPACT_RELEASES = 128
 
@@ -48,7 +52,7 @@ class ReleaseFrontier:
         "metrics",
     )
 
-    def __init__(self, provider: object) -> None:
+    def __init__(self, provider: CandidateProvider) -> None:
         self.provider = provider
         self.catalogs: dict[tuple[str, bool, bool], PackageCatalog] = {}
         self.domains: dict[tuple[str, bool, bool], ReleaseDomain] = {}

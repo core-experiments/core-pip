@@ -7,8 +7,7 @@ import zipfile
 from pathlib import Path
 
 import pytest
-from cpip.cli.fast_install import is_safe_member
-from cpip.cli.fast_install import run_cached_remote
+from cpip.cli.fast_install import is_safe_member, run_cached_remote
 from cpip.cli.fast_install import run as run_fast_install
 from cpip.resolution.engine import ResolutionEngine
 from cpip.resolution.engine.sources.wheelhouse.catalog import build_catalog_indexes

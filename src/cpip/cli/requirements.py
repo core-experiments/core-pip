@@ -156,6 +156,17 @@ class DeferredNetworkSession:
     def __getattr__(self, name: str) -> Any:
         return getattr(self.materialize(), name)
 
+    @property
+    def auth(self) -> Any:
+        return self.materialize().auth
+
+    @property
+    def trusted_hosts(self) -> Any:
+        return self.materialize().trusted_hosts
+
+    def get(self, *args: Any, **kwargs: Any) -> Any:
+        return self.materialize().get(*args, **kwargs)
+
 
 class RequirementSourceState:
     """Requirement-file source options without constructing an index provider."""

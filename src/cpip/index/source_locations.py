@@ -14,7 +14,7 @@ from cpip.index.directory_index import (
     LocalSourceSnapshot,
     local_source_snapshot,
 )
-from cpip.index.links import Link, SUPPORTED_EXTENSIONS
+from cpip.index.links import SUPPORTED_EXTENSIONS, Link
 from cpip.index.source_models import ArtifactKind
 
 SUPPORTED_SCHEMES = frozenset(("http", "https", "file", "ftp"))

@@ -29,8 +29,10 @@ from cpip.resolution.engine.input.files.options import (
 from cpip.resolution.engine.input.files.pylock import is_pylock_reference, parse_pylock
 
 if TYPE_CHECKING:
-    from cpip.index.provider import CandidateProvider
-    from cpip.network.http import NetworkSession
+    from cpip.resolution.engine.input.files.contracts import (
+        RequirementSession,
+        RequirementSource,
+    )
 
 logger = logging.getLogger(__name__)
 CODING_RE = re.compile(rb"^[ \t\f]*#.*?coding[:=][ \t]*([-\w.]+)")
@@ -55,7 +57,7 @@ BOM_ENCODINGS = (
 class RequirementFilePrefetcher:
     """Lazily schedule remote requirement-file reads."""
 
-    def __init__(self, session: NetworkSession) -> None:
+    def __init__(self, session: RequirementSession) -> None:
         self.session = session
         self.worker: Prefetcher[Any, str] | None = None
 
@@ -103,8 +105,8 @@ class _RequirementLineTask:
 
 def parse_requirements(
     filename: str,
-    session: NetworkSession,
-    provider: CandidateProvider | None = None,
+    session: RequirementSession,
+    provider: RequirementSource | None = None,
     options: Any = None,
     constraint: bool = False,
 ) -> list[ParsedRequirement]:
@@ -125,9 +127,9 @@ def parse_requirements(
 
 def parse_requirements_internal(
     filename: str,
-    session: NetworkSession,
+    session: RequirementSession,
     *,
-    provider: CandidateProvider | None,
+    provider: RequirementSource | None,
     options: Any,
     constraint: bool,
     stack: list[str],
@@ -219,7 +221,7 @@ def parse_requirements_internal(
 
 def _read_requirement_content(
     normalized: str,
-    session: NetworkSession,
+    session: RequirementSession,
     prefetcher: RequirementFilePrefetcher,
 ) -> str:
     parsed = urllib.parse.urlparse(normalized)
@@ -315,8 +317,8 @@ def parse_line(
     line_number: int,
     line: str,
     *,
-    session: NetworkSession,
-    provider: CandidateProvider | None,
+    session: RequirementSession,
+    provider: RequirementSource | None,
     options: Any,
     constraint: bool,
     stack: list[str],

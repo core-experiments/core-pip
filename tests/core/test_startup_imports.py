@@ -67,8 +67,7 @@ def imported_modules(
         cwd=cwd or ROOT,
         env=process_env,
         text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
         check=False,
     )
     output = result.stdout + result.stderr
@@ -88,8 +87,7 @@ def run_cpip(
         cwd=cwd or ROOT,
         env=process_env,
         text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
         check=False,
     )
 

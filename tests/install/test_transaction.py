@@ -1,8 +1,8 @@
 import os
 from pathlib import Path
 
-import pytest
 import cpip.install.transaction as transaction_module
+import pytest
 from cpip.core.errors import InstallationError
 from cpip.install.transaction import InstallTransaction
 from cpip.install.wheel_state import discover_installed_wheels

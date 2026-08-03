@@ -530,10 +530,9 @@ class SelectionOperations:
                     else effective_versions & frontier_versions
                 )
             provider_method = self.provider.find_candidates
+            provider_function = getattr(provider_method, "__func__", None)
             provider_supports_versions = (
-                getattr(provider_method, "__func__", None) is not None
-                and getattr(provider_method, "__func__", None).__name__
-                == "find_candidates"
+                getattr(provider_function, "__name__", None) == "find_candidates"
             )
             if (
                 effective_versions

@@ -166,7 +166,7 @@ class CandidateEvaluator:
         allow_binary: bool,
         allow_source: bool,
         target: TargetContext | None,
-    ) -> InstallationCandidate | RejectedCandidate:
+    ) -> CandidateRecord | RejectedCandidate:
         parsed = InstallationCandidate.from_link(link, target=target)
         return CandidateEvaluator.evaluate_parsed_link(
             link,

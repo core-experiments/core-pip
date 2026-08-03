@@ -6,6 +6,7 @@ import atexit
 import os
 import stat
 from collections.abc import Sequence
+
 from cpip.core.marshal_cache import load_snapshot, save_snapshot
 
 VERSION = 3

@@ -22,6 +22,9 @@ RELEASE_OPTIONS = frozenset(("--all-releases", "--only-final"))
 if TYPE_CHECKING:
     import argparse
 
+    from cpip.install.wheel_archive_cache import CachedInstallPlan
+    from cpip.resolution.engine.model import ResolutionResult
+    from cpip.resolution.engine.state.plans import InstallPlan
     from cpip.resolution.req_install import InstallRequirement
 
 
@@ -37,6 +40,7 @@ def run_install(args: list[str]) -> int:
     options = parser.parse_args(normalized_args)
 
     import logging
+
     from cpip.cli.context import target_prefix as target_prefix_internal
     from cpip.cli.requirements import (
         bundle_install_requirements,
@@ -452,7 +456,7 @@ def run_install(args: list[str]) -> int:
 
     if bundle.find_links and not quiet:
         print(f"Looking in links: {', '.join(bundle.find_links)}")
-    plan: Any | None = None
+    plan: CachedInstallPlan | InstallPlan | ResolutionResult | None = None
     if bundle.requirements:
         plan_cache_key = _cached_remote_plan_key(
             options,
@@ -460,24 +464,24 @@ def run_install(args: list[str]) -> int:
             requirements,
             target,
         )
-        plan = None
+        mutable_plan: CachedInstallPlan | InstallPlan | None = None
         if plan_cache_key is not None and cache_dir is not None:
             from cpip.install.wheel_archive_cache import load_cached_install_plan
 
-            plan = load_cached_install_plan(cache_dir, plan_cache_key)
-        resolved_fresh = False
-        if plan is None:
-            plan = _try_local_wheelhouse_plan(
+            mutable_plan = load_cached_install_plan(cache_dir, plan_cache_key)
+        if mutable_plan is None:
+            mutable_plan = _try_local_wheelhouse_plan(
                 options,
                 bundle,
                 requirements,
                 cache_dir=cache_dir,
             )
-        if plan is None:
+        fresh_plan: ResolutionResult | None = None
+        if mutable_plan is None:
             try:
                 from cpip.resolution.engine import ResolutionEngine
 
-                plan = ResolutionEngine(
+                fresh_plan = ResolutionEngine(
                     provider=get_provider(),
                     no_deps=options.no_deps,
                     upgrade=options.upgrade,
@@ -490,7 +494,6 @@ def run_install(args: list[str]) -> int:
                     ignore_requires_python=options.ignore_requires_python,
                     python_version=python_version,
                 ).resolve(requirements)
-                resolved_fresh = True
             except DistributionNotFound as exc:
                 if options.verbose:
                     message = str(exc)
@@ -504,14 +507,21 @@ def run_install(args: list[str]) -> int:
                     )
                     print(f"DistributionNotFound: {detail}")
                 raise
+        plan = fresh_plan if fresh_plan is not None else mutable_plan
         assert plan is not None
         unique_candidates: dict[str, Any] = {}
         for candidate in plan.candidates:
             unique_candidates.setdefault(candidate.canonical_name, candidate)
-        if resolved_fresh:
-            plan = replace(plan, candidates=tuple(unique_candidates.values()))
+        if fresh_plan is not None:
+            fresh_plan = replace(
+                fresh_plan,
+                candidates=tuple(unique_candidates.values()),
+            )
+            plan = fresh_plan
         else:
-            plan.candidates = list(unique_candidates.values())
+            assert mutable_plan is not None
+            mutable_plan.candidates = list(unique_candidates.values())
+            plan = mutable_plan
         if plan.candidates and not options.dry_run:
             from cpip.install.wheel_archive_cache import prepare_cached_wheel
             from cpip.resolution.engine.output import prepare_install_candidates
@@ -521,10 +531,16 @@ def run_install(args: list[str]) -> int:
                 cache_dir,
                 prepare_cached_wheel,
             )
-            if resolved_fresh:
-                plan = replace(plan, candidates=tuple(materialized_candidates))
+            if fresh_plan is not None:
+                fresh_plan = replace(
+                    fresh_plan,
+                    candidates=tuple(materialized_candidates),
+                )
+                plan = fresh_plan
             else:
-                plan.candidates = materialized_candidates
+                assert mutable_plan is not None
+                mutable_plan.candidates = materialized_candidates
+                plan = mutable_plan
         for item in plan.satisfied:
             requested = item.requirement.raw or item.requirement.name
             if not quiet:
@@ -642,7 +658,7 @@ def run_install(args: list[str]) -> int:
                                     )
                         raise
                 if (
-                    resolved_fresh
+                    fresh_plan is not None
                     and plan_cache_key is not None
                     and cache_dir is not None
                 ):

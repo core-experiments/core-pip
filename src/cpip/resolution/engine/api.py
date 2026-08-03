@@ -14,8 +14,8 @@ from cpip.resolution.engine.model import ResolutionResult
 from cpip.resolution.engine.runtime import ResolutionRuntime
 
 if TYPE_CHECKING:
-    from cpip.resolution.req_install import InstallRequirement
     from cpip.resolution.engine.state.requirement_set import RequirementSet
+    from cpip.resolution.req_install import InstallRequirement
 
 
 @dataclass(frozen=True, slots=True)

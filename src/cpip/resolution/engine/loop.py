@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
 from collections.abc import Mapping
+from typing import TYPE_CHECKING
 
 from cpip.core.errors import DistributionNotFound, ResolutionError
 from cpip.core.packaging import Requirement, Version, marker_applies

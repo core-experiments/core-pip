@@ -31,7 +31,7 @@ from cpip.install.wheel_archive import (
     validate_member_parts,
     zip_mode,
 )
-from cpip.install.wheel_archive_runtime import open_wheel_archive
+from cpip.install.wheel_archive_runtime import CachedWheelInfo, open_wheel_archive
 from cpip.install.wheel_state import (
     InstalledTargetInventory,
     compiled_files,
@@ -46,6 +46,9 @@ from cpip.install.wheel_transaction_direct import (
 if TYPE_CHECKING:
     from cpip.build.metadata import InstalledMetadataDistribution
     from cpip.core.direct_url import DirectUrl
+    from cpip.install.wheel_state import InstalledWheelDistribution
+
+    ExistingDistribution = InstalledMetadataDistribution | InstalledWheelDistribution
 
 DIRECT_CONTENT_LIMIT = 64 * 1024
 StagedEntry = tuple[str, str, str, int | None]
@@ -97,7 +100,7 @@ class WheelInstaller:
         requested: bool = False,
         direct_url: DirectUrl | None = None,
         transaction_sink: list[InstallTransaction] | None = None,
-        existing: InstalledMetadataDistribution | None = None,
+        existing: ExistingDistribution | None = None,
         lookup_existing: bool = True,
         validated_dist_info: str | None = None,
         destination_cache: DestinationCache | None = None,
@@ -153,7 +156,7 @@ def install_wheel_internal(
     direct_url: DirectUrl | None = None,
     script_executable: str | None = None,
     transaction_sink: list[InstallTransaction] | None = None,
-    existing: InstalledMetadataDistribution | None = None,
+    existing: ExistingDistribution | None = None,
     lookup_existing: bool = True,
     validated_dist_info: str | None = None,
     destination_cache: DestinationCache | None = None,
@@ -326,27 +329,25 @@ def install_wheel_internal(
                         assert transaction is not None
                         os.makedirs(os.path.dirname(destination_text), exist_ok=True)
                         transaction.record_created(destination_text)
-                    cached_source = getattr(member, "source_path", None)
-                    cached_clone = (
-                        cached_source is not None
+                    cached_member = (
+                        member if isinstance(member, CachedWheelInfo) else None
+                    )
+                    if (
+                        cached_member is not None
                         and not direct
-                        and not rewrite_metadata
-                        and not script_member
-                        and not is_record
                         and relative_name != "entry_points.txt"
                         and (
                             not pycompile or os.path.splitext(relative_name)[1] != ".py"
                         )
-                    )
-                    if cached_clone:
-                        source_text = cached_source
+                    ):
+                        source_text = cached_member.source_path
                         clone_sources.add(source_text)
-                        metadata = getattr(member, "record_metadata", metadata)
-                    elif cached_source is not None and not direct:
+                        metadata = cached_member.record_metadata
+                    elif cached_member is not None and not direct:
                         from cpip.platform.clone import clone_path
 
-                        clone_path(cached_source, source_text)
-                        metadata = getattr(member, "record_metadata", metadata)
+                        clone_path(cached_member.source_path, source_text)
+                        metadata = cached_member.record_metadata
                     else:
                         metadata = copy_member_with_metadata(
                             archive,

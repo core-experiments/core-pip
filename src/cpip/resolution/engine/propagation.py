@@ -8,8 +8,8 @@ can provide the authoritative result and diagnostics.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
 from cpip.core.packaging import Requirement, Version, marker_applies, parse_requirement
@@ -511,9 +511,7 @@ def local_wheelhouse_eligible(
 
 def requirement_from_local(requirement: LocalWheelRequirement) -> Requirement:
     """Convert one compact-wheel requirement into the canonical value type."""
-    extras = (
-        f"[{','.join(sorted(requirement.extras))}]" if requirement.extras else ""
-    )
+    extras = f"[{','.join(sorted(requirement.extras))}]" if requirement.extras else ""
     specifier = ",".join(
         operator + str(getattr(expected, "text", expected))
         for operator, expected in requirement.specifier.values

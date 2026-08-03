@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import errno
 import os
-import stat
 import shutil
+import stat
 import tempfile
 from collections.abc import Iterable
 

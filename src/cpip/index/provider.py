@@ -23,8 +23,8 @@ from cpip.index.prefetch import Prefetcher, PrefetchPolicy
 from cpip.index.source_locations import (
     FindLinksSource,
     SimpleIndexSource,
-    looks_like_path_requirement,
     is_remote_source_location,
+    looks_like_path_requirement,
 )
 from cpip.index.source_models import (
     INSTALLABLE_ARTIFACT_KINDS,
@@ -814,13 +814,21 @@ class CandidateProvider:
                     not isinstance(record, tuple)
                     or len(record) != 9
                     or not isinstance(record[0], str)
-                    or not isinstance(record[1], tuple)
-                    or len(record[1]) != 5
-                    or not all(isinstance(value, str) for value in record[1])
+                ):
+                    continue
+                parsed_record_url = record[1]
+                if (
+                    not isinstance(parsed_record_url, tuple)
+                    or len(parsed_record_url) != 5
+                    or not isinstance(parsed_record_url[0], str)
+                    or not isinstance(parsed_record_url[1], str)
+                    or not isinstance(parsed_record_url[2], str)
+                    or not isinstance(parsed_record_url[3], str)
+                    or not isinstance(parsed_record_url[4], str)
                 ):
                     continue
                 filename = posixpath.basename(
-                    urllib.parse.unquote(record[1][2].rstrip("/")),
+                    urllib.parse.unquote(parsed_record_url[2].rstrip("/")),
                 )
                 kind = Link.artifact_kind_from_filename(filename)
                 if kind is ArtifactKind.WHEEL:

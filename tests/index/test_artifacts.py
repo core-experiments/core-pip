@@ -4,7 +4,6 @@ import hashlib
 from pathlib import Path
 
 import pytest
-
 from cpip.core.errors import HashMismatch
 from cpip.index.artifacts import ArtifactLocator
 from cpip.network.cache import SafeFileCache

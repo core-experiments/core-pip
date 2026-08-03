@@ -29,8 +29,8 @@ from cpip.resolution.engine.conflict_learning import ConflictLearning
 from cpip.resolution.engine.constraints import ConstraintStore
 from cpip.resolution.engine.frontier import ReleaseFrontier
 from cpip.resolution.engine.loop import SearchLoop
-from cpip.resolution.engine.policy import PolicyChecks
 from cpip.resolution.engine.metrics import ResolutionMetrics
+from cpip.resolution.engine.policy import PolicyChecks
 from cpip.resolution.engine.state.domains import (
     Assignment,
     LearnedIncompatibility,
@@ -46,8 +46,7 @@ if TYPE_CHECKING:
     from cpip.core.metadata import InstalledDistribution
     from cpip.core.wheel import WheelCandidate
     from cpip.index.candidate_materialization import CandidateStream
-    from cpip.resolution.engine.context import EngineContext
-    from cpip.resolution.engine.context import ConfigurationContext
+    from cpip.resolution.engine.context import ConfigurationContext, EngineContext
     from cpip.resolution.engine.state.requirement_set import RequirementSet
     from cpip.resolution.req_install import InstallRequirement
 

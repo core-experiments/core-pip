@@ -42,6 +42,7 @@ if TYPE_CHECKING:
     from cpip.core.wheel import WheelCandidate
     from cpip.install.target import InstallTarget
     from cpip.install.wheel_state import InstalledWheelDistribution
+    from cpip.resolution.engine.state.plans import SatisfiedRequirement
 
     class WheelInstallCandidate(Protocol):
         """Read-only candidate boundary required by the archive installer."""
@@ -141,7 +142,7 @@ class CachedInstallPlan:
         self.candidates = candidates
         self.graph = graph
         self.conflicts: list[str] = []
-        self.satisfied: list[object] = []
+        self.satisfied: list[SatisfiedRequirement] = []
         self.metrics: dict[str, int | float] = {"warm_resolution_cache_hit": 1}
 
 

@@ -21,7 +21,7 @@ from cpip.core.wheel import parse_wheel_filename
 from cpip.resolution.engine.input.files.models import ParsedRequirement
 
 if TYPE_CHECKING:
-    from cpip.index.provider import CandidateProvider
+    from cpip.resolution.engine.input.files.contracts import RequirementSource
 
 HTTP_SCHEMES = frozenset(("http", "https"))
 ARCHIVE_SUFFIXES = (".tar.gz", ".tar.bz2", ".tar.xz", ".tar", ".zip")
@@ -46,7 +46,7 @@ def parse_pylock(
     reference: str,
     content: str,
     *,
-    provider: CandidateProvider | None,
+    provider: RequirementSource | None,
 ) -> list[ParsedRequirement]:
     from cpip.core.format_control import FormatControl
 
@@ -179,7 +179,7 @@ def parse_pylock(
 
 def _select_distribution(
     package: dict[str, object],
-    provider: CandidateProvider | None,
+    provider: RequirementSource | None,
 ) -> tuple[dict[str, object], str]:
     """Select the first usable PEP 751 distribution without packaging.pylock."""
     for key, kind in (
