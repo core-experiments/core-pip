@@ -51,9 +51,7 @@ except ImportError:
 
 def split_leading_dir(path: str) -> list[str]:
     path = path.lstrip("/").lstrip("\\")
-    if "/" in path and (
-        ("\\" in path and path.find("/") < path.find("\\")) or "\\" not in path
-    ):
+    if "/" in path and (("\\" in path and path.find("/") < path.find("\\")) or "\\" not in path):
         return path.split("/", 1)
     if "\\" in path:
         return path.split("\\", 1)
@@ -366,8 +364,7 @@ def untar_without_filter(
             os.path.realpath(path),
         ):
             message = (
-                "The tar file ({}) has a file ({}) trying to install "
-                "outside target directory ({})"
+                "The tar file ({}) has a file ({}) trying to install outside target directory ({})"
             )
             raise InstallationError(message.format(filename, path, location))
         if member.isdir():

@@ -56,6 +56,31 @@ def test_lock_wheel_from_findlinks(
     }
 
 
+def test_lock_applies_constraint_file(
+    script: CpipTestEnvironment,
+    shared_data: TestData,
+    tmp_path: Path,
+) -> None:
+    constraint = tmp_path / "constraints.txt"
+    constraint.write_text("simplewheel==1.0\n", encoding="utf-8")
+
+    result = script.cpip(
+        "lock",
+        "simplewheel>=1.0",
+        "--constraint",
+        constraint,
+        "--quiet",
+        "--output=-",
+        "--no-index",
+        "--find-links",
+        str(shared_data.root / "packages/"),
+        expect_stderr=True,
+    )
+
+    pylock = tomllib.loads(result.stdout)
+    assert pylock["packages"][0]["version"] == "1.0"
+
+
 def test_lock_sdist_from_findlinks(
     script: CpipTestEnvironment,
     shared_data: TestData,

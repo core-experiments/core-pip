@@ -12,8 +12,8 @@ from pathlib import Path
 from benchmark_support import reset_caches
 from cpip.core.errors import ResolutionError
 from cpip.index.provider import CandidateProvider
-from cpip.resolution.engine import ResolutionEngine
-from cpip.resolution.engine.input.files import parse_requirements
+from cpip.resolution.api import ResolutionEngine
+from cpip.resolution.files import parse_requirements
 from pytest_codspeed import BenchmarkFixture
 
 

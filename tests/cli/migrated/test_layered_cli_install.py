@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import cpip.cli.main as greenfield
-from cpip.cli.commands import install as install_command
+from cpip.cli import install as install_command
 
 
 def test_layered_cli_uses_public_cpip_install_services() -> None:

@@ -633,8 +633,7 @@ class RequirementPreparer:
         """Prepare an already-installed requirement."""
         assert req.satisfied_by, "req should have been satisfied but isn't"
         assert skip_reason is not None, (
-            "did not get skip reason skipped but req.satisfied_by "
-            f"is set to {req.satisfied_by}"
+            f"did not get skip reason skipped but req.satisfied_by is set to {req.satisfied_by}"
         )
         logger.info(
             "Requirement %s: %s (%s)",

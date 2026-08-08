@@ -43,9 +43,7 @@ def direct_batch_preflight(
         )
         member_sets.append(raw_members)
         total_size += sum(
-            raw_member[4]
-            for raw_member in raw_members
-            if not raw_member[0].endswith("/")
+            raw_member[4] for raw_member in raw_members if not raw_member[0].endswith("/")
         )
     if total_size <= DIRECT_CONTENT_BATCH_LIMIT:
         return None

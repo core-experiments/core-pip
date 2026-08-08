@@ -10,7 +10,13 @@ import tempfile
 from pathlib import Path
 
 from cpip_benchmark.hyperfine import Command, Hyperfine
-from cpip_benchmark.workloads import workload_manifest
+from cpip_benchmark.workloads import (
+    OFFICIAL_WORKLOAD_NAMES,
+    OFFICIAL_WORKLOADS,
+    WORKLOAD_NAMES,
+    official_workload,
+    workload_manifest,
+)
 
 BENCHMARKS = (
     "startup-help",
@@ -28,6 +34,53 @@ BENCHMARKS = (
     "install-warm",
     "install-incremental-warm",
 )
+
+OFFICIAL_LOCK_BENCHMARKS = ("lock-cold", "lock-warm")
+OFFICIAL_INSTALL_BENCHMARKS = ("install-cold", "install-warm")
+
+
+def expand_workloads(selector: str) -> tuple[str, ...]:
+    if selector == "live":
+        return OFFICIAL_WORKLOAD_NAMES
+    return (selector,)
+
+
+def default_benchmarks(workload: str) -> tuple[str, ...]:
+    if workload == "offline":
+        return BENCHMARKS
+    definition = official_workload(workload)
+    if definition is None:
+        raise ValueError(f"Unknown workload: {workload}")
+    if definition.compiled is None:
+        return OFFICIAL_LOCK_BENCHMARKS
+    return (*OFFICIAL_LOCK_BENCHMARKS, *OFFICIAL_INSTALL_BENCHMARKS)
+
+
+def supports_benchmark(workload: str, benchmark: str) -> bool:
+    if workload == "offline":
+        return True
+    if benchmark.startswith("startup-fast-"):
+        return False
+    if not benchmark.startswith("install-"):
+        return True
+    if benchmark == "install-incremental-warm":
+        return True
+    definition = official_workload(workload)
+    return definition is not None and definition.compiled is not None
+
+
+def print_workloads() -> None:
+    print("offline\tlock + install\tGenerated local wheelhouse (no network)")
+    print(
+        f"live\tsuite\tAll {len(OFFICIAL_WORKLOADS)} official uv workloads "
+        "(install where compiled)",
+    )
+    for workload in OFFICIAL_WORKLOADS:
+        capabilities = "lock + install" if workload.compiled else "lock"
+        python = f"; Python {workload.python}" if workload.python else ""
+        print(
+            f"{workload.name}\t{capabilities}\t{workload.description}{python}",
+        )
 
 
 def repo_root() -> Path:
@@ -120,6 +173,7 @@ def build_commands(
     python: str,
 ) -> list[Command]:
     manifest = workload_manifest(workspace / "workload", workload=workload)
+    workload_name = manifest["workload"]
     cpip_cache = workspace / "cache" / "cpip"
     uv_cache = workspace / "cache" / "uv"
     cpip_output = workspace / "cpip.out"
@@ -128,7 +182,10 @@ def build_commands(
     uv_target = workspace / "target" / "uv"
     wheelhouse = manifest.get("wheelhouse")
     source_requirements = manifest["source_requirements"]
-    install_requirements = manifest["install_requirements"]
+    cpip_source = manifest.get("cpip_source", source_requirements)
+    source_kind = manifest.get("source_kind", "requirements")
+    constraint_requirements = manifest.get("constraint_requirements")
+    install_requirements = manifest.get("install_requirements")
     incremental_wheelhouse = manifest["incremental_wheelhouse"]
     incremental_base = manifest["incremental_base_requirements"]
     incremental_update = manifest["incremental_update_requirements"]
@@ -250,6 +307,8 @@ def build_commands(
     if benchmark == "startup-fast-install":
         if wheelhouse is None:
             raise ValueError("startup-fast-install requires the offline workload")
+        if install_requirements is None:
+            raise ValueError(f"{workload_name} has no install workload")
         cpip_args = [
             "install",
             "--quiet",
@@ -317,13 +376,20 @@ def build_commands(
             "--python",
             python,
         ]
-        if wheelhouse is None:
-            cpip_args.extend(["-r", source_requirements])
+        if source_kind == "project":
+            if wheelhouse is not None:
+                raise ValueError("project workloads cannot use the offline wheelhouse")
+            cpip_args.append(cpip_source)
+        elif wheelhouse is None:
+            cpip_args.extend(["-r", cpip_source])
         else:
             cpip_args.extend(
-                ["--no-index", "--find-links", wheelhouse, "-r", source_requirements]
+                ["--no-index", "--find-links", wheelhouse, "-r", cpip_source]
             )
             uv_args.extend(["--no-index", "--find-links", wheelhouse])
+        if constraint_requirements is not None:
+            cpip_args.extend(["--constraint", constraint_requirements])
+            uv_args.extend(["--constraint", constraint_requirements])
         cpip_run = cpip(cpip_args)
         cpip_run[4:4] = ["--env", f"CPIP_CACHE_DIR={cpip_cache}"]
         return [
@@ -400,6 +466,11 @@ def build_commands(
         ]
 
     if benchmark.startswith("install-"):
+        if install_requirements is None:
+            raise ValueError(
+                f"{workload_name} has no official compiled install workload; "
+                "run a lock benchmark instead",
+            )
         cold = benchmark.endswith("cold")
         cpip_prepare = prepare_with_cache(
             workspace,
@@ -460,7 +531,17 @@ def main() -> None:
         description="Benchmark cpip against uv with hyperfine."
     )
     parser.add_argument("--benchmark", "-b", choices=BENCHMARKS, action="append")
-    parser.add_argument("--workload", choices=("offline", "live"), default="offline")
+    parser.add_argument(
+        "--workload",
+        choices=WORKLOAD_NAMES,
+        default="offline",
+        help="Workload to run; 'live' expands to every official uv workload",
+    )
+    parser.add_argument(
+        "--list-workloads",
+        action="store_true",
+        help="List workload capabilities and exit",
+    )
     parser.add_argument("--cpip-python", default=sys.executable)
     parser.add_argument("--cpip-console")
     parser.add_argument(
@@ -477,19 +558,39 @@ def main() -> None:
     parser.add_argument("--keep-workspace", action="store_true")
     args = parser.parse_args()
 
+    if args.list_workloads:
+        print_workloads()
+        return
+
     min_runs = args.min_runs
     if args.runs is None and min_runs is None:
         min_runs = 10
 
-    benchmarks = args.benchmark or list(BENCHMARKS)
+    workloads = expand_workloads(args.workload)
+    runs: list[tuple[str, str]] = []
+    for workload in workloads:
+        benchmarks = tuple(args.benchmark or default_benchmarks(workload))
+        for benchmark in benchmarks:
+            if supports_benchmark(workload, benchmark):
+                runs.append((workload, benchmark))
+            elif args.workload == "live":
+                print(
+                    f"Skipping {workload}/{benchmark}: unsupported by workload",
+                    file=sys.stderr,
+                )
+            else:
+                parser.error(f"{workload} does not support {benchmark}")
+    if not runs:
+        parser.error("No supported workload and benchmark combinations selected")
+
     with tempfile.TemporaryDirectory(prefix="cpip-bench-") as temporary:
         workspace_root = Path(temporary)
-        for benchmark in benchmarks:
-            workspace = workspace_root / benchmark
-            workspace.mkdir()
+        for workload, benchmark in runs:
+            workspace = workspace_root / workload / benchmark
+            workspace.mkdir(parents=True)
             commands = build_commands(
                 benchmark,
-                workload=args.workload,
+                workload=workload,
                 workspace=workspace,
                 cpip_python=args.cpip_python,
                 cpip_console=args.cpip_console,
@@ -509,7 +610,9 @@ def main() -> None:
                     ],
                 )
             run = Hyperfine(
-                name=benchmark,
+                name=(
+                    benchmark if workload == "offline" else f"{workload}-{benchmark}"
+                ),
                 commands=commands,
                 setup=setup,
                 warmup=args.warmup,

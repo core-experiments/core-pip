@@ -34,8 +34,7 @@ class VenvImportError(DiagnosticCpipError):
         super().__init__(
             message="Cannot import the 'venv' module of the Python standard library",
             context=(
-                "This is a symptom of a broken/modified Python, which cannot be used "
-                "with cpip."
+                "This is a symptom of a broken/modified Python, which cannot be used with cpip."
             ),
             note_stmt="This is an issue with the Python installation itself, not cpip.",
             hint_stmt=hint_stmt,
@@ -47,9 +46,7 @@ class VenvCreationError(DiagnosticCpipError):
 
     def __init__(self, context: str) -> None:
         hint_stmt = (
-            "This may be caused by running antivirus software."
-            if os.name == "nt"
-            else None
+            "This may be caused by running antivirus software." if os.name == "nt" else None
         )
         super().__init__(
             message="Cannot create a virtual environment",
@@ -200,9 +197,7 @@ class VenvBuildEnvironment(BuildEnvironment):
     def __enter__(self) -> None:
         # We want backend calls to be able to use binaries installed as if this
         # virtual environment was "activated".
-        self.save_env = {
-            name: os.environ.get(name, None) for name in ("PATH", "PYTHONPATH")
-        }
+        self.save_env = {name: os.environ.get(name, None) for name in ("PATH", "PYTHONPATH")}
 
         new_path = [self.bin_path_internal]
         if old_path := self.save_env["PATH"]:

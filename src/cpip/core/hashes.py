@@ -115,8 +115,7 @@ class Hashes:
 
     def has_one_of(self, hashes: Mapping[str, str]) -> bool:
         return any(
-            self.is_hash_allowed(hash_name, hex_digest)
-            for hash_name, hex_digest in hashes.items()
+            self.is_hash_allowed(hash_name, hex_digest) for hash_name, hex_digest in hashes.items()
         )
 
     def __bool__(self) -> bool:

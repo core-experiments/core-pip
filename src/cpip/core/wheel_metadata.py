@@ -22,9 +22,7 @@ FAST_METADATA_NAMES = {
 def metadata_paths(names: Iterable[str]) -> list[str]:
     """Return top-level wheel METADATA members in stable order."""
     return sorted(
-        name
-        for name in names
-        if name.endswith(".dist-info/METADATA") and name.count("/") == 1
+        name for name in names if name.endswith(".dist-info/METADATA") and name.count("/") == 1
     )
 
 
@@ -58,9 +56,7 @@ def parse_metadata_headers(contents: str) -> MetadataHeaders:
     if fast_headers is not None:
         return fast_headers
     separators = (
-        offset
-        for marker in ("\n\n", "\r\n\r\n")
-        if (offset := contents.find(marker)) >= 0
+        offset for marker in ("\n\n", "\r\n\r\n") if (offset := contents.find(marker)) >= 0
     )
     header_end = min(separators, default=len(contents))
     headers: MetadataHeaders = {}

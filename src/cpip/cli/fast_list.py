@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import os
 
+from cpip.cli.fast_path import option_value
+from cpip.core.packaging import canonicalize_name
+
 
 class ListOptions:
     __slots__ = ("excludes", "format", "paths", "verbose")
@@ -40,16 +43,6 @@ UNSUPPORTED_FLAGS = frozenset(
         "--include-editable",
     ),
 )
-
-
-def canonicalize_name(value: str) -> str:
-    return value.replace("_", "-").lower()
-
-
-def option_value(args: list[str], index: int) -> str | None:
-    if index + 1 >= len(args):
-        return None
-    return args[index + 1]
 
 
 def parse_arguments(args: list[str]) -> ListOptions | None:
@@ -122,10 +115,7 @@ def iter_distributions(paths: list[str]) -> list[dict[str, str]]:
                     entry.name
                     for entry in entries
                     if entry.is_dir()
-                    and (
-                        entry.name.endswith(".dist-info")
-                        or entry.name.endswith(".egg-info")
-                    )
+                    and (entry.name.endswith(".dist-info") or entry.name.endswith(".egg-info"))
                 ]
         except OSError:
             continue
@@ -196,19 +186,13 @@ def run(args: list[str]) -> int | None:
         return 0
 
     rows = [["Package", "Version"]]
-    rows.extend(
-        [distribution["name"], distribution["version"]]
-        for distribution in distributions
-    )
+    rows.extend([distribution["name"], distribution["version"]] for distribution in distributions)
     widths = [
-        max(len(str(row[i])) if i < len(row) else 0 for row in rows)
-        for i in range(len(rows[0]))
+        max(len(str(row[i])) if i < len(row) else 0 for row in rows) for i in range(len(rows[0]))
     ]
     print(
         "\n".join(
-            " ".join(
-                str(value).ljust(widths[i]) for i, value in enumerate(row)
-            ).rstrip()
+            " ".join(str(value).ljust(widths[i]) for i, value in enumerate(row)).rstrip()
             for row in rows
         ),
     )

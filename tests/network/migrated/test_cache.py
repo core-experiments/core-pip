@@ -50,6 +50,15 @@ class TestSafeFileCache:
         cache.delete("test key")
         assert cache.get_body("test key") is None
 
+    def test_atomic_cache_roundtrip(self, cache_tmpdir: Path) -> None:
+        cache = SafeFileCache(os.fspath(cache_tmpdir))
+
+        assert cache.get_atomic("test key") is None
+        cache.set_atomic("test key", b"compiled data")
+        assert cache.get_atomic("test key") == b"compiled data"
+        cache.delete("test key")
+        assert cache.get_atomic("test key") is None
+
     @pytest.mark.skipif("sys.platform == 'win32'")
     def test_safe_get_no_perms(
         self,

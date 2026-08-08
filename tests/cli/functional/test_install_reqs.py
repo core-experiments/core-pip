@@ -7,7 +7,6 @@ from typing import Any, Protocol
 import pytest
 from cpip_test_support import (
     CpipTestEnvironment,
-    ResolverVariant,
     TestData,
     create_basic_sdist_for_package,
     create_basic_wheel_for_package,
@@ -475,7 +474,6 @@ def test_constraints_only_causes_error(
 def test_constraints_local_editable_install_causes_error(
     script: CpipTestEnvironment,
     data: TestData,
-    resolver_variant: ResolverVariant,
 ) -> None:
     script.scratch_path.joinpath("constraints.txt").write_text("singlemodule==0.0.0")
     to_install = data.src.joinpath("singlemodule")
@@ -509,7 +507,6 @@ def test_constraints_local_editable_install_pep518(
 def test_constraints_local_install_causes_error(
     script: CpipTestEnvironment,
     data: TestData,
-    resolver_variant: ResolverVariant,
 ) -> None:
     script.scratch_path.joinpath("constraints.txt").write_text("singlemodule==0.0.0")
     to_install = data.src.joinpath("singlemodule")
@@ -525,13 +522,12 @@ def test_constraints_local_install_causes_error(
         expect_error=True,
     )
     # Because singlemodule only has 0.0.1 available.
-    assert "Cannot install singlemodule 0.0.1" in result.stderr, str(result)
+    assert "No matching distribution found for singlemodule" in result.stderr, str(result)
 
 
 def test_constraints_constrain_to_local_editable(
     script: CpipTestEnvironment,
     data: TestData,
-    resolver_variant: ResolverVariant,
 ) -> None:
     to_install = data.src.joinpath("singlemodule")
     script.scratch_path.joinpath("constraints.txt").write_text(
@@ -546,18 +542,14 @@ def test_constraints_constrain_to_local_editable(
         script.scratch_path / "constraints.txt",
         "singlemodule",
         allow_stderr_warning=True,
-        expect_error=(resolver_variant == "resolvelib"),
+        expect_error=True,
     )
-    if resolver_variant == "resolvelib":
-        assert "Editable requirements are not allowed as constraints" in result.stderr
-    else:
-        assert "Running setup.py develop for singlemodule" in result.stdout
+    assert "Editable requirements are not allowed as constraints" in result.stderr
 
 
 def test_constraints_constrain_to_local(
     script: CpipTestEnvironment,
     data: TestData,
-    resolver_variant: ResolverVariant,
 ) -> None:
     to_install = data.src.joinpath("singlemodule")
     script.scratch_path.joinpath("constraints.txt").write_text(
@@ -644,7 +636,6 @@ def test_double_install_spurious_hash_mismatch(
 def test_install_with_extras_from_constraints(
     script: CpipTestEnvironment,
     data: TestData,
-    resolver_variant: ResolverVariant,
 ) -> None:
     # Make sure CpipDeprecationWarnings don't turn into errors
     script.environ["_CPIP_TEST_ENV"] = ""
@@ -658,12 +649,9 @@ def test_install_with_extras_from_constraints(
         file,
         "LocalExtras",
         allow_stderr_warning=True,
-        expect_error=(resolver_variant == "resolvelib"),
+        expect_error=True,
     )
-    if resolver_variant == "resolvelib":
-        assert "Constraints cannot have extras" in result.stderr
-    else:
-        result.did_create(script.site_packages / "simple")
+    assert "Constraints cannot have extras" in result.stderr
 
 
 def test_install_with_extras_from_install(script: CpipTestEnvironment) -> None:
@@ -716,7 +704,6 @@ def test_install_with_extras_and_url_constraint(
 def test_install_with_extras_joined(
     script: CpipTestEnvironment,
     data: TestData,
-    resolver_variant: ResolverVariant,
 ) -> None:
     # Make sure CpipDeprecationWarnings don't turn into errors
     script.environ["_CPIP_TEST_ENV"] = ""
@@ -730,19 +717,14 @@ def test_install_with_extras_joined(
         file,
         "LocalExtras[baz]",
         allow_stderr_warning=True,
-        expect_error=(resolver_variant == "resolvelib"),
+        expect_error=True,
     )
-    if resolver_variant == "resolvelib":
-        assert "Constraints cannot have extras" in result.stderr
-    else:
-        result.did_create(script.site_packages / "simple")
-        result.did_create(script.site_packages / "singlemodule.py")
+    assert "Constraints cannot have extras" in result.stderr
 
 
 def test_install_with_extras_editable_joined(
     script: CpipTestEnvironment,
     data: TestData,
-    resolver_variant: ResolverVariant,
 ) -> None:
     to_install = data.packages.joinpath("LocalExtras")
     file = script.temporary_file(
@@ -754,13 +736,9 @@ def test_install_with_extras_editable_joined(
         file,
         "LocalExtras[baz]",
         allow_stderr_warning=True,
-        expect_error=(resolver_variant == "resolvelib"),
+        expect_error=True,
     )
-    if resolver_variant == "resolvelib":
-        assert "Editable requirements are not allowed as constraints" in result.stderr
-    else:
-        result.did_create(script.site_packages / "simple")
-        result.did_create(script.site_packages / "singlemodule.py")
+    assert "Editable requirements are not allowed as constraints" in result.stderr
 
 
 def test_install_distribution_full_union(
@@ -792,7 +770,6 @@ def test_install_distribution_duplicate_extras(
 def test_install_distribution_union_with_constraints(
     script: CpipTestEnvironment,
     data: TestData,
-    resolver_variant: ResolverVariant,
 ) -> None:
     # Make sure CpipDeprecationWarnings don't turn into errors
     script.environ["_CPIP_TEST_ENV"] = ""
@@ -803,36 +780,25 @@ def test_install_distribution_union_with_constraints(
         script.scratch_path / "constraints.txt",
         f"{to_install}[baz]",
         allow_stderr_warning=True,
-        expect_error=(resolver_variant == "resolvelib"),
+        expect_error=True,
     )
-    if resolver_variant == "resolvelib":
-        msg = "Unnamed requirements are not allowed as constraints"
-        assert msg in result.stderr
-    else:
-        assert "Building wheel for LocalExtras" in result.stdout
-        result.did_create(script.site_packages / "singlemodule.py")
+    assert "Unnamed requirements are not allowed as constraints" in result.stderr
 
 
 def test_install_distribution_union_with_versions(
     script: CpipTestEnvironment,
     data: TestData,
-    resolver_variant: ResolverVariant,
 ) -> None:
     to_install_001 = data.packages.joinpath("LocalExtras")
     to_install_002 = data.packages.joinpath("LocalExtras-0.0.2")
     result = script.cpip_install_local(
         f"{to_install_001}[bar]",
         f"{to_install_002}[baz]",
-        expect_error=(resolver_variant == "resolvelib"),
+        expect_error=True,
     )
-    if resolver_variant == "resolvelib":
-        assert "Cannot install localextras" in result.stderr
-        assert ("The user requested localextras 0.0.1") in result.stdout
-        assert ("The user requested localextras 0.0.2") in result.stdout
-    else:
-        assert (
-            "Successfully installed LocalExtras-0.0.1 simple-3.0 singlemodule-0.0.1"
-        ) in result.stdout
+    assert "Cannot install localextras" in result.stderr
+    assert "The user requested localextras 0.0.1" in result.stdout
+    assert "The user requested localextras 0.0.2" in result.stdout
 
 
 @pytest.mark.xfail

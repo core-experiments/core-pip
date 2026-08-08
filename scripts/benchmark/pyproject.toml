@@ -17,3 +17,8 @@ build-backend = "hatchling.build"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "--confcutdir=."
+
+[dependency-groups]
+tests = [
+    "pytest-xdist>=3.8.0",
+]

@@ -15,7 +15,7 @@ graph and reject cycles.
 | Question | Start at | Then follow |
 | --- | --- | --- |
 | What happens when `cpip` starts? | `src/cpip/cli/entrypoint.py:main` | bootstrap output, narrow fast paths, fallback dispatch |
-| Where is a command implemented? | `src/cpip/cli/commands/registry.py` | its lazy `CommandSpec` and `run_*` function |
+| Where is a command implemented? | `src/cpip/cli/commands/registry.py` | its eagerly-registered `CommandSpec` and `run_*` function |
 | How does install choose a plan? | `src/cpip/cli/commands/install.py:run_install` | `install_plan.py`, cached plans, wheelhouse plans, `ResolutionEngine` |
 | How are dependencies resolved? | `src/cpip/resolution/engine/api.py:ResolutionEngine` | `runtime.py`, `propagation.py`, then `loop.py` |
 | Where do index candidates come from? | `src/cpip/index/provider.py:CandidateProvider` | sources, link evaluation, lazy materialization |
@@ -36,29 +36,34 @@ entrypoint.
 ```text
 console script / cpip.__init__:main / python -m cpip
   -> cli.entrypoint:main
-       +--> dependency-light help, version, and command help
+       +--> help, version, and command help
        +--> cli.commands.fast_lock:run
        +--> cli.fast_install:run_cached_remote
        +--> cli.fast_install:run_local_fallback
        +--> cli.fast_install:run
        +--> cli.fast_list:run
-       `--> cli._fallback_main:run
-              +--> configure execution context and logging when required
-              +--> create a global temporary-directory context when required
-              +--> retry the general install fast path when eligible
-              `--> cli._main_fallback:run
-                     +--> fast lock, then normal lock if it declines
-                     `--> cli.commands.registry:get_command_runner
+       +--> configure execution context and logging when required
+       +--> create a global temporary-directory context when required
+       `--> cli._main_fallback:run
+              +--> fast lock, then normal lock if it declines
+              `--> cli.commands.registry:get_command_runner
 ```
 
-The entrypoint parses only the global options needed to choose a route. Fast
-paths are conservative recognizers, not separate command semantics. They
-return `None` when an argument, target state, source shape, or feature is not
-supported. Fallback dispatch must remain available after every declined fast
+The entrypoint eagerly imports the command registry at module load, so all
+first-party modules reachable from the registry are imported during startup.
+Fast paths remain conservative recognizers, not separate command semantics.
+They return `None` when an argument, target state, source shape, or feature is
+not supported. Fallback dispatch must remain available after every declined fast
 path.
 
-The command registry stores module and function names instead of imported
-callables. It imports a command module only after that command is selected.
+All first-party `cpip` modules use top-level imports; there are no function-level
+`from X import Y` hoists left in `src/cpip` (the resolver, installer, index, and
+build subtrees are imported eagerly when their owning module loads). The command
+registry eagerly imports every command module at module load and binds each
+module object on its `CommandSpec`, so dispatch no longer calls
+`importlib.import_module` for a command module. Only genuinely dynamic dispatch
+remains deferred: VCS backends are loaded by scheme and PEP 517 build backends by
+config name, both via `importlib.import_module` with a runtime module name.
 `CommandSpec.needs_logging` and `CommandSpec.needs_tempdir` keep unnecessary
 startup work out of lightweight commands. New process-level behavior belongs
 in `cli.entrypoint`; new command behavior belongs in its command module and
@@ -414,10 +419,18 @@ domain must not import a higher domain merely to reuse a convenience type.
 These boundaries are part of behavior, not benchmark-only implementation
 details:
 
-1. `cli.entrypoint` imports only bootstrap data until it knows which route is
-   needed. Help, version, and command help must not import the fallback graph.
-2. Command registration remains lazy. Adding a command must not import its
-   implementation during general startup.
+1. First-party `cpip` modules use top-level imports throughout, and
+   `cli.entrypoint` eagerly loads the command registry, which in turn eagerly
+   imports every command module. A `cpip` process therefore imports the full
+   first-party graph (resolver, installer, index, platform, build, network) on
+   startup, including for `--help`/`--version`. The only work that may remain
+   deferred is genuinely non-first-party or dynamic: optional dependencies
+   (`keyring`, `virtualenv`/`venv`), VCS backends selected by scheme, and PEP 517
+   build backends selected by config name.
+2. Command *modules* are loaded eagerly by the registry, so adding a command is
+   part of the steady-state import graph and must respect the domain-ownership
+   rules in the package-ownership table. Only dynamic dispatch — VCS backends by
+   scheme and build backends by config name — remains import-deferred.
 3. Fast command paths recognize only semantics they implement completely and
    return `None` or `False` before unsupported behavior is committed.
 4. Candidate discovery, metadata parsing, artifact localization, and source

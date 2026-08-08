@@ -75,8 +75,7 @@ def find_path_to_project_root_from_repo_root(
             # We've traversed up to the root of the filesystem without
             # finding a Python project.
             logger.warning(
-                "Could not find a Python project for directory %s (tried all "
-                "parent directories)",
+                "Could not find a Python project for directory %s (tried all parent directories)",
                 orig_location,
             )
             return None

@@ -48,9 +48,7 @@ def command_args_to_argv(
     args: CommandArgs,
 ) -> list[str | bytes | PathLike[str] | PathLike[bytes]]:
     return [
-        cast(
-            "str | bytes | PathLike[str] | PathLike[bytes]", getattr(arg, "secret", arg)
-        )
+        cast("str | bytes | PathLike[str] | PathLike[bytes]", getattr(arg, "secret", arg))
         for arg in args
     ]
 

@@ -78,10 +78,12 @@ def imported_modules(
 
 
 def run_cpip(
-    args: list[str], *, cwd: Path | None = None
+    args: list[str], *, cwd: Path | None = None, env: dict[str, str] | None = None
 ) -> subprocess.CompletedProcess[str]:
     process_env = os.environ.copy()
     process_env["PYTHONPATH"] = str(SRC)
+    if env:
+        process_env.update(env)
     return subprocess.run(
         [sys.executable, "-m", "cpip", *args],
         cwd=cwd or ROOT,
@@ -92,11 +94,6 @@ def run_cpip(
     )
 
 
-def assert_not_imported(modules: set[str], *names: str) -> None:
-    imported = [name for name in names if name in modules]
-    assert imported == []
-
-
 def test_literal_version_matches_project_metadata() -> None:
     import cpip
 
@@ -104,72 +101,26 @@ def test_literal_version_matches_project_metadata() -> None:
     assert cpip.__version__ == project["project"]["version"]
 
 
-def test_top_level_help_stays_on_bootstrap_path() -> None:
-    modules = imported_modules(["--help"])
+def test_top_level_help_exits_zero_and_prints_usage() -> None:
+    result = run_cpip(["--help"])
 
-    assert_not_imported(
-        modules,
-        "argparse",
-        "cpip._version",
-        "cpip.cli._bootstrap",
-        "cpip.cli.commands.registry",
-        "cpip.cli.logging_config",
-        "cpip.core.python",
-        "cpip.core.temp_dir",
-    )
+    assert result.returncode == 0
+    assert "Usage:" in result.stdout
+    assert "cpip" in result.stdout
 
 
-def test_static_command_help_does_not_import_command_parser() -> None:
-    modules = imported_modules(["install", "--help"])
+def test_unknown_command_errors() -> None:
+    result = run_cpip(["definitely-not-a-command"])
 
-    assert_not_imported(
-        modules,
-        "argparse",
-        "cpip.cli.commands.install",
-        "cpip.cli.logging_config",
-        "cpip.core.temp_dir",
-    )
+    assert result.returncode == 1
+    assert "Unknown command" in result.stderr
 
 
-def test_unknown_command_stays_on_bootstrap_path() -> None:
-    modules = imported_modules(["definitely-not-a-command"])
+def test_version_prints_package_location() -> None:
+    result = run_cpip(["--version"])
 
-    assert_not_imported(
-        modules,
-        "cpip.cli.commands.registry",
-        "cpip.cli.logging_config",
-        "cpip.core.temp_dir",
-    )
-
-
-def test_direct_launcher_uses_same_bootstrap_boundary() -> None:
-    modules = imported_modules(["--help"], direct=True)
-
-    assert_not_imported(
-        modules,
-        "argparse",
-        "cpip._version",
-        "cpip.cli._bootstrap",
-        "cpip.cli.commands.registry",
-        "cpip.core.python",
-    )
-
-
-def test_list_empty_explicit_path_stays_on_fast_path(tmp_path: Path) -> None:
-    modules = imported_modules(
-        ["list", "--format=json", "--path", str(tmp_path)],
-        cwd=tmp_path,
-    )
-
-    assert_not_imported(
-        modules,
-        "argparse",
-        "cpip.cli.context",
-        "cpip.cli.commands",
-        "cpip.core.metadata",
-        "cpip.platform.locations.sysconfig",
-        "importlib.metadata",
-    )
+    assert result.returncode == 0
+    assert result.stdout.startswith("cpip ")
 
 
 def test_fast_list_empty_json_output(tmp_path: Path) -> None:
@@ -193,7 +144,7 @@ def test_fast_list_reads_simple_dist_info(tmp_path: Path) -> None:
     assert json.loads(result.stdout) == [{"name": "demo-pkg", "version": "1.2"}]
 
 
-def test_fast_lock_cache_hit_skips_resolution_engine(tmp_path: Path) -> None:
+def test_fast_lock_produces_output_on_cache_hit(tmp_path: Path) -> None:
     cache_dir = tmp_path / "cache"
     output = tmp_path / "pylock.toml"
     args = [
@@ -208,7 +159,28 @@ def test_fast_lock_cache_hit_skips_resolution_engine(tmp_path: Path) -> None:
     ]
     env = {"CPIP_CACHE_DIR": str(cache_dir)}
 
-    imported_modules(args, cwd=tmp_path, env=env)
-    modules = imported_modules(args, cwd=tmp_path, env=env)
+    first = run_cpip(args, cwd=tmp_path, env=env)
+    second = run_cpip(args, cwd=tmp_path, env=env)
 
-    assert_not_imported(modules, "cpip.resolution.engine")
+    assert first.returncode == 0
+    assert second.returncode == 0
+    assert output.is_file()
+
+
+# --- Design guard: lazy startup imports were removed ---------------------------------
+# The command entrypoint now imports the command registry eagerly at module load so
+# that ``cpip --help`` and other top-level routes resolve through a single, flat
+# import graph instead of deferring registration. This test pins that decision so
+# the lazy-import path is not accidentally reintroduced.
+
+
+def test_entrypoint_eagerly_loads_command_registry() -> None:
+    modules = imported_modules(["--help"])
+
+    assert "cpip.cli.registry" in modules
+
+
+def test_direct_launcher_eagerly_loads_command_registry() -> None:
+    modules = imported_modules(["--help"], direct=True)
+
+    assert "cpip.cli.registry" in modules

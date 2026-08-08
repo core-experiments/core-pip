@@ -78,8 +78,7 @@ class WheelCache:
             pass
         except Exception as e:
             logger.warning(
-                "Could not read origin file %s in cache entry (%s). "
-                "Will attempt to overwrite it.",
+                "Could not read origin file %s in cache entry (%s). Will attempt to overwrite it.",
                 origin_path,
                 e,
             )

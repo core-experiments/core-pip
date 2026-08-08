@@ -4,8 +4,18 @@ from __future__ import annotations
 
 import sys
 
-VERSION_FLAGS = frozenset(("-V", "--version"))
-HELP_FLAGS = frozenset(("-h", "--help"))
+from cpip.cli import fast_lock
+from cpip.cli import lock
+from cpip.cli.registry import get_command, get_command_runner
+from cpip.cli.entrypoint import (
+    HELP_FLAGS,
+    VERSION_FLAGS,
+    print_help,
+    print_version,
+    run_help,
+)
+from cpip.cli.status_codes import VIRTUALENV_NOT_FOUND
+from cpip.platform.virtualenv import running_under_virtualenv
 
 
 def run(
@@ -15,48 +25,47 @@ def run(
     location: str | None = None,
 ) -> int:
     if not args:
-        from cpip.cli.help import print_help
-
         print_help()
+
         return 0
+
     if args[0] in VERSION_FLAGS:
-        from cpip.cli.help import print_version
+        print_version(None, location)
 
-        print_version(location)
         return 0
+
     if args[0] in HELP_FLAGS:
-        from cpip.cli.help import print_help
-
         print_help()
+
         return 0
+
     if args[0] == "help":
-        from cpip.cli.help import run_help
-
         return run_help(args[1:])
+
     if require_virtualenv:
-        from cpip.platform.virtualenv import running_under_virtualenv
-
         if not running_under_virtualenv():
-            from cpip.cli.status_codes import VIRTUALENV_NOT_FOUND
-
             print("Could not find an activated virtualenv (required).", file=sys.stderr)
-            return VIRTUALENV_NOT_FOUND
-    if args[0] == "lock":
-        from cpip.cli.commands.fast_lock import run as run_fast_lock
 
-        status = run_fast_lock(args[1:])
+            return VIRTUALENV_NOT_FOUND
+
+    if args[0] == "lock":
+        status = fast_lock.run(args[1:])
+
         if status is not None:
             return status
-        from cpip.cli.commands.lock import run_lock
 
-        return run_lock(args[1:])
-    from cpip.cli.commands.registry import get_command, get_command_runner
+        return lock.run_lock(args[1:])
 
     command = args[0]
+
     if get_command(command) is None:
         print(f"ERROR: Unknown command: {command}", file=sys.stderr)
+
         return 1
+
     runner = get_command_runner(command)
+
     if runner is not None:
         return runner(args[1:])
+
     raise AssertionError(f"unhandled command: {command}")

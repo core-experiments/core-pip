@@ -5,8 +5,8 @@ from __future__ import annotations
 import json
 
 from cpip.core.packaging import canonicalize_name
+from cpip.core.hashes import file_hashes
 from cpip.core.urls import url_to_path
-from cpip.resolution.req_install import file_hashes
 
 
 class ReportItem:

@@ -179,8 +179,7 @@ class Mercurial(VersionControl):
             )
         except BadCommand:
             logger.debug(
-                "could not determine if %s is under hg control "
-                "because hg is not available",
+                "could not determine if %s is under hg control because hg is not available",
                 location,
             )
             return None
