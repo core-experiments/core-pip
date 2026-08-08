@@ -1,93 +1,379 @@
 from __future__ import annotations
 
+import datetime
+import hashlib
+import logging
 import os
 import sys
-import hashlib
-from dataclasses import replace
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
 from cpip.build.build import build_editable_from_source
+from cpip.build.check import (
+    check_package_set,
+    installed_dependencies_by_name,
+    package_set_from_dependencies,
+)
 from cpip.build.metadata import InstalledDistributionStore
-from cpip.cli.install_helpers import (
-    install_candidate,
-    normalize_install_args,
-    target_library_is_empty,
-)
-from cpip.cli.install_plan import (
-    cached_remote_plan_key as _cached_remote_plan_key,
-)
-from cpip.cli.install_plan import (
-    try_local_wheelhouse_plan as _try_local_wheelhouse_plan,
-)
-from cpip.cli.install_reporting import warn_about_install_conflicts
-from cpip.cli.install_setup import (
-    config_settings,
-    format_control_from_args,
-    group_items,
-    InstallExecutionContext,
-    requirement_bundle,
-    release_control_args,
-    resolution_error_message,
-    requirement_state,
-    runtime_setup,
-    python_version,
-    target_context,
-    validate_option_combinations,
-)
-from cpip.cli.install_resolution import create_candidate_provider
-from cpip.cli.context import target_prefix as target_prefix_internal
-from cpip.cli.dependency_groups import parse_dependency_groups
-from cpip.cli import fast_install
-from cpip.cli.parser import ArgumentParser as ArgumentParser_internal
+from cpip.cli.config import SourceConfig, load_source_config
+from cpip.cli.common import ArgumentParser as ArgumentParser_internal, target_prefix
+from cpip.cli.dependency_groups import group_items, parse_dependency_groups
+from cpip.cli.fast import install as fast_install
 from cpip.cli.requirements import (
     bundle_install_requirements,
+    collect_requirements,
+    config_settings,
     requirements_from_script,
 )
-from cpip.core.urls import url_to_path
+from cpip.cli.resolution_errors import resolution_error_message
+from cpip.core.appdirs import resolve_cache_dir
+from cpip.core.cpip_version import CPIP_DISTRIBUTION_NAMES
 from cpip.core.errors import (
     CommandError,
     DistributionNotFound,
     InstallationError,
     ResolutionError,
 )
+from cpip.core.format_control import FormatControl
+from cpip.core.hashes import Hashes
 from cpip.core.metadata import find_installed, user_lib_path
 from cpip.core.packaging import (
     canonicalize_name,
     marker_applies,
     parse_requirement,
 )
-from cpip.core.wheel import wheel_candidate
-from cpip.platform.virtualenv import running_under_virtualenv
-from cpip.install.direct_url import direct_url_from_link
-from cpip.install.editable import prepare_editable_source
-from cpip.install.report import ReportItem, write_install_report
+from cpip.core.utils import CURRENT_PYTHON_VERSION_DIGITS, CURRENT_PYTHON_VERSION_FULL
+from cpip.core.urls import url_to_path
+from cpip.core.wheel import TargetContext, wheel_candidate
+from cpip.index.links import Link
+from cpip.index.provider import CandidateProvider
+from cpip.install.metadata import (
+    direct_url_from_link,
+    prepare_editable_source,
+    ReportItem,
+    write_install_report,
+)
+from cpip.install.output import prepare_install_candidates
 from cpip.install.target import InstallTarget
 from cpip.install.wheel_archive_cache import (
     CachedWheelArchive,
+    exact_install_plan_key,
     load_cached_install_plan,
     prepare_cached_wheel,
     save_cached_install_plan,
 )
-from cpip.install.wheel_transaction import install_wheels_transactionally
+from cpip.install.wheel_transaction import WheelInstaller, install_wheels_transactionally
+from cpip.platform.virtualenv import running_under_virtualenv
 from cpip.resolution.api import ResolutionEngine
 from cpip.resolution.input_requirements import install_req_from_line
-from cpip.install.output import prepare_install_candidates
-
-INDEX_URL_OPTIONS = frozenset(("-i", "--index-url"))
 
 if TYPE_CHECKING:
     import argparse
-
-    from cpip.install.wheel_archive_cache import CachedInstallPlan
     from cpip.resolution.model import ResolutionResult
     from cpip.resolution.req_install import InstallRequirement
 
+INDEX_URL_OPTIONS = frozenset(("-i", "--index-url"))
 
-def run_install(args: list[str]) -> int:
+
+# ==============================================================================
+# Helper structures and classes
+# ==============================================================================
+
+@dataclass(frozen=True)
+class InstallRuntimeSetup:
+    config: Any
+    explicit_index_url: bool
+    cache_dir: str | None
+    quiet: bool
+
+
+@dataclass
+class InstallExecutionContext:
+    options: Any
+    bundle: Any
+    target: TargetContext
+    requirements: list[Any]
+    cache_dir: str | None
+    quiet: bool
+    python_version: str
+
+
+@dataclass(frozen=True)
+class InstallRequirementState:
+    requested_order: dict[str, int]
+    requested_source_urls: set[str]
+    summary_root_source_urls: set[str]
+    build_options: dict[str, dict[str, object]]
+    source_requirements_by_name: dict[str, Any]
+    source_requirements_by_url: dict[str, Any]
+    requested_extras_by_name: dict[str, set[str]]
+
+
+@dataclass(frozen=True)
+class PreparedInstall:
+    options: Any
+    bundle: Any
+    cache_dir: str | None
+    quiet: bool
+    release_control: list[tuple[str, str]]
+
+
+@dataclass
+class InstallOutcome:
+    report_enabled: bool = False
+    installed: list[str] = field(default_factory=list)
+    installed_canonical_names: list[str] = field(default_factory=list)
+    summary_root_names: set[str] = field(default_factory=set)
+    newly_installed_names: set[str] = field(default_factory=set)
+    reported_satisfied: set[str] = field(default_factory=set)
+    satisfied_requirements: list[str] = field(default_factory=list)
+    report_items: list[Any] = field(default_factory=list)
+
+    def record_installed(self, display: str, canonical_name: str) -> None:
+        self.installed.append(display)
+        self.installed_canonical_names.append(canonical_name)
+
+    def add_report_item(self, **fields: Any) -> None:
+        if not self.report_enabled:
+            return
+        self.report_items.append(ReportItem(**fields))
+
+
+# ==============================================================================
+# CLI Argument Normalization and Option Combinations
+# ==============================================================================
+
+def normalize_install_args(args: list[str], options: frozenset[str]) -> list[str]:
+    normalized: list[str] = []
+    index = 0
+    while index < len(args):
+        token = args[index]
+        if token in options and index + 1 < len(args):
+            normalized.append(f"{token}={args[index + 1]}")
+            index += 2
+            continue
+        normalized.append(token)
+        index += 1
+    return normalized
+
+
+def requirement_state(requirements: list[Any], bundle: Any) -> InstallRequirementState:
+    requested_order = {
+        requirement.req.canonical_name: index
+        for index, requirement in enumerate(requirements)
+        if requirement.req is not None
+    }
+    requested_source_urls = {
+        url
+        for requirement in requirements
+        for url in (
+            requirement.link.url if requirement.link is not None else None,
+            requirement.req.url if requirement.req is not None else None,
+        )
+        if url is not None
+    }
+    summary_root_source_urls = {
+        requirement.link.url
+        for requirement in requirements
+        if requirement.link is not None and requirement.link.is_existing_dir
+    }
+    build_options: dict[str, dict[str, object]] = {}
+    for requirement in requirements:
+        if not requirement.config_settings or requirement.req is None:
+            continue
+        build_options[requirement.req.raw] = dict(requirement.config_settings)
+        if requirement.req.url is not None:
+            build_options[requirement.req.url] = dict(requirement.config_settings)
+        if requirement.link is not None:
+            build_options[requirement.link.url] = dict(requirement.config_settings)
+
+    source_requirements_by_name: dict[str, Any] = {}
+    requested_extras_by_name: dict[str, set[str]] = {}
+    source_requirements_by_url: dict[str, Any] = {}
+    for requirement in requirements:
+        if requirement.req is None:
+            continue
+        name = canonicalize_name(requirement.req.name)
+        source_requirements_by_name[name] = requirement
+        requested_extras_by_name.setdefault(name, set()).update(requirement.req.extras)
+        if requirement.link is not None:
+            source_requirements_by_url[requirement.link.url] = requirement
+        if requirement.req.url is not None:
+            source_requirements_by_url[requirement.req.url] = requirement
+
+    for constraint in bundle.constraints:
+        constraint_requirement = install_req_from_line(constraint)
+        if constraint_requirement.req is None:
+            continue
+        name = canonicalize_name(constraint_requirement.req.name)
+        source_requirements_by_name[name] = constraint_requirement
+        if constraint_requirement.link is not None:
+            source_requirements_by_url[constraint_requirement.link.url] = (
+                constraint_requirement
+            )
+        if constraint_requirement.req.url is not None:
+            source_requirements_by_url[constraint_requirement.req.url] = (
+                constraint_requirement
+            )
+
+    return InstallRequirementState(
+        requested_order=requested_order,
+        requested_source_urls=requested_source_urls,
+        summary_root_source_urls=summary_root_source_urls,
+        build_options=build_options,
+        source_requirements_by_name=source_requirements_by_name,
+        source_requirements_by_url=source_requirements_by_url,
+        requested_extras_by_name=requested_extras_by_name,
+    )
+
+
+def runtime_setup(
+    args: list[str],
+    options: argparse.Namespace,
+    index_url_options: frozenset[str],
+) -> InstallRuntimeSetup:
+    quiet = options.quiet > 0
+    if quiet:
+        logging.getLogger().setLevel(logging.ERROR)
+        os.environ["CPIP_QUIET"] = "1"
+    else:
+        os.environ.pop("CPIP_QUIET", None)
+
+    cache_dir = None if options.no_cache_dir else resolve_cache_dir(options.cache_dir)
+    return InstallRuntimeSetup(
+        config=load_source_config("install"),
+        explicit_index_url=any(arg in index_url_options for arg in args),
+        cache_dir=cache_dir,
+        quiet=quiet,
+    )
+
+
+def format_control_from_args(args: list[str]) -> FormatControl:
+    control = FormatControl()
+    index = 0
+    while index < len(args):
+        token = args[index]
+        if token in ("--no-binary", "--only-binary"):
+            if index + 1 < len(args):
+                control.apply(token[2:], args[index + 1])
+            index += 2
+            continue
+        if token.startswith(("--no-binary=", "--only-binary=")):
+            option, _, value = token.partition("=")
+            control.apply(option[2:], value)
+        index += 1
+    return control
+
+
+def release_control_args(args: list[str]) -> list[tuple[str, str]]:
+    result: list[tuple[str, str]] = []
+    index = 0
+    while index < len(args):
+        token = args[index]
+        if token in ("--all-releases", "--only-final"):
+            if index + 1 >= len(args):
+                raise ValueError(f"{token} requires a value")
+            result.append((token[2:], args[index + 1]))
+            index += 2
+            continue
+        if token.startswith(("--all-releases=", "--only-final=")):
+            option, _, value = token.partition("=")
+            result.append((option[2:], value))
+        elif token == "--pre":
+            result.append(("pre", ":all:"))
+        index += 1
+    return result
+
+
+def requirement_bundle(
+    options: argparse.Namespace,
+    *,
+    config: SourceConfig,
+    explicit_index_url: bool,
+    grouped_requirements: list[str],
+    script_requirements: list[str],
+    format_control: FormatControl,
+    release_control: list[tuple[str, str]],
+    config_settings: dict[str, object],
+    cache_dir: str | None,
+):
+    return collect_requirements(
+        requirements=[
+            *options.requirements,
+            *grouped_requirements,
+            *script_requirements,
+        ],
+        requirement_files=options.requirement_files,
+        constraint_files=options.constraint_files,
+        editables=options.editables,
+        requirement_config_settings={
+            requirement: dict(config_settings) for requirement in options.requirements
+        },
+        editable_config_settings={
+            editable: dict(config_settings) for editable in options.editables
+        },
+        find_links=[*config.find_links, *options.find_links],
+        index_url=options.index_url if explicit_index_url else config.index_url,
+        extra_index_urls=[*config.extra_index_urls, *options.extra_index_url],
+        no_index=options.no_index or config.no_index,
+        format_control=format_control,
+        release_control_args=release_control,
+        require_hashes=options.require_hashes,
+        cert=options.cert,
+        client_cert=options.client_cert,
+        no_input=options.no_input,
+        keyring_provider=options.keyring_provider,
+        proxy=options.proxy,
+        cache_dir=cache_dir,
+    )
+
+
+def validate_option_combinations(options: argparse.Namespace) -> None:
+    if options.user and options.target:
+        raise ValueError("Can not combine '--user' and '--target'")
+    if options.user and options.prefix:
+        raise ValueError("Can not combine '--user' and '--prefix'")
+    if (
+        not options.target
+        and not options.dry_run
+        and (options.platform or options.python_version or options.abi)
+    ):
+        raise ValueError(
+            "Can not use any platform or abi specific options unless installing via '--target'",
+        )
+    if options.pre and (options.all_releases or options.only_final):
+        raise ValueError("--pre cannot be used with --all-releases or --only-final")
+
+
+def python_version(options: argparse.Namespace) -> str:
+    if not options.python_version:
+        return CURRENT_PYTHON_VERSION_FULL
+    value = str(options.python_version)
+    if "." in value:
+        parts = value.split(".")
+        return f"{parts[0]}.{parts[1]}.0" if len(parts) == 2 else value
+    if len(value) == 1:
+        return f"{value}.0.0"
+    if len(value) == 2:
+        return f"{value[0]}.{value[1]}.0"
+    return value
+
+
+def target_context(options: argparse.Namespace) -> TargetContext:
+    return TargetContext(
+        platforms=tuple(options.platform),
+        implementation=options.implementation,
+        python_version=(
+            str(options.python_version)
+            if options.python_version
+            else CURRENT_PYTHON_VERSION_DIGITS
+        ),
+        abis=tuple(options.abi),
+    )
+
+
+def prepare_install(args: list[str], parser: Any) -> PreparedInstall:
     normalized_args = normalize_install_args(args, INDEX_URL_OPTIONS)
-
-    parser = create_parser()
-
     options = parser.parse_args(normalized_args)
 
     if len(options.requirements_from_scripts) > 1:
@@ -96,7 +382,9 @@ def run_install(args: list[str]) -> int:
     if options.no_input:
         os.environ["GIT_TERMINAL_PROMPT"] = "0"
 
-    if any(os.path.basename(value) == "requirements.txt" for value in options.requirements):
+    if any(
+        os.path.basename(value) == "requirements.txt" for value in options.requirements
+    ):
         print(
             "Hint: It looks like you are trying to install a requirements file. "
             "Use the -r option to install the file, or provide a package literally "
@@ -130,12 +418,10 @@ def run_install(args: list[str]) -> int:
 
     if parsed_group_items:
         grouped_requirements = parse_dependency_groups(parsed_group_items)
-
     else:
         grouped_requirements = []
 
     script_requirements: list[str] = []
-
     if options.requirements_from_scripts:
         script_requirements = requirements_from_script(
             options.requirements_from_scripts[0],
@@ -157,7 +443,6 @@ def run_install(args: list[str]) -> int:
                     "Can not perform a '--user' install. User site-packages are "
                     "not visible in this virtualenv.",
                 )
-
             raise InstallationError(
                 "Can not perform a '--user' install. User site-packages are "
                 "disabled for this Python.",
@@ -166,28 +451,25 @@ def run_install(args: list[str]) -> int:
         if running_under_virtualenv():
             for raw_requirement in options.requirements:
                 item = install_req_from_line(raw_requirement)
-
                 if item.req is None:
                     continue
-
-                installed = InstalledDistributionStore().find(item.req.name)
-
+                installed_dist = InstalledDistributionStore().find(item.req.name)
                 if (
-                    installed is not None
+                    installed_dist is not None
                     and not options.ignore_installed
                     and os.path.commonpath(
                         (
-                            os.path.abspath(installed.location),
+                            os.path.abspath(installed_dist.location),
                             os.path.abspath(user_lib_path()),
                         ),
                     )
                     != os.path.abspath(user_lib_path())
-                    and installed.in_site_packages
+                    and installed_dist.in_site_packages
                 ):
                     raise InstallationError(
                         "Will not install to the user site because it will lack "
-                        f"sys.path precedence to {installed.raw_name} in "
-                        f"{installed.location}",
+                        f"sys.path precedence to {installed_dist.raw_name} in "
+                        f"{installed_dist.location}",
                     )
 
     if (
@@ -248,48 +530,546 @@ def run_install(args: list[str]) -> int:
             'You must give at least one requirement to install (see "cpip help install")',
         )
 
-    installed: list[str] = []
+    return PreparedInstall(
+        options=options,
+        bundle=bundle,
+        cache_dir=cache_dir,
+        quiet=quiet,
+        release_control=parsed_release_control_args,
+    )
 
-    installed_canonical_names: list[str] = []
 
-    summary_root_names: set[str] = set()
+# ==============================================================================
+# Planning & Provider Logic
+# ==============================================================================
 
-    newly_installed_names: set[str] = set()
+def intersect_hashes(left: Hashes, right: Hashes) -> Hashes:
+    return Hashes(
+        {
+            algorithm: [
+                digest
+                for digest in left.allowed_internal.get(algorithm, [])
+                if digest in right.allowed_internal.get(algorithm, [])
+            ]
+            for algorithm in left.allowed_internal.keys()
+            & right.allowed_internal.keys()
+        },
+    )
 
-    reported_satisfied: set[str] = set()
 
-    satisfied_requirements: list[str] = []
+def create_candidate_provider(
+    options: Any,
+    bundle: Any,
+    requirements: list[Any],
+    build_options: dict[str, dict[str, object]],
+    target: Any,
+    *,
+    cache_dir: str | None,
+) -> Any:
+    provider = CandidateProvider.from_options(
+        find_links=bundle.find_links,
+        index_url=bundle.index_url,
+        extra_index_urls=bundle.extra_index_urls,
+        no_index=bundle.no_index,
+        format_control=bundle.format_control,
+        build_options=build_options,
+        build_constraints=options.build_constraint_files,
+        wheel_cache_dir=cache_dir,
+        trusted_hosts=options.trusted_hosts,
+        session=bundle.session,
+        dry_run=options.dry_run,
+        build_isolation=not options.no_build_isolation,
+        locked_links={name: Link(url) for name, url in bundle.locked_links.items()},
+        target=target,
+        uploaded_prior_to=(
+            datetime.datetime.fromisoformat(
+                options.uploaded_prior_to.replace("Z", "+00:00"),
+            )
+            if options.uploaded_prior_to
+            else None
+        ),
+    )
 
-    report_items: list[Any] = []
+    provider.release_control = bundle.release_control
+    provider.hashes_by_name = {}
 
-    def add_report_item(**fields: Any) -> None:
-        if not options.report:
-            return
+    for item in requirements:
+        if item.req is None or not item.hash_options:
+            continue
+        hashes = item.hashes()
+        previous = provider.hashes_by_name.get(item.req.canonical_name)
+        provider.hashes_by_name[item.req.canonical_name] = (
+            hashes if previous is None else intersect_hashes(previous, hashes)
+        )
 
-        report_items.append(ReportItem(**fields))
+    for raw, hashes in (
+        *bundle.constraint_hashes.items(),
+        *bundle.requirement_hashes.items(),
+    ):
+        name = parse_requirement(raw).canonical_name
+        current = provider.hashes_by_name.get(name)
+        provider.hashes_by_name[name] = (
+            Hashes(hashes)
+            if current is None
+            else intersect_hashes(current, Hashes(hashes))
+        )
 
+    return provider
+
+
+def cached_remote_plan_key(
+    options: Any,
+    bundle: Any,
+    requirements: list[Any],
+    target: Any,
+) -> str | None:
+    if (
+        options.no_cache_dir
+        or options.target is None
+        or not options.ignore_installed
+        or not options.no_compile
+        or options.dry_run
+        or options.report
+        or options.user
+        or options.root is not None
+        or options.prefix is not None
+        or options.no_deps
+        or options.upgrade
+        or options.pre
+        or options.require_hashes
+        or options.ignore_requires_python
+        or options.platform
+        or options.implementation
+        or options.python_version
+        or options.abi
+        or options.uploaded_prior_to
+        or options.groups
+        or options.requirements_from_scripts
+        or options.constraint_files
+        or options.build_constraint_files
+        or options.config_settings
+        or options.no_binary
+        or options.only_binary
+        or options.all_releases
+        or options.only_final
+        or bundle.no_index
+        or bundle.find_links
+        or bundle.extra_index_urls
+        or bundle.constraints
+        or bundle.editables
+        or bundle.require_hashes
+        or bundle.locked_links
+        or bundle.requirement_hashes
+        or bundle.constraint_hashes
+        or bundle.format_control.no_binary
+        or bundle.format_control.only_binary
+        or bundle.release_control.all_releases
+        or bundle.release_control.only_final
+    ):
+        return None
+
+    context = (
+        "remote-exact-v1",
+        bundle.index_url,
+        tuple(bundle.extra_index_urls),
+        tuple(target.platforms),
+        target.implementation,
+        target.python_version,
+        tuple(target.abis),
+        options.upgrade_strategy,
+        bool(options.force_reinstall),
+    )
+
+    return exact_install_plan_key(tuple(requirements), context)
+
+
+# ==============================================================================
+# Executing Installation
+# ==============================================================================
+
+def target_library_is_empty(target: InstallTarget) -> bool:
+    seen: set[str] = set()
+    for root in target.library_roots:
+        if root in seen:
+            continue
+        seen.add(root)
+        try:
+            with os.scandir(root) as entries:
+                if next(entries, None) is not None:
+                    return False
+        except FileNotFoundError:
+            continue
+        except NotADirectoryError:
+            return False
+    return True
+
+
+def install_candidate(
+    candidate: Any,
+    options: Any,
+    *,
+    requested: bool,
+    reinstall: bool,
+    direct_url: Any = None,
+) -> None:
+    target = InstallTarget.from_options(
+        candidate.canonical_name,
+        target=options.target,
+        user=options.user,
+        root=options.root,
+        prefix=options.prefix or target_prefix(),
+    )
+    WheelInstaller(
+        target,
+        pycompile=not options.no_compile,
+        force=reinstall or (direct_url is not None and direct_url.is_local_editable()),
+        preserve_existing=options.ignore_installed,
+    ).install(candidate.path, requested=requested, direct_url=direct_url)
+
+
+def warn_about_install_conflicts(changed_names: set[str]) -> None:
+    distributions = InstalledDistributionStore().iter(skip=CPIP_DISTRIBUTION_NAMES)
+    distributions_by_name = {dist.canonical_name: dist for dist in distributions}
+    dependencies_by_name = installed_dependencies_by_name(distributions)
+
+    dependents_by_name: dict[str, set[str]] = {}
+    for name, dependencies in dependencies_by_name.items():
+        for requirement in dependencies:
+            dependents_by_name.setdefault(
+                canonicalize_name(requirement.name),
+                set(),
+            ).add(name)
+
+    package_set = package_set_from_dependencies(distributions, dependencies_by_name)
+    affected = set(changed_names)
+    pending = list(changed_names)
+
+    while pending:
+        dependency = pending.pop()
+        for dependent in dependents_by_name.get(dependency, ()):
+            if dependent not in affected:
+                affected.add(dependent)
+                pending.append(dependent)
+
+    missing, conflicting = check_package_set(package_set)
+
+    for name, requirements in sorted(missing.items()):
+        if name not in affected:
+            continue
+        distribution = distributions_by_name[name]
+        for _, requirement in requirements:
+            print(
+                f"{distribution.canonical_name} {distribution.version} requires "
+                f"{requirement.name}, which is not installed.",
+                file=sys.stderr,
+            )
+
+    for name, requirements in sorted(conflicting.items()):
+        if name not in affected:
+            continue
+        distribution = distributions_by_name[name]
+        for dependency_name, version, requirement in requirements:
+            print(
+                f"{distribution.canonical_name} {distribution.version} requires "
+                f"{requirement}, but you have {dependency_name} {version} which is incompatible.",
+                file=sys.stderr,
+            )
+
+
+def report_nothing_installed(
+    execution: Any,
+    outcome: InstallOutcome,
+) -> None:
+    for requirement in outcome.satisfied_requirements:
+        if requirement not in outcome.reported_satisfied and not execution.quiet:
+            print(f"Requirement already satisfied: {requirement}")
+
+    for requirement in execution.bundle.requirements:
+        item = install_req_from_line(requirement)
+        requirement_name = item.req.name if item.req is not None else requirement
+        if (
+            find_installed(requirement_name) is not None
+            and requirement not in outcome.reported_satisfied
+            and not execution.quiet
+        ):
+            print(f"Requirement already satisfied: {requirement}", file=sys.stdout)
+
+
+def report_install_summary(
+    execution: Any,
+    outcome: InstallOutcome,
+    plan: Any,
+) -> None:
+    for requirement in outcome.satisfied_requirements:
+        if requirement not in outcome.reported_satisfied and not execution.quiet:
+            print(f"Requirement already satisfied: {requirement}")
+
+    if execution.options.report:
+        session = execution.bundle.session
+        write_install_report(
+            execution.options.report,
+            outcome.report_items,
+            network_stats=(
+                session.network_stats.as_dict()
+                if session is not None and session.network_stats is not None
+                else None
+            ),
+            resolution_metrics=dict(plan.metrics) if plan is not None else None,
+        )
+
+    if (
+        outcome.installed
+        and not execution.options.dry_run
+        and not execution.options.no_deps
+        and not execution.options.no_warn_conflicts
+        and execution.options.target is None
+    ):
+        warn_about_install_conflicts(outcome.newly_installed_names)
+
+    if outcome.installed and execution.options.dry_run and not execution.quiet:
+        print(f"Would install {' '.join(outcome.installed)}")
+    elif outcome.installed and not execution.quiet:
+        locked_order = {
+            name: index for index, name in enumerate(execution.bundle.locked_links)
+        }
+        outcome.installed = [
+            value
+            for _, value in sorted(
+                zip(outcome.installed_canonical_names, outcome.installed, strict=True),
+                key=lambda item: (
+                    0
+                    if item[0] in locked_order
+                    else item[0] not in outcome.summary_root_names,
+                    locked_order.get(item[0], len(locked_order)),
+                ),
+            )
+        ]
+        print(f"Successfully installed {' '.join(outcome.installed)}")
+        for item in outcome.installed:
+            print(f"installed {item}")
+
+
+# ==============================================================================
+# Editable Handling
+# ==============================================================================
+
+def install_editables(
+    execution: Any,
+    outcome: InstallOutcome,
+    *,
+    reinstall: bool,
+    build_options: dict[str, dict[str, object]],
+    preinstalled_editables: set[str],
+    preinstalled_editable_reports: dict[str, tuple[Any, Any]],
+) -> None:
+    for editable in execution.bundle.editables:
+        if editable in preinstalled_editables:
+            candidate, direct_url = preinstalled_editable_reports[editable]
+            outcome.add_report_item(
+                candidate_name=candidate.name,
+                candidate_version=str(candidate.version),
+                requested=True,
+                source_url=direct_url.url if direct_url is not None else None,
+                source_hashes=None,
+                yanked=False,
+                is_direct=direct_url is not None,
+                editable=True,
+            )
+            continue
+
+        source_path, direct_url, metadata = prepare_editable_source(editable)
+
+        built = build_editable_from_source(
+            source_path,
+            config_settings=execution.bundle.editable_config_settings.get(editable),
+            build_constraints=execution.options.build_constraint_files,
+            build_isolation=not execution.options.no_build_isolation,
+        )
+
+        built_candidate = wheel_candidate(built)
+        editable_requirement = install_req_from_line(editable)
+
+        for raw_constraint in execution.bundle.constraints:
+            constraint = parse_requirement(raw_constraint)
+            if constraint.canonical_name != built_candidate.canonical_name:
+                continue
+            if constraint.url is None and not constraint.is_satisfied_by(
+                built_candidate.version,
+                allow_prereleases=execution.options.pre,
+            ):
+                raise InstallationError(
+                    f"Cannot install {built_candidate.name} "
+                    f"{built_candidate.version} because it does not satisfy "
+                    f"the constraint {raw_constraint}",
+                )
+
+        editable_dependencies = [
+            dependency
+            for dependency in built_candidate.dependencies
+            if marker_applies(
+                parse_requirement(str(dependency)).marker,
+                extras=(
+                    editable_requirement.req.extras
+                    if editable_requirement.req is not None
+                    else ()
+                ),
+            )
+        ]
+
+        if metadata is not None and editable_requirement.req is not None:
+            editable_dependencies = [
+                dependency
+                for dependency in metadata.dependencies
+                if marker_applies(
+                    parse_requirement(str(dependency)).marker,
+                    extras=editable_requirement.req.extras,
+                )
+            ]
+            for extra in editable_requirement.req.extras:
+                editable_dependencies.extend(
+                    metadata.optional_dependencies.get(extra, ()),
+                )
+
+        if not execution.options.no_deps and editable_dependencies:
+            dependency_plan = ResolutionEngine(
+                provider=create_candidate_provider(
+                    execution.options,
+                    execution.bundle,
+                    execution.requirements,
+                    build_options,
+                    execution.target,
+                    cache_dir=execution.cache_dir,
+                ),
+                no_deps=False,
+                upgrade=execution.options.upgrade
+                and execution.options.upgrade_strategy == "eager",
+                upgrade_strategy=execution.options.upgrade_strategy,
+                ignore_installed=reinstall,
+                constraints=execution.bundle.constraints,
+                allow_prereleases=execution.options.pre,
+                require_hashes=execution.bundle.require_hashes,
+                compute_source_hashes=(
+                    bool(execution.options.report)
+                    or execution.bundle.require_hashes
+                    or bool(execution.bundle.requirement_hashes)
+                ),
+                ignore_requires_python=execution.options.ignore_requires_python,
+                python_version=(
+                    execution.python_version
+                    if execution.options.python_version
+                    else None
+                ),
+            ).resolve(
+                [
+                    install_req_from_line(str(requirement))
+                    for requirement in editable_dependencies
+                ],
+            )
+
+            for candidate in dependency_plan.candidates:
+                outcome.add_report_item(
+                    candidate_name=candidate.name,
+                    candidate_version=str(candidate.version),
+                    requested=False,
+                    source_url=candidate.source_url,
+                    source_hashes=(
+                        candidate.source_hashes if execution.options.report else None
+                    ),
+                    yanked=candidate.yanked_reason is not None,
+                )
+
+                if not execution.options.dry_run:
+                    existing = find_installed(candidate.name)
+                    if (
+                        execution.options.upgrade
+                        and existing is not None
+                        and existing.version == candidate.version
+                    ):
+                        if not execution.quiet:
+                            print(
+                                f"Requirement already satisfied: {candidate.name}=={candidate.version}"
+                            )
+                        continue
+                    install_candidate(
+                        candidate,
+                        execution.options,
+                        requested=False,
+                        reinstall=reinstall,
+                    )
+
+                outcome.record_installed(
+                    f"{candidate.name}-{candidate.version}", candidate.canonical_name
+                )
+
+        if execution.options.dry_run:
+            candidate = wheel_candidate(built)
+        else:
+            candidate = wheel_candidate(built)
+            install_candidate(
+                candidate,
+                execution.options,
+                requested=True,
+                reinstall=reinstall,
+                direct_url=direct_url,
+            )
+
+        outcome.record_installed(
+            f"{candidate.name}-{candidate.version}", candidate.canonical_name
+        )
+        outcome.newly_installed_names.add(candidate.canonical_name)
+        outcome.add_report_item(
+            candidate_name=candidate.name,
+            candidate_version=str(candidate.version),
+            requested=True,
+            source_url=direct_url.url if direct_url is not None else None,
+            source_hashes=None,
+            yanked=False,
+            is_direct=direct_url is not None,
+            requested_extras=(
+                tuple(sorted(editable_requirement.req.extras))
+                if editable_requirement.req is not None
+                else ()
+            ),
+            requires_dist=tuple(
+                str(dependency) for dependency in editable_dependencies
+            ),
+            editable=True,
+        )
+
+
+# ==============================================================================
+# Main Command Runner
+# ==============================================================================
+
+def run_install(args: list[str]) -> int:
+    prepared = prepare_install(args, create_parser())
+
+    options = prepared.options
+    bundle = prepared.bundle
+    cache_dir = prepared.cache_dir
+    quiet = prepared.quiet
+    parsed_release_control_args = prepared.release_control
+
+    outcome = InstallOutcome(report_enabled=bool(options.report))
     reinstall = options.force_reinstall or options.ignore_installed
 
     requested_roots: set[str] = set()
-
     requested_names: dict[str, str] = {}
 
     for requirement in bundle.requirements:
         item = install_req_from_line(requirement)
-
         name = item.req.name if item.req is not None else requirement
-
         canonical_name = canonicalize_name(name)
-
         requested_roots.add(canonical_name)
-
         requested_names.setdefault(canonical_name, name)
 
     resolved_python_version = python_version(options)
     target = target_context(options)
 
     requirements = (
-        bundle_install_requirements(bundle, target=target) if bundle.requirements else []
+        bundle_install_requirements(bundle, target=target)
+        if bundle.requirements
+        else []
     )
 
     execution = InstallExecutionContext(
@@ -319,7 +1099,7 @@ def run_install(args: list[str]) -> int:
                     allow_prereleases=options.pre,
                 )
             ):
-                satisfied_requirements.append(requirement.req.raw)
+                outcome.satisfied_requirements.append(requirement.req.raw)
             else:
                 unresolved_requirements.append(requirement)
         requirements = unresolved_requirements
@@ -350,7 +1130,6 @@ def run_install(args: list[str]) -> int:
         for requirement in requirements:
             if requirement.req is None:
                 continue
-
             print(
                 f"Getting page {bundle.index_url.rstrip('/')}/{requirement.req.canonical_name}",
             )
@@ -361,7 +1140,6 @@ def run_install(args: list[str]) -> int:
                 print(f"Fetching project page and analyzing links: {find_link}")
 
     preinstalled_editables: set[str] = set()
-
     preinstalled_editable_reports: dict[str, tuple[Any, Any]] = {}
 
     if bundle.editables:
@@ -370,8 +1148,11 @@ def run_install(args: list[str]) -> int:
                 editable,
                 build_isolation=not options.no_build_isolation,
             )
-
-            if metadata is None or metadata.dependencies or metadata.optional_dependencies:
+            if (
+                metadata is None
+                or metadata.dependencies
+                or metadata.optional_dependencies
+            ):
                 continue
 
             built = build_editable_from_source(
@@ -380,12 +1161,10 @@ def run_install(args: list[str]) -> int:
                 build_constraints=options.build_constraint_files,
                 build_isolation=not options.no_build_isolation,
             )
-
             candidate = wheel_candidate(built)
 
             for raw_constraint in bundle.constraints:
                 constraint = parse_requirement(raw_constraint)
-
                 if (
                     constraint.canonical_name == candidate.canonical_name
                     and constraint.url is None
@@ -408,14 +1187,11 @@ def run_install(args: list[str]) -> int:
                     direct_url=direct_url,
                 )
 
-            installed.append(f"{candidate.name}-{candidate.version}")
-
-            installed_canonical_names.append(candidate.canonical_name)
-
-            newly_installed_names.add(candidate.canonical_name)
-
+            outcome.record_installed(
+                f"{candidate.name}-{candidate.version}", candidate.canonical_name
+            )
+            outcome.newly_installed_names.add(candidate.canonical_name)
             preinstalled_editables.add(editable)
-
             preinstalled_editable_reports[editable] = (candidate, direct_url)
 
     if bundle.find_links and not quiet:
@@ -427,7 +1203,9 @@ def run_install(args: list[str]) -> int:
             constraint_hashes = getattr(bundle, "constraint_hashes", {}).get(raw, {})
             digest_count = len(hashes.get("sha256", ()))
             if constraint_hashes:
-                digest_count = min(digest_count, len(constraint_hashes.get("sha256", ())))
+                digest_count = min(
+                    digest_count, len(constraint_hashes.get("sha256", ()))
+                )
             discarded = max(0, 2 - digest_count)
             suffix = "no candidates" if discarded == 0 else f"{discarded} non-matches"
             print(
@@ -435,36 +1213,26 @@ def run_install(args: list[str]) -> int:
                 f"({digest_count} matches, 0 no digest): discarding {suffix}",
             )
 
-    plan: CachedInstallPlan | ResolutionResult | None = None
+    plan: ResolutionResult | None = None
 
     if execution.bundle.requirements:
-        plan_cache_key = _cached_remote_plan_key(
+        plan_cache_key = cached_remote_plan_key(
             execution.options,
             execution.bundle,
             execution.requirements,
             execution.target,
         )
 
-        mutable_plan: CachedInstallPlan | ResolutionResult | None = None
-
         if plan_cache_key is not None and execution.cache_dir is not None:
-            mutable_plan = load_cached_install_plan(execution.cache_dir, plan_cache_key)
+            plan = load_cached_install_plan(execution.cache_dir, plan_cache_key)
 
-        if mutable_plan is None:
-            mutable_plan = _try_local_wheelhouse_plan(
-                execution.options,
-                execution.bundle,
-                execution.requirements,
-                cache_dir=execution.cache_dir,
-            )
+        resolved_fresh = plan is None
 
-        fresh_plan: ResolutionResult | None = None
-
-        if mutable_plan is None:
+        if plan is None:
             try:
                 if os.environ.get("CPIP_RESOLVER_DEBUG") == "1":
                     print("Reporter.starting()")
-                fresh_plan = ResolutionEngine(
+                plan = ResolutionEngine(
                     provider=get_provider(),
                     no_deps=execution.options.no_deps,
                     upgrade=execution.options.upgrade,
@@ -480,7 +1248,9 @@ def run_install(args: list[str]) -> int:
                     ),
                     ignore_requires_python=execution.options.ignore_requires_python,
                     python_version=(
-                        execution.python_version if execution.options.python_version else None
+                        execution.python_version
+                        if execution.options.python_version
+                        else None
                     ),
                 ).resolve(execution.requirements)
 
@@ -498,11 +1268,9 @@ def run_install(args: list[str]) -> int:
                     print(f"DistributionNotFound: {detail}")
                 raise DistributionNotFound(detail) from exc
 
-        plan = fresh_plan if fresh_plan is not None else mutable_plan
-
         assert plan is not None
 
-        if getattr(plan, "metrics", {}).get("nab_conflicts", 0) and not execution.quiet:
+        if plan.metrics.get("nab_conflicts", 0) and not execution.quiet:
             print("This could take a while.")
             if plan.metrics.get("nab_conflicts", 0) >= 8:
                 print("This could take a while.")
@@ -517,29 +1285,20 @@ def run_install(args: list[str]) -> int:
                         installed_dependency.version,
                         allow_prereleases=True,
                     ):
-                        print(f"Requirement already satisfied: {dependency.raw or dependency.name}")
+                        print(
+                            f"Requirement already satisfied: {dependency.raw or dependency.name}"
+                        )
 
         unique_candidates: dict[str, Any] = {}
-
         for candidate in plan.candidates:
             unique_candidates.setdefault(candidate.canonical_name, candidate)
+        plan = replace(plan, candidates=tuple(unique_candidates.values()))
 
-        if fresh_plan is not None:
-            fresh_plan = replace(
-                fresh_plan,
-                candidates=tuple(unique_candidates.values()),
-            )
-
-            plan = fresh_plan
-
-        else:
-            assert mutable_plan is not None
-
-            mutable_plan.candidates = list(unique_candidates.values())
-
-            plan = mutable_plan
-
-        if options.upgrade and options.upgrade_strategy == "only-if-needed" and not reinstall:
+        if (
+            options.upgrade
+            and options.upgrade_strategy == "only-if-needed"
+            and not reinstall
+        ):
             needed_versions = {
                 dependency.canonical_name: dependency
                 for parent in plan.candidates
@@ -554,17 +1313,18 @@ def run_install(args: list[str]) -> int:
                     or (
                         candidate.canonical_name not in requested_roots
                         and dependency is not None
-                        and dependency.is_satisfied_by(existing.version, allow_prereleases=True)
+                        and dependency.is_satisfied_by(
+                            existing.version, allow_prereleases=True
+                        )
                     )
                 ):
                     if not quiet:
-                        print(f"Requirement already satisfied: {candidate.name}=={candidate.version}")
+                        print(
+                            f"Requirement already satisfied: {candidate.name}=={candidate.version}"
+                        )
                 else:
                     retained.append(candidate)
-            if fresh_plan is not None:
-                plan = fresh_plan = replace(fresh_plan, candidates=tuple(retained))
-            else:
-                plan.candidates = retained
+            plan = replace(plan, candidates=tuple(retained))
 
         if plan.candidates and (
             not execution.options.dry_run or bool(execution.bundle.requirement_hashes)
@@ -573,10 +1333,17 @@ def run_install(args: list[str]) -> int:
                 for candidate in plan.candidates:
                     expected = {}
                     for raw, hashes in execution.bundle.requirement_hashes.items():
-                        if canonicalize_name(raw.split("==", 1)[0].strip()) == candidate.canonical_name:
+                        if (
+                            canonicalize_name(raw.split("==", 1)[0].strip())
+                            == candidate.canonical_name
+                        ):
                             expected = hashes
                             break
-                    if expected and candidate.source_url and candidate.source_url.startswith("file:"):
+                    if (
+                        expected
+                        and candidate.source_url
+                        and candidate.source_url.startswith("file:")
+                    ):
                         path = url_to_path(candidate.source_url)
                         with open(path, "rb") as artifact:
                             actual = hashlib.sha256(artifact.read()).hexdigest()
@@ -595,21 +1362,7 @@ def run_install(args: list[str]) -> int:
                 execution.cache_dir,
                 prepare_cached_wheel,
             )
-
-            if fresh_plan is not None:
-                fresh_plan = replace(
-                    fresh_plan,
-                    candidates=tuple(materialized_candidates),
-                )
-
-                plan = fresh_plan
-
-            else:
-                assert mutable_plan is not None
-
-                mutable_plan.candidates = materialized_candidates
-
-                plan = mutable_plan
+            plan = replace(plan, candidates=tuple(materialized_candidates))
 
         active_constraints = [
             parse_requirement(raw)
@@ -640,21 +1393,17 @@ def run_install(args: list[str]) -> int:
                     file=sys.stderr,
                 )
 
-
         for item in plan.satisfied:
             requested = item.requirement.raw or item.requirement.name
-
             if not quiet:
                 if options.upgrade:
                     print(
                         f"Requirement already satisfied: {requested} in "
                         f"{item.distribution.location}",
                     )
-
                 else:
                     print(f"Requirement already satisfied: {requested}")
-
-            reported_satisfied.add(requested)
+            outcome.reported_satisfied.add(requested)
 
         if plan.candidates and not quiet:
             display_candidates = sorted(
@@ -675,18 +1424,15 @@ def run_install(args: list[str]) -> int:
                 target=options.target,
                 user=options.user,
                 root=options.root,
-                prefix=options.prefix or target_prefix_internal(),
+                prefix=options.prefix or target_prefix(),
             )
 
             candidate_direct_urls: dict[str, Any] = {}
-
             for candidate in plan.candidates:
                 source_requirement = source_requirements_by_name.get(
                     candidate.canonical_name,
                 ) or source_requirements_by_url.get(candidate.source_url or "")
-
                 direct_url = None
-
                 if (
                     source_requirement is not None
                     and source_requirement.link is not None
@@ -694,14 +1440,11 @@ def run_install(args: list[str]) -> int:
                     and source_requirement.req.url is not None
                 ):
                     direct_url = direct_url_from_link(source_requirement.link)
-
                 candidate_direct_urls[candidate.canonical_name] = direct_url
 
             if not options.dry_run:
                 hybrid_installed = False
-
                 target_is_empty = target_library_is_empty(batch_target)
-
                 prepared_archives = all(
                     isinstance(candidate.wheel_layout, CachedWheelArchive)
                     for candidate in plan.candidates
@@ -718,7 +1461,10 @@ def run_install(args: list[str]) -> int:
                     and execution.options.prefix is None
                     and target_is_empty
                     and not prepared_archives
-                    and all(candidate.source_kind == "wheel" for candidate in plan.candidates)
+                    and all(
+                        candidate.source_kind == "wheel"
+                        for candidate in plan.candidates
+                    )
                     and not any(
                         candidate.source_url in requested_source_urls
                         for candidate in plan.candidates
@@ -756,23 +1502,19 @@ def run_install(args: list[str]) -> int:
 
                     except InstallationError as exc:
                         prefix = "Cannot install "
-
                         message = str(exc)
-
                         if message.startswith(prefix):
                             conflict_name = message[len(prefix) :].split(":", 1)[0]
-
                             for candidate in plan.candidates:
                                 if candidate.canonical_name == conflict_name:
                                     print(
                                         f"The user requested {candidate.canonical_name} "
                                         f"{candidate.version}",
                                     )
-
                         raise
 
                 if (
-                    fresh_plan is not None
+                    resolved_fresh
                     and plan_cache_key is not None
                     and execution.cache_dir is not None
                 ):
@@ -783,8 +1525,9 @@ def run_install(args: list[str]) -> int:
                         plan.graph,
                     )
 
-        plan_order = {id(candidate): index for index, candidate in enumerate(plan.candidates)}
-
+        plan_order = {
+            id(candidate): index for index, candidate in enumerate(plan.candidates)
+        }
         ordered_candidates = (
             sorted(
                 plan.candidates,
@@ -803,12 +1546,10 @@ def run_install(args: list[str]) -> int:
 
         for candidate in ordered_candidates:
             display_name = requested_names.get(candidate.canonical_name, candidate.name)
-
-            installed.append(f"{display_name}-{candidate.version}")
-
-            installed_canonical_names.append(candidate.canonical_name)
-
-            newly_installed_names.add(candidate.canonical_name)
+            outcome.record_installed(
+                f"{display_name}-{candidate.version}", candidate.canonical_name
+            )
+            outcome.newly_installed_names.add(candidate.canonical_name)
 
         report_candidates = sorted(
             plan.candidates,
@@ -823,51 +1564,40 @@ def run_install(args: list[str]) -> int:
         )
 
         provenance_by_name: dict[str, tuple[str, tuple[str, ...]]] = {}
-
         provenance_with_extras: set[str] = set()
 
         if not quiet:
             for parent in plan.candidates:
                 parent_name = requested_names.get(parent.canonical_name, parent.name)
-
                 parent_extras = tuple(
                     sorted(requested_extras_by_name.get(parent.canonical_name, ())),
                 )
-
                 for child_name in plan.graph.get(parent.canonical_name, ()):
                     if child_name in provenance_with_extras:
                         continue
-
                     provenance_by_name[child_name] = (parent_name, parent_extras)
-
                     if parent_extras:
                         provenance_with_extras.add(child_name)
 
         for candidate in report_candidates:
             if candidate.source_url in requested_source_urls:
                 requested_roots.add(candidate.canonical_name)
-
                 requested_names.setdefault(candidate.canonical_name, candidate.name)
 
             if candidate.source_url in summary_root_source_urls:
-                summary_root_names.add(candidate.canonical_name)
+                outcome.summary_root_names.add(candidate.canonical_name)
 
             if not quiet:
                 provenance_value = provenance_by_name.get(candidate.canonical_name)
-
                 provenance = None
-
                 if provenance_value is not None:
                     parent_name, parent_extras = provenance_value
-
                     provenance = (
                         f"{parent_name}[{','.join(parent_extras)}]"
                         if parent_extras
                         else parent_name
                     )
-
                 suffix = f" (from {provenance})" if provenance else ""
-
                 print(f"Processing {candidate.path}{suffix}")
 
             source_requirement = source_requirements_by_name.get(
@@ -877,13 +1607,12 @@ def run_install(args: list[str]) -> int:
             requested_extras = tuple(
                 sorted(requested_extras_by_name.get(candidate.canonical_name, ())),
             )
-
             if source_requirement is not None and source_requirement.req is not None:
                 requested_extras = tuple(
                     sorted(set(requested_extras) | set(source_requirement.req.extras)),
                 )
 
-            add_report_item(
+            outcome.add_report_item(
                 candidate_name=candidate.name,
                 candidate_version=str(candidate.version),
                 requested=candidate.canonical_name in requested_roots,
@@ -899,264 +1628,38 @@ def run_install(args: list[str]) -> int:
                     )
                 ),
                 requested_extras=requested_extras,
-                requires_dist=tuple(str(dependency) for dependency in candidate.dependencies),
-            )
-
-    for editable in execution.bundle.editables:
-        if editable in preinstalled_editables:
-            candidate, direct_url = preinstalled_editable_reports[editable]
-
-            add_report_item(
-                candidate_name=candidate.name,
-                candidate_version=str(candidate.version),
-                requested=True,
-                source_url=direct_url.url if direct_url is not None else None,
-                source_hashes=None,
-                yanked=False,
-                is_direct=direct_url is not None,
-                editable=True,
-            )
-
-            continue
-
-        source_path, direct_url, metadata = prepare_editable_source(editable)
-
-        built = build_editable_from_source(
-            source_path,
-            config_settings=execution.bundle.editable_config_settings.get(editable),
-            build_constraints=execution.options.build_constraint_files,
-            build_isolation=not execution.options.no_build_isolation,
-        )
-
-        built_candidate = wheel_candidate(built)
-
-        editable_requirement = install_req_from_line(editable)
-
-        for raw_constraint in execution.bundle.constraints:
-            constraint = parse_requirement(raw_constraint)
-
-            if constraint.canonical_name != built_candidate.canonical_name:
-                continue
-
-            if constraint.url is None and not constraint.is_satisfied_by(
-                built_candidate.version,
-                allow_prereleases=execution.options.pre,
-            ):
-                raise InstallationError(
-                    f"Cannot install {built_candidate.name} "
-                    f"{built_candidate.version} because it does not satisfy "
-                    f"the constraint {raw_constraint}",
-                )
-
-        editable_dependencies = [
-            dependency
-            for dependency in built_candidate.dependencies
-            if marker_applies(
-                parse_requirement(str(dependency)).marker,
-                extras=(
-                    editable_requirement.req.extras if editable_requirement.req is not None else ()
+                requires_dist=tuple(
+                    str(dependency) for dependency in candidate.dependencies
                 ),
             )
-        ]
 
-        if metadata is not None and editable_requirement.req is not None:
-            editable_dependencies = [
-                dependency
-                for dependency in metadata.dependencies
-                if marker_applies(
-                    parse_requirement(str(dependency)).marker,
-                    extras=editable_requirement.req.extras,
-                )
-            ]
+    install_editables(
+        execution,
+        outcome,
+        reinstall=reinstall,
+        build_options=build_options,
+        preinstalled_editables=preinstalled_editables,
+        preinstalled_editable_reports=preinstalled_editable_reports,
+    )
 
-            for extra in editable_requirement.req.extras:
-                editable_dependencies.extend(
-                    metadata.optional_dependencies.get(extra, ()),
-                )
-
-        if not execution.options.no_deps and editable_dependencies:
-            dependency_plan = ResolutionEngine(
-                provider=get_provider(),
-                no_deps=False,
-                upgrade=execution.options.upgrade and execution.options.upgrade_strategy == "eager",
-                upgrade_strategy=execution.options.upgrade_strategy,
-                ignore_installed=reinstall,
-                constraints=execution.bundle.constraints,
-                allow_prereleases=execution.options.pre,
-                require_hashes=execution.bundle.require_hashes,
-                compute_source_hashes=(
-                    bool(execution.options.report)
-                    or execution.bundle.require_hashes
-                    or bool(execution.bundle.requirement_hashes)
-                ),
-                ignore_requires_python=execution.options.ignore_requires_python,
-                python_version=(
-                    execution.python_version if execution.options.python_version else None
-                ),
-            ).resolve(
-                [install_req_from_line(str(requirement)) for requirement in editable_dependencies],
-            )
-
-            for candidate in dependency_plan.candidates:
-                add_report_item(
-                    candidate_name=candidate.name,
-                    candidate_version=str(candidate.version),
-                    requested=False,
-                    source_url=candidate.source_url,
-                    source_hashes=(candidate.source_hashes if execution.options.report else None),
-                    yanked=candidate.yanked_reason is not None,
-                )
-
-                if not execution.options.dry_run:
-                    existing = find_installed(candidate.name)
-                    if (
-                        execution.options.upgrade
-                        and existing is not None
-                        and existing.version == candidate.version
-                    ):
-                        if not execution.quiet:
-                            print(f"Requirement already satisfied: {candidate.name}=={candidate.version}")
-                        continue
-                    install_candidate(
-                        candidate,
-                        execution.options,
-                        requested=False,
-                        reinstall=reinstall,
-                    )
-
-                installed.append(f"{candidate.name}-{candidate.version}")
-
-                installed_canonical_names.append(candidate.canonical_name)
-
-        if execution.options.dry_run:
-            candidate = wheel_candidate(built)
-
-        else:
-            candidate = wheel_candidate(built)
-
-            install_candidate(
-                candidate,
-            execution.options,
-                requested=True,
-            reinstall=reinstall,
-                direct_url=direct_url,
-            )
-
-        installed.append(f"{candidate.name}-{candidate.version}")
-
-        installed_canonical_names.append(candidate.canonical_name)
-
-        newly_installed_names.add(candidate.canonical_name)
-
-        add_report_item(
-            candidate_name=candidate.name,
-            candidate_version=str(candidate.version),
-            requested=True,
-            source_url=direct_url.url if direct_url is not None else None,
-            source_hashes=None,
-            yanked=False,
-            is_direct=direct_url is not None,
-            requested_extras=(
-                tuple(sorted(editable_requirement.req.extras))
-                if editable_requirement.req is not None
-                else ()
-            ),
-            requires_dist=tuple(str(dependency) for dependency in editable_dependencies),
-            editable=True,
-        )
-
-    if not installed and execution.bundle.requirements:
-        for requirement in satisfied_requirements:
-            if requirement not in reported_satisfied and not execution.quiet:
-                print(f"Requirement already satisfied: {requirement}")
-
-        for requirement in execution.bundle.requirements:
-            item = install_req_from_line(requirement)
-
-            requirement_name = item.req.name if item.req is not None else requirement
-
-            installed_dist = find_installed(requirement_name)
-
-            if (
-                installed_dist is not None
-                and requirement not in reported_satisfied
-                and not execution.quiet
-            ):
-                print(
-                    f"Requirement already satisfied: {requirement}",
-                    file=sys.stdout,
-                )
-
+    if not outcome.installed and execution.bundle.requirements:
+        report_nothing_installed(execution, outcome)
         return 0
 
-    for requirement in satisfied_requirements:
-        if requirement not in reported_satisfied and not execution.quiet:
-            print(f"Requirement already satisfied: {requirement}")
-
-    if execution.options.report:
-        write_install_report(
-            execution.options.report,
-            report_items,
-            network_stats=(
-                execution.bundle.session.network_stats.as_dict()
-                if execution.bundle.session is not None and execution.bundle.session.network_stats is not None
-                else None
-            ),
-            resolution_metrics=(
-                dict(plan.metrics) if plan is not None and hasattr(plan, "metrics") else None
-            ),
-        )
-
-    if (
-        installed
-        and not execution.options.dry_run
-        and not execution.options.no_deps
-        and not execution.options.no_warn_conflicts
-        # A target installation is isolated from the running environment.
-        # Scanning the active environment here cannot report conflicts in the
-        # target and only adds a full installed-metadata pass to the command.
-        and execution.options.target is None
-    ):
-        warn_about_install_conflicts(newly_installed_names)
-
-    if installed and execution.options.dry_run and not execution.quiet:
-        print(f"Would install {' '.join(installed)}")
-
-    elif installed and not execution.quiet:
-        locked_order = {name: index for index, name in enumerate(execution.bundle.locked_links)}
-
-        installed = [
-            value
-            for _, value in sorted(
-                zip(installed_canonical_names, installed, strict=True),
-                key=lambda item: (
-                    0 if item[0] in locked_order else item[0] not in summary_root_names,
-                    locked_order.get(item[0], len(locked_order)),
-                ),
-            )
-        ]
-
-        print(f"Successfully installed {' '.join(installed)}")
-        for item in installed:
-            print(f"installed {item}")
-
+    report_install_summary(execution, outcome, plan)
     return 0
 
 
 def create_parser() -> argparse.ArgumentParser:
     parser = ArgumentParser_internal(prog="cpip install", allow_abbrev=False)
-
     parser.add_argument("requirements", nargs="*")
-
     parser.add_argument("--group", dest="groups", action="append", default=[])
-
     parser.add_argument(
         "--requirements-from-script",
         dest="requirements_from_scripts",
         action="append",
         default=[],
     )
-
     parser.add_argument(
         "-r",
         "--requirement",
@@ -1164,7 +1667,6 @@ def create_parser() -> argparse.ArgumentParser:
         action="append",
         default=[],
     )
-
     parser.add_argument(
         "-c",
         "--constraint",
@@ -1172,14 +1674,12 @@ def create_parser() -> argparse.ArgumentParser:
         action="append",
         default=[],
     )
-
     parser.add_argument(
         "--build-constraint",
         dest="build_constraint_files",
         action="append",
         default=[],
     )
-
     parser.add_argument(
         "-e",
         "--editable",
@@ -1187,121 +1687,72 @@ def create_parser() -> argparse.ArgumentParser:
         action="append",
         default=[],
     )
-
     parser.add_argument("-f", "--find-links", action="append", default=[])
-
     parser.add_argument("-i", "--index-url")
-
     parser.add_argument("--extra-index-url", action="append", default=[])
-
     parser.add_argument(
         "--trusted-host",
         dest="trusted_hosts",
         action="append",
         default=[],
     )
-
     parser.add_argument("--cert")
-
     parser.add_argument("--client-cert")
-
     parser.add_argument("--no-input", action="store_true")
-
     parser.add_argument(
         "--keyring-provider",
         choices=("auto", "disabled", "import", "subprocess"),
         default="auto",
     )
-
     parser.add_argument("--proxy", default=None)
-
     parser.add_argument("--no-index", action="store_true")
-
     parser.add_argument("--isolated", action="store_true")
-
     parser.add_argument("--no-deps", action="store_true")
-
     parser.add_argument("--no-build-isolation", action="store_true")
-
     parser.add_argument("--use-pep517", action="store_true")
-
     parser.add_argument("--use-deprecated", action="append", default=[])
-
     parser.add_argument(
         "--use-feature",
         dest="use_features",
         action="append",
         default=[],
     )
-
     parser.add_argument("--disable-cpip-version-check", action="store_true")
-
     parser.add_argument("--compile", action="store_true")
-
     parser.add_argument("--no-compile", action="store_true")
-
     parser.add_argument("-U", "--upgrade", action="store_true")
-
     parser.add_argument(
         "--upgrade-strategy",
         choices=("only-if-needed", "eager"),
         default="only-if-needed",
     )
-
     parser.add_argument("-I", "--ignore-installed", action="store_true")
-
     parser.add_argument("--force-reinstall", action="store_true")
-
     parser.add_argument("--no-user", action="store_true")
-
     parser.add_argument("--user", action="store_true")
-
     parser.add_argument("--root")
-
     parser.add_argument("--prefix")
-
     parser.add_argument("-t", "--target")
-
     parser.add_argument("--cache-dir")
-
     parser.add_argument("--no-cache-dir", action="store_true")
-
     parser.add_argument("--no-binary", action="append", default=[])
-
     parser.add_argument("--only-binary", action="append", default=[])
-
     parser.add_argument("--platform", action="append", default=[])
-
     parser.add_argument("--implementation")
-
     parser.add_argument("--python-version")
-
     parser.add_argument("--abi", action="append", default=[])
-
     parser.add_argument("--pre", action="store_true")
-
     parser.add_argument("--all-releases", action="append", default=[])
-
     parser.add_argument("--only-final", action="append", default=[])
-
     parser.add_argument("--ignore-requires-python", action="store_true")
-
     parser.add_argument("--dry-run", action="store_true")
-
     parser.add_argument("--report")
-
     parser.add_argument("--uploaded-prior-to")
-
     parser.add_argument("--retries", type=int, default=5)
-
     parser.add_argument("-v", "--verbose", action="count", default=0)
-
     parser.add_argument("-q", "--quiet", action="count", default=0)
-
     parser.add_argument("--no-warn-script-location", action="store_true")
-
     parser.add_argument("--no-warn-conflicts", action="store_true")
-
     parser.add_argument(
         "--config-settings",
         "--config-setting",
@@ -1309,7 +1760,5 @@ def create_parser() -> argparse.ArgumentParser:
         action="append",
         default=[],
     )
-
     parser.add_argument("--require-hashes", action="store_true")
-
     return parser

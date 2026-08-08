@@ -12,7 +12,7 @@ from cpip.build.cache import WheelCache
 from cpip.build.metadata import MetadataDistribution
 from cpip.build.wheels import build_wheel_pep517
 from cpip.core.errors import InvalidWheelFilename, UnsupportedWheel
-from cpip.core.filesystem import ensure_dir
+from cpip.core.utils import ensure_dir
 from cpip.core.hashes import hash_file
 from cpip.core.packaging import (
     InvalidVersion,

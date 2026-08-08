@@ -241,7 +241,9 @@ class CandidateProvider:
         normalized_find_links = list(find_links)
 
         normalized_index_urls = (
-            [url for url in (index_url, *extra_index_urls) if url] if not no_index else []
+            [url for url in (index_url, *extra_index_urls) if url]
+            if not no_index
+            else []
         )
 
         sources: list[PackageSource] = []
@@ -256,7 +258,8 @@ class CandidateProvider:
             )
 
         sources.extend(
-            SimpleIndexSource(url, tuple(trusted_hosts), session) for url in normalized_index_urls
+            SimpleIndexSource(url, tuple(trusted_hosts), session)
+            for url in normalized_index_urls
         )
 
         return cls(
@@ -270,7 +273,9 @@ class CandidateProvider:
             target=target,
             build_options=build_options,
             build_constraints=build_constraints,
-            wheel_cache_dir=os.fspath(wheel_cache_dir) if wheel_cache_dir is not None else None,
+            wheel_cache_dir=os.fspath(wheel_cache_dir)
+            if wheel_cache_dir is not None
+            else None,
             trusted_hosts=tuple(trusted_hosts),
             build_isolation=build_isolation,
             dry_run=dry_run,
@@ -294,7 +299,9 @@ class CandidateProvider:
                     except ValueError:
                         pass
                 link = Link.from_url(url, source_url=None)
-                if link.kind is ArtifactKind.UNKNOWN and url.startswith(("http://", "https://")):
+                if link.kind is ArtifactKind.UNKNOWN and url.startswith(
+                    ("http://", "https://")
+                ):
                     # Some archive endpoints (notably GitHub's /tarball/
                     # URLs) omit the archive suffix.  The downloader can
                     # determine the real filename from the response, but
@@ -415,7 +422,9 @@ class CandidateProvider:
                 if isinstance(parsed, InstallationCandidate):
                     grouped.setdefault(parsed.canonical_name, []).append(link)
 
-            self.find_links_by_name_cache = {name: tuple(links) for name, links in grouped.items()}
+            self.find_links_by_name_cache = {
+                name: tuple(links) for name, links in grouped.items()
+            }
 
         links = list(self.find_links_by_name_cache.get(requirement.canonical_name, ()))
 
@@ -915,7 +924,13 @@ class CandidateProvider:
 
             result.extend(candidates)
 
-        for source_url, generation, choice_target, allow_binary, allow_source in dirty_choices:
+        for (
+            source_url,
+            generation,
+            choice_target,
+            allow_binary,
+            allow_source,
+        ) in dirty_choices:
             choices = self.catalog_choice_cache[
                 (
                     source_url,
@@ -989,7 +1004,9 @@ class CandidateProvider:
         """Fetch configured index pages concurrently, preserving source order."""
 
         if len(self.index_sources) <= 1 or self.session is None:
-            return tuple(source.collect_links(requirement) for source in self.index_sources)
+            return tuple(
+                source.collect_links(requirement) for source in self.index_sources
+            )
 
         if self.index_executor is None:
             self.index_executor = ThreadPoolExecutor(
@@ -1078,7 +1095,11 @@ class CandidateProvider:
 
             catalog = self.package_catalog_cache.get(catalog_key)
 
-        if requirement.url is None and exact_version is not None and catalog is not None:
+        if (
+            requirement.url is None
+            and exact_version is not None
+            and catalog is not None
+        ):
             if catalog.records_by_version is not None:
                 links = ()
 
@@ -1105,7 +1126,9 @@ class CandidateProvider:
 
             if allowed_versions is not None:
                 matching_versions = tuple(
-                    summary for summary in matching_versions if summary.version in allowed_versions
+                    summary
+                    for summary in matching_versions
+                    if summary.version in allowed_versions
                 )
 
             if catalog.records_by_version is not None:
@@ -1213,7 +1236,9 @@ class CandidateProvider:
 
             return selection
 
-        cached_catalog_candidates = catalog is not None and catalog.records_by_version is not None
+        cached_catalog_candidates = (
+            catalog is not None and catalog.records_by_version is not None
+        )
 
         candidate_items: tuple[Link | CandidateRecord, ...] = (
             catalog_candidates if catalog_candidates is not None else tuple(links)
@@ -1225,7 +1250,10 @@ class CandidateProvider:
                 and self.uploaded_prior_to is None
                 and isinstance(item, CandidateRecord)
             ):
-                if allowed_versions is not None and item.version not in allowed_versions:
+                if (
+                    allowed_versions is not None
+                    and item.version not in allowed_versions
+                ):
                     continue
 
                 result = self.evaluate_catalog_candidate(
@@ -1462,7 +1490,10 @@ class CandidateProvider:
                 candidate
                 for candidate in accepted
                 if not candidate.link.hashes
-                or any(digest.lower() in allowed for digest in candidate.link.hashes.values())
+                or any(
+                    digest.lower() in allowed
+                    for digest in candidate.link.hashes.values()
+                )
             )
 
             if matching and len(matching) != len(accepted):
@@ -1741,14 +1772,20 @@ class CandidateProvider:
             if record_kind not in {WHEEL_RECORD, SDIST_RECORD}:
                 continue
 
-            if record[RECORD_YANKED] is not None and not self.allow_yanked and not exact_pin:
+            if (
+                record[RECORD_YANKED] is not None
+                and not self.allow_yanked
+                and not exact_pin
+            ):
                 continue
 
             is_yanked = record[RECORD_YANKED] is not None
 
             is_wheel = record_kind == WHEEL_RECORD
 
-            bucket = (2 if is_yanked else 0) + (0 if is_wheel or not self.prefer_binary else 1)
+            bucket = (2 if is_yanked else 0) + (
+                0 if is_wheel or not self.prefer_binary else 1
+            )
 
             descriptor_buckets[bucket].append(
                 (version, record, record_kind, tag_rank, source_url),
@@ -1756,7 +1793,9 @@ class CandidateProvider:
 
         if self.prefer_binary:
             descriptors = [
-                descriptor for bucket in descriptor_buckets for descriptor in reversed(bucket)
+                descriptor
+                for bucket in descriptor_buckets
+                for descriptor in reversed(bucket)
             ]
 
         else:
@@ -1774,7 +1813,9 @@ class CandidateProvider:
 
             if allow_prereleases is False:
                 descriptors = [
-                    descriptor for descriptor in descriptors if not descriptor[0].is_prerelease
+                    descriptor
+                    for descriptor in descriptors
+                    if not descriptor[0].is_prerelease
                 ]
 
             elif allow_prereleases is None:
@@ -1787,7 +1828,9 @@ class CandidateProvider:
 
                 if not explicitly_allowed:
                     stable = [
-                        descriptor for descriptor in descriptors if not descriptor[0].is_prerelease
+                        descriptor
+                        for descriptor in descriptors
+                        if not descriptor[0].is_prerelease
                     ]
 
                     if stable:
@@ -1925,7 +1968,9 @@ class CandidateProvider:
             )
 
         if allowed_versions is not None:
-            versions = tuple(version for version in versions if version in allowed_versions)
+            versions = tuple(
+                version for version in versions if version in allowed_versions
+            )
 
         supported_tags = supported_wheel_tags(self.target)
 
@@ -1940,7 +1985,9 @@ class CandidateProvider:
 
         persistent_cache = getattr(self.session, "cache", None)
 
-        descriptor_list: list[tuple[Version, tuple[object, ...], int, int | None, str]] = []
+        descriptor_list: list[
+            tuple[Version, tuple[object, ...], int, int | None, str]
+        ] = []
 
         for version in versions:
             best: tuple[Version, tuple[object, ...], int, int | None, str] | None = None
@@ -2061,7 +2108,9 @@ class CandidateProvider:
 
             if allow_prereleases is False:
                 descriptor_list = [
-                    descriptor for descriptor in descriptor_list if not descriptor[0].is_prerelease
+                    descriptor
+                    for descriptor in descriptor_list
+                    if not descriptor[0].is_prerelease
                 ]
 
             elif allow_prereleases is None:
@@ -2162,7 +2211,11 @@ class CandidateProvider:
         allowed_versions: frozenset[Version] | None = None,
     ) -> CandidateStream:
         if requirement.name.startswith(("file://", "http://", "https://")):
-            name = urllib.parse.urlsplit(requirement.name).path.rstrip("/").rsplit("/", 1)[-1]
+            name = (
+                urllib.parse.urlsplit(requirement.name)
+                .path.rstrip("/")
+                .rsplit("/", 1)[-1]
+            )
             requirement = Requirement(
                 name=name or requirement.name,
                 specifier=requirement.specifier,
@@ -2175,7 +2228,9 @@ class CandidateProvider:
             parts = urllib.parse.urlsplit(requirement.url)
             if parts.netloc == "localhost":
                 requirement = requirement.copy_with(
-                    url=urllib.parse.urlunsplit(("file", "", parts.path, parts.query, parts.fragment)),
+                    url=urllib.parse.urlunsplit(
+                        ("file", "", parts.path, parts.query, parts.fragment)
+                    ),
                 )
         lazy_records = self.lazy_catalog_records(
             requirement,
@@ -2236,15 +2291,20 @@ class CandidateProvider:
 
         if catalog is not None:
             for link in catalog.links:
-                if link.requires_python and not CandidateEvaluator.requires_python_matches(
-                    link.requires_python,
+                if (
+                    link.requires_python
+                    and not CandidateEvaluator.requires_python_matches(
+                        link.requires_python,
+                    )
                 ):
                     self.last_rejected_requires_python[requirement.canonical_name] = (
                         link.requires_python
                     )
             return catalog.summaries
 
-        future = self.prefetcher.take(cache_key) if self.prefetcher is not None else None
+        future = (
+            self.prefetcher.take(cache_key) if self.prefetcher is not None else None
+        )
 
         if future is not None:
             summaries = future.result()
@@ -2296,7 +2356,9 @@ class CandidateProvider:
             [] if cached_groups is not None and len(cached_groups) == 1 else None
         )
 
-        catalog_links = () if cached_groups is not None else self.catalog_links(requirement)
+        catalog_links = (
+            () if cached_groups is not None else self.catalog_links(requirement)
+        )
 
         if cached_groups is not None:
             parsed_versions: dict[str, Version] = {}
@@ -2338,12 +2400,18 @@ class CandidateProvider:
 
                         if isinstance(requires_python, str):
                             try:
-                                if not CandidateEvaluator.requires_python_matches(requires_python):
-                                    self.last_rejected_requires_python[requirement.canonical_name] = requires_python
+                                if not CandidateEvaluator.requires_python_matches(
+                                    requires_python
+                                ):
+                                    self.last_rejected_requires_python[
+                                        requirement.canonical_name
+                                    ] = requires_python
                                     continue
 
                             except ValueError:
-                                self.last_rejected_requires_python[requirement.canonical_name] = requires_python
+                                self.last_rejected_requires_python[
+                                    requirement.canonical_name
+                                ] = requires_python
                                 continue
 
                         has_eligible_artifact = True
@@ -2407,9 +2475,9 @@ class CandidateProvider:
                     if not CandidateEvaluator.requires_python_matches(
                         link.requires_python,
                     ):
-                        self.last_rejected_requires_python[requirement.canonical_name] = (
-                            link.requires_python
-                        )
+                        self.last_rejected_requires_python[
+                            requirement.canonical_name
+                        ] = link.requires_python
                         continue
 
                 except ValueError:
@@ -2521,7 +2589,11 @@ class CandidateProvider:
     ) -> None:
         """Fetch independent project catalogs in bounded background workers."""
 
-        if len(requirements) < 2 or self.session is None or not self.prefetch_remote_sources:
+        if (
+            len(requirements) < 2
+            or self.session is None
+            or not self.prefetch_remote_sources
+        ):
             return
 
         unique: dict[tuple[str, bool, bool], Requirement] = {}
@@ -2544,7 +2616,8 @@ class CandidateProvider:
 
             if warm is None:
                 warm = bool(self.index_sources) and all(
-                    source.has_fresh_cached_page(requirement) for source in self.index_sources
+                    source.has_fresh_cached_page(requirement)
+                    for source in self.index_sources
                 )
 
                 self.warm_catalog_cache[key] = warm

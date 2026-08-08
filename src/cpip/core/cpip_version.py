@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import importlib.metadata
 
-from cpip.core._execution_context import current_version
+from cpip.core.utils import current_version
 
 CPIP_DISTRIBUTION_NAME = "cpip"
 

@@ -38,7 +38,11 @@ class WheelArchive:
         _, _, _, _, entries, directory_size, directory_offset, _ = (
             END_OF_CENTRAL_DIRECTORY.unpack_from(tail, marker)
         )
-        if entries == 0xFFFF or directory_size == 0xFFFFFFFF or directory_offset == 0xFFFFFFFF:
+        if (
+            entries == 0xFFFF
+            or directory_size == 0xFFFFFFFF
+            or directory_offset == 0xFFFFFFFF
+        ):
             raise WheelhouseUnavailable
         self.file.seek(directory_offset)
         target_bytes = target.encode("utf-8") if target is not None else None
@@ -159,7 +163,9 @@ class WheelArchive:
             header = self.file.read(30)
             if len(header) != 30 or header[:4] != b"PK\x03\x04":
                 raise WheelhouseUnavailable
-            (_, _, _, _, _, _, _, _, _, name_size, extra_size) = LOCAL_FILE_HEADER.unpack(header)
+            (_, _, _, _, _, _, _, _, _, name_size, extra_size) = (
+                LOCAL_FILE_HEADER.unpack(header)
+            )
             self.file.seek(name_size + extra_size, 1)
             data = self.file.read(compressed_size)
             if len(data) != compressed_size:
@@ -173,7 +179,10 @@ class WheelArchive:
                     raise WheelhouseUnavailable from exc
             else:
                 raise WheelhouseUnavailable
-            if len(result) != uncompressed_size or zlib.crc32(result) & 0xFFFFFFFF != crc:
+            if (
+                len(result) != uncompressed_size
+                or zlib.crc32(result) & 0xFFFFFFFF != crc
+            ):
                 raise WheelhouseUnavailable
             if in_archive_order:
                 ordered_results.append(result)

@@ -143,7 +143,10 @@ class InstallationCandidate(CandidateRecord):
             try:
                 with os.scandir(source_dir) as entries:
                     for entry in entries:
-                        if entry.name in {"pyproject.toml", "setup.py"} and entry.is_file():
+                        if (
+                            entry.name in {"pyproject.toml", "setup.py"}
+                            and entry.is_file()
+                        ):
                             project_files.add(entry.name)
 
             except OSError:

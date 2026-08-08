@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import json
 
-from cpip.cli.parser import ArgumentParser
-from cpip.cli.requirements import load_source_config
+from cpip.cli.common import ArgumentParser
+from cpip.cli.config import load_source_config, resolve_sources
 from cpip.core.format_control import FormatControl
 from cpip.core.packaging import parse_requirement
 from cpip.index.provider import CandidateProvider
@@ -43,12 +43,12 @@ def create_parser() -> ArgumentParser:
 def run_index(args: list[str]) -> int:
     options = create_parser().parse_args(args)
 
-    config = load_source_config("index")
+    sources = resolve_sources(options, load_source_config("index"))
 
     provider = CandidateProvider.from_options(
-        index_url=options.index_url or config.index_url,
-        extra_index_urls=options.extra_index_url or config.extra_index_urls,
-        no_index=options.no_index or config.no_index,
+        index_url=sources.index_url,
+        extra_index_urls=sources.extra_index_urls,
+        no_index=sources.no_index,
         format_control=FormatControl(),
         trusted_hosts=options.trusted_hosts,
     )
@@ -58,7 +58,9 @@ def run_index(args: list[str]) -> int:
     versions = provider.available_versions(requirement)
 
     if not options.pre:
-        versions = tuple(version for version in versions if not version.version.is_prerelease)
+        versions = tuple(
+            version for version in versions if not version.version.is_prerelease
+        )
 
     available = [str(version.version) for version in reversed(versions)]
 

@@ -13,7 +13,6 @@ from cpip.core.errors import (
     InstallationError,
 )
 from cpip.core.hashes import Hashes
-from cpip.core.hashes import file_hashes
 from cpip.core.packaging import (
     Requirement as ParsedRequirement,
 )
@@ -227,7 +226,9 @@ class InstallRequirement:
 
         self.needs_more_preparation = needs_more_preparation
 
-        self.build_env = build_env if build_env is not None else NoOpBuildEnvironment_internal()
+        self.build_env = (
+            build_env if build_env is not None else NoOpBuildEnvironment_internal()
+        )
 
         self.pyproject_requires = pyproject_requires
 
@@ -313,7 +314,9 @@ class InstallRequirement:
         return bool(self.hash_options)
 
     def hashes(self, trust_internet: bool = True) -> Hashes:
-        values = {algorithm: list(digests) for algorithm, digests in self.hash_options.items()}
+        values = {
+            algorithm: list(digests) for algorithm, digests in self.hash_options.items()
+        }
 
         link = self.link if trust_internet else None
 
@@ -468,7 +471,11 @@ class InstallRequirement:
                 or (
                     self.link.url
                     if self.link is not None
-                    and (self.link.is_existing_dir or self.link.is_file or self.link.is_vcs)
+                    and (
+                        self.link.is_existing_dir
+                        or self.link.is_file
+                        or self.link.is_vcs
+                    )
                     else None
                 )
             ),
@@ -574,7 +581,9 @@ class InstallRequirement:
 
         backend = build_system.get("build-backend", "setuptools.build_meta")
 
-        setup_uses_pkg_resources = setup_contents is not None and "pkg_resources" in setup_contents
+        setup_uses_pkg_resources = (
+            setup_contents is not None and "pkg_resources" in setup_contents
+        )
 
         if (
             isinstance(backend, str)
@@ -620,7 +629,9 @@ class InstallRequirement:
             raw_backend_path = build_system.get("backend-path", [])
 
             if isinstance(raw_backend_path, list):
-                backend_path = tuple(item for item in raw_backend_path if isinstance(item, str))
+                backend_path = tuple(
+                    item for item in raw_backend_path if isinstance(item, str)
+                )
 
         if backend is None:
             backend = "setuptools.build_meta:__legacy__"
@@ -667,7 +678,11 @@ class InstallRequirement:
         self.assert_source_matches_version()
 
     def __str__(self) -> str:
-        return str(self.req) if self.req is not None else str(self.link.url if self.link else "")
+        return (
+            str(self.req)
+            if self.req is not None
+            else str(self.link.url if self.link else "")
+        )
 
     def __repr__(self) -> str:
         return f"<InstallRequirement object: {self} editable={self.editable}>"
@@ -680,7 +695,9 @@ class InstallRequirement:
             if isinstance(name, str) and not name.startswith("__")
         }
 
-        attributes = ", ".join(f"{name}={getattr(self, name)!r}" for name in sorted(names))
+        attributes = ", ".join(
+            f"{name}={getattr(self, name)!r}" for name in sorted(names)
+        )
 
         return f"<{self.__class__.__name__} object: {{{attributes}}}>"
 

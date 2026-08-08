@@ -92,7 +92,11 @@ def load_records(cache: Any, url: str) -> list[tuple[object, ...]] | None:
         return None
     groups, unparsed = catalog
     return [
-        *(record for _name, _version, artifacts, _facts in groups for _kind, record in artifacts),
+        *(
+            record
+            for _name, _version, artifacts, _facts in groups
+            for _kind, record in artifacts
+        ),
         *unparsed,
     ]
 
@@ -461,7 +465,9 @@ def valid_record(value: object) -> bool:
             or isinstance(identity[WHEEL_IDENTITY_BUILD_TAG], str)
         )
         and all(
-            isinstance(tag, tuple) and len(tag) == 3 and all(isinstance(part, str) for part in tag)
+            isinstance(tag, tuple)
+            and len(tag) == 3
+            and all(isinstance(part, str) for part in tag)
             for tag in tags
         )
     )
@@ -978,7 +984,9 @@ def link_from_record(record: object, *, source_url: str | None = None) -> Link:
     ):
         raise ValueError("invalid catalog metadata")
     hashes_value = cast("dict[str, str]", hashes) if isinstance(hashes, dict) else None
-    metadata_value = cast("dict[str, str]", metadata) if isinstance(metadata, dict) else None
+    metadata_value = (
+        cast("dict[str, str]", metadata) if isinstance(metadata, dict) else None
+    )
     parsed_upload_time: datetime.datetime | None = None
     if upload_time is not None:
         if not isinstance(upload_time, str):
@@ -992,6 +1000,8 @@ def link_from_record(record: object, *, source_url: str | None = None) -> Link:
         hashes=hashes_value or {},
         requires_python=requires_python if isinstance(requires_python, str) else None,
         yanked_reason=yanked if isinstance(yanked, str) else None,
-        metadata_file=(MetadataFile(metadata_value) if metadata_value is not None else None),
+        metadata_file=(
+            MetadataFile(metadata_value) if metadata_value is not None else None
+        ),
         upload_time=parsed_upload_time,
     )

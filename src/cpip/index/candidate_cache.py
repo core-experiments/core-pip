@@ -66,7 +66,9 @@ def cached_wheel_for_link(
     try:
         with os.scandir(entry_dir_text) as entries:
             wheels = sorted(
-                entry.path for entry in entries if entry.name.endswith(".whl") and entry.is_file()
+                entry.path
+                for entry in entries
+                if entry.name.endswith(".whl") and entry.is_file()
             )
 
     except OSError:

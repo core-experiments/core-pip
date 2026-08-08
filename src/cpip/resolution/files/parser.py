@@ -262,7 +262,11 @@ def _read_requirement_content(
         return data.decode("utf-8")
     except UnicodeDecodeError:
         getencoding = getattr(locale, "getencoding", None)
-        encoding = getencoding() if callable(getencoding) else locale.getpreferredencoding(False)
+        encoding = (
+            getencoding()
+            if callable(getencoding)
+            else locale.getpreferredencoding(False)
+        )
         logger.warning(
             "unable to decode data from %s with default encoding utf-8, "
             "falling back to locale encoding %s",
@@ -370,13 +374,17 @@ def parse_line(
                     provider.index_urls[:] = [normalize_reference(value, filename)]
                 auth = session.auth
                 if auth is not None:
-                    auth.index_urls = [] if provider is None else list(provider.index_urls)
+                    auth.index_urls = (
+                        [] if provider is None else list(provider.index_urls)
+                    )
             elif option == "--extra-index-url":
                 if provider is not None and not provider.no_index:
                     provider.index_urls.append(normalize_reference(value, filename))
                 auth = session.auth
                 if auth is not None:
-                    auth.index_urls = [] if provider is None else list(provider.index_urls)
+                    auth.index_urls = (
+                        [] if provider is None else list(provider.index_urls)
+                    )
             elif option == "--no-index":
                 if provider is not None:
                     provider.no_index = True

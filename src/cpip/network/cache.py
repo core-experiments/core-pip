@@ -10,7 +10,7 @@ from contextlib import contextmanager
 from datetime import datetime
 from typing import Any, BinaryIO
 
-from cpip.core.filesystem import ensure_dir
+from cpip.core.utils import ensure_dir
 from cpip.platform.filesystem import (
     adjacent_tmp_file,
     copy_directory_permissions,

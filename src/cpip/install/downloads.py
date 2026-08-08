@@ -98,7 +98,9 @@ class DownloadManager:
     def local_file(self, link: Link, hashes: Hashes | None = None) -> File:
         cached = self.cached_path(link, hashes)
         path = cached or link.file_path
-        if hashes and not (cached is not None and self.check_download_dir is check_download_dir):
+        if hashes and not (
+            cached is not None and self.check_download_dir is check_download_dir
+        ):
             hashes.check_against_path(path)
         return File(path)
 
@@ -118,7 +120,11 @@ class DownloadManager:
             return None
 
         assert not link.is_existing_dir
-        file = self.local_file(link, hashes) if link.is_file else self.http_file(link, hashes)
+        file = (
+            self.local_file(link, hashes)
+            if link.is_file
+            else self.http_file(link, hashes)
+        )
         if not link.is_wheel:
             ArchiveExtractor(file.path, location, file.content_type).extract()
         return file

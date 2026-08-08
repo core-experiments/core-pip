@@ -23,7 +23,9 @@ def path_to_url(path: str) -> str:
 
 
 def url_to_path(url: str) -> str:
-    assert url.startswith("file:"), f"You can only turn file: urls into filenames (not {url!r})"
+    assert url.startswith("file:"), (
+        f"You can only turn file: urls into filenames (not {url!r})"
+    )
 
     _, netloc, path, _, _ = urllib.parse.urlsplit(url)
     if not netloc or netloc == "localhost":

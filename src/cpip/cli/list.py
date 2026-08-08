@@ -11,9 +11,8 @@ from cpip.build.list import (
     format_list_json,
     select_installed_distributions,
 )
-from cpip.cli.context import target_paths
-from cpip.cli.parser import ArgumentParser
-from cpip.cli.requirements import load_source_config
+from cpip.cli.common import ArgumentParser, target_paths
+from cpip.cli.config import load_source_config, resolve_sources
 from cpip.core.format_control import FormatControl
 from cpip.core.metadata import stdlib_pkgs, user_lib_path
 from cpip.core.packaging import parse_requirement
@@ -111,13 +110,13 @@ def run_list(args: list[str]) -> int:
     latest: dict[str, tuple[Any, str]] = {}
 
     if options.outdated or options.uptodate:
-        config = load_source_config("list")
+        sources = resolve_sources(options, load_source_config("list"))
 
         provider = CandidateProvider.from_options(
-            find_links=options.find_links or config.find_links,
-            index_url=options.index_url or config.index_url,
-            extra_index_urls=options.extra_index_url or config.extra_index_urls,
-            no_index=options.no_index or config.no_index,
+            find_links=sources.find_links,
+            index_url=sources.index_url,
+            extra_index_urls=sources.extra_index_urls,
+            no_index=sources.no_index,
             format_control=FormatControl(),
         )
 
@@ -140,7 +139,9 @@ def run_list(args: list[str]) -> int:
 
             if not options.pre and allow_prereleases is not True:
                 candidates = [
-                    candidate for candidate in candidates if not candidate.version.is_prerelease
+                    candidate
+                    for candidate in candidates
+                    if not candidate.version.is_prerelease
                 ]
 
             if not candidates:
@@ -154,14 +155,16 @@ def run_list(args: list[str]) -> int:
             distributions = [
                 dist
                 for dist in distributions
-                if dist.canonical_name in latest and latest[dist.canonical_name][0] > dist.version
+                if dist.canonical_name in latest
+                and latest[dist.canonical_name][0] > dist.version
             ]
 
         else:
             distributions = [
                 dist
                 for dist in distributions
-                if dist.canonical_name in latest and latest[dist.canonical_name][0] == dist.version
+                if dist.canonical_name in latest
+                and latest[dist.canonical_name][0] == dist.version
             ]
 
     distributions.sort(key=lambda dist: dist.canonical_name)
@@ -197,12 +200,15 @@ def run_list(args: list[str]) -> int:
     rows.insert(0, header)
 
     widths = [
-        max(len(str(row[i])) if i < len(row) else 0 for row in rows) for i in range(len(rows[0]))
+        max(len(str(row[i])) if i < len(row) else 0 for row in rows)
+        for i in range(len(rows[0]))
     ]
 
     print(
         "\n".join(
-            " ".join(str(value).ljust(widths[i]) for i, value in enumerate(row)).rstrip()
+            " ".join(
+                str(value).ljust(widths[i]) for i, value in enumerate(row)
+            ).rstrip()
             for row in rows
         ),
     )

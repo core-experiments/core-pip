@@ -217,10 +217,3 @@ def get_scheme(
             converted_keys[key] = change_root(root, getattr(scheme, key))
         scheme = Scheme(**converted_keys)
     return scheme
-
-
-def get_bin_prefix() -> str:
-    # Forcing to use /usr/local/bin for standard macOS framework installs.
-    if sys.platform[:6] == "darwin" and sys.prefix[:16] == "/System/Library/":
-        return "/usr/local/bin"
-    return sysconfig.get_paths()["scripts"]

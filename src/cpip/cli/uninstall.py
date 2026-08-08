@@ -6,8 +6,7 @@ import os
 import site
 
 from cpip.build.metadata import InstalledDistributionStore
-from cpip.cli.context import target_paths
-from cpip.cli.parser import ArgumentParser
+from cpip.cli.common import ArgumentParser, target_paths
 from cpip.core.packaging import parse_requirement
 from cpip.install.requirements import RequirementInstaller
 

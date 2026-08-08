@@ -121,7 +121,9 @@ def resolve_requirement_set(
                 archive_info=ArchiveInfo(hashes=hashes),
             )
 
-        requirement.editable = bool(source_req.editable) if source_req is not None else False
+        requirement.editable = (
+            bool(source_req.editable) if source_req is not None else False
+        )
 
         requirement.is_wheel_from_cache = candidate.from_cache
 
@@ -224,7 +226,9 @@ def source_requirement_map(
         if previous is not None and previous.hash_options and requirement.hash_options:
             merged_hashes: dict[str, list[str]] = {}
 
-            for algorithm in previous.hash_options.keys() & requirement.hash_options.keys():
+            for algorithm in (
+                previous.hash_options.keys() & requirement.hash_options.keys()
+            ):
                 values = [
                     digest
                     for digest in requirement.hash_options[algorithm]

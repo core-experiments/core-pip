@@ -10,7 +10,7 @@ import stat
 import tempfile
 from collections.abc import Sequence
 
-from cpip.core.marshal_cache import load_snapshot, save_snapshot
+from cpip.core.utils import load_snapshot, save_snapshot
 from cpip.platform.clone import clone_path
 
 VERSION = 3

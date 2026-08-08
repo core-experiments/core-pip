@@ -19,7 +19,8 @@ def rewrite_shebang(path: str, executable: str | None) -> None:
     if contents.startswith(b"#!python\n"):
         with open(path, "wb") as file:
             file.write(
-                f"#!{executable or sys.executable}\n".encode() + contents[len(b"#!python\n") :],
+                f"#!{executable or sys.executable}\n".encode()
+                + contents[len(b"#!python\n") :],
             )
 
 

@@ -1,4 +1,4 @@
-"""Management commands for cpip's on-disk caches."""
+"""The ``cpip cache`` command and the manager it drives."""
 
 from __future__ import annotations
 
@@ -7,7 +7,9 @@ import fnmatch
 import os
 import sys
 
+from cpip.cli.common import ArgumentParser
 from cpip.core.appdirs import user_cache_dir
+from cpip.core.errors import CommandError
 
 
 class CacheManager:
@@ -54,15 +56,21 @@ class CacheManager:
     def list(self, pattern: str | None, *, absolute: bool) -> builtins.list[str]:
         wheels = self.wheel_files()
         if pattern:
-            expression = pattern if any(char in pattern for char in "*?[]") else f"*{pattern}*"
+            expression = (
+                pattern if any(char in pattern for char in "*?[]") else f"*{pattern}*"
+            )
             wheels = [
-                path for path in wheels if fnmatch.fnmatch(os.path.basename(path), expression)
+                path
+                for path in wheels
+                if fnmatch.fnmatch(os.path.basename(path), expression)
             ]
         if absolute:
             return wheels
         if not wheels:
             return []
-        return [f" - {os.path.basename(path)} ({os.path.dirname(path)})" for path in wheels]
+        return [
+            f" - {os.path.basename(path)} ({os.path.dirname(path)})" for path in wheels
+        ]
 
     def remove(
         self,
@@ -103,7 +111,9 @@ class CacheManager:
                 if pattern is not None
                 and fnmatch.fnmatch(
                     os.path.basename(path),
-                    pattern if any(char in pattern for char in "*?[]") else f"*{pattern}*",
+                    pattern
+                    if any(char in pattern for char in "*?[]")
+                    else f"*{pattern}*",
                 )
             ]
 
@@ -159,3 +169,88 @@ class CacheManager:
             self.wheel_dir,
             len(self.wheel_files()),
         )
+
+
+def create_parser() -> ArgumentParser:
+    parser = ArgumentParser(prog="cpip cache")
+
+    parser.add_argument("command", choices=("dir", "info", "list", "remove", "purge"))
+
+    parser.add_argument("pattern", nargs="?")
+
+    parser.add_argument("--format", choices=("human", "abspath"), default="human")
+
+    parser.add_argument("--cache-dir")
+
+    parser.add_argument("--no-cache-dir", action="store_true")
+
+    parser.add_argument("-v", "--verbose", action="count", default=0)
+
+    return parser
+
+
+def run_cache(args: list[str]) -> int:
+    parser = create_parser()
+
+    options = parser.parse_args(args)
+
+    if options.command == "dir":
+        if options.pattern or options.cache_dir or options.no_cache_dir:
+            raise CommandError("Too many arguments")
+
+        print(os.path.normcase(user_cache_dir("cpip")))
+
+        return 0
+
+    if options.no_cache_dir:
+        raise CommandError(
+            "cpip cache commands can not function since cache is disabled.",
+        )
+
+    manager = CacheManager(options.cache_dir)
+
+    if options.command == "info":
+        if options.pattern:
+            raise CommandError("Too many arguments")
+
+        http_dir, wheel_dir, wheel_count = manager.info()
+
+        print(f"Package index page cache location (cpip v23.3+): {http_dir}")
+
+        print(f"Locally built wheels location: {wheel_dir}")
+
+        print(f"Number of locally built wheels: {wheel_count}")
+
+        return 0
+
+    if options.command == "list":
+        if options.pattern and options.pattern == "":
+            parser.error("Too many arguments")
+
+        lines = manager.list(options.pattern, absolute=options.format == "abspath")
+
+        if not lines and options.format == "human":
+            print("No locally built wheels cached.")
+
+        else:
+            print("\n".join(lines))
+
+        return 0
+
+    if options.command == "remove" and options.pattern is None:
+        raise CommandError("Missing package name")
+
+    if options.command == "purge" and options.pattern is not None:
+        raise CommandError("Too many arguments")
+
+    files, bytes_removed, directories = manager.remove(
+        options.pattern,
+        purge=options.command == "purge",
+        verbose=bool(options.verbose),
+    )
+
+    print(f"Files removed: {files} ({bytes_removed} bytes)")
+
+    print(f"Directories removed: {directories}")
+
+    return 0

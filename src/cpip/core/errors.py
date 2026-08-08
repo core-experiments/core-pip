@@ -3,7 +3,8 @@ from __future__ import annotations
 
 def valid_reference(value: str) -> bool:
     return bool(value) and all(
-        part and all("a" <= character <= "z" for character in part) for part in value.split("-")
+        part and all("a" <= character <= "z" for character in part)
+        for part in value.split("-")
     )
 
 
@@ -36,7 +37,11 @@ class DiagnosticCpipError(CpipError):
         self.hint_stmt = hint_stmt
 
     def render(self, *, ascii: bool = False, color: bool = False) -> str:
-        return self.render_ascii(color=color) if ascii else self.render_unicode(color=color)
+        return (
+            self.render_ascii(color=color)
+            if ascii
+            else self.render_unicode(color=color)
+        )
 
     def render_header(self, *, color: bool) -> str:
         reference = self.reference

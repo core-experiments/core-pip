@@ -6,12 +6,14 @@ import os
 import shutil
 
 from cpip.build.build import build_wheel_from_source
-from cpip.cli.dependency_groups import parse_dependency_groups
-from cpip.cli.parser import ArgumentParser
+from cpip.cli.config import load_source_config, resolve_sources
+from cpip.cli.dependency_groups import group_items, parse_dependency_groups
+from cpip.cli.common import ArgumentParser
 from cpip.cli.requirements import (
+    apply_proxy_environment,
     bundle_install_requirements,
     collect_requirements,
-    load_source_config,
+    config_settings,
 )
 from cpip.core.errors import CommandError
 from cpip.core.format_control import FormatControl
@@ -107,18 +109,11 @@ def create_parser() -> ArgumentParser:
 def run_wheel(args: list[str]) -> int:
     options = create_parser().parse_args([arg for arg in args if arg])
 
-    config = load_source_config("wheel")
+    sources = resolve_sources(options, load_source_config("wheel"))
 
-    config_settings: dict[str, object] = {}
+    parsed_config_settings = config_settings(options.config_settings)
 
-    for value in options.config_settings:
-        key, separator, payload = value.partition("=")
-
-        config_settings[key] = payload if separator else ""
-
-    group_items = [("pyproject.toml", group) for group in options.groups]
-
-    grouped_requirements = parse_dependency_groups(group_items)
+    grouped_requirements = parse_dependency_groups(group_items(options.groups))
 
     bundle = collect_requirements(
         requirements=[*options.requirements, *grouped_requirements],
@@ -126,29 +121,21 @@ def run_wheel(args: list[str]) -> int:
         constraint_files=options.constraint_files,
         editables=options.editables,
         requirement_config_settings={
-            requirement: dict(config_settings) for requirement in options.requirements
+            requirement: dict(parsed_config_settings)
+            for requirement in options.requirements
         },
         editable_config_settings={
-            editable: dict(config_settings) for editable in options.editables
+            editable: dict(parsed_config_settings) for editable in options.editables
         },
-        find_links=options.find_links or config.find_links,
-        index_url=options.index_url or config.index_url,
-        extra_index_urls=options.extra_index_url or config.extra_index_urls,
-        no_index=options.no_index or config.no_index,
+        find_links=sources.find_links,
+        index_url=sources.index_url,
+        extra_index_urls=sources.extra_index_urls,
+        no_index=sources.no_index,
         format_control=FormatControl(),
         proxy=options.proxy,
     )
 
-    if options.proxy:
-        os.environ["CPIP_PROXY"] = options.proxy
-
-        os.environ["HTTP_PROXY"] = options.proxy
-
-        os.environ["HTTPS_PROXY"] = options.proxy
-
-        os.environ["http_proxy"] = options.proxy
-
-        os.environ["https_proxy"] = options.proxy
+    apply_proxy_environment(options.proxy)
 
     raw_requirements = [*bundle.requirements, *bundle.editables]
 

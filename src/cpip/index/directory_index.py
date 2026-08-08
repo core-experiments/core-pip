@@ -71,7 +71,9 @@ def local_source_snapshot(
                 continue
             if not stat.S_ISREG(info.st_mode):
                 continue
-            identity = f"stat:{info.st_dev}:{info.st_ino}:{info.st_size}:{info.st_mtime_ns}"
+            identity = (
+                f"stat:{info.st_dev}:{info.st_ino}:{info.st_size}:{info.st_mtime_ns}"
+            )
             discovered.append(
                 LocalSourceEntry(
                     entry.path,

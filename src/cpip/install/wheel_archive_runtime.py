@@ -171,7 +171,8 @@ def open_wheel_archive(
     members = None
 
     if members is not None and any(
-        member[0] not in {0, 8} or member[2] > 1024 * 1024 for member in members.values()
+        member[0] not in {0, 8} or member[2] > 1024 * 1024
+        for member in members.values()
     ):
         return zipfile.ZipFile(path)
 
@@ -190,7 +191,8 @@ def open_wheel_archive(
         return zipfile.ZipFile(path)
 
     if any(
-        member[0] not in {0, 8} or member[3] > 1024 * 1024 for member in archive.members.values()
+        member[0] not in {0, 8} or member[3] > 1024 * 1024
+        for member in archive.members.values()
     ):
         file.close()
 

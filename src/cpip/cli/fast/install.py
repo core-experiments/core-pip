@@ -1,20 +1,29 @@
-"""Small local pure-wheel installer used by deterministic benchmarks."""
+"""Fast paths for installing wheels without initializing the normal CLI.
+
+Three entry points cover three target states, all guarded by
+:mod:`cpip.cli.fast` and all declining to normal install dispatch:
+
+- :func:`run_cached_remote` -- a missing target and an exact-pin remote plan
+  already validated in the archive cache.
+- :func:`run` -- an empty target and a local ``--no-index`` wheelhouse, which
+  can clone a cached completed target or run the minimal resolver.
+- :func:`run_local_fallback` -- a non-empty local target, resolved the same way
+  but installed through the archive or transactional installer.
+"""
 
 from __future__ import annotations
 
 import os
 import sys
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 
-from cpip.cli.fast_path import consume_option, extend_requirements
-from cpip.cli.config import ConfigurationStore
-from cpip.cli.fast_install_cache import FastInstallMetadataCache
-from cpip.core.appdirs import user_cache_dir
-from cpip.core.errors import ConfigurationError
+from cpip.cli.config import load_source_config
+from cpip.cli.fast import consume_option, extend_requirements
+from cpip.cli.fast.install_cache import FastInstallMetadataCache
+from cpip.core.appdirs import resolve_cache_dir
 from cpip.core.packaging import Version
-from cpip.core.wheel import WheelCandidate
+from cpip.core.wheel import PureWheelCandidate, WheelCandidate
 from cpip.core.wheel import parse_wheel_filename as parse_wheel_filename_core
-from cpip.index.config import DEFAULT_INDEX_URL
 from cpip.install.target import InstallTarget
 from cpip.install.wheel_archive_cache import (
     exact_install_plan_key_from_strings,
@@ -30,18 +39,8 @@ from cpip.resolution.archive import (
 )
 
 
-class PureWheelCandidate:
-    __slots__ = ()
-
-    canonical_name: str
-
-    path: str
-
-
 class FastCandidate(PureWheelCandidate):
     """Lightweight candidate shared by local resolution and installation.
-
-
 
     Metadata is loaded only after resolution selects a filename candidate.  The
 
@@ -219,58 +218,12 @@ def parse_arguments(args: list[str]) -> InstallOptions | None:
 def _remote_index_url() -> str | None:
     """Return the effective sole index, or decline non-default source shapes."""
 
-    store = ConfigurationStore()
+    config = load_source_config("install")
 
-    try:
-        store.load()
-
-    except ConfigurationError:
-        index_url = DEFAULT_INDEX_URL
-
-        find_links = None
-
-        extra_index_urls = None
-
-        no_index = None
-
-    else:
-
-        def configured(option: str) -> str | None:
-            value = store.get_optional(f"install.{option}")
-
-            if value is not None:
-                return value
-
-            return store.get_optional(f"global.{option}")
-
-        index_url = configured("index-url") or DEFAULT_INDEX_URL
-
-        find_links = configured("find-links")
-
-        extra_index_urls = configured("extra-index-url")
-
-        no_index = configured("no-index")
-
-    if (value := os.environ.get("CPIP_INDEX_URL")) is not None:
-        index_url = value
-
-    if (value := os.environ.get("CPIP_FIND_LINKS")) is not None:
-        find_links = value
-
-    if (value := os.environ.get("CPIP_EXTRA_INDEX_URL")) is not None:
-        extra_index_urls = value
-
-    if (value := os.environ.get("CPIP_NO_INDEX")) is not None:
-        no_index = value
-
-    if (
-        find_links
-        or extra_index_urls
-        or (no_index and no_index.strip().lower() in {"1", "true", "yes", "on"})
-    ):
+    if config.find_links or config.extra_index_urls or config.no_index:
         return None
 
-    return index_url
+    return config.index_url
 
 
 def run_cached_remote(args: list[str]) -> int | None:
@@ -291,10 +244,7 @@ def run_cached_remote(args: list[str]) -> int | None:
     ):
         return None
 
-    cache_dir = options.cache_dir or os.environ.get("CPIP_CACHE_DIR")
-
-    if cache_dir is None:
-        cache_dir = user_cache_dir("cpip")
+    cache_dir = resolve_cache_dir(options.cache_dir)
 
     index_url = _remote_index_url()
 
@@ -319,7 +269,7 @@ def run_cached_remote(args: list[str]) -> int | None:
     if keyed is None:
         return None
 
-    key, requested_roots = keyed
+    key, roots = keyed
 
     plan = load_cached_install_plan(cache_dir, key)
 
@@ -330,7 +280,7 @@ def run_cached_remote(args: list[str]) -> int | None:
         tuple(
             (
                 candidate.path,
-                candidate.canonical_name in requested_roots,
+                candidate.canonical_name in roots,
                 None,
             )
             for candidate in plan.candidates
@@ -345,6 +295,20 @@ def run_cached_remote(args: list[str]) -> int | None:
 
 
 def is_safe_member(name: str) -> bool:
+    """Reject wheel members that would escape the install target.
+
+    This is a purely lexical check, deliberately weaker than
+    ``install.wheel_archive.validate_member_parts`` plus the resolved-parent
+    containment test the staged installer performs. It is sound here only
+    because ``install_resolved_pure_wheels`` refuses any target that is not
+    empty, so no attacker-controlled symlink can already sit on the
+    destination path, and because every member is written as a regular file
+    rather than reproduced as a symlink.
+
+    If that emptiness precondition is ever relaxed, this check is no longer
+    sufficient and the caller must adopt the resolving check instead.
+    """
+
     if not name or "\\" in name:
         return False
 
@@ -358,6 +322,53 @@ def is_safe_member(name: str) -> bool:
 
 def normalize_name(value: str) -> str:
     return value.replace("_", "-").replace(".", "-").lower()
+
+
+def requested_roots(requirements: Iterable[str]) -> set[str]:
+    """Return the canonical names named directly on the command line."""
+
+    return {
+        normalize_name(
+            value.partition("[")[0]
+            .split("==", 1)[0]
+            .split(">", 1)[0]
+            .split("<", 1)[0]
+            .strip(),
+        )
+        for value in requirements
+    }
+
+
+def is_purelib(wheel_text: str) -> bool:
+    """Report whether a ``WHEEL`` file declares a pure-Python root."""
+
+    return any(
+        line.casefold().strip() == "root-is-purelib: true"
+        for line in wheel_text.splitlines()
+    )
+
+
+def report_plan(
+    find_links: Sequence[str],
+    candidates: Sequence[FastCandidate],
+) -> None:
+    print(f"Looking in links: {', '.join(find_links)}")
+
+    if candidates:
+        print(
+            "Installing collected packages: "
+            + ", ".join(candidate.name for candidate in candidates),
+        )
+
+
+def report_installed(candidates: Sequence[FastCandidate]) -> None:
+    if not candidates:
+        return
+
+    print(
+        "Successfully installed "
+        + " ".join(f"{candidate.name}-{candidate.version}" for candidate in candidates),
+    )
 
 
 def version_key(value: str) -> tuple[int, ...] | None:
@@ -463,9 +474,13 @@ def wheel_metadata(
 
             candidate.archive_members = archive.members
 
-            metadata_members = [name for name in names if name.endswith(".dist-info/METADATA")]
+            metadata_members = [
+                name for name in names if name.endswith(".dist-info/METADATA")
+            ]
 
-            wheel_members = [name for name in names if name.endswith(".dist-info/WHEEL")]
+            wheel_members = [
+                name for name in names if name.endswith(".dist-info/WHEEL")
+            ]
 
             if len(metadata_members) != 1 or len(wheel_members) != 1:
                 return None
@@ -483,7 +498,7 @@ def wheel_metadata(
         if line.startswith("Requires-Dist:"):
             dependencies.append(line.partition(":")[2].strip())
 
-    pure = any(line.casefold().strip() == "root-is-purelib: true" for line in wheel.splitlines())
+    pure = is_purelib(wheel)
 
     result = (dependencies, pure)
 
@@ -522,7 +537,11 @@ def resolve_simple_wheelhouse(
     requirements: list[str],
     metadata_cache: object | None = None,
 ) -> list[FastCandidate] | None:
-    get_plan = getattr(metadata_cache, "get_plan", None) if metadata_cache is not None else None
+    get_plan = (
+        getattr(metadata_cache, "get_plan", None)
+        if metadata_cache is not None
+        else None
+    )
 
     if get_plan is not None:
         cached_plan = get_plan(find_links, requirements)
@@ -559,7 +578,9 @@ def resolve_simple_wheelhouse(
         candidates_by_name.setdefault(candidate.canonical_name, []).append(candidate)
 
     for candidates in candidates_by_name.values():
-        candidates.sort(key=lambda candidate: version_key(candidate.version) or (), reverse=True)
+        candidates.sort(
+            key=lambda candidate: version_key(candidate.version) or (), reverse=True
+        )
 
     resolved: dict[str, FastCandidate] = {}
 
@@ -628,7 +649,11 @@ def resolve_simple_wheelhouse(
 
     result = list(resolved.values())
 
-    put_plan = getattr(metadata_cache, "put_plan", None) if metadata_cache is not None else None
+    put_plan = (
+        getattr(metadata_cache, "put_plan", None)
+        if metadata_cache is not None
+        else None
+    )
 
     if put_plan is not None:
         put_plan(
@@ -659,16 +684,10 @@ def install_resolved_pure_wheels(
 
     separator = os.sep
 
-    if os.path.isdir(target):
-        try:
-            with os.scandir(target) as entries:
-                if any(entries):
-                    return False
-
-        except OSError:
-            return False
-
-    elif os.path.exists(target):
+    # Load-bearing for member safety, not just for correctness: an empty target
+    # is what lets this path use the lexical `is_safe_member` check instead of
+    # resolving each destination. See that function's docstring.
+    if not target_is_empty(target):
         return False
 
     prepared: list[tuple[str, bool, bool, list[tuple[str, str, bytes]]]] = []
@@ -720,7 +739,9 @@ def install_resolved_pure_wheels(
 
                     directories_for_wheel.append(os.path.dirname(destination))
 
-                wheel_members = [name for name in names if name.endswith(".dist-info/WHEEL")]
+                wheel_members = [
+                    name for name in names if name.endswith(".dist-info/WHEEL")
+                ]
 
                 if len(wheel_members) != 1:
                     return False
@@ -731,10 +752,7 @@ def install_resolved_pure_wheels(
 
                 wheel_text = wheel_contents.decode("utf-8")
 
-                if not any(
-                    line.casefold().strip() == "root-is-purelib: true"
-                    for line in wheel_text.splitlines()
-                ):
+                if not is_purelib(wheel_text):
                     return False
 
                 dist_info = wheel_members[0].rsplit("/", 1)[0]
@@ -865,7 +883,9 @@ def install_resolved_pure_wheels(
                     encoding="utf-8",
                     newline="",
                 ) as output:
-                    csv.writer(output).writerows(record_rows[name] for name in sorted(record_rows))
+                    csv.writer(output).writerows(
+                        record_rows[name] for name in sorted(record_rows)
+                    )
 
                 if record_path not in created_files:
                     created_files.append(record_path)
@@ -891,7 +911,9 @@ def install_resolved_pure_wheels(
     return True
 
 
-def _target_is_empty(target: str) -> bool:
+def target_is_empty(target: str) -> bool:
+    """Report whether ``target`` is an empty directory or does not exist."""
+
     if os.path.isdir(target):
         try:
             with os.scandir(target) as entries:
@@ -947,7 +969,7 @@ def run(args: list[str]) -> int | None:
 
     # wheelhouse a second time just to reject the plan.
 
-    if not _target_is_empty(options.target):
+    if not target_is_empty(options.target):
         return None
 
     metadata_cache = None
@@ -964,26 +986,10 @@ def run(args: list[str]) -> int | None:
     if candidates is None:
         return None
 
-    roots = {
-        value.partition("[")[0]
-        .split("==", 1)[0]
-        .split(">", 1)[0]
-        .split("<", 1)[0]
-        .strip()
-        .replace("_", "-")
-        .replace(".", "-")
-        .lower()
-        for value in options.requirements
-    }
+    roots = requested_roots(options.requirements)
 
     if not options.quiet:
-        print(f"Looking in links: {', '.join(options.find_links)}")
-
-        if candidates:
-            print(
-                "Installing collected packages: "
-                + ", ".join(candidate.name for candidate in candidates),
-            )
+        report_plan(options.find_links, candidates)
 
     installed = False
 
@@ -1007,11 +1013,8 @@ def run(args: list[str]) -> int | None:
                 options.target,
             )
 
-    if candidates and not options.quiet:
-        print(
-            "Successfully installed "
-            + " ".join(f"{candidate.name}-{candidate.version}" for candidate in candidates),
-        )
+    if not options.quiet:
+        report_installed(candidates)
 
     if metadata_cache is not None:
         metadata_cache.flush()
@@ -1033,7 +1036,7 @@ def run_local_fallback(args: list[str]) -> int | None:
         or not options.find_links
         or not options.requirements
         or "--no-compile" not in args
-        or _target_is_empty(options.target)
+        or target_is_empty(options.target)
     ):
         return None
 
@@ -1055,29 +1058,29 @@ def run_local_fallback(args: list[str]) -> int | None:
     if options.cache_dir is not None:
         metadata_cache = FastInstallMetadataCache(options.cache_dir)
 
-    local_candidates = resolve_simple_wheelhouse(
+    candidates = resolve_simple_wheelhouse(
         options.find_links,
         options.requirements,
         metadata_cache,
     )
 
-    if local_candidates is None:
+    if candidates is None:
         return None
 
     if (
         options.upgrade
         and not options.ignore_installed
-        and any(candidate.dependencies for candidate in local_candidates)
+        and any(candidate.dependencies for candidate in candidates)
     ):
         return None
-
-    candidates = local_candidates
 
     if options.cache_dir is not None:
         try:
             for candidate in candidates:
                 identity = (
-                    metadata_cache.identity(candidate.path) if metadata_cache is not None else None
+                    metadata_cache.identity(candidate.path)
+                    if metadata_cache is not None
+                    else None
                 )
 
                 digest = (
@@ -1108,29 +1111,13 @@ def run_local_fallback(args: list[str]) -> int | None:
         except OSError:
             return None
 
-    requested_roots = {
-        value.partition("[")[0]
-        .split("==", 1)[0]
-        .split(">", 1)[0]
-        .split("<", 1)[0]
-        .strip()
-        .replace("_", "-")
-        .replace(".", "-")
-        .lower()
-        for value in options.requirements
-    }
+    roots = requested_roots(options.requirements)
 
     if not options.quiet:
-        print(f"Looking in links: {', '.join(options.find_links)}")
-
-        if candidates:
-            print(
-                "Installing collected packages: "
-                + ", ".join(candidate.name for candidate in candidates),
-            )
+        report_plan(options.find_links, candidates)
 
     requests = tuple(
-        (candidate.path, candidate.canonical_name in requested_roots, None)
+        (candidate.path, candidate.canonical_name in roots, None)
         for candidate in candidates
     )
 
@@ -1175,12 +1162,8 @@ def run_local_fallback(args: list[str]) -> int | None:
             candidates=wheel_candidates,
         )
 
-
-    if candidates and not options.quiet:
-        print(
-            "Successfully installed "
-            + " ".join(f"{candidate.name}-{candidate.version}" for candidate in candidates),
-        )
+    if not options.quiet:
+        report_installed(candidates)
 
     if metadata_cache is not None:
         metadata_cache.flush()

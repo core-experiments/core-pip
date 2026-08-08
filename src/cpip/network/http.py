@@ -16,7 +16,7 @@ import urllib.parse
 from collections.abc import Iterator, Mapping, Sequence
 from typing import Any
 
-from cpip.core._execution_context import current_version
+from cpip.core.utils import current_version
 from cpip.core.cpip_version import get_cpip_version
 from cpip.core.urls import redact_auth_from_url, url_to_path
 from cpip.network.auth import MultiDomainBasicAuth
@@ -164,7 +164,8 @@ class InFlightRequest:
         self.event = threading.Event()
 
         self.response: (
-            tuple[int, str, str, Mapping[str, str] | email.message.Message, bytes] | None
+            tuple[int, str, str, Mapping[str, str] | email.message.Message, bytes]
+            | None
         ) = None
 
         self.error: BaseException | None = None
@@ -301,7 +302,9 @@ class NetworkSession:
         self.fresh_cached_response_cache: dict[str, float | None] = {}
 
         self.network_stats = (
-            NetworkStats() if os.environ.get("CPIP_BENCH_NETWORK_STATS") == "1" else None
+            NetworkStats()
+            if os.environ.get("CPIP_BENCH_NETWORK_STATS") == "1"
+            else None
         )
 
     def ensure_requests_backend(self) -> None:
@@ -325,7 +328,6 @@ class NetworkSession:
             self.requests_session = session
 
             self.requests_exceptions = requests.exceptions
-
 
     @staticmethod
     def user_agent() -> str:
@@ -512,7 +514,9 @@ class NetworkSession:
             request.method,
             request.url,
             tuple(
-                sorted((name.lower(), value) for name, value in request.headers.items()),
+                sorted(
+                    (name.lower(), value) for name, value in request.headers.items()
+                ),
             ),
         )
 
@@ -794,7 +798,9 @@ class NetworkSession:
 
         cache_control = response.headers.get("Cache-Control", "")
 
-        directives = {part.strip().lower() for part in cache_control.split(",") if part.strip()}
+        directives = {
+            part.strip().lower() for part in cache_control.split(",") if part.strip()
+        }
 
         if "no-store" in directives:
             return

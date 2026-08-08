@@ -218,7 +218,9 @@ class SimpleIndexSource:
             session=self.session,
         ).links_from_url(project_url)
 
-    def collect_cached_records(self, requirement: Requirement) -> list[tuple[object, ...]] | None:
+    def collect_cached_records(
+        self, requirement: Requirement
+    ) -> list[tuple[object, ...]] | None:
         """Return raw cached records when the HTTP page is still fresh."""
 
         if self.session is None:

@@ -5,26 +5,14 @@ from __future__ import annotations
 import os
 import sys
 
-from cpip.cli.registry import get_command
-from cpip.cli.status_codes import BROKEN_STDOUT
-VISIBLE_COMMAND_NAMES = (
+from cpip.cli.common import BROKEN_STDOUT, VIRTUALENV_NOT_FOUND
+from cpip.cli.registry import COMMAND_SPECS, CommandSpec, get_command
 
-    "install",
-    "wheel",
-    "index",
-    "download",
-    "uninstall",
-    "list",
-    "freeze",
-    "show",
-    "inspect",
-    "hash",
-    "check",
-    "cache",
-    "lock",
-)
-
-COMMAND_NAMES = frozenset((*VISIBLE_COMMAND_NAMES, "help"))
+# Keep command discovery in one place.  The registry also owns command loading,
+# parser factories, and lifecycle requirements; deriving these sets here keeps
+# global-option handling and help output in sync with dispatch.
+VISIBLE_COMMAND_NAMES = tuple(spec.name for spec in COMMAND_SPECS if spec.visible)
+COMMAND_NAMES = frozenset(spec.name for spec in COMMAND_SPECS)
 
 VIRTUALENV_OPTIONS = frozenset(("--require-virtualenv", "--require-venv"))
 
@@ -34,8 +22,6 @@ VERBOSITY_FLAGS = frozenset(("-vv", "-vvv"))
 VERSION_FLAGS = frozenset(("-V", "--version"))
 
 HELP_FLAGS = frozenset(("-h", "--help"))
-
-CPIP_VERSION = "0.0.1"
 
 
 def extract_python_option(args: list[str]) -> tuple[list[str], str | None]:
@@ -161,15 +147,14 @@ def print_help() -> None:
 
 
 def print_version(version: str | None, location: str | None) -> None:
-    if version is None or location is None:
-        if version is None:
-            version = CPIP_VERSION
+    if version is None:
+        # Already imported: cpip.__init__ is what loaded this module.
+        from cpip import __version__
 
-        if location is None:
-            location = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        version = __version__
 
     if location is None:
-        raise RuntimeError("cpip package location is unavailable")
+        location = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
     python_version = f"{sys.version_info.major}.{sys.version_info.minor}"
 
@@ -179,16 +164,18 @@ def print_version(version: str | None, location: str | None) -> None:
 
 
 def print_command_help(command: str) -> int | None:
-    if get_command(command) is None:
+    """Print a command's own help, or return ``None`` for a non-command.
+
+    ``help`` itself is excluded: it has no parser of its own, and reporting it
+    as unknown is what ``cpip help help`` has always done.
+    """
+
+    spec = get_command(command)
+
+    if spec is None or spec.name == "help":
         return None
 
-    from cpip.cli.registry import parser_for_command
-
-    try:
-        parser_for_command(command).parse_args(["--help"])
-
-    except SystemExit as exc:
-        return int(exc.code or 0)
+    spec.create_parser().print_help()
 
     return 0
 
@@ -201,20 +188,85 @@ def run_help(args: list[str]) -> int:
 
         return 0
 
-    command = args[0]
+    status = print_command_help(args[0])
 
-    spec = get_command(command)
+    if status is None:
+        print(f"ERROR: Unknown command: {args[0]}", file=sys.stderr)
 
-    if spec is not None and spec.name != "help":
-        from cpip.cli.registry import parser_for_command
+        return 1
 
-        parser_for_command(command).print_help()
+    return status
+
+
+def handle_global_commands(
+    argv: list[str],
+    *,
+    require_virtualenv: bool,
+    version: str | None,
+    location: str | None,
+) -> int | None:
+    """Handle help, version, the virtualenv gate, and unknown command names.
+
+    Returns the process status, or ``None`` when ``argv`` names a real command
+    and dispatch should continue.  The order matches what the fallback
+    dispatcher used to do: help and version answer before the virtualenv gate,
+    so ``cpip --require-virtualenv --help`` still works outside a virtualenv.
+    """
+
+    if not argv or argv[0] in HELP_FLAGS:
+        print_help()
 
         return 0
 
-    print(f"ERROR: Unknown command: {command}", file=sys.stderr)
+    if argv[0] == "help":
+        return run_help(argv[1:])
 
-    return 1
+    if argv[0] in VERSION_FLAGS:
+        print_version(version, location)
+
+        return 0
+
+    if require_virtualenv:
+        from cpip.platform.virtualenv import running_under_virtualenv
+
+        if not running_under_virtualenv():
+            print(
+                "Could not find an activated virtualenv (required).",
+                file=sys.stderr,
+            )
+
+            return VIRTUALENV_NOT_FOUND
+
+    if argv[0] not in COMMAND_NAMES:
+        print(f"ERROR: Unknown command: {argv[0]}", file=sys.stderr)
+
+        return 1
+
+    return None
+
+
+def run_command(argv: list[str], spec: CommandSpec) -> int:
+    """Run a resolved command, giving the lock fast path its last chance."""
+
+    from cpip.cli import fast
+
+    status = fast.run_lock_after_startup(argv)
+
+    if status is not None:
+        return status
+
+    runner = spec.load_runner()
+
+    if runner is None:
+        raise AssertionError(f"unhandled command: {spec.name}")
+
+    return runner(argv[1:])
+
+
+def flush_streams() -> None:
+    sys.stdout.flush()
+
+    sys.stderr.flush()
 
 
 def main(
@@ -226,19 +278,15 @@ def main(
     verbosity = 0
 
     managed_environment = {
-        name: os.environ.get(name) for name in ("CPIP_RESOLVER_DEBUG", "CPIP_TARGET_PREFIX")
+        name: os.environ.get(name)
+        for name in ("CPIP_RESOLVER_DEBUG", "CPIP_TARGET_PREFIX")
     }
-
     try:
         argv = list(sys.argv[1:] if args is None else args)
-
         argv, verbosity, require_virtualenv, log_file = extract_global_options(argv)
-
         if verbosity >= 2 or any(token in VERBOSITY_FLAGS for token in argv):
             os.environ["CPIP_RESOLVER_DEBUG"] = "1"
-
         argv, target_prefix = extract_python_option(argv)
-
         if target_prefix is not None:
             os.environ["CPIP_TARGET_PREFIX"] = target_prefix
 
@@ -253,231 +301,74 @@ def main(
             status = print_command_help(argv[0])
 
             if status is not None:
-                sys.stdout.flush()
-
-                sys.stderr.flush()
+                flush_streams()
 
                 return status
 
-        if argv and argv[0] == "lock" and "--quiet" in argv[1:]:
-            from cpip.cli import fast_lock
-
-            status = fast_lock.run(argv[1:])
-
-            if status is not None:
-                sys.stdout.flush()
-
-                sys.stderr.flush()
-
-                return status
-
-        fast_install_attempted = False
-
-        if (
-            argv
-            and argv[0] == "install"
-            and "--quiet" in argv[1:]
-            and "--no-index" not in argv[1:]
-            and all(
-                option in argv[1:] for option in ("--ignore-installed", "--no-compile", "--target")
-            )
-        ):
-            from cpip.cli import fast_install
-
-            status = fast_install.run_cached_remote(argv[1:])
-
-            if status is not None:
-                sys.stdout.flush()
-
-                sys.stderr.flush()
-
-                return status
-
-        if (
-            argv
-            and argv[0] == "install"
-            and "--quiet" in argv[1:]
-            and "--no-index" in argv[1:]
-            and "--upgrade" in argv[1:]
-            and "--no-compile" in argv[1:]
-            and "--target" in argv[1:]
-            and "--ignore-installed" not in argv[1:]
-        ):
-            from cpip.cli import fast_install
-
-            fast_install_attempted = True
-
-            status = fast_install.run_local_fallback(argv[1:])
-
-            if status is not None:
-                sys.stdout.flush()
-
-                sys.stderr.flush()
-
-                return status
-
-        if (
-            argv
-            and argv[0] == "install"
-            and all(
-                option in argv[1:]
-                for option in (
-                    "--no-index",
-                    "--ignore-installed",
-                    "--no-compile",
-                    "--target",
-                )
-            )
-        ):
-            from cpip.cli import fast_install
-
-            fast_install_attempted = True
-
-            status = fast_install.run(argv[1:])
-
-            if status is not None:
-                sys.stdout.flush()
-
-                sys.stderr.flush()
-
-                return status
-
-            status = fast_install.run_local_fallback(argv[1:])
-
-            if status is not None:
-                sys.stdout.flush()
-
-                sys.stderr.flush()
-
-                return status
-
-        if argv and argv[0] == "list":
-            from cpip.cli import fast_list
-
-            status = fast_list.run(argv[1:])
-
-            if status is not None:
-                sys.stdout.flush()
-
-                sys.stderr.flush()
-
-                return status
-
-        if not require_virtualenv and log_file is None and verbosity == 0:
-            if not argv or argv[0] in HELP_FLAGS or argv[:1] == ["help"]:
-                if argv[:1] == ["help"] and len(argv) > 1:
-                    command = argv[1]
-
-                    if command not in COMMAND_NAMES or command == "help":
-                        print(f"ERROR: Unknown command: {command}", file=sys.stderr)
-
-                        sys.stdout.flush()
-
-                        sys.stderr.flush()
-
-                        return 1
-
-                else:
-                    print_help()
-
-                    sys.stdout.flush()
-
-                    sys.stderr.flush()
-
-                    return 0
-
-            if argv and argv[0] in VERSION_FLAGS:
-                print_version(version, location)
-
-                sys.stdout.flush()
-
-                sys.stderr.flush()
-
-                return 0
-
-            if argv and argv[0] not in COMMAND_NAMES:
-                print(f"ERROR: Unknown command: {argv[0]}", file=sys.stderr)
-
-                sys.stdout.flush()
-
-                sys.stderr.flush()
-
-                return 1
-
-        quiet_fast_command = bool(
-            argv
-            and "--quiet" in argv
-            and log_file is None
-            and (
-                argv[0] == "lock"
-                or (
-                    argv[0] == "install"
-                    and "--no-index" in argv
-                    and "--no-compile" in argv
-                    and "--target" in argv
-                    and ("--ignore-installed" in argv or "--upgrade" in argv)
-                )
-            ),
+        status = handle_global_commands(
+            argv,
+            require_virtualenv=require_virtualenv,
+            version=version,
+            location=location,
         )
 
-        spec = get_command(argv[0]) if argv else None
+        if status is not None:
+            flush_streams()
 
-        if (version is not None or location is not None) and (
-            not argv or (argv[0] != "lock" and (spec is None or spec.needs_tempdir))
+            return status
+
+        from cpip.cli import fast
+
+        status, fast_install_attempted = fast.run_before_startup(argv)
+
+        if status is not None:
+            flush_streams()
+
+            return status
+
+        quiet_fast_command = fast.suppresses_logging(argv, log_file=log_file)
+
+        # handle_global_commands rejected empty argv and unknown names, so the
+        # command always resolves from here on.
+        spec = get_command(argv[0])
+
+        if spec is None:
+            raise AssertionError(f"unhandled command: {argv[0]}")
+
+        if version is not None and (
+            spec.needs_execution_context and spec.needs_tempdir
         ):
-            from cpip.core._execution_context import configure
+            from cpip.core.utils import configure
 
-            configure(
-                version=version,
-                runner=(
-                    os.path.join(os.path.dirname(location), "__cpip-runner__.py")
-                    if location is not None
-                    else None
-                ),
-            )
+            configure(version=version)
 
-        needs_logging = spec is None or spec.needs_logging
-
-        if needs_logging and not quiet_fast_command and not os.environ.get("CPIP_QUIET"):
-            from cpip.cli.logging_config import configure_logging
+        if (
+            spec.needs_logging
+            and not quiet_fast_command
+            and not os.environ.get("CPIP_QUIET")
+        ):
+            from cpip.cli.common import configure_logging
 
             configure_logging(log_file)
 
-        if argv and argv[0] == "install" and not fast_install_attempted:
-            from cpip.cli import fast_install
-
-            status = fast_install.run(argv[1:])
+        if not fast_install_attempted:
+            status = fast.run_install_after_startup(argv)
 
             if status is not None:
-                sys.stdout.flush()
-
-                sys.stderr.flush()
+                flush_streams()
 
                 return status
 
-        if spec is not None and not spec.needs_tempdir:
-            from cpip.cli import _main_fallback
-
-            status = _main_fallback.run(
-                argv,
-                require_virtualenv=require_virtualenv,
-                location=location,
-            )
-
-        else:
-            from cpip.cli import _main_fallback
+        if spec.needs_tempdir:
             from cpip.core.temp_dir import global_tempdir_manager
 
             with global_tempdir_manager():
-                status = _main_fallback.run(
-                    argv,
-                    require_virtualenv=require_virtualenv,
-                    location=location,
-                )
+                status = run_command(argv, spec)
 
-        sys.stdout.flush()
+        else:
+            status = run_command(argv, spec)
 
-        sys.stderr.flush()
+        flush_streams()
 
         return status
 
@@ -504,7 +395,8 @@ def main(
 
         if verbosity > 0:
             import traceback
-            from cpip.cli.logging_config import BrokenStdoutLoggingError
+
+            from cpip.cli.common import BrokenStdoutLoggingError
 
             try:
                 raise BrokenStdoutLoggingError() from exc

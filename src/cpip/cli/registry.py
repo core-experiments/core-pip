@@ -3,7 +3,7 @@ from __future__ import annotations
 from types import ModuleType
 from typing import TYPE_CHECKING
 
-from cpip.cli.parser import ArgumentParser
+from cpip.cli.common import ArgumentParser
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -13,12 +13,12 @@ if TYPE_CHECKING:
     ParserFactory = Callable[[], ArgumentParser]
 
 
-
 class CommandSpec:
     __slots__ = (
         "_module",
         "module_path",
         "name",
+        "needs_execution_context",
         "needs_logging",
         "needs_tempdir",
         "parser_factory",
@@ -30,11 +30,12 @@ class CommandSpec:
         self,
         name: str,
         module_path: str,
-        runner: str = "run",
-        parser_factory: str = "create_parser",
+        runner: str | None = "run",
+        parser_factory: str | None = "create_parser",
         visible: bool = True,
         needs_logging: bool = True,
         needs_tempdir: bool = True,
+        needs_execution_context: bool = True,
     ) -> None:
         self.name = name
         self.module_path = module_path
@@ -44,6 +45,7 @@ class CommandSpec:
         self.visible = visible
         self.needs_logging = needs_logging
         self.needs_tempdir = needs_tempdir
+        self.needs_execution_context = needs_execution_context
 
     @property
     def module(self) -> ModuleType:
@@ -83,14 +85,15 @@ COMMAND_SPECS = (
     ),
     CommandSpec(
         "freeze",
-        "cpip.cli.freeze_command",
+        "cpip.cli.freeze",
         "run_freeze",
         needs_tempdir=False,
     ),
     CommandSpec(
         "show",
-        "cpip.cli.show",
+        "cpip.cli.inspect",
         "run_show",
+        parser_factory="create_show_parser",
         needs_logging=False,
         needs_tempdir=False,
     ),
@@ -98,30 +101,40 @@ COMMAND_SPECS = (
         "inspect",
         "cpip.cli.inspect",
         "run_inspect",
+        parser_factory="create_inspect_parser",
         needs_logging=False,
         needs_tempdir=False,
     ),
     CommandSpec(
         "hash",
-        "cpip.cli.hash",
+        "cpip.cli.inspect",
         "run_hash",
+        parser_factory="create_hash_parser",
         needs_logging=False,
         needs_tempdir=False,
     ),
     CommandSpec(
         "check",
-        "cpip.cli.check",
+        "cpip.cli.inspect",
         "run_check",
+        parser_factory="create_check_parser",
         needs_logging=False,
         needs_tempdir=False,
     ),
-    CommandSpec("cache", "cpip.cli.cache_command", "run_cache"),
-    CommandSpec("lock", "cpip.cli.lock", "run_lock"),
+    CommandSpec("cache", "cpip.cli.cache", "run_cache"),
+    # ``lock`` writes a lock file rather than running an installed
+    # environment, so it never needs the runner/version execution context.
+    CommandSpec(
+        "lock",
+        "cpip.cli.lock",
+        "run_lock",
+        needs_execution_context=False,
+    ),
     CommandSpec(
         "help",
         "cpip.cli.entrypoint",
-        runner="",
-        parser_factory="",
+        runner=None,
+        parser_factory=None,
         visible=False,
         needs_logging=False,
         needs_tempdir=False,

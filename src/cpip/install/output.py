@@ -2,24 +2,14 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Collection, Sequence
+from collections.abc import Callable, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
-from typing import TYPE_CHECKING, TypeVar
 
-from cpip.core.errors import ResolutionError
 from cpip.core.hashes import file_hashes
 from cpip.core.wheel import WheelCandidate
 from cpip.index.candidate_materialization import LazyWheelCandidate
 
 SOURCE_TREE_OR_VCS_KINDS = frozenset(("source-tree", "vcs"))
-
-
-if TYPE_CHECKING:
-    from cpip.resolution.input_models import RequirementInput
-    from cpip.install.requirement_set import RequirementSet
-
-
-RequirementT = TypeVar("RequirementT", bound="RequirementInput")
 
 
 default_file_hashes = file_hashes
@@ -29,7 +19,10 @@ _MATERIALIZATION_WORKERS = 32
 
 
 def actual_hashes_for_candidate(candidate: WheelCandidate) -> dict[str, str]:
-    if candidate.source_kind in {"sdist", "source-tree", "vcs"} and candidate.source_hashes:
+    if (
+        candidate.source_kind in {"sdist", "source-tree", "vcs"}
+        and candidate.source_hashes
+    ):
         return dict(candidate.source_hashes)
     source_url = candidate.source_url
     if source_url is not None and source_url.startswith("file:"):
@@ -47,7 +40,10 @@ def actual_hashes_for_candidate(candidate: WheelCandidate) -> dict[str, str]:
 
 def finalize_source_hashes(candidate: WheelCandidate) -> WheelCandidate:
     if isinstance(candidate, LazyWheelCandidate):
-        if candidate.materializer_internal.dry_run and not candidate.record_internal.link.is_file:
+        if (
+            candidate.materializer_internal.dry_run
+            and not candidate.record_internal.link.is_file
+        ):
             # Keep index-provided hashes, but never download a remote artifact
 
             # solely to fill an optional dry-run report field.
@@ -190,7 +186,9 @@ def prepare_install_candidates(
         def submit_archive(index: int, candidate: WheelCandidate) -> None:
             concrete[index] = candidate
 
-            archive_futures[archive_pool.submit(prepare_archive, candidate, cache_dir)] = index
+            archive_futures[
+                archive_pool.submit(prepare_archive, candidate, cache_dir)
+            ] = index
 
         if remote:
             with ThreadPoolExecutor(
@@ -262,67 +260,3 @@ def finalize_candidates(
     """Finalize remote wheel winners concurrently while preserving plan order."""
 
     return _run_candidate_operation(candidates, finalize)
-
-
-def get_installation_order(
-    resolver,
-    requirement_set: RequirementSet[RequirementT],
-    *,
-    graph: dict[str, set[str]] | None = None,
-) -> list[RequirementT]:
-    active_graph = graph or resolver.last_graph
-
-    if active_graph is None:
-        raise ResolutionError("installation order is unavailable before resolution")
-
-    named = requirement_set.requirements
-
-    ordered_names = resolver.installation_order(
-        {name for name, req in named.items() if req.req is not None},
-        active_graph,
-    )
-
-    return [named[name] for name in ordered_names if name in named]
-
-
-def installation_order(
-    selected: Collection[str],
-    graph: dict[str, set[str]],
-) -> list[str]:
-    ordered: list[str] = []
-
-    state: dict[str, int] = {}
-
-    for name in sorted(selected, reverse=True):
-        if state.get(name, 0) == 2:
-            continue
-
-        pending: list[tuple[str, bool]] = [(name, False)]
-
-        while pending:
-            current, expanded = pending.pop()
-
-            if expanded:
-                state[current] = 2
-
-                ordered.append(current)
-
-                continue
-
-            if state.get(current, 0) == 2:
-                continue
-
-            if state.get(current, 0) == 1:
-                continue
-
-            state[current] = 1
-
-            pending.append((current, True))
-
-            dependencies = [
-                dep for dep in sorted(graph.get(current, ()), reverse=True) if dep in selected
-            ]
-
-            pending.extend((dep, False) for dep in reversed(dependencies))
-
-    return ordered

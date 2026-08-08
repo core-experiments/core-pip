@@ -10,7 +10,7 @@ import sys
 from typing import Any
 
 from cpip.core.direct_url import DirectUrl
-from cpip.core.python import CURRENT_PYTHON_VERSION_DIGITS
+from cpip.core.utils import CURRENT_PYTHON_VERSION_DIGITS
 from cpip.core.temp_dir import TempDirectory, tempdir_kinds
 
 logger = logging.getLogger(__name__)

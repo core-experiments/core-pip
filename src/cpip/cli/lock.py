@@ -8,9 +8,10 @@ from typing import TYPE_CHECKING, cast
 
 from cpip.build.build import unpack_source
 from cpip.build.build_backend import prepare_project_metadata
-from cpip.cli.fast_path import read_requirements
-from cpip.cli.lock_format import toml_string
-from cpip.cli.parser import ArgumentParser
+from cpip.cli.fast import read_requirements
+from cpip.cli.lock_format import LOCK_HEADER, toml_string, write_lock_output
+from cpip.core.appdirs import configured_cache_dir
+from cpip.cli.common import ArgumentParser
 from cpip.core.errors import CommandError
 from cpip.core.format_control import FormatControl
 from cpip.core.packaging import parse_requirement
@@ -39,7 +40,7 @@ def read_requirement_lines(filename: str) -> list[str]:
 
 
 def render_lock(packages: list[dict[str, object]]) -> str:
-    lines = ['created-by = "cpip"', 'lock-version = "1.0"', ""]
+    lines = list(LOCK_HEADER)
 
     for package in packages:
         lines.append("[[packages]]")
@@ -177,7 +178,7 @@ def create_parser() -> ArgumentParser:
 def run_lock(args: list[str]) -> int:
     options = create_parser().parse_args(args)
 
-    cache_dir = os.environ.get("CPIP_CACHE_DIR")
+    cache_dir = configured_cache_dir()
 
     resolution_session = NetworkSession(
         cache=(os.path.join(cache_dir, "http-v1") if cache_dir else None),
@@ -324,7 +325,9 @@ def run_lock(args: list[str]) -> int:
                                 "url": item.locked_link,
                                 "hashes": {
                                     algorithm: values[0]
-                                    for algorithm, values in (item.locked_hashes or {}).items()
+                                    for algorithm, values in (
+                                        item.locked_hashes or {}
+                                    ).items()
                                     if values
                                 },
                             },
@@ -526,12 +529,7 @@ def run_lock(args: list[str]) -> int:
 
     rendered = render_lock(packages)
 
-    if options.output == "-":
-        print(rendered, end="")
-
-    else:
-        with open(options.output, "w", encoding="utf-8") as output_file:
-            output_file.write(rendered)
+    write_lock_output(options.output, rendered)
 
     if quiet_environment is None:
         os.environ.pop("CPIP_QUIET", None)

@@ -299,7 +299,9 @@ class CandidateEvaluator:
                     f"invalid Requires-Python: {link.requires_python}",
                 )
 
-        if link.is_yanked and not (allow_yanked or CandidateEvaluator.is_exact_pin(requirement)):
+        if link.is_yanked and not (
+            allow_yanked or CandidateEvaluator.is_exact_pin(requirement)
+        ):
             return CandidateEvaluator.reject(
                 link,
                 RejectionReason.YANKED,
@@ -401,7 +403,8 @@ class CandidateEvaluator:
             supported_matches = (
                 rank
                 for file_tag in candidate.wheel.tags
-                if (rank := self.supported_tag_ranks.get(str(file_tag).lower())) is not None
+                if (rank := self.supported_tag_ranks.get(str(file_tag).lower()))
+                is not None
             )
 
             best_rank = min(supported_matches, default=None)
@@ -411,7 +414,10 @@ class CandidateEvaluator:
 
             build_tag = legacy_build_tag(candidate.wheel.build_tag)
 
-        elif candidate.link.kind is ArtifactKind.WHEEL or candidate.link.filename.endswith(".whl"):
+        elif (
+            candidate.link.kind is ArtifactKind.WHEEL
+            or candidate.link.filename.endswith(".whl")
+        ):
             try:
                 wheel = Wheel(candidate.link.filename)
 
@@ -420,7 +426,8 @@ class CandidateEvaluator:
                 supported_matches = (
                     rank
                     for file_tag in wheel.file_tags
-                    if (rank := self.supported_tag_ranks.get(str(file_tag).lower())) is not None
+                    if (rank := self.supported_tag_ranks.get(str(file_tag).lower()))
+                    is not None
                 )
 
                 best_rank = min(supported_matches, default=None)

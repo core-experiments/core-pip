@@ -94,7 +94,9 @@ def _iter_installed_distributions(
     paths: Iterable[str] | None = None,
     names: Collection[str] | None = None,
 ) -> Iterable[InstalledDistribution]:
-    canonical_names = {canonicalize_name(name) for name in names} if names is not None else None
+    canonical_names = (
+        {canonicalize_name(name) for name in names} if names is not None else None
+    )
 
     if paths is None:
         distributions = importlib.metadata.distributions()
@@ -114,7 +116,10 @@ def _iter_installed_distributions(
         if not name or not version:
             continue
 
-        if canonical_names is not None and canonicalize_name(name) not in canonical_names:
+        if (
+            canonical_names is not None
+            and canonicalize_name(name) not in canonical_names
+        ):
             continue
 
         metadata_location = getattr(dist, "_path", None)

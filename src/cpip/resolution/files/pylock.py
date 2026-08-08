@@ -18,7 +18,7 @@ except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility
 from cpip.core.errors import InstallationError
 from cpip.core.format_control import FormatControl
 from cpip.core.packaging import SpecifierSet, Version
-from cpip.core.python import CURRENT_PYTHON_VERSION_FULL
+from cpip.core.utils import CURRENT_PYTHON_VERSION_FULL
 from cpip.core.urls import path_to_url
 from cpip.core.wheel import parse_wheel_filename
 from cpip.resolution.files.models import ParsedRequirement
@@ -146,9 +146,7 @@ def parse_pylock(
                 or ""
             )
 
-            requirement = (
-                f"{package_name} @ {distribution['type']}+{link}@{distribution['commit-id']}"
-            )
+            requirement = f"{package_name} @ {distribution['type']}+{link}@{distribution['commit-id']}"
 
             direct = True
 
@@ -278,11 +276,14 @@ def _distribution_hashes(
         raise InstallationError(f"Invalid hashes for {package_name!r}")
 
     if not all(
-        isinstance(name, str) and isinstance(value, str) for name, value in raw_hashes.items()
+        isinstance(name, str) and isinstance(value, str)
+        for name, value in raw_hashes.items()
     ):
         raise InstallationError(f"Invalid hashes for {package_name!r}")
 
-    return {cast("str", name): [cast("str", value)] for name, value in raw_hashes.items()}
+    return {
+        cast("str", name): [cast("str", value)] for name, value in raw_hashes.items()
+    }
 
 
 def _sdist_version(filename: str, package_name: str) -> str:

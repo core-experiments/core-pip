@@ -58,7 +58,9 @@ class RequirementInstaller:
     def uninstall(self, name: str, *, paths: list[str] | None = None) -> bool:
         """Uninstall an installed distribution using its recorded files."""
         uninstaller = (
-            self.uninstaller_internal if paths is None else DistributionUninstaller(paths)
+            self.uninstaller_internal
+            if paths is None
+            else DistributionUninstaller(paths)
         )
         return uninstaller.uninstall(name)
 
@@ -91,7 +93,9 @@ class RequirementInstaller:
     def install_all(self, requirements: list[InstallRequirement]) -> list[str]:
         """Install prepared requirements and report the installed names."""
         to_install = {
-            requirement.name: requirement for requirement in requirements if requirement.name
+            requirement.name: requirement
+            for requirement in requirements
+            if requirement.name
         }
         if to_install:
             logger.info(

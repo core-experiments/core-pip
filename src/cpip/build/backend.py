@@ -57,7 +57,8 @@ class ConfiguredBuildBackend:
         pythonpath = [source_text]
 
         pythonpath.extend(
-            os.path.realpath(os.path.join(source_text, path)) for path in self.backend_path
+            os.path.realpath(os.path.join(source_text, path))
+            for path in self.backend_path
         )
 
         existing = env.get("PYTHONPATH")

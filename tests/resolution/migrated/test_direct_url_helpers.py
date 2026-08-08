@@ -10,7 +10,7 @@ from cpip.core.direct_url import (
     VcsInfo,
 )
 from cpip.index.links import Link
-from cpip.install.direct_url import direct_url_from_link
+from cpip.install.metadata import direct_url_from_link
 from cpip.vcs.git import Git
 
 

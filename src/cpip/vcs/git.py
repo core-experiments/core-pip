@@ -7,9 +7,8 @@ import urllib.parse
 import urllib.request
 from typing import Any
 
-from cpip.core.contracts import AuthInfo
+from cpip.core.utils import AuthInfo, display_path
 from cpip.core.errors import InstallationError
-from cpip.core.filesystem import display_path
 from cpip.core.urls import path_to_url
 
 from .errors import BadCommand

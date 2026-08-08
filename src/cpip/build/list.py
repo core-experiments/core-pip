@@ -56,7 +56,9 @@ def select_installed_distributions(
         }
 
         distributions = [
-            dist for dist in distributions if dist.canonical_name not in dependency_names
+            dist
+            for dist in distributions
+            if dist.canonical_name not in dependency_names
         ]
 
     return [dist for dist in distributions if dist.canonical_name not in excluded]

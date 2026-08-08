@@ -59,7 +59,9 @@ def uninstall_distribution(
 
             raw_relative = row[0]
 
-            if raw_relative.startswith("/") or (os.name == "nt" and ntpath.isabs(raw_relative)):
+            if raw_relative.startswith("/") or (
+                os.name == "nt" and ntpath.isabs(raw_relative)
+            ):
                 continue
 
             relative_parts = tuple(
@@ -109,7 +111,9 @@ def uninstall_distribution(
             if entry.startswith("/") or (os.name == "nt" and ntpath.isabs(entry)):
                 continue
 
-            relative_parts = tuple(part for part in entry.split("/") if part and part != ".")
+            relative_parts = tuple(
+                part for part in entry.split("/") if part and part != "."
+            )
 
             path = os.path.realpath(os.path.join(egg_link_root, *relative_parts))
 
@@ -147,7 +151,9 @@ def uninstall_distribution(
             try:
                 with os.scandir(path_entry) as children:
                     egg_links.extend(
-                        entry.path for entry in children if entry.name.endswith(".egg-link")
+                        entry.path
+                        for entry in children
+                        if entry.name.endswith(".egg-link")
                     )
 
             except OSError:

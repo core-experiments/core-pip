@@ -8,7 +8,8 @@ from cpip.cli import install as install_command
 
 def test_layered_cli_uses_public_cpip_install_services() -> None:
     source = Path(install_command.__file__).read_text()
-    assert "from cpip.install.editable import prepare_editable_source" in source
+    assert "from cpip.install.metadata import (" in source
+    assert "prepare_editable_source," in source
     assert "def _prepare_editable_source" not in source
 
 

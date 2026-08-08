@@ -68,7 +68,9 @@ class InstallTransaction:
         mode: int | None = None,
     ) -> None:
         source_text = source if isinstance(source, str) else os.fspath(source)
-        destination_text = destination if isinstance(destination, str) else os.fspath(destination)
+        destination_text = (
+            destination if isinstance(destination, str) else os.fspath(destination)
+        )
         if destination_text in self.staged_destinations:
             raise InstallationError(
                 f"duplicate installation destination: {destination_text}",
@@ -84,7 +86,9 @@ class InstallTransaction:
         mode: int | None = None,
     ) -> None:
         """Stage bytes for one destination without creating a temp source file."""
-        destination_text = destination if isinstance(destination, str) else os.fspath(destination)
+        destination_text = (
+            destination if isinstance(destination, str) else os.fspath(destination)
+        )
         if destination_text in self.staged_destinations:
             raise InstallationError(
                 f"duplicate installation destination: {destination_text}",
@@ -103,7 +107,9 @@ class InstallTransaction:
     ) -> None:
         """Stage an immutable cache source without consuming it at commit."""
         source_text = source if isinstance(source, str) else os.fspath(source)
-        destination_text = destination if isinstance(destination, str) else os.fspath(destination)
+        destination_text = (
+            destination if isinstance(destination, str) else os.fspath(destination)
+        )
         if destination_text in self.staged_destinations:
             raise InstallationError(
                 f"duplicate installation destination: {destination_text}",
@@ -189,7 +195,9 @@ class InstallTransaction:
             append_created = self.created_internal.append
             for item in self.staged_internal:
                 backup_if_needed(item.destination_text)
-                destination_parent_text = os.path.dirname(item.destination_text) or os.curdir
+                destination_parent_text = (
+                    os.path.dirname(item.destination_text) or os.curdir
+                )
                 if destination_parent_text not in created_directories:
                     makedirs(destination_parent_text, exist_ok=True)
                     created_directories.add(destination_parent_text)

@@ -97,6 +97,34 @@ def parse_installed_dependencies(
     return result
 
 
+def installed_dependencies_by_name(
+    distributions: Iterable[InstalledMetadataDistribution],
+) -> dict[str, list[Requirement]]:
+    """Map each installed distribution's canonical name to its dependencies."""
+    return {
+        dist.canonical_name: parse_installed_dependencies(dist)
+        for dist in distributions
+    }
+
+
+def package_set_from_dependencies(
+    distributions: Iterable[InstalledMetadataDistribution],
+    dependencies_by_name: dict[str, list[Requirement]],
+) -> PackageSet:
+    """Build the :func:`check_package_set` input from an installed environment.
+
+    Callers pass the dependency map separately because the install command
+    reuses it to index dependents; ``cpip check`` does not.
+    """
+    return {
+        dist.canonical_name: PackageDetails.from_dependencies(
+            Version(dist.raw_version),
+            dependencies_by_name[dist.canonical_name],
+        )
+        for dist in distributions
+    }
+
+
 def metadata_errors(
     distributions: Iterable[InstalledMetadataDistribution],
 ) -> list[str]:

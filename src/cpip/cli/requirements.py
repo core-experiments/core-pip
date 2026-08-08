@@ -14,8 +14,7 @@ except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility
     from cpip._vendor import tomli as tomllib
 
 from cpip.build.build_backend import prepare_project_metadata
-from cpip.cli.config import ConfigurationStore
-from cpip.core.errors import ConfigurationError, InstallationError
+from cpip.core.errors import InstallationError
 from cpip.core.format_control import FormatControl
 from cpip.core.packaging import (
     SpecifierSet,
@@ -31,8 +30,6 @@ from cpip.index.source_locations import resolve_source_location
 from cpip.network.http import NetworkSession
 from cpip.resolution.files import parse_requirements
 from cpip.resolution.input_requirements import install_req_from_line
-
-NO_INDEX_VALUES = frozenset(("1", "true", "yes", "on"))
 
 RELEASE_OPTIONS = frozenset(("pre", "all-releases"))
 
@@ -113,7 +110,9 @@ class RequirementsBundle:
 
         self.locked_direct_names = locked_direct_names
 
-        self.release_control = release_control if release_control is not None else ReleaseControl()
+        self.release_control = (
+            release_control if release_control is not None else ReleaseControl()
+        )
 
         self.require_hashes = require_hashes
 
@@ -174,7 +173,9 @@ class DeferredNetworkSession:
 
             session = NetworkSession(
                 index_urls=self.index_urls,
-                cache=(os.path.join(self.cache_dir, "http-v1") if self.cache_dir else None),
+                cache=(
+                    os.path.join(self.cache_dir, "http-v1") if self.cache_dir else None
+                ),
             )
 
             session.auth.prompting = not self.no_input
@@ -188,7 +189,9 @@ class DeferredNetworkSession:
                 session.cert = self.client_cert
 
             if self.proxy is not None:
-                session.proxies = {"http": self.proxy, "https": self.proxy} if self.proxy else {}
+                session.proxies = (
+                    {"http": self.proxy, "https": self.proxy} if self.proxy else {}
+                )
 
             self.session = session
 
@@ -242,78 +245,37 @@ class RequirementSourceState:
         self.locked_links: dict[str, Any] = {}
 
 
-class SourceConfig:
-    __slots__ = ("extra_index_urls", "find_links", "index_url", "no_index")
-
-    def __init__(
-        self,
-        find_links: list[str],
-        index_url: str | None,
-        extra_index_urls: list[str],
-        no_index: bool,
-    ) -> None:
-        self.find_links = find_links
-
-        self.index_url = index_url
-
-        self.extra_index_urls = extra_index_urls
-
-        self.no_index = no_index
+PROXY_ENVIRONMENT_NAMES = (
+    "CPIP_PROXY",
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "http_proxy",
+    "https_proxy",
+)
 
 
-def load_source_config(command: str | None = None) -> SourceConfig:
-    store = ConfigurationStore()
+def apply_proxy_environment(proxy: str | None) -> None:
+    """Point urllib-based helpers and subprocesses at the resolver's proxy.
 
-    try:
-        store.load()
+    Also ensures ``--proxy`` overrides inherited HTTP(S)_PROXY values on every
+    platform.
+    """
 
-    except ConfigurationError:
-        return SourceConfig([], DEFAULT_INDEX_URL, [], False)
+    if not proxy:
+        return
 
-    def configured(option: str) -> str | None:
-        if command is not None:
-            value = store.get_optional(f"{command}.{option}")
+    for name in PROXY_ENVIRONMENT_NAMES:
+        os.environ[name] = proxy
 
-            if value is not None:
-                return value
 
-        return store.get_optional(f"global.{option}")
+def config_settings(values: list[str]) -> dict[str, object]:
+    """Parse ``--config-settings KEY=VALUE`` pairs; a bare ``KEY`` means ``""``."""
 
-    raw_find_links = configured("find-links")
-
-    find_links = (
-        []
-        if raw_find_links is None
-        else [line.strip() for line in raw_find_links.splitlines() if line.strip()]
-    )
-
-    index_url = configured("index-url") or DEFAULT_INDEX_URL
-
-    raw_extra_index_urls = configured("extra-index-url")
-
-    extra_index_urls = (
-        []
-        if raw_extra_index_urls is None
-        else [line.strip() for line in raw_extra_index_urls.splitlines() if line.strip()]
-    )
-
-    no_index_value = configured("no-index")
-
-    no_index = no_index_value is not None and no_index_value.strip().lower() in NO_INDEX_VALUES
-
-    if (value := os.environ.get("CPIP_FIND_LINKS")) is not None:
-        find_links = value.split()
-
-    if (value := os.environ.get("CPIP_INDEX_URL")) is not None:
-        index_url = value
-
-    if (value := os.environ.get("CPIP_EXTRA_INDEX_URL")) is not None:
-        extra_index_urls = value.split()
-
-    if (value := os.environ.get("CPIP_NO_INDEX")) is not None:
-        no_index = value.strip().lower() in NO_INDEX_VALUES
-
-    return SourceConfig(find_links, index_url, extra_index_urls, no_index)
+    result: dict[str, object] = {}
+    for value in values:
+        key, separator, payload = value.partition("=")
+        result[key] = payload if separator else ""
+    return result
 
 
 def requirements_from_script(path: str) -> list[str]:
@@ -481,7 +443,9 @@ def collect_requirements(
         and not requirement_files
         and not constraint_files
         and bool(bundle_find_links)
-        and all(resolve_source_location(value)[1] is not None for value in bundle_find_links)
+        and all(
+            resolve_source_location(value)[1] is not None for value in bundle_find_links
+        )
     )
 
     if local_only:
@@ -489,7 +453,9 @@ def collect_requirements(
 
     else:
         session = DeferredNetworkSession(
-            index_urls=[url for url in (bundle_index_url, *bundle_extra_index_urls) if url],
+            index_urls=[
+                url for url in (bundle_index_url, *bundle_extra_index_urls) if url
+            ],
             cache_dir=cache_dir,
             cert=cert,
             client_cert=client_cert,
@@ -610,7 +576,9 @@ def collect_requirements(
         editable_config_settings=editable_settings,
         find_links=list(provider.find_links),
         index_url=provider.index_urls[0] if provider.index_urls else None,
-        extra_index_urls=provider.index_urls[1:] if len(provider.index_urls) > 1 else [],
+        extra_index_urls=provider.index_urls[1:]
+        if len(provider.index_urls) > 1
+        else [],
         no_index=provider.no_index,
         format_control=provider.format_control or FormatControl(),
         locked_links=locked_links,
@@ -640,7 +608,11 @@ def validate_constraint_requirement(
     if item.req is None:
         raise InstallationError("Unnamed requirements are not allowed as constraints")
 
-    if item.req.url is not None and "@" not in requirement and "#egg=" not in requirement:
+    if (
+        item.req.url is not None
+        and "@" not in requirement
+        and "#egg=" not in requirement
+    ):
         raise InstallationError("Unnamed requirements are not allowed as constraints")
 
     if item.req.extras:
@@ -709,7 +681,8 @@ def bundle_install_requirements(
             [
                 constraint
                 for constraint in (
-                    parse_requirement(raw_constraint) for raw_constraint in bundle.constraints
+                    parse_requirement(raw_constraint)
+                    for raw_constraint in bundle.constraints
                 )
                 if constraint.canonical_name == item.req.canonical_name
                 and constraint.url is not None
@@ -723,9 +696,13 @@ def bundle_install_requirements(
 
             constrained = direct_constraints[-1]
 
-            if item.req is not None and (item.req.url is None or item.req.url == constrained.url):
+            if item.req is not None and (
+                item.req.url is None or item.req.url == constrained.url
+            ):
                 merged_specifier = ",".join(
-                    part for part in (str(item.req.specifier), str(constrained.specifier)) if part
+                    part
+                    for part in (str(item.req.specifier), str(constrained.specifier))
+                    if part
                 )
 
                 constrained = constrained.copy_with(

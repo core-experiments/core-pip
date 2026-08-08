@@ -29,3 +29,25 @@ def test_command_help_uses_registered_parser(
 ) -> None:
     assert main(["help", command]) == 0
     assert expected in capsys.readouterr().out
+
+
+def test_help_dash_help_prints_top_level_usage(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """``help --help`` asks for help about help, not about a command.
+
+    This used to reach ``getattr(module, "")`` through the ``help`` command
+    spec and die with an AttributeError traceback.
+    """
+    assert main(["help", "--help"]) == 0
+
+    output = capsys.readouterr().out
+    assert "Usage:" in output
+    assert "install" in output
+
+
+def test_help_help_reports_unknown_command(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    assert main(["help", "help"]) == 1
+    assert "Unknown command: help" in capsys.readouterr().err

@@ -7,7 +7,7 @@ from collections.abc import Iterable
 from typing import TYPE_CHECKING, cast
 
 from cpip.core.errors import InstallationError
-from cpip.core.filesystem import display_path
+from cpip.core.utils import display_path
 from cpip.core.subprocess import call_subprocess
 from cpip.install.build_env.base import BuildIsolationMode
 from cpip.install.build_env.noop import NoOpBuildEnvironment
@@ -205,7 +205,9 @@ class SourceMetadataPreparation:
         raise InstallationError(error_message)
 
     def raise_missing_reqs(self, missing: set[str]) -> None:
-        format_string = "Some build dependencies for {requirement} are missing: {missing}."
+        format_string = (
+            "Some build dependencies for {requirement} are missing: {missing}."
+        )
         error_message = format_string.format(
             requirement=self.req,
             missing=", ".join(map(repr, sorted(missing))),

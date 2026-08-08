@@ -6,7 +6,7 @@ import atexit
 import os
 from typing import TypeAlias, cast
 
-from cpip.core.marshal_cache import load_snapshot, save_snapshot
+from cpip.core.utils import load_snapshot, save_snapshot
 
 MetadataHeaders: TypeAlias = dict[str, list[str]]
 MetadataIdentity: TypeAlias = tuple[str, int, int]
@@ -65,7 +65,11 @@ class WheelMetadataCache:
 
     def get(self, identity: MetadataIdentity) -> MetadataHeaders | None:
         value = self.entries.get(identity)
-        return None if value is None else {name: list(values) for name, values in value.items()}
+        return (
+            None
+            if value is None
+            else {name: list(values) for name, values in value.items()}
+        )
 
     def get_reference(self, identity: MetadataIdentity) -> MetadataHeaders | None:
         """Return cached headers without copying for read-only hot paths."""
@@ -74,7 +78,9 @@ class WheelMetadataCache:
     def put(self, identity: MetadataIdentity, headers: MetadataHeaders) -> None:
         if identity not in self.entries and len(self.entries) >= _MAX_ENTRIES:
             self.entries.pop(next(iter(self.entries)))
-        self.entries[identity] = {name: list(values) for name, values in headers.items()}
+        self.entries[identity] = {
+            name: list(values) for name, values in headers.items()
+        }
         self.dirty = True
 
     def put_reference(

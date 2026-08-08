@@ -160,7 +160,9 @@ class LazyWheelCandidate(WheelCandidate):
         self._record_internal = record
 
         self._version_internal = (
-            version if version is not None else (record.version if record is not None else None)
+            version
+            if version is not None
+            else (record.version if record is not None else None)
         )
 
         self.requirement_internal = requirement
@@ -336,15 +338,21 @@ class CandidateMaterializer:
         self.session = session
 
         self.persistent_metadata_cache = (
-            get_wheel_metadata_cache(wheel_cache_dir) if wheel_cache_dir is not None else None
+            get_wheel_metadata_cache(wheel_cache_dir)
+            if wheel_cache_dir is not None
+            else None
         )
 
         self.persistent_candidate_metadata_cache = (
-            get_candidate_metadata_cache(wheel_cache_dir) if wheel_cache_dir is not None else None
+            get_candidate_metadata_cache(wheel_cache_dir)
+            if wheel_cache_dir is not None
+            else None
         )
 
         self.persistent_release_facts_cache = (
-            get_release_facts_cache(wheel_cache_dir) if wheel_cache_dir is not None else None
+            get_release_facts_cache(wheel_cache_dir)
+            if wheel_cache_dir is not None
+            else None
         )
 
         self.artifacts = None
@@ -435,7 +443,9 @@ class CandidateMaterializer:
 
         if candidate.link.is_file:
             path = (
-                os.fspath(local_path) if local_path is not None else self.local_path_for(candidate)
+                os.fspath(local_path)
+                if local_path is not None
+                else self.local_path_for(candidate)
             )
 
             assert path is not None
@@ -541,7 +551,9 @@ class CandidateMaterializer:
         record_key = (
             requirement.canonical_name,
             tuple(sorted(requirement.extras)),
-            tuple((candidate.link.url, candidate.version.public) for candidate in accepted),
+            tuple(
+                (candidate.link.url, candidate.version.public) for candidate in accepted
+            ),
         )
 
         records = self.prepared_record_cache.get(record_key)
@@ -550,7 +562,9 @@ class CandidateMaterializer:
             if len(self.prepared_record_cache) >= 4096:
                 self.prepared_record_cache.pop(next(iter(self.prepared_record_cache)))
 
-            records = tuple(self.prepare_record(requirement, candidate) for candidate in accepted)
+            records = tuple(
+                self.prepare_record(requirement, candidate) for candidate in accepted
+            )
 
             self.prepared_record_cache[record_key] = records
 
@@ -625,7 +639,8 @@ class CandidateMaterializer:
 
                 if (
                     self.persistent_release_facts_cache is not None
-                    and self.persistent_release_facts_cache.get(negative_key) is not None
+                    and self.persistent_release_facts_cache.get(negative_key)
+                    is not None
                 ):
                     self.invalid_links.add(candidate.link.url)
 
@@ -841,7 +856,10 @@ class CandidateMaterializer:
             if candidate.link.kind in SOURCE_ARTIFACT_KINDS:
                 metadata = self.pypi_metadata(candidate, requested_extras)
 
-                if metadata is not None and requested_extras <= metadata.provided_extras:
+                if (
+                    metadata is not None
+                    and requested_extras <= metadata.provided_extras
+                ):
                     self.metadata_cache[key] = metadata
 
                     if self.persistent_candidate_metadata_cache is not None:
@@ -933,9 +951,11 @@ class CandidateMaterializer:
                     zipfile.ZipFile(stream) as archive,
                 ):
                     try:
-                        dist_info_dir, wheel_metadata_text = validate_wheel_with_metadata(
-                            archive,
-                            os.path.basename(path_text)[:-4].split("-", 1)[0],
+                        dist_info_dir, wheel_metadata_text = (
+                            validate_wheel_with_metadata(
+                                archive,
+                                os.path.basename(path_text)[:-4].split("-", 1)[0],
+                            )
                         )
 
                     except UnsupportedWheel as exc:
@@ -1152,7 +1172,11 @@ class CandidateMaterializer:
                 if cached_hashes is not None:
                     source_hashes.update(cached_hashes)
 
-            if self.compute_source_hashes and not source_hashes and local_path is not None:
+            if (
+                self.compute_source_hashes
+                and not source_hashes
+                and local_path is not None
+            ):
                 try:
                     with open(local_path, "rb") as file:
                         source_hashes["sha256"] = hashlib.sha256(
@@ -1170,7 +1194,9 @@ class CandidateMaterializer:
             ):
                 path = os.path.join(path, candidate.link.subdirectory_fragment)
 
-            cache_built_wheel = (candidate.link.kind is ArtifactKind.SDIST and not candidates) or (
+            cache_built_wheel = (
+                candidate.link.kind is ArtifactKind.SDIST and not candidates
+            ) or (
                 candidate.link.kind is ArtifactKind.SOURCE_TREE
                 and is_immutable_vcs_link(candidate.link.url)
                 and not candidates
@@ -1261,12 +1287,14 @@ class CandidateMaterializer:
                             open(path, "rb", buffering=32768) as stream,
                             zipfile.ZipFile(stream) as archive,
                         ):
-                            dist_info_dir, wheel_metadata_text = validate_wheel_with_metadata(
-                                archive,
-                                os.path.basename(os.fspath(path))[:-4].split(
-                                    "-",
-                                    1,
-                                )[0],
+                            dist_info_dir, wheel_metadata_text = (
+                                validate_wheel_with_metadata(
+                                    archive,
+                                    os.path.basename(os.fspath(path))[:-4].split(
+                                        "-",
+                                        1,
+                                    )[0],
+                                )
                             )
 
                             built = wheel_candidate(
@@ -1329,9 +1357,13 @@ class CandidateMaterializer:
                 provided_extras=built.provided_extras,
                 requires_python=built.requires_python or candidate.link.requires_python,
                 source_url=candidate.link.url,
-                source_hashes=cache_hashes if cache_hashes is not None else source_hashes,
+                source_hashes=cache_hashes
+                if cache_hashes is not None
+                else source_hashes,
                 source_kind=candidate.link.kind.value,
-                source_vcs=vcs_scheme(candidate.link.url) if candidate.link.is_vcs else None,
+                source_vcs=vcs_scheme(candidate.link.url)
+                if candidate.link.is_vcs
+                else None,
                 from_cache=from_cache,
                 yanked_reason=candidate.link.yanked_reason,
             )
@@ -1417,7 +1449,9 @@ def validate_build_requirements(source: str | os.PathLike[str]) -> None:
 
     requires = build_system.get("requires")
 
-    if not isinstance(requires, list) or not all(isinstance(item, str) for item in requires):
+    if not isinstance(requires, list) or not all(
+        isinstance(item, str) for item in requires
+    ):
         raise BuildError(
             f"Invalid PEP 518 build requirements in {pyproject}: build-system.requires is not a list of strings",
         )
@@ -1435,7 +1469,8 @@ def validate_build_requirements(source: str | os.PathLike[str]) -> None:
             _, upper_bound = req.specifier.bounds()
 
             if upper_bound is not None and (
-                upper_bound[0] < minimum or (upper_bound[0] == minimum and not upper_bound[1])
+                upper_bound[0] < minimum
+                or (upper_bound[0] == minimum and not upper_bound[1])
             ):
                 raise BuildError(
                     f"Some build dependencies for {path_to_url(os.path.abspath(os.fspath(source)))} conflict with PEP 517/518 supported requirements: "

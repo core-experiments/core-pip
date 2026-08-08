@@ -6,7 +6,7 @@ import atexit
 import os
 from typing import cast
 
-from cpip.core.marshal_cache import load_snapshot, save_snapshot
+from cpip.core.utils import load_snapshot, save_snapshot
 from cpip.core.packaging import Requirement, Version, parse_requirement
 from cpip.index.source_models import CandidateMetadata
 

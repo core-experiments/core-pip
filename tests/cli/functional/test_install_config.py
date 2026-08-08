@@ -228,7 +228,7 @@ def test_options_from_venv_config(
     virtualenv: VirtualEnvironment,
 ) -> None:
     """Test if ConfigOptionParser reads a virtualenv-local config file"""
-    from cpip.platform.configuration import CONFIG_BASENAME
+    from cpip.cli.config import CONFIG_BASENAME
 
     conf = "[global]\nno-index = true"
     ini = virtualenv.location / CONFIG_BASENAME

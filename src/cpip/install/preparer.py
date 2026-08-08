@@ -21,7 +21,7 @@ from cpip.core.errors import (
     InstallationError,
     VcsHashUnsupported,
 )
-from cpip.core.filesystem import display_path
+from cpip.core.utils import display_path
 from cpip.core.hashes import Hashes, MissingHashes, hash_file
 from cpip.core.packaging import Requirement, canonicalize_name
 from cpip.core.temp_dir import TempDirectory
@@ -30,7 +30,7 @@ from cpip.core.wheel import Wheel
 from cpip.index.links import Link
 from cpip.index.paths import PathComponent
 from cpip.install.build_env.base import BuildEnvironmentInstaller, BuildIsolationMode
-from cpip.install.direct_url import direct_url_from_link
+from cpip.install.metadata import direct_url_from_link
 from cpip.install.downloads import (
     DownloadManager,
     File,

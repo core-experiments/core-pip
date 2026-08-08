@@ -35,7 +35,9 @@ def install_req_from_line(
     path_text = text
     if "[" in text and text.endswith("]") and " @ " not in text:
         maybe_path, extras_text = text[:-1].split("[", 1)
-        extras = frozenset(item.strip() for item in extras_text.split(",") if item.strip())
+        extras = frozenset(
+            item.strip() for item in extras_text.split(",") if item.strip()
+        )
         if extras and (looks_like_path(maybe_path) or os.path.exists(maybe_path)):
             path_text = maybe_path
             path_extras = extras
@@ -187,7 +189,9 @@ def install_req_from_line(
     return InstallRequirement(
         parsed,
         comes_from=comes_from,
-        link=(Link(parsed.url) if parsed.url else Link(text) if "://" in text else None),
+        link=(
+            Link(parsed.url) if parsed.url else Link(text) if "://" in text else None
+        ),
         marker_internal=marker,
         isolated=isolated,
         user_supplied=user_supplied,
@@ -221,7 +225,9 @@ def install_req_from_editable(
         )
     else:
         parsed = parse_requirement(
-            f"{name}[{','.join(sorted(extras))}] @ {url}" if extras else f"{name} @ {url}",
+            f"{name}[{','.join(sorted(extras))}] @ {url}"
+            if extras
+            else f"{name} @ {url}",
         )
     return InstallRequirement(
         parsed,

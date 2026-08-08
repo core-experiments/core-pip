@@ -41,7 +41,10 @@ class RequirementSet(Generic[RequirementT]):
 
     def has_requirement(self, name: str) -> bool:
         normalized = canonicalize_name(name)
-        return normalized in self.named_internal and not self.named_internal[normalized].constraint
+        return (
+            normalized in self.named_internal
+            and not self.named_internal[normalized].constraint
+        )
 
     def get_requirement(self, name: str) -> RequirementT:
         normalized = canonicalize_name(name)

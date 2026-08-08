@@ -102,9 +102,13 @@ class BuildConfiguration:
     ) -> None:
         self.session = session
 
-        self.format_control = format_control if format_control is not None else FormatControl()
+        self.format_control = (
+            format_control if format_control is not None else FormatControl()
+        )
 
-        self.release_control = release_control if release_control is not None else ReleaseControl()
+        self.release_control = (
+            release_control if release_control is not None else ReleaseControl()
+        )
 
         self.index_urls = index_urls if index_urls is not None else []
 
@@ -130,7 +134,9 @@ class InstallWheelBuildError(DiagnosticCpipError):
 
     def __init__(self, failed: list[InstallRequirement]) -> None:
         super().__init__(
-            message=("Failed to build installable wheels for some pyproject.toml based projects"),
+            message=(
+                "Failed to build installable wheels for some pyproject.toml based projects"
+            ),
             context=", ".join(requirement.name or "" for requirement in failed),
             hint_stmt=None,
         )
@@ -325,7 +331,9 @@ class InprocessBuildEnvironmentInstaller:
             resolved_set.requirements.values(),
         )
 
-        reqs_to_build = [r for r in resolved_set.requirements_to_install if not r.is_wheel]
+        reqs_to_build = [
+            r for r in resolved_set.requirements_to_install if not r.is_wheel
+        ]
 
         _, build_failures = WheelBuilder(self.wheel_cache_internal, verify=True).build(
             reqs_to_build,

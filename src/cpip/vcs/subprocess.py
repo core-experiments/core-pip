@@ -56,7 +56,9 @@ def call_subprocess(
             command_args_to_argv(cmd),
             stdin=subprocess_internal.PIPE,
             stdout=subprocess_internal.PIPE,
-            stderr=subprocess_internal.PIPE if stdout_only else subprocess_internal.STDOUT,
+            stderr=subprocess_internal.PIPE
+            if stdout_only
+            else subprocess_internal.STDOUT,
             cwd=cwd,
             env=env,
             encoding="locale",

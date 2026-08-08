@@ -7,18 +7,20 @@ import shutil
 import sys
 
 from cpip.build.build import build_wheel_from_source
-from cpip.cli.parser import ArgumentParser
+from cpip.cli.common import ArgumentParser
+from cpip.cli.config import load_source_config, resolve_sources
+from cpip.cli.dependency_groups import group_items, parse_dependency_groups
 from cpip.cli.requirements import (
+    apply_proxy_environment,
     bundle_install_requirements,
     collect_requirements,
-    load_source_config,
 )
-from cpip.cli.install_setup import resolution_error_message
+from cpip.cli.resolution_errors import resolution_error_message
 from cpip.core.errors import DistributionNotFound, ResolutionError
 from cpip.core.format_control import FormatControl
 from cpip.index.artifacts import ArtifactLocator
 from cpip.index.provider import CandidateProvider
-from cpip.install.editable import prepare_editable_source
+from cpip.install.metadata import prepare_editable_source
 from cpip.resolution.api import ResolutionEngine
 
 
@@ -80,32 +82,20 @@ def create_parser() -> ArgumentParser:
 def run_download(args: list[str]) -> int:
     options = create_parser().parse_args(args)
 
-    if options.proxy is not None:
-        # Keep urllib-based helpers and subprocesses on the same proxy as the
+    apply_proxy_environment(options.proxy)
 
-        # resolver session. This also ensures --proxy overrides inherited
+    sources = resolve_sources(options, load_source_config("download"))
 
-        # HTTP(S)_PROXY values on every platform.
-
-        for name in (
-            "CPIP_PROXY",
-            "HTTP_PROXY",
-            "HTTPS_PROXY",
-            "http_proxy",
-            "https_proxy",
-        ):
-            os.environ[name] = options.proxy
-
-    config = load_source_config("download")
+    grouped_requirements = parse_dependency_groups(group_items(options.groups))
 
     bundle = collect_requirements(
-        requirements=options.requirements,
+        requirements=[*options.requirements, *grouped_requirements],
         requirement_files=options.requirement_files,
         constraint_files=options.constraint_files,
-        find_links=options.find_links or config.find_links,
-        index_url=options.index_url or config.index_url,
-        extra_index_urls=options.extra_index_url or config.extra_index_urls,
-        no_index=options.no_index or config.no_index,
+        find_links=sources.find_links,
+        index_url=sources.index_url,
+        extra_index_urls=sources.extra_index_urls,
+        no_index=sources.no_index,
         format_control=FormatControl(),
         cert=options.cert,
         client_cert=options.client_cert,
@@ -167,14 +157,20 @@ def run_download(args: list[str]) -> int:
 
         source_text = os.fspath(source)
 
-        shutil.copy2(source_text, os.path.join(destination, os.path.basename(source_text)))
+        shutil.copy2(
+            source_text, os.path.join(destination, os.path.basename(source_text))
+        )
 
         names.append(candidate.name)
 
     if names:
         message = f"Successfully downloaded {' '.join(sorted(names))}"
 
-        if sys.stdout.isatty() and not options.no_color and "NO_COLOR" not in os.environ:
+        if (
+            sys.stdout.isatty()
+            and not options.no_color
+            and "NO_COLOR" not in os.environ
+        ):
             message = f"\x1b[32m{message}\x1b[0m"
 
         print(message)

@@ -11,7 +11,7 @@ from collections.abc import Callable, Generator
 from contextlib import ExitStack, contextmanager
 from typing import Any, TypeVar
 
-from cpip.core.misc import enum
+from cpip.core.utils import enum
 
 logger = logging.getLogger(__name__)
 T_internal = TypeVar("T_internal", bound="TempDirectory")
@@ -110,7 +110,9 @@ class TempDirectory:
 
     @property
     def path(self) -> str:
-        assert not self.deleted_internal, f"Attempted to access deleted path: {self.path_internal}"
+        assert not self.deleted_internal, (
+            f"Attempted to access deleted path: {self.path_internal}"
+        )
         return self.path_internal
 
     def __repr__(self) -> str:

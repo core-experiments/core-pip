@@ -183,7 +183,9 @@ class Version:
             else None
         )
 
-        self.dev = int(match.group("dev_n") or 0) if match.group("dev_n") is not None else None
+        self.dev = (
+            int(match.group("dev_n") or 0) if match.group("dev_n") is not None else None
+        )
 
         self.local = (
             NORMALIZE_RE.sub(".", match.group("local").lower())
@@ -263,7 +265,9 @@ class Version:
             suffix = (-1, 0, 0, 0, 0, self.dev)
 
         else:
-            pre_rank, pre_number = (3, 0) if self.pre is None else (self.pre[0], self.pre[1])
+            pre_rank, pre_number = (
+                (3, 0) if self.pre is None else (self.pre[0], self.pre[1])
+            )
 
             post_rank = 0 if self.post is None else 1
 
@@ -284,7 +288,8 @@ class Version:
 
         if self.local is not None:
             local = tuple(
-                (1, int(part)) if part.isdigit() else (0, part) for part in self.local.split(".")
+                (1, int(part)) if part.isdigit() else (0, part)
+                for part in self.local.split(".")
             )
 
             key += (local,)
@@ -411,7 +416,9 @@ class Specifier:
         return (
             self.operator,
             self.version,
-            None if self._parsed_version is None else self._parsed_version.cache_state_internal(),
+            None
+            if self._parsed_version is None
+            else self._parsed_version.cache_state_internal(),
         )
 
     @property
@@ -954,7 +961,11 @@ def canonicalize_requirement(value: str) -> str:
 
 
 def looks_like_direct_reference(value: str) -> bool:
-    return looks_like_url(value) or value.startswith((".", "/", "~")) or is_windows_path(value)
+    return (
+        looks_like_url(value)
+        or value.startswith((".", "/", "~"))
+        or is_windows_path(value)
+    )
 
 
 def looks_like_url(value: str) -> bool:
@@ -970,7 +981,9 @@ def looks_like_url(value: str) -> bool:
 
 
 def is_windows_path(value: str) -> bool:
-    return len(value) >= 3 and value[0].isalpha() and value[1] == ":" and value[2] in "/\\"
+    return (
+        len(value) >= 3 and value[0].isalpha() and value[1] == ":" and value[2] in "/\\"
+    )
 
 
 def project_from_direct_reference(value: str) -> tuple[str, str | None] | None:
@@ -1026,7 +1039,9 @@ def egg_fragment_internal(value: str) -> tuple[str | None, frozenset[str]]:
             name, extras_text = name[:-1].split("[", 1)
 
             extras = frozenset(
-                safe_extra(part.strip()) for part in extras_text.split(",") if part.strip()
+                safe_extra(part.strip())
+                for part in extras_text.split(",")
+                if part.strip()
             )
 
         if REQ_NAME_RE.fullmatch(name):

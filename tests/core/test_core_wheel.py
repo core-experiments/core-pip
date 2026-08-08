@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 from cpip.core.errors import InstallationError
-from cpip.core.python import CURRENT_PYTHON_VERSION_DIGITS
+from cpip.core.utils import CURRENT_PYTHON_VERSION_DIGITS
 from cpip.core.wheel import (
     TargetContext,
     WheelTag,

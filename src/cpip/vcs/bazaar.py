@@ -2,8 +2,7 @@ from __future__ import annotations
 
 import logging
 
-from cpip.core.contracts import AuthInfo
-from cpip.core.filesystem import display_path
+from cpip.core.utils import AuthInfo, display_path
 from cpip.core.urls import path_to_url
 
 from .subprocess import make_command

@@ -98,21 +98,30 @@ class ResolutionEngine:
         try:
             selected = resolver.resolve(roots)
         except Exception as error:
-            from cpip._vendor.nab_resolver.errors import ResolutionError as NabResolutionError
+            from cpip._vendor.nab_resolver.errors import (
+                ResolutionError as NabResolutionError,
+            )
             from cpip._vendor.nab_resolver.report import format_error
 
             if isinstance(error, NabResolutionError):
-                message = format_error(
-                    error.incompatibility,
-                    narrow=adapter.narrow_for_display,
-                ) if error.incompatibility is not None else str(error)
+                message = (
+                    format_error(
+                        error.incompatibility,
+                        narrow=adapter.narrow_for_display,
+                    )
+                    if error.incompatibility is not None
+                    else str(error)
+                )
+
                 # The provider represents dependency ranges as the finite set
                 # of available versions.  When that set is empty, the report
                 # loses the user's original specifier and prints ``<empty>``.
                 # Restore it for actionable CLI diagnostics.
                 def restore_requirement(match: re.Match[str]) -> str:
                     name = match.group(1)
-                    requirement = adapter.display_requirements.get(name) or adapter.requirements.get(name)
+                    requirement = adapter.display_requirements.get(
+                        name
+                    ) or adapter.requirements.get(name)
                     if requirement is None or not str(requirement.specifier):
                         return match.group(0)
                     return f"depends on {name}{requirement.specifier}"
@@ -145,7 +154,10 @@ class ResolutionEngine:
             candidates=candidates,
             graph=graph,
             satisfied=satisfied,
-            metrics={"nab_rounds": resolver.stats.rounds, "nab_conflicts": resolver.stats.conflicts},
+            metrics={
+                "nab_rounds": resolver.stats.rounds,
+                "nab_conflicts": resolver.stats.conflicts,
+            },
         )
 
         if os.environ.get("CPIP_RESOLUTION_STATS") == "1":

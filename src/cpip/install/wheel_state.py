@@ -180,7 +180,9 @@ def discover_installed_wheels(
                     if not entry.is_dir(follow_symlinks=False):
                         return None
 
-                    identity = _wheel_metadata_identity(os.path.join(entry.path, "METADATA"))
+                    identity = _wheel_metadata_identity(
+                        os.path.join(entry.path, "METADATA")
+                    )
 
                     if identity is None:
                         return None
@@ -312,7 +314,9 @@ def existing_paths(
             continue
 
         existing.add(
-            os.path.realpath(path) if stat.S_ISLNK(path_stat.st_mode) else os.path.abspath(path),
+            os.path.realpath(path)
+            if stat.S_ISLNK(path_stat.st_mode)
+            else os.path.abspath(path),
         )
 
     return existing, existing
@@ -348,7 +352,10 @@ class InstalledTargetInventory:
         ).iter(names=names)
 
         return cls(
-            {distribution.canonical_name: distribution for distribution in distributions},
+            {
+                distribution.canonical_name: distribution
+                for distribution in distributions
+            },
         )
 
     def find(
@@ -356,14 +363,3 @@ class InstalledTargetInventory:
         name: str,
     ) -> InstalledMetadataDistribution | InstalledWheelDistribution | None:
         return self.distributions.get(name)
-
-
-def is_within(path: str, root: str) -> bool:
-    try:
-        if os.path.commonpath((path, root)) != root:
-            raise ValueError
-
-    except (OSError, ValueError):
-        return False
-
-    return True

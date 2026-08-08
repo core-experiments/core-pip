@@ -331,7 +331,9 @@ class InstalledMetadataDistribution:
     def installer(self) -> str:
         try:
             return next(
-                line.strip() for line in self.read_text("INSTALLER").splitlines() if line.strip()
+                line.strip()
+                for line in self.read_text("INSTALLER").splitlines()
+                if line.strip()
             )
 
         except (FileNotFoundError, StopIteration):
@@ -392,7 +394,11 @@ class InstalledMetadataDistribution:
             try:
                 with os.scandir(egg_link_root) as entries:
                     egg_link = next(
-                        (entry.path for entry in entries if entry.name.endswith(".egg-link")),
+                        (
+                            entry.path
+                            for entry in entries
+                            if entry.name.endswith(".egg-link")
+                        ),
                         None,
                     )
 
@@ -458,7 +464,9 @@ class InstalledMetadataDistribution:
     def iter_declared_entries(self) -> list[str]:
         if self.info_location and self.info_location.endswith(".egg-info"):
             try:
-                return [line for line in self.read_text("installed-files.txt").splitlines()]
+                return [
+                    line for line in self.read_text("installed-files.txt").splitlines()
+                ]
 
             except FileNotFoundError:
                 return []
@@ -556,6 +564,10 @@ class InstalledDistributionStore:
         ]
 
         return next(
-            (distribution for distribution in distributions if distribution.in_usersite),
+            (
+                distribution
+                for distribution in distributions
+                if distribution.in_usersite
+            ),
             next(iter(distributions), None),
         )

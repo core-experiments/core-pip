@@ -25,6 +25,7 @@ import time
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Generator
 
 from cpip.core.errors import InstallationError
@@ -43,16 +44,18 @@ from cpip.install.wheel_scripts import (
 )
 from cpip.install.wheel_state import discover_installed_wheels, existing_paths
 from cpip.platform.clone import clone_path
+from cpip.resolution.model import ResolutionResult
 
 if TYPE_CHECKING:
     from typing import Protocol, TypeVar
 
-    from cpip.build.metadata import InstalledDistributionStore, InstalledMetadataDistribution
+    from cpip.build.metadata import (
+        InstalledDistributionStore,
+        InstalledMetadataDistribution,
+    )
     from cpip.core.direct_url import DirectUrl
     from cpip.install.target import InstallTarget
     from cpip.install.wheel_state import InstalledWheelDistribution
-    from cpip.resolution.model import ResolvedRequirement
-
 
     class WheelInstallCandidate(Protocol):
         """Read-only candidate boundary required by the archive installer."""
@@ -156,27 +159,6 @@ class _WheelInstallPlan:
         self.direct_url = direct_url
 
         self.scripts = scripts
-
-
-class CachedInstallPlan:
-    """Small plan shape consumed by the install command."""
-
-    __slots__ = ("candidates", "conflicts", "graph", "metrics", "satisfied")
-
-    def __init__(
-        self,
-        candidates: list[WheelCandidate],
-        graph: dict[str, set[str]],
-    ) -> None:
-        self.candidates = candidates
-
-        self.graph = graph
-
-        self.conflicts: list[str] = []
-
-        self.satisfied: list[ResolvedRequirement] = []
-
-        self.metrics: dict[str, int | float] = {"warm_resolution_cache_hit": 1}
 
 
 class _DestinationNode:
@@ -323,7 +305,9 @@ def _entry_lock(path: str, entry_root: str, digest: str) -> Generator[None, None
             pass
 
 
-def _record_metadata(archive: zipfile.ZipFile, dist_info: str) -> dict[str, tuple[str, str]]:
+def _record_metadata(
+    archive: zipfile.ZipFile, dist_info: str
+) -> dict[str, tuple[str, str]]:
     try:
         text = archive.read(f"{dist_info}/RECORD").decode("utf-8")
 
@@ -440,7 +424,9 @@ def _extract_archive(
         loaded = _load_archive(entry_root, digest)
 
         if loaded is None:
-            raise OSError(errno.EIO, "failed to publish wheel archive cache", entry_root)
+            raise OSError(
+                errno.EIO, "failed to publish wheel archive cache", entry_root
+            )
 
         return loaded
 
@@ -487,7 +473,9 @@ def _prepare_cached_wheels(
     cache_dir: str,
 ) -> tuple[CachedWheelArchive, ...]:
     if len(candidates) < _INSTALL_WORKERS:
-        return tuple(prepare_cached_wheel(candidate, cache_dir) for candidate in candidates)
+        return tuple(
+            prepare_cached_wheel(candidate, cache_dir) for candidate in candidates
+        )
 
     with ThreadPoolExecutor(
         max_workers=min(_INSTALL_WORKERS, len(candidates)),
@@ -725,7 +713,7 @@ def save_cached_install_plan(
 def load_cached_install_plan(
     cache_dir: str,
     key: str,
-) -> CachedInstallPlan | None:
+) -> ResolutionResult | None:
     """Load and validate a fresh plan receipt and all referenced archives."""
 
     if not _valid_sha256(key):
@@ -812,7 +800,9 @@ def load_cached_install_plan(
                     version=Version(record[1]),
                     path=archive.tree,
                     dependencies=tuple(parse_requirement(item) for item in record[3]),
-                    provided_extras=frozenset(item for item in record[4] if isinstance(item, str)),
+                    provided_extras=frozenset(
+                        item for item in record[4] if isinstance(item, str)
+                    ),
                     requires_python=record[5],
                     source_url=record[6],
                     source_hashes=dict(record[7]),
@@ -836,7 +826,9 @@ def load_cached_install_plan(
             ):
                 return None
 
-            graph[graph_record[0]] = {child for child in graph_record[1] if isinstance(child, str)}
+            graph[graph_record[0]] = {
+                child for child in graph_record[1] if isinstance(child, str)
+            }
 
     except (TypeError, ValueError):
         return None
@@ -858,7 +850,11 @@ def load_cached_install_plan(
             ):
                 return None
 
-    return CachedInstallPlan(candidates, graph)
+    return ResolutionResult(
+        candidates=tuple(candidates),
+        graph={name: frozenset(children) for name, children in graph.items()},
+        metrics=MappingProxyType({"warm_resolution_cache_hit": 1}),
+    )
 
 
 def _normalized_path(path: str) -> str:
@@ -878,7 +874,8 @@ def _eligible_target(target: InstallTarget, cache_dir: str) -> str | None:
         return None
 
     if any(
-        _normalized_path(path) != root for path in (target.platlib, target.headers, target.data)
+        _normalized_path(path) != root
+        for path in (target.platlib, target.headers, target.data)
     ):
         return None
 
@@ -961,7 +958,9 @@ def _reserve_destination(
 
     has_children = bool(node.children)
 
-    if (terminal is not None and not (allow_same_owner and terminal == owner)) or has_children:
+    if (
+        terminal is not None and not (allow_same_owner and terminal == owner)
+    ) or has_children:
         raise InstallationError(
             f"Cannot install {candidate.canonical_name}: "
             f"duplicate installation destination: {'/'.join(parts)}",
@@ -1310,7 +1309,8 @@ def _finalize_wheel(
 
 def _plan_destinations(root: str, plan: _WheelInstallPlan) -> set[str]:
     destinations = {
-        os.path.join(root, *_mapped_parts(relative)) for relative, _, _, _ in plan.archive.entries
+        os.path.join(root, *_mapped_parts(relative))
+        for relative, _, _, _ in plan.archive.entries
     }
 
     scripts_root = os.path.join(root, "Scripts" if os.name == "nt" else "bin")
@@ -1417,7 +1417,8 @@ def install_wheels_from_archive_cache(
         candidates,
         archives,
         prevalidated=all(
-            candidate.wheel_layout is archive for candidate, archive in zip(candidates, archives)
+            candidate.wheel_layout is archive
+            for candidate, archive in zip(candidates, archives)
         ),
     )
 
@@ -1436,7 +1437,9 @@ def install_wheels_from_archive_cache(
 
         active_plans = plans
 
-        uninstalling: list[InstalledMetadataDistribution | InstalledWheelDistribution] = []
+        uninstalling: list[
+            InstalledMetadataDistribution | InstalledWheelDistribution
+        ] = []
 
         destinations_by_plan: dict[_WheelInstallPlan, set[str]] = {}
 
@@ -1519,7 +1522,8 @@ def install_wheels_from_archive_cache(
                 for destination in destinations:
                     if (
                         os.path.lexists(destination)
-                        and _internal_comparison_path(destination) not in allowed_existing
+                        and _internal_comparison_path(destination)
+                        not in allowed_existing
                     ):
                         return None
 

@@ -14,7 +14,7 @@ from typing import Any, cast
 from zipfile import ZipInfo
 
 from cpip.core.errors import InstallationError
-from cpip.core.filesystem import ensure_dir
+from cpip.core.utils import ensure_dir
 
 BZ2_EXTENSIONS: tuple[str, ...] = (".tar.bz2", ".tbz")
 XZ_EXTENSIONS: tuple[str, ...] = (
@@ -51,7 +51,9 @@ except ImportError:
 
 def split_leading_dir(path: str) -> list[str]:
     path = path.lstrip("/").lstrip("\\")
-    if "/" in path and (("\\" in path and path.find("/") < path.find("\\")) or "\\" not in path):
+    if "/" in path and (
+        ("\\" in path and path.find("/") < path.find("\\")) or "\\" not in path
+    ):
         return path.split("/", 1)
     if "\\" in path:
         return path.split("\\", 1)
@@ -363,9 +365,7 @@ def untar_without_filter(
             resolved_location,
             os.path.realpath(path),
         ):
-            message = (
-                "The tar file ({}) has a file ({}) trying to install outside target directory ({})"
-            )
+            message = "The tar file ({}) has a file ({}) trying to install outside target directory ({})"
             raise InstallationError(message.format(filename, path, location))
         if member.isdir():
             ensure_dir(path)

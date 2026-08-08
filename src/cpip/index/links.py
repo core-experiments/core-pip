@@ -95,7 +95,11 @@ def ensure_quoted_url(url: str) -> str:
 
 
 def absolute_link_url(base_url: str, url: str) -> str:
-    return url if url.startswith(("https://", "http://")) else urllib.parse.urljoin(base_url, url)
+    return (
+        url
+        if url.startswith(("https://", "http://"))
+        else urllib.parse.urljoin(base_url, url)
+    )
 
 
 class LinkType(Enum):
@@ -159,7 +163,9 @@ class Link:
         else:
             try:
                 self.file_path_internal = (
-                    url_to_path(url) if self.parsed_url_internal.scheme == "file" else None
+                    url_to_path(url)
+                    if self.parsed_url_internal.scheme == "file"
+                    else None
                 )
             except ValueError:
                 # Preserve deferred validation for non-local file URLs.
@@ -199,7 +205,9 @@ class Link:
         upload_time: datetime.datetime | None = None,
     ) -> Link:
         normalized_hashes = (
-            None if hashes is None else {str(name): str(value) for name, value in hashes.items()}
+            None
+            if hashes is None
+            else {str(name): str(value) for name, value in hashes.items()}
         )
         return cls(
             url,
@@ -310,9 +318,15 @@ class Link:
             metadata = None
         else:
             name, sep, value = metadata_info.partition("=")
-            metadata = MetadataFile(supported_hashes({name: value})) if sep else MetadataFile(None)
+            metadata = (
+                MetadataFile(supported_hashes({name: value}))
+                if sep
+                else MetadataFile(None)
+            )
         upload_time_value = attrs.get("data-upload-time")
-        upload_time = parse_iso_datetime(upload_time_value) if upload_time_value else None
+        upload_time = (
+            parse_iso_datetime(upload_time_value) if upload_time_value else None
+        )
         return cls(
             url,
             comes_from=page_url,
@@ -342,13 +356,19 @@ class Link:
         else:
             metadata = None
         upload_time = (
-            parse_iso_datetime(file_data["upload-time"]) if file_data.get("upload-time") else None
+            parse_iso_datetime(file_data["upload-time"])
+            if file_data.get("upload-time")
+            else None
         )
         return cls(
             absolute,
             comes_from=page_url,
-            requires_python=requires_python if isinstance(requires_python, str) else None,
-            yanked_reason="" if yanked and not isinstance(yanked, str) else (yanked or None),
+            requires_python=requires_python
+            if isinstance(requires_python, str)
+            else None,
+            yanked_reason=""
+            if yanked and not isinstance(yanked, str)
+            else (yanked or None),
             metadata_file_data=metadata,
             upload_time=upload_time,
             hashes=hashes if isinstance(hashes, dict) else None,
@@ -480,7 +500,8 @@ class Link:
         if hashes is None:
             return False
         return any(
-            hashes.is_hash_allowed(name, digest) for name, digest in self.hashes_internal.items()
+            hashes.is_hash_allowed(name, digest)
+            for name, digest in self.hashes_internal.items()
         )
 
     @property
@@ -527,7 +548,9 @@ class Link:
         return name
 
     def __str__(self) -> str:
-        rp = f" (requires-python:{self.requires_python})" if self.requires_python else ""
+        rp = (
+            f" (requires-python:{self.requires_python})" if self.requires_python else ""
+        )
         return (
             f"{self.redacted_url} (from {self.comes_from}){rp}"
             if self.comes_from

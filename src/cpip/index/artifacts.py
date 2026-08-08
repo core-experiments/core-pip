@@ -101,7 +101,11 @@ class ArtifactLocator:
 
             return os.fspath(materialize_vcs(url_or_path, prompting=prompting))
 
-        local = os.fspath(local_path) if local_path is not None else self.local_path(url_or_path)
+        local = (
+            os.fspath(local_path)
+            if local_path is not None
+            else self.local_path(url_or_path)
+        )
 
         if local is not None:
             return local

@@ -69,7 +69,8 @@ class BuildBackendHookCaller:
         self.source_dir = os.path.abspath(source_dir)
         self.backend = backend
         self.backend_path = tuple(
-            os.path.abspath(os.path.join(self.source_dir, path)) for path in (backend_path or ())
+            os.path.abspath(os.path.join(self.source_dir, path))
+            for path in (backend_path or ())
         )
         self.python_executable = python_executable or sys.executable
 

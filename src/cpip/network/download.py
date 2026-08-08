@@ -88,7 +88,9 @@ def log_download(
 
     if total_length:
         if range_start:
-            logged_url = f"{logged_url} ({format_size(range_start)}/{format_size(total_length)})"
+            logged_url = (
+                f"{logged_url} ({format_size(range_start)}/{format_size(total_length)})"
+            )
 
         else:
             logged_url = f"{logged_url} ({format_size(total_length)})"
@@ -325,7 +327,10 @@ class Downloader:
     ) -> None:
         """Attempt to resume/restart the download if connection was dropped."""
 
-        while download.reattempts < self.resume_retries_internal and download.is_incomplete():
+        while (
+            download.reattempts < self.resume_retries_internal
+            and download.is_incomplete()
+        ):
             assert download.size is not None
 
             download.reattempts += 1
