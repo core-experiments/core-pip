@@ -93,6 +93,8 @@ class CandidateMetadataCache:
     def _init_sqlite(self) -> None:
         try:
             self.conn = sqlite3.connect(self.path)
+            self.conn.execute("PRAGMA journal_mode=WAL")
+            self.conn.execute("PRAGMA busy_timeout=5000")
             self.conn.execute(
                 "CREATE TABLE IF NOT EXISTS candidate_metadata ("
                 "key TEXT PRIMARY KEY, value BLOB)"
@@ -111,6 +113,8 @@ class CandidateMetadataCache:
             except OSError:
                 pass
             self.conn = sqlite3.connect(self.path)
+            self.conn.execute("PRAGMA journal_mode=WAL")
+            self.conn.execute("PRAGMA busy_timeout=5000")
             self.conn.execute(
                 "CREATE TABLE IF NOT EXISTS candidate_metadata ("
                 "key TEXT PRIMARY KEY, value BLOB)"
@@ -440,8 +444,11 @@ class CandidateMetadataCache:
             self._pending_req_states.clear()
             self._pending_ver_states.clear()
             self.dirty = False
-        except Exception:
-            pass
+        except (sqlite3.Error, ValueError, TypeError):
+            try:
+                self.conn.rollback()
+            except sqlite3.Error:
+                pass
 
     def __del__(self) -> None:
         try:

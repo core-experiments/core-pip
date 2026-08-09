@@ -29,6 +29,8 @@ class WheelMetadataCache:
         
         try:
             self.conn = sqlite3.connect(self.path)
+            self.conn.execute("PRAGMA journal_mode=WAL")
+            self.conn.execute("PRAGMA busy_timeout=5000")
             self.conn.execute(
                 "CREATE TABLE IF NOT EXISTS metadata ("
                 "path TEXT, size INTEGER, mtime INTEGER, headers BLOB, "
@@ -40,6 +42,8 @@ class WheelMetadataCache:
             except OSError:
                 pass
             self.conn = sqlite3.connect(self.path)
+            self.conn.execute("PRAGMA journal_mode=WAL")
+            self.conn.execute("PRAGMA busy_timeout=5000")
             self.conn.execute(
                 "CREATE TABLE IF NOT EXISTS metadata ("
                 "path TEXT, size INTEGER, mtime INTEGER, headers BLOB, "
@@ -157,8 +161,11 @@ class WheelMetadataCache:
             self.conn.commit()
             self._pending_puts.clear()
             self.dirty = False
-        except Exception:
-            pass
+        except (sqlite3.Error, ValueError, TypeError):
+            try:
+                self.conn.rollback()
+            except sqlite3.Error:
+                pass
 
     def __del__(self) -> None:
         try:

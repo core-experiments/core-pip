@@ -28,6 +28,13 @@ def test_metadata_cache_ignores_corrupt_snapshots(tmp_path: Path) -> None:
     cache = WheelMetadataCache(tmp_path / "cache")
 
     assert cache.entries == {}
+    assert cache.get(("/wheel.whl", 1, 2)) is None
+
+    cache.put(("/wheel.whl", 1, 2), {"Name": ["demo"]})
+    cache.flush()
+
+    reopened = WheelMetadataCache(tmp_path / "cache")
+    assert reopened.get(("/wheel.whl", 1, 2)) == {"Name": ["demo"]}
 
 
 def test_metadata_cache_identity_changes_when_artifact_changes(tmp_path: Path) -> None:
