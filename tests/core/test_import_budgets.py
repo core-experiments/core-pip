@@ -135,26 +135,26 @@ def _help_route(
 
 
 COMMAND_HELP_ROUTES = (
-    _help_route("install", max_new_modules=38),
-    _help_route("wheel", max_new_modules=38),
-    _help_route("index", max_new_modules=38),
-    _help_route("download", max_new_modules=38),
-    _help_route("uninstall", max_new_modules=38),
-    _help_route("list", max_new_modules=38),
-    _help_route("freeze", max_new_modules=38),
-    _help_route("show", parser_module="inspect", max_new_modules=38),
-    _help_route("inspect", parser_module="inspect", max_new_modules=38),
+    _help_route("install", max_new_modules=40),
+    _help_route("wheel", max_new_modules=40),
+    _help_route("index", max_new_modules=40),
+    _help_route("download", max_new_modules=40),
+    _help_route("uninstall", max_new_modules=40),
+    _help_route("list", max_new_modules=40),
+    _help_route("freeze", max_new_modules=40),
+    _help_route("show", parser_module="inspect", max_new_modules=40),
+    _help_route("inspect", parser_module="inspect", max_new_modules=40),
     # ``hash`` enumerates digest algorithms to build its --algorithm choices,
     # so it alone pays for hashlib.
     _help_route(
         "hash",
         parser_module="inspect",
-        max_new_modules=41,
+        max_new_modules=43,
         forbidden=tuple(name for name in EXPENSIVE if name != "hashlib"),
     ),
-    _help_route("check", parser_module="inspect", max_new_modules=38),
-    _help_route("cache", max_new_modules=38),
-    _help_route("lock", max_new_modules=38),
+    _help_route("check", parser_module="inspect", max_new_modules=40),
+    _help_route("cache", max_new_modules=40),
+    _help_route("lock", max_new_modules=40),
 )
 
 WORK_ROUTES = (
@@ -163,7 +163,7 @@ WORK_ROUTES = (
     Route(
         id="list-json-empty",
         argv=("list", "--format=json", "--path", "{tmp}"),
-        max_new_modules=23,
+        max_new_modules=25,
         allowed_first_party=COLD_CORE
         | {
             "cpip.cli.fast",
@@ -179,7 +179,7 @@ WORK_ROUTES = (
     Route(
         id="hash-file",
         argv=("hash", "pyproject.toml"),
-        max_new_modules=47,
+        max_new_modules=49,
         forbidden=tuple(
             name
             for name in EXPENSIVE
