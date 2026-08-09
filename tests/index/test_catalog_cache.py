@@ -116,22 +116,28 @@ def test_catalog_choices_are_scoped_to_generation(tmp_path: Path) -> None:
     embedded = load_summary(cache, page_url)
     assert embedded is not None
     assert embedded[3][("target", True, True)] == choices
-    assert load_choices(
-        cache,
-        page_url,
-        summary[0],
-        "target",
-        True,
-        True,
-    ) == choices
-    assert load_choices(
-        cache,
-        page_url,
-        "different-generation",
-        "target",
-        True,
-        True,
-    ) == {}
+    assert (
+        load_choices(
+            cache,
+            page_url,
+            summary[0],
+            "target",
+            True,
+            True,
+        )
+        == choices
+    )
+    assert (
+        load_choices(
+            cache,
+            page_url,
+            "different-generation",
+            "target",
+            True,
+            True,
+        )
+        == {}
+    )
 
 
 def test_catalog_summary_migrates_v2_in_version_order(tmp_path: Path) -> None:
@@ -195,8 +201,7 @@ def test_catalog_cache_migrates_v2_records_locally(tmp_path: Path) -> None:
 
     assert catalog is not None
     assert [
-        (name, version, facts)
-        for name, version, _artifacts, facts in catalog[0]
+        (name, version, facts) for name, version, _artifacts, facts in catalog[0]
     ] == [("demo", "1.2.3", [(WHEEL_RECORD, ">=3.9", "")])]
     assert cache.get_atomic(cache_key(page_url)) is not None
     loaded = load_links(cache, page_url)

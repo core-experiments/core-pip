@@ -1,0 +1,98 @@
+name: Checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Keep failures readable: pytest's own progress output is enough, and a
+  # traceback per failure beats a screenful of locals.
+  PYTEST_ADDOPTS: "--color=yes -q --tb=short"
+
+jobs:
+  lint:
+    name: Lint and types
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - run: uv sync --locked --group typing
+      - name: ruff check
+        run: uv run ruff check src tests conftest.py
+      - name: ruff format
+        run: uv run ruff format --check src tests conftest.py
+      - name: ty
+        run: uv run ty check src
+
+  tests:
+    name: Tests / Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Starts at the versions this repository already exercises: 3.10 is
+        # what the checked-in lockfile resolves for locally and 3.12 is what
+        # the CodSpeed job runs. `requires-python` allows 3.9 upward, so widen
+        # this once the suite is known green on the rest.
+        python-version: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python-version }}
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - run: uv sync --locked --group test --group benchmark
+      - name: Unit and package tests
+        # Excludes tests/cli/functional, which drives a real cpip in a
+        # subprocess and runs in its own job below. Network-marked tests are
+        # deselected here so a slow index cannot fail an unrelated pull
+        # request; the functional job covers what needs the network.
+        run: >
+          uv run pytest tests
+          --ignore=tests/cli/functional
+          -m "not network"
+          -p no:randomly
+
+  functional:
+    name: Functional CLI suite
+    runs-on: ubuntu-latest
+    # Not required to merge yet. This suite builds virtualenvs and wheels per
+    # test, so it is both the slowest and the most environment-sensitive part
+    # of the tree; give it a few green runs on CI hardware before gating on
+    # it. Promote by deleting this line and adding the job to branch
+    # protection.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - run: uv sync --locked --group test --group benchmark
+      - name: Functional tests
+        timeout-minutes: 30
+        run: uv run pytest tests/cli/functional -n auto -p no:randomly
