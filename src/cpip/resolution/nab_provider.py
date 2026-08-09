@@ -150,6 +150,15 @@ class NabProvider:
         self.requirements: dict[str, Requirement] = {}
         self.display_requirements: dict[str, Requirement] = {}
         self._version_cache: dict[tuple[object, ...], tuple[Version, ...]] = {}
+        # Fast paths in front of ``_version_cache``, whose key costs more to
+        # build than the lookup it guards. A package's entry in
+        # ``self.requirements`` is replaced, never mutated, so an identity
+        # check is enough to notice that the answer may have moved; a miss
+        # just falls through to the content-keyed cache below.
+        self._version_memo: dict[str, tuple[Requirement, tuple[Version, ...]]] = {}
+        self._priority_memo: dict[
+            str, tuple[Requirement, int, tuple[int, int, str]]
+        ] = {}
         self._installed_cache: dict[str, InstalledCandidate | None] = {}
         # Forward-check memos. The catalog ones are keyed on facts that do not
         # move during a resolution. The verdict is not: it depends on the
@@ -213,6 +222,19 @@ class NabProvider:
 
     def _versions(self, package: str) -> tuple[Version, ...]:
         requirement = self.requirements[package]
+        memo = self._version_memo.get(package)
+        if memo is not None and memo[0] is requirement:
+            return memo[1]
+
+        versions = self._versions_uncached(package, requirement)
+        self._version_memo[package] = (requirement, versions)
+        return versions
+
+    def _versions_uncached(
+        self,
+        package: str,
+        requirement: Requirement,
+    ) -> tuple[Version, ...]:
         cache_key = (
             package,
             requirement.specifier.raw,
@@ -897,7 +919,18 @@ class NabProvider:
         conflict_counts: Mapping[str, int],
         culprit_counts: Mapping[str, int] | None = None,
     ) -> tuple[int, int, str]:
-        return (len(self._versions(package)), -conflict_counts.get(package, 0), package)
+        # ``choose_package`` runs this for every undecided package on every
+        # decision, so the scan is the hot caller. Only the conflict count
+        # moves between decisions; the version count follows the requirement.
+        conflicts = conflict_counts.get(package, 0)
+        requirement = self.requirements[package]
+        memo = self._priority_memo.get(package)
+        if memo is not None and memo[0] is requirement and memo[1] == conflicts:
+            return memo[2]
+
+        priority = (len(self._versions(package)), -conflicts, package)
+        self._priority_memo[package] = (requirement, conflicts, priority)
+        return priority
 
     def is_ready(self, package: str) -> bool:
         return True

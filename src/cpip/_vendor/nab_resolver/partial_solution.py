@@ -71,6 +71,9 @@ class Assignment(Generic[PackageType, VersionType]):
     cum_negative: RangeProtocol[VersionType] | None = None
     """Latest negative accumulated range for the package as of this entry."""
 
+    cum_decision: VersionType | None = None
+    """The package's decided version as of this entry, if it had one."""
+
     package_index: int = 0
     """Position in the package's own assignment trail."""
 
@@ -174,6 +177,7 @@ class PartialSolution(Generic[PackageType, VersionType]):
             positive=True,
             cum_positive=exact_range,
             cum_negative=self._negative_ranges.get(package),
+            cum_decision=version,
             package_index=len(package_entries),
         )
         self._assignments.append(assignment)
@@ -221,6 +225,7 @@ class PartialSolution(Generic[PackageType, VersionType]):
             positive=positive,
             cum_positive=self._positive_ranges.get(package),
             cum_negative=self._negative_ranges.get(package),
+            cum_decision=self._decided_versions.get(package),
             package_index=len(package_entries),
         )
         self._assignments.append(assignment)
@@ -230,9 +235,10 @@ class PartialSolution(Generic[PackageType, VersionType]):
         """Remove all assignments above target_level.
 
         Non-chronological backjumping: skips past irrelevant decision levels
-        directly to the cause of the conflict.  Relies on
-        ``Assignment.accumulated_range`` already being cumulative, so each
-        package's surviving state can be rebuilt without re-intersecting.
+        directly to the cause of the conflict.  Every ``cum_*`` field records
+        the package's state as of that entry, so the surviving top entry
+        restores it outright -- no re-intersecting, and no rescan of the
+        package's trail.
         See: https://github.com/dart-lang/pub/blob/master/doc/solver.md#conflict-resolution
         """
         affected_packages: set[PackageType] = set()
@@ -240,7 +246,7 @@ class PartialSolution(Generic[PackageType, VersionType]):
             assignment = self._assignments.pop()
             package = assignment.package
             affected_packages.add(package)
-            
+
             entries = self._assignments_by_package.get(package)
             if entries:
                 entries.pop()
@@ -257,28 +263,24 @@ class PartialSolution(Generic[PackageType, VersionType]):
                 self._undecided.discard(package)
             else:
                 last_entry = entries[-1]
-                
+
                 if last_entry.cum_positive is None:
                     self._positive_ranges.pop(package, None)
                 else:
                     self._positive_ranges[package] = last_entry.cum_positive
-                
+
                 if last_entry.cum_negative is None:
                     self._negative_ranges.pop(package, None)
                 else:
                     self._negative_ranges[package] = last_entry.cum_negative
-                
-                last_decision_version = None
-                for assignment in entries:
-                    if assignment.is_decision:
-                        last_decision_version = assignment.version
-                
-                if last_decision_version is None:
+
+                decided_version = last_entry.cum_decision
+                if decided_version is None:
                     self._decided_versions.pop(package, None)
                 else:
-                    self._decided_versions[package] = last_decision_version
-                
-                if last_entry.cum_positive is not None and last_decision_version is None:
+                    self._decided_versions[package] = decided_version
+
+                if last_entry.cum_positive is not None and decided_version is None:
                     self._undecided.add(package)
                 else:
                     self._undecided.discard(package)

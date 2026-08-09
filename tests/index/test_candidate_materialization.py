@@ -1,11 +1,13 @@
 import os
+import zipfile
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
 import pytest
+from cpip.core.errors import UnsupportedWheel
 from cpip.core.packaging import Version, parse_requirement
-from cpip.core.wheel import WheelCandidate
+from cpip.core.wheel import WheelCandidate, parse_wheel
 from cpip.index.candidate_materialization import (
     CandidateMaterializer,
     CandidateStream,
@@ -13,7 +15,11 @@ from cpip.index.candidate_materialization import (
     candidate_metadata_fingerprint,
 )
 from cpip.index.links import Link
+from cpip.index.provider import CandidateProvider
 from cpip.index.source_models import CandidateRecord
+from cpip.resolution.api import ResolutionEngine
+
+from .wheel_helpers import make_wheel
 
 
 def make_candidate(version: str) -> WheelCandidate:
@@ -158,3 +164,59 @@ def test_file_url_identity_stat_is_reused(
 
     assert candidate_metadata_fingerprint(record).startswith("stat:")
     assert stats == 1
+
+
+def resolve_names(wheelhouse: Path, requirements: list[str]) -> list[str]:
+    engine = ResolutionEngine(
+        provider=CandidateProvider.from_options(
+            find_links=[str(wheelhouse)],
+            no_index=True,
+        ),
+        ignore_installed=True,
+    )
+    return [candidate.name for candidate in engine.resolve(requirements).candidates]
+
+
+def test_resolution_reads_only_the_metadata_member(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Resolution must not decompress WHEEL for candidates it only inspects.
+
+    Locating the ``.dist-info`` directory comes free with the central
+    directory ZipFile already parsed; reading WHEEL on top of METADATA
+    doubles the member decompressions per candidate, and resolution has no
+    use for the text.
+    """
+    make_wheel(tmp_path, "demo-pkg", "demo_pkg", "1.0.0")
+
+    members: list[str] = []
+    original_read = zipfile.ZipFile.read
+
+    def recording_read(self: zipfile.ZipFile, name: Any, pwd: Any = None) -> bytes:
+        members.append(name if isinstance(name, str) else name.filename)
+        return original_read(self, name, pwd)
+
+    monkeypatch.setattr(zipfile.ZipFile, "read", recording_read)
+
+    assert resolve_names(tmp_path, ["demo-pkg"]) == ["demo-pkg"]
+
+    assert any(member.endswith("/METADATA") for member in members)
+    assert not [member for member in members if member.endswith("/WHEEL")]
+
+
+def test_resolution_defers_the_wheel_version_check_to_install(
+    tmp_path: Path,
+) -> None:
+    """A future ``Wheel-Version`` is the installer's to reject, not resolution.
+
+    Skipping the WHEEL read moves this diagnostic from resolve time to
+    install time.  Nothing is installed unchecked -- ``parse_wheel`` still
+    refuses the same archive -- so the trade is only where it surfaces.
+    """
+    wheel = make_wheel(tmp_path, "future-pkg", "future_pkg", "3.0", wheel_version="3.0")
+
+    assert resolve_names(tmp_path, ["future-pkg"]) == ["future-pkg"]
+
+    with zipfile.ZipFile(wheel) as archive, pytest.raises(UnsupportedWheel):
+        parse_wheel(archive, "future-pkg")

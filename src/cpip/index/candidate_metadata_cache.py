@@ -28,6 +28,7 @@ class CandidateMetadataCache:
     """Process-local metadata cache backed by an incremental SQLite database."""
 
     __slots__ = (
+        "_db_exists",
         "_pending_puts",
         "_pending_req_states",
         "_pending_ver_states",
@@ -45,9 +46,10 @@ class CandidateMetadataCache:
 
     def __init__(self, cache_dir: str | os.PathLike[str]) -> None:
         self.path = os.path.join(os.fspath(cache_dir), NAME)
-        os.makedirs(os.path.dirname(self.path), exist_ok=True)
         self.lock = threading.RLock()
-        
+        self.conn: sqlite3.Connection | None = None
+        self._db_exists = os.path.isfile(self.path)
+
         self.entries: dict[CacheKey, CacheValue] = {}
         self.decoded: dict[CacheKey, CandidateMetadata] = {}
         self.decoded_requirements: dict[str, Requirement] = {}
@@ -62,7 +64,7 @@ class CandidateMetadataCache:
         
         # Check if the file at self.path exists and is a legacy marshal snapshot
         legacy_payload = None
-        if os.path.isfile(self.path):
+        if self._db_exists:
             try:
                 payload = load_snapshot(self.path)
                 if (
@@ -74,63 +76,73 @@ class CandidateMetadataCache:
                     legacy_payload = payload
             except Exception:
                 pass
-                
-        with self.lock:
-            if legacy_payload is not None:
-                # It's a legacy marshal file. Rename it so we can create SQLite database.
+
+        if legacy_payload is not None:
+            with self.lock:
+                # It's a legacy marshal file. Rename it so the database can
+                # take its place; the migrating flush creates the database.
                 temp_path = self.path + ".migration"
                 try:
                     os.rename(self.path, temp_path)
-                    self._init_sqlite()
+                    self._db_exists = False
                     self.migrate_payload(legacy_payload)
                     os.remove(temp_path)
-                except Exception:
-                    # If migration fails, try to clean up and init fresh
-                    self._init_sqlite()
-            else:
-                self._init_sqlite()
-        
+                except OSError:
+                    pass
+
         # Run other legacy migrations if SQLite is still empty
         self.load_other_legacy()
         atexit.register(self.flush)
 
-    def _init_sqlite(self) -> None:
+    def _reader(self) -> sqlite3.Connection | None:
+        """Return the connection, or ``None`` while no database exists yet.
+
+        Creating the file costs a WAL journal plus three schema statements,
+        which a resolve that only ever misses should not pay.  An absent
+        database reads as empty instead of being brought into existence.
+        """
+        if self.conn is None and not self._db_exists:
+            return None
+        return self._writer()
+
+    def _writer(self) -> sqlite3.Connection:
+        """Return the connection, opening the database on first real use."""
+        if self.conn is not None:
+            return self.conn
+
+        os.makedirs(os.path.dirname(self.path), exist_ok=True)
         try:
-            self.conn = sqlite3.connect(self.path, check_same_thread=False)
-            self.conn.execute("PRAGMA journal_mode=WAL")
-            self.conn.execute("PRAGMA busy_timeout=5000")
-            self.conn.execute(
-                "CREATE TABLE IF NOT EXISTS candidate_metadata ("
-                "key TEXT PRIMARY KEY, value BLOB)"
-            )
-            self.conn.execute(
-                "CREATE TABLE IF NOT EXISTS requirement_states ("
-                "raw TEXT PRIMARY KEY, state BLOB)"
-            )
-            self.conn.execute(
-                "CREATE TABLE IF NOT EXISTS version_states ("
-                "raw TEXT PRIMARY KEY, state BLOB)"
-            )
+            conn = self._open()
         except sqlite3.Error:
+            # A corrupt file is worth one retry from scratch; a second
+            # failure is the caller's to handle.
             try:
                 os.remove(self.path)
             except OSError:
                 pass
-            self.conn = sqlite3.connect(self.path, check_same_thread=False)
-            self.conn.execute("PRAGMA journal_mode=WAL")
-            self.conn.execute("PRAGMA busy_timeout=5000")
-            self.conn.execute(
-                "CREATE TABLE IF NOT EXISTS candidate_metadata ("
-                "key TEXT PRIMARY KEY, value BLOB)"
-            )
-            self.conn.execute(
-                "CREATE TABLE IF NOT EXISTS requirement_states ("
-                "raw TEXT PRIMARY KEY, state BLOB)"
-            )
-            self.conn.execute(
-                "CREATE TABLE IF NOT EXISTS version_states ("
-                "raw TEXT PRIMARY KEY, state BLOB)"
-            )
+            conn = self._open()
+
+        self.conn = conn
+        self._db_exists = True
+        return conn
+
+    def _open(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(self.path, check_same_thread=False)
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=5000")
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS candidate_metadata ("
+            "key TEXT PRIMARY KEY, value BLOB)"
+        )
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS requirement_states ("
+            "raw TEXT PRIMARY KEY, state BLOB)"
+        )
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS version_states ("
+            "raw TEXT PRIMARY KEY, state BLOB)"
+        )
+        return conn
 
     def load(self) -> None:
         # No-op in SQLite
@@ -163,18 +175,28 @@ class CandidateMetadataCache:
             pass
 
     def load_other_legacy(self) -> None:
-        try:
-            row = self.conn.execute("SELECT 1 FROM candidate_metadata LIMIT 1").fetchone()
-            if row is not None:
-                return
-        except Exception:
-            return
-            
+        # Checked before the database is consulted: with no snapshot to import
+        # there is nothing to decide, and a cold run never opens a connection.
         legacy_path = os.path.join(os.path.dirname(self.path), LEGACY_NAME)
-        if os.path.isfile(legacy_path):
-            payload = load_snapshot(legacy_path)
-            if payload:
-                self.migrate_payload(payload)
+        if not os.path.isfile(legacy_path):
+            return
+
+        try:
+            conn = self._reader()
+            if (
+                conn is not None
+                and conn.execute(
+                    "SELECT 1 FROM candidate_metadata LIMIT 1",
+                ).fetchone()
+                is not None
+            ):
+                return
+        except sqlite3.Error:
+            return
+
+        payload = load_snapshot(legacy_path)
+        if payload:
+            self.migrate_payload(payload)
 
     @staticmethod
     def valid_key(value: object) -> bool:
@@ -215,10 +237,15 @@ class CandidateMetadataCache:
             # Query SQLite
             with self.lock:
                 try:
-                    row = self.conn.execute(
-                        "SELECT value FROM candidate_metadata WHERE key = ?",
-                        (json.dumps(key),),
-                    ).fetchone()
+                    conn = self._reader()
+                    row = (
+                        None
+                        if conn is None
+                        else conn.execute(
+                            "SELECT value FROM candidate_metadata WHERE key = ?",
+                            (json.dumps(key),),
+                        ).fetchone()
+                    )
                 except sqlite3.Error:
                     row = None
             if row is not None:
@@ -278,10 +305,15 @@ class CandidateMetadataCache:
             # Query SQLite
             with self.lock:
                 try:
-                    row = self.conn.execute(
-                        "SELECT state FROM requirement_states WHERE raw = ?",
-                        (raw,),
-                    ).fetchone()
+                    conn = self._reader()
+                    row = (
+                        None
+                        if conn is None
+                        else conn.execute(
+                            "SELECT state FROM requirement_states WHERE raw = ?",
+                            (raw,),
+                        ).fetchone()
+                    )
                 except sqlite3.Error:
                     row = None
             if row is not None:
@@ -318,10 +350,15 @@ class CandidateMetadataCache:
             # Query SQLite
             with self.lock:
                 try:
-                    row = self.conn.execute(
-                        "SELECT state FROM version_states WHERE raw = ?",
-                        (raw,),
-                    ).fetchone()
+                    conn = self._reader()
+                    row = (
+                        None
+                        if conn is None
+                        else conn.execute(
+                            "SELECT state FROM version_states WHERE raw = ?",
+                            (raw,),
+                        ).fetchone()
+                    )
                 except sqlite3.Error:
                     row = None
             if row is not None:
@@ -357,10 +394,15 @@ class CandidateMetadataCache:
             # Query SQLite
             with self.lock:
                 try:
-                    row = self.conn.execute(
-                        "SELECT value FROM candidate_metadata WHERE key = ?",
-                        (json.dumps(key),),
-                    ).fetchone()
+                    conn = self._reader()
+                    row = (
+                        None
+                        if conn is None
+                        else conn.execute(
+                            "SELECT value FROM candidate_metadata WHERE key = ?",
+                            (json.dumps(key),),
+                        ).fetchone()
+                    )
                 except sqlite3.Error:
                     row = None
             if row is not None:
@@ -426,6 +468,8 @@ class CandidateMetadataCache:
         
         with self.lock:
             try:
+                conn = self._writer()
+
                 # Batch insert pending candidate metadata
                 items = [
                     (json.dumps(k), marshal.dumps(v))
@@ -433,7 +477,7 @@ class CandidateMetadataCache:
                     if self.valid_key(k) and self.valid_value(v)
                 ]
                 if items:
-                    self.conn.executemany(
+                    conn.executemany(
                         "INSERT OR REPLACE INTO candidate_metadata (key, value) VALUES (?, ?)",
                         items,
                     )
@@ -444,7 +488,7 @@ class CandidateMetadataCache:
                     for raw, state in self._pending_req_states.items()
                 ]
                 if req_items:
-                    self.conn.executemany(
+                    conn.executemany(
                         "INSERT OR REPLACE INTO requirement_states (raw, state) VALUES (?, ?)",
                         req_items,
                     )
@@ -455,27 +499,29 @@ class CandidateMetadataCache:
                     for raw, state in self._pending_ver_states.items()
                 ]
                 if ver_items:
-                    self.conn.executemany(
+                    conn.executemany(
                         "INSERT OR REPLACE INTO version_states (raw, state) VALUES (?, ?)",
                         ver_items,
                     )
                     
-                self.conn.commit()
+                conn.commit()
                 self._pending_puts.clear()
                 self._pending_req_states.clear()
                 self._pending_ver_states.clear()
                 self.dirty = False
-            except (sqlite3.Error, ValueError, TypeError):
-                try:
-                    self.conn.rollback()
-                except sqlite3.Error:
-                    pass
+            except (sqlite3.Error, ValueError, TypeError, OSError):
+                if self.conn is not None:
+                    try:
+                        self.conn.rollback()
+                    except sqlite3.Error:
+                        pass
 
     def __del__(self) -> None:
         try:
             self.flush()
             with self.lock:
-                self.conn.close()
+                if self.conn is not None:
+                    self.conn.close()
         except Exception:
             pass
 

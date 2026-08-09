@@ -21,42 +21,61 @@ _CACHE_INSTANCES: dict[str, WheelMetadataCache] = {}
 class WheelMetadataCache:
     """Process-local metadata cache backed by an incremental SQLite database."""
 
-    __slots__ = ("_pending_puts", "conn", "dirty", "entries", "lock", "path")
+    __slots__ = ("_db_exists", "_pending_puts", "conn", "dirty", "entries", "lock", "path")
 
     def __init__(self, cache_dir: str | os.PathLike[str]) -> None:
         self.path = os.path.join(os.fspath(cache_dir), _CACHE_NAME)
-        # Create directories if they do not exist
-        os.makedirs(os.path.dirname(self.path), exist_ok=True)
         self.lock = threading.RLock()
-        
-        with self.lock:
-            try:
-                self.conn = sqlite3.connect(self.path, check_same_thread=False)
-                self.conn.execute("PRAGMA journal_mode=WAL")
-                self.conn.execute("PRAGMA busy_timeout=5000")
-                self.conn.execute(
-                    "CREATE TABLE IF NOT EXISTS metadata ("
-                    "path TEXT, size INTEGER, mtime INTEGER, headers BLOB, "
-                    "PRIMARY KEY (path, size, mtime))"
-                )
-            except sqlite3.Error:
-                try:
-                    os.remove(self.path)
-                except OSError:
-                    pass
-                self.conn = sqlite3.connect(self.path, check_same_thread=False)
-                self.conn.execute("PRAGMA journal_mode=WAL")
-                self.conn.execute("PRAGMA busy_timeout=5000")
-                self.conn.execute(
-                    "CREATE TABLE IF NOT EXISTS metadata ("
-                    "path TEXT, size INTEGER, mtime INTEGER, headers BLOB, "
-                    "PRIMARY KEY (path, size, mtime))"
-                )
-        
+        self.conn: sqlite3.Connection | None = None
+        self._db_exists = os.path.isfile(self.path)
+
         self.entries: dict[MetadataIdentity, MetadataHeaders] = {}
         self._pending_puts: dict[MetadataIdentity, MetadataHeaders] = {}
         self.dirty = False
         atexit.register(self.flush)
+
+    def _reader(self) -> sqlite3.Connection | None:
+        """Return the connection, or ``None`` while no database exists yet.
+
+        Creating the file costs a WAL journal plus the schema statements,
+        which a run that only ever misses should not pay.  An absent database
+        reads as empty instead of being brought into existence.
+        """
+        if self.conn is None and not self._db_exists:
+            return None
+        return self._writer()
+
+    def _writer(self) -> sqlite3.Connection:
+        """Return the connection, opening the database on first real use."""
+        if self.conn is not None:
+            return self.conn
+
+        os.makedirs(os.path.dirname(self.path), exist_ok=True)
+        try:
+            conn = self._open()
+        except sqlite3.Error:
+            # A corrupt file is worth one retry from scratch; a second
+            # failure is the caller's to handle.
+            try:
+                os.remove(self.path)
+            except OSError:
+                pass
+            conn = self._open()
+
+        self.conn = conn
+        self._db_exists = True
+        return conn
+
+    def _open(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(self.path, check_same_thread=False)
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=5000")
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS metadata ("
+            "path TEXT, size INTEGER, mtime INTEGER, headers BLOB, "
+            "PRIMARY KEY (path, size, mtime))"
+        )
+        return conn
 
     def load(self) -> None:
         # No-op in SQLite because we load rows on-demand during get()
@@ -84,26 +103,8 @@ class WheelMetadataCache:
     def get(self, identity: MetadataIdentity) -> MetadataHeaders | None:
         value = self.entries.get(identity)
         if value is None:
-            # Query SQLite
-            with self.lock:
-                try:
-                    cursor = self.conn.execute(
-                        "SELECT headers FROM metadata WHERE path = ? AND size = ? AND mtime = ?",
-                        identity,
-                    )
-                    row = cursor.fetchone()
-                except sqlite3.Error:
-                    row = None
-            if row is not None:
-                try:
-                    value = marshal.loads(row[0])
-                    if self.valid_headers(value):
-                        if len(self.entries) >= _MAX_ENTRIES:
-                            self.entries.pop(next(iter(self.entries)))
-                        self.entries[identity] = value
-                except Exception:
-                    pass
-        
+            value = self._load(identity)
+
         return (
             None
             if value is None
@@ -114,25 +115,36 @@ class WheelMetadataCache:
         """Return cached headers without copying for read-only hot paths."""
         value = self.entries.get(identity)
         if value is None:
-            # Query SQLite
-            with self.lock:
-                try:
-                    cursor = self.conn.execute(
-                        "SELECT headers FROM metadata WHERE path = ? AND size = ? AND mtime = ?",
+            value = self._load(identity)
+        return value
+
+    def _load(self, identity: MetadataIdentity) -> MetadataHeaders | None:
+        """Read one row out of the database and memoize it."""
+        with self.lock:
+            try:
+                conn = self._reader()
+                row = (
+                    None
+                    if conn is None
+                    else conn.execute(
+                        "SELECT headers FROM metadata "
+                        "WHERE path = ? AND size = ? AND mtime = ?",
                         identity,
-                    )
-                    row = cursor.fetchone()
-                except sqlite3.Error:
-                    row = None
-            if row is not None:
-                try:
-                    value = marshal.loads(row[0])
-                    if self.valid_headers(value):
-                        if len(self.entries) >= _MAX_ENTRIES:
-                            self.entries.pop(next(iter(self.entries)))
-                        self.entries[identity] = value
-                except Exception:
-                    pass
+                    ).fetchone()
+                )
+            except sqlite3.Error:
+                return None
+        if row is None:
+            return None
+        try:
+            value = marshal.loads(row[0])
+        except Exception:
+            return None
+        if not self.valid_headers(value):
+            return None
+        if len(self.entries) >= _MAX_ENTRIES:
+            self.entries.pop(next(iter(self.entries)))
+        self.entries[identity] = value
         return value
 
     def put(self, identity: MetadataIdentity, headers: MetadataHeaders) -> None:
@@ -166,24 +178,27 @@ class WheelMetadataCache:
                     (identity[0], identity[1], identity[2], marshal.dumps(headers))
                     for identity, headers in self._pending_puts.items()
                 ]
-                self.conn.executemany(
+                conn = self._writer()
+                conn.executemany(
                     "INSERT OR REPLACE INTO metadata (path, size, mtime, headers) VALUES (?, ?, ?, ?)",
                     items,
                 )
-                self.conn.commit()
+                conn.commit()
                 self._pending_puts.clear()
                 self.dirty = False
-            except (sqlite3.Error, ValueError, TypeError):
-                try:
-                    self.conn.rollback()
-                except sqlite3.Error:
-                    pass
+            except (sqlite3.Error, ValueError, TypeError, OSError):
+                if self.conn is not None:
+                    try:
+                        self.conn.rollback()
+                    except sqlite3.Error:
+                        pass
 
     def __del__(self) -> None:
         try:
             self.flush()
             with self.lock:
-                self.conn.close()
+                if self.conn is not None:
+                    self.conn.close()
         except Exception:
             pass
 

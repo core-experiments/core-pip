@@ -30,6 +30,7 @@ from cpip.core.wheel import (
     WheelCandidate,
     validate_wheel_with_metadata,
     wheel_candidate,
+    wheel_dist_info_dir,
 )
 from cpip.core.wheel_metadata import parse_metadata_headers
 from cpip.build.build import build_wheel_from_source, unpack_source_internal
@@ -893,11 +894,14 @@ class CandidateMaterializer:
                     zipfile.ZipFile(stream) as archive,
                 ):
                     try:
-                        dist_info_dir, wheel_metadata_text = (
-                            validate_wheel_with_metadata(
-                                archive,
-                                os.path.basename(path_text)[:-4].split("-", 1)[0],
-                            )
+                        # Locating the .dist-info directory is all resolution
+                        # needs.  Reading WHEEL for its ``Wheel-Version`` costs
+                        # a second member decompression per candidate, and
+                        # ``include_layout=False`` discards the text anyway;
+                        # ``wheel_transaction`` re-validates before installing.
+                        dist_info_dir = wheel_dist_info_dir(
+                            archive,
+                            os.path.basename(path_text)[:-4].split("-", 1)[0],
                         )
 
                     except UnsupportedWheel as exc:
@@ -909,7 +913,6 @@ class CandidateMaterializer:
                         archive=archive,
                         filename_info=(candidate.name, candidate.version),
                         dist_info_dir=dist_info_dir,
-                        wheel_metadata_text=wheel_metadata_text,
                         include_layout=False,
                         metadata_cache=self.persistent_metadata_cache,
                     )

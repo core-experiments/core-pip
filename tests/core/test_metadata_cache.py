@@ -20,6 +20,20 @@ def test_metadata_cache_round_trips_versioned_headers(tmp_path: Path) -> None:
     assert restored.get(identity) == headers
 
 
+def test_metadata_cache_defers_database_creation_until_a_write(tmp_path: Path) -> None:
+    """A cold cache that only misses must not pay to create the database."""
+    cache_dir = tmp_path / "cache"
+    database = cache_dir / "metadata-v2.sqlite"
+
+    cache = WheelMetadataCache(cache_dir)
+    assert cache.get(("/wheel.whl", 1, 2)) is None
+    assert not database.exists()
+
+    cache.put(("/wheel.whl", 1, 2), {"Name": ["demo"]})
+    cache.flush()
+    assert database.is_file()
+
+
 def test_metadata_cache_ignores_corrupt_snapshots(tmp_path: Path) -> None:
     cache_path = tmp_path / "cache" / "metadata-v2.sqlite"
     cache_path.parent.mkdir()
