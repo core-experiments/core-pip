@@ -16,6 +16,7 @@ from cpip.cli.requirements import (
     collect_requirements,
 )
 from cpip.cli.resolution_errors import resolution_error_message
+from cpip.core.appdirs import resolve_cache_dir
 from cpip.core.errors import DistributionNotFound, ResolutionError
 from cpip.core.format_control import FormatControl
 from cpip.index.artifacts import ArtifactLocator
@@ -28,6 +29,12 @@ def run_download(args: list[str]) -> int:
     options = create_parser().parse_args(args)
 
     apply_proxy_environment(options.proxy)
+
+    # Downloads go through the same HTTP, metadata and artifact caches as an
+    # install, so repeating one costs a revalidation rather than a refetch.
+    # ``--no-cache-dir`` opts out, which is the only reason the flag existed
+    # before anything read it.
+    cache_dir = None if options.no_cache_dir else resolve_cache_dir(options.cache_dir)
 
     sources = resolve_sources(options, load_source_config("download"))
 
@@ -45,6 +52,7 @@ def run_download(args: list[str]) -> int:
         cert=options.cert,
         client_cert=options.client_cert,
         proxy=options.proxy,
+        cache_dir=cache_dir,
     )
 
     provider = CandidateProvider.from_options(
@@ -55,6 +63,7 @@ def run_download(args: list[str]) -> int:
         format_control=bundle.format_control,
         trusted_hosts=options.trusted_hosts,
         session=bundle.session,
+        wheel_cache_dir=cache_dir,
     )
 
     requirements = bundle_install_requirements(bundle)
@@ -85,11 +94,15 @@ def run_download(args: list[str]) -> int:
 
         names.append(os.path.basename(wheel).split("-", 1)[0])
 
+    # One locator for the whole batch: it memoizes resolved paths and holds
+    # the artifact cache, both of which a per-candidate instance would discard.
+    artifact_locator = ArtifactLocator(bundle.session, cache_dir=cache_dir)
+
     for candidate in plan.candidates:
         source = candidate.path
 
         if candidate.source_kind == "sdist" and candidate.source_url is not None:
-            source = ArtifactLocator(bundle.session).ensure_local(candidate.source_url)
+            source = artifact_locator.ensure_local(candidate.source_url)
 
             # Build isolation commonly consumes setuptools from a local wheel
 

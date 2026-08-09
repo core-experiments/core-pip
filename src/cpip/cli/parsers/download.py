@@ -55,6 +55,8 @@ def create_parser() -> ArgumentParser:
 
     parser.add_argument("--no-build-isolation", action="store_true")
 
+    parser.add_argument("--cache-dir")
+
     parser.add_argument("--no-cache-dir", action="store_true")
 
     parser.add_argument("--no-color", action="store_true")

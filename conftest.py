@@ -196,6 +196,7 @@ def pytest_collection_modifyitems(config: Config, items: list[pytest.Function]) 
             and Path(module_path).parts[0] == "tests"
             and Path(module_path).parts[1]
             in {
+                "cli",
                 "core",
                 "build",
                 "index",
