@@ -131,6 +131,27 @@ def _key(requirement: Requirement) -> str:
     return canonicalize_name(name)
 
 
+class _RecordingRequirements(dict):
+    """The package -> requirement map, recording every package it replaces.
+
+    ``prioritize`` answers from ``len(_versions(package))``, which follows
+    the package's requirement, and the resolver caches sort keys between
+    decision scans. Recording in ``__setitem__`` rather than at the handful
+    of assignment sites is what keeps that record complete as merging grows
+    new ones.
+    """
+
+    __slots__ = ("touched",)
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.touched: set[str] = set()
+
+    def __setitem__(self, key: str, value: Requirement) -> None:
+        self.touched.add(key)
+        super().__setitem__(key, value)
+
+
 @dataclass
 class NabProvider:
     """Native NAB provider backed by cpip candidate discovery."""
@@ -147,7 +168,7 @@ class NabProvider:
         self.records: dict[
             tuple[str, Version], WheelCandidate | InstalledCandidate
         ] = {}
-        self.requirements: dict[str, Requirement] = {}
+        self.requirements: dict[str, Requirement] = _RecordingRequirements()
         self.display_requirements: dict[str, Requirement] = {}
         self._version_cache: dict[tuple[object, ...], tuple[Version, ...]] = {}
         # Fast paths in front of ``_version_cache``, whose key costs more to
@@ -911,6 +932,18 @@ class NabProvider:
 
     def begin_decision_scan(self) -> None:
         return None
+
+    def consume_priority_invalidations(self) -> list[str]:
+        """Report packages whose priority may have moved, and reset.
+
+        ``is_ready`` is constant here, so a package's priority moves only
+        with its requirement -- which is replaced, never mutated in place.
+        """
+        touched = self.requirements.touched
+        if not touched:
+            return []
+        self.requirements.touched = set()
+        return list(touched)
 
     def prioritize(
         self,

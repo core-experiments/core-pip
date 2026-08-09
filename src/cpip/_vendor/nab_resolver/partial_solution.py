@@ -102,6 +102,11 @@ class PartialSolution(Generic[PackageType, VersionType]):
             PackageType, RangeProtocol[VersionType] | None
         ] = {}
 
+        # Packages whose range moved since the last drain. ``prioritize`` is
+        # handed a package's range, so a decision scan that reuses a cached
+        # sort key has to know which ones it may no longer trust.
+        self._touched: set[PackageType] = set()
+
         # Per-package index of trail entries; lets satisfier() avoid the full scan.
         self._assignments_by_package: defaultdict[
             PackageType, list[Assignment[PackageType, VersionType]]
@@ -165,6 +170,7 @@ class PartialSolution(Generic[PackageType, VersionType]):
         self._decided_versions[package] = version
         self._effective_range_cache.pop(package, None)
         self._undecided.discard(package)
+        self._touched.add(package)
 
         package_entries = self._assignments_by_package[package]
         assignment = Assignment(
@@ -213,6 +219,7 @@ class PartialSolution(Generic[PackageType, VersionType]):
             self._negative_ranges[package] = new_range
 
         self._effective_range_cache.pop(package, None)
+        self._touched.add(package)
 
         package_entries = self._assignments_by_package[package]
         assignment = Assignment(
@@ -252,6 +259,7 @@ class PartialSolution(Generic[PackageType, VersionType]):
                 entries.pop()
 
         self._decision_level = target_level
+        self._touched |= affected_packages
 
         for package in affected_packages:
             entries = self._assignments_by_package.get(package)
@@ -286,6 +294,17 @@ class PartialSolution(Generic[PackageType, VersionType]):
                     self._undecided.discard(package)
 
         self._effective_range_cache.clear()
+
+    def drain_touched(self) -> set[PackageType]:
+        """Return packages whose range moved since the last call, and reset.
+
+        ``decide``, ``derive`` and ``backtrack`` are the only writers of a
+        package's range, so recording here is what keeps a cached sort key
+        from outliving the range it was built from.
+        """
+        touched = self._touched
+        self._touched = set()
+        return touched
 
     def decisions(self) -> dict[PackageType, VersionType]:
         """Return the current decision map: ``{package: version}``."""

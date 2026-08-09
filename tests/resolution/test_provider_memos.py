@@ -174,3 +174,23 @@ def test_memos_never_change_a_backtracking_answer(
 
     assert memoized == plain
     assert memoized is not None
+
+
+def test_replaced_requirements_are_reported_for_priority_invalidation(
+    tmp_path: Path,
+) -> None:
+    """Every requirement replacement must reach the resolver's key cache.
+
+    ``choose_package_to_decide`` reuses a package's sort key until something
+    reports that it moved, and the version count behind that key follows the
+    requirement. A replacement that goes unreported does not fail loudly --
+    it silently reorders decisions.
+    """
+    provider = make_provider(wheelhouse_with_demo(tmp_path))
+
+    provider.requirements["demo"] = parse_requirement("demo")
+    assert provider.consume_priority_invalidations() == ["demo"]
+    assert provider.consume_priority_invalidations() == []
+
+    provider.requirements["demo"] = parse_requirement("demo>=1")
+    assert provider.consume_priority_invalidations() == ["demo"]

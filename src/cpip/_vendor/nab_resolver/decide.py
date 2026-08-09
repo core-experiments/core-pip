@@ -34,6 +34,20 @@ def choose_package_to_decide(resolver: Resolver[Any, Any]) -> Any | None:
     the start of the scan so a provider fed by another thread can hold the
     state behind its sort key still: ``min`` only picks correctly over a key
     that does not move while it runs.
+
+    Keys are reused between scans rather than rebuilt.  Rebuilding is
+    quadratic over a resolution -- every undecided package, once per decision
+    -- and dominates once a requirements file gets wide, but almost no key
+    actually moves between two decisions.  A key survives until one of its
+    inputs is reported to have moved: the package's range (from the partial
+    solution), its conflict or culprit count (from the stats counters), or
+    the provider's own state.  A provider that cannot report the last of
+    those returns ``None`` and every key is rebuilt, which is what this did
+    unconditionally before.
+
+    Reusing a key whose input moved does not merely slow resolution down --
+    it picks a different package, and decision order decides how much
+    backtracking the resolution does at all.
     """
     undecided = resolver.solution.undecided_packages()
     undecided.discard(ROOT)
@@ -67,7 +81,27 @@ def choose_package_to_decide(resolver: Resolver[Any, Any]) -> Any | None:
             tiebreak_cache[package] = tiebreak
         return (ready_penalty, priority, tiebreak)
 
-    return min(undecided, key=sort_key)
+    # Drain unconditionally: a provider that cannot report invalidations
+    # still has to leave the resolver-side records empty, or they would
+    # accumulate and be applied to keys built long after they were recorded.
+    moved = resolver.solution.drain_touched()
+    moved |= resolver.stats.drain_priority_touched()
+
+    reporter = getattr(resolver.provider, "consume_priority_invalidations", None)
+    reported = reporter() if reporter is not None else None
+    keys = resolver.priority_keys
+
+    if reported is None:
+        keys.clear()
+    else:
+        moved.update(reported)
+        for package in moved:
+            keys.pop(package, None)
+
+    for package in undecided - keys.keys():
+        keys[package] = sort_key(package)
+
+    return min(undecided, key=keys.__getitem__)
 
 
 def choose_version(resolver: Resolver[Any, Any], package: Any) -> Any | None:
