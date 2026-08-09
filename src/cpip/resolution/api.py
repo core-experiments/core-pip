@@ -11,8 +11,11 @@ from typing import TYPE_CHECKING, Any
 
 from cpip.core.errors import ResolutionError as CpipResolutionError
 from cpip.index.provider import CandidateProvider
-from cpip.resolution.model import ResolvedRequirement, ResolutionResult
-from cpip.resolution.config import ResolutionConfig
+from cpip.resolution.models import (
+    ResolvedRequirement,
+    ResolutionResult,
+    ResolutionConfig,
+)
 from cpip.resolution.nab_provider import NabProvider
 from cpip.resolution.inputs import (
     coerce_requirements,

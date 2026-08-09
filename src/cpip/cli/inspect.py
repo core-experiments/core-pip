@@ -7,15 +7,15 @@ import json
 import os
 import sys
 
-from cpip.build.check import (
+from cpip.build.query import (
     check_package_set,
     installed_dependencies_by_name,
     metadata_errors,
     package_set_from_dependencies,
     unsupported_distributions,
+    iter_installed_package_info,
 )
 from cpip.build.metadata import InstalledDistributionStore
-from cpip.build.show import iter_installed_package_info
 from cpip.cli.common import ArgumentParser
 from cpip.core.cpip_version import CPIP_DISTRIBUTION_NAMES, get_cpip_version
 from cpip.core.metadata import stdlib_pkgs

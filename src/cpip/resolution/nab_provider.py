@@ -16,8 +16,7 @@ from cpip.core.packaging import (
 )
 from cpip.index.candidate_evaluators import CandidateEvaluator
 from cpip.index.provider import CandidateProvider
-from cpip.resolution.config import ResolutionConfig
-from cpip.resolution.url import canonical_url, url_name
+from cpip.resolution.models import ResolutionConfig, canonical_url, url_name
 
 
 class InstalledCandidate:

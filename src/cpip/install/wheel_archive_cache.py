@@ -44,7 +44,7 @@ from cpip.install.wheel_scripts import (
 )
 from cpip.install.wheel_state import discover_installed_wheels, existing_paths
 from cpip.platform.clone import clone_path
-from cpip.resolution.model import ResolutionResult
+from cpip.resolution.models import ResolutionResult
 
 if TYPE_CHECKING:
     from typing import Protocol, TypeVar

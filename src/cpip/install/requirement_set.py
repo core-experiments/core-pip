@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Generic, TypeVar
 from cpip.core.packaging import canonicalize_name
 
 if TYPE_CHECKING:
-    from cpip.resolution.input_models import RequirementInput
+    from cpip.resolution.models import RequirementInput
 
 
 RequirementT = TypeVar("RequirementT", bound="RequirementInput")

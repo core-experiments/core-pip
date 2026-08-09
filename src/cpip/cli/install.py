@@ -9,7 +9,7 @@ from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
 from cpip.build.build import build_editable_from_source
-from cpip.build.check import (
+from cpip.build.query import (
     check_package_set,
     installed_dependencies_by_name,
     package_set_from_dependencies,
@@ -69,7 +69,7 @@ from cpip.resolution.input_requirements import install_req_from_line
 
 if TYPE_CHECKING:
     import argparse
-    from cpip.resolution.model import ResolutionResult
+    from cpip.resolution.models import ResolutionResult
     from cpip.resolution.req_install import InstallRequirement
 
 INDEX_URL_OPTIONS = frozenset(("-i", "--index-url"))

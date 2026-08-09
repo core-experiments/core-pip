@@ -5,7 +5,7 @@ from __future__ import annotations
 import sys
 from typing import Any
 
-from cpip.build.list import (
+from cpip.build.query import (
     format_list_columns,
     format_list_freeze,
     format_list_json,
