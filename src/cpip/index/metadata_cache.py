@@ -3,46 +3,45 @@
 from __future__ import annotations
 
 import atexit
+import marshal
 import os
+import sqlite3
 from typing import TypeAlias, cast
-
-from cpip.core.utils import load_snapshot, save_snapshot
 
 MetadataHeaders: TypeAlias = dict[str, list[str]]
 MetadataIdentity: TypeAlias = tuple[str, int, int]
 
 _CACHE_VERSION = 2
-_CACHE_NAME = "metadata-v2.marshal"
+_CACHE_NAME = "metadata-v2.sqlite"
 _MAX_ENTRIES = 8_192
 _CACHE_INSTANCES: dict[str, WheelMetadataCache] = {}
 
 
 class WheelMetadataCache:
-    """Process-local metadata cache backed by an atomic marshal snapshot."""
+    """Process-local metadata cache backed by an incremental SQLite database."""
 
-    __slots__ = ("dirty", "entries", "path")
+    __slots__ = ("dirty", "entries", "path", "conn", "_pending_puts")
 
     def __init__(self, cache_dir: str | os.PathLike[str]) -> None:
         self.path = os.path.join(os.fspath(cache_dir), _CACHE_NAME)
+        # Create directories if they do not exist
+        os.makedirs(os.path.dirname(self.path), exist_ok=True)
+        
+        self.conn = sqlite3.connect(self.path)
+        self.conn.execute(
+            "CREATE TABLE IF NOT EXISTS metadata ("
+            "path TEXT, size INTEGER, mtime INTEGER, headers BLOB, "
+            "PRIMARY KEY (path, size, mtime))"
+        )
+        
         self.entries: dict[MetadataIdentity, MetadataHeaders] = {}
+        self._pending_puts: dict[MetadataIdentity, MetadataHeaders] = {}
         self.dirty = False
-        self.load()
         atexit.register(self.flush)
 
     def load(self) -> None:
-        payload = load_snapshot(self.path)
-        if (
-            not isinstance(payload, tuple)
-            or len(payload) != 3
-            or payload[0] != "cpip-metadata"
-            or payload[1] != _CACHE_VERSION
-            or not isinstance(payload[2], dict)
-        ):
-            return
-        for key, value in payload[2].items():
-            if not self.valid_identity(key) or not self.valid_headers(value):
-                continue
-            self.entries[cast("MetadataIdentity", key)] = cast("MetadataHeaders", value)
+        # No-op in SQLite because we load rows on-demand during get()
+        pass
 
     @staticmethod
     def valid_identity(value: object) -> bool:
@@ -65,6 +64,23 @@ class WheelMetadataCache:
 
     def get(self, identity: MetadataIdentity) -> MetadataHeaders | None:
         value = self.entries.get(identity)
+        if value is None:
+            # Query SQLite
+            cursor = self.conn.execute(
+                "SELECT headers FROM metadata WHERE path = ? AND size = ? AND mtime = ?",
+                identity,
+            )
+            row = cursor.fetchone()
+            if row is not None:
+                try:
+                    value = marshal.loads(row[0])
+                    if self.valid_headers(value):
+                        if len(self.entries) >= _MAX_ENTRIES:
+                            self.entries.pop(next(iter(self.entries)))
+                        self.entries[identity] = value
+                except Exception:
+                    pass
+        
         return (
             None
             if value is None
@@ -73,14 +89,31 @@ class WheelMetadataCache:
 
     def get_reference(self, identity: MetadataIdentity) -> MetadataHeaders | None:
         """Return cached headers without copying for read-only hot paths."""
-        return self.entries.get(identity)
+        value = self.entries.get(identity)
+        if value is None:
+            # Query SQLite
+            cursor = self.conn.execute(
+                "SELECT headers FROM metadata WHERE path = ? AND size = ? AND mtime = ?",
+                identity,
+            )
+            row = cursor.fetchone()
+            if row is not None:
+                try:
+                    value = marshal.loads(row[0])
+                    if self.valid_headers(value):
+                        if len(self.entries) >= _MAX_ENTRIES:
+                            self.entries.pop(next(iter(self.entries)))
+                        self.entries[identity] = value
+                except Exception:
+                    pass
+        return value
 
     def put(self, identity: MetadataIdentity, headers: MetadataHeaders) -> None:
         if identity not in self.entries and len(self.entries) >= _MAX_ENTRIES:
             self.entries.pop(next(iter(self.entries)))
-        self.entries[identity] = {
-            name: list(values) for name, values in headers.items()
-        }
+        copied = {name: list(values) for name, values in headers.items()}
+        self.entries[identity] = copied
+        self._pending_puts[identity] = copied
         self.dirty = True
 
     def put_reference(
@@ -92,16 +125,35 @@ class WheelMetadataCache:
         if identity not in self.entries and len(self.entries) >= _MAX_ENTRIES:
             self.entries.pop(next(iter(self.entries)))
         self.entries[identity] = headers
+        self._pending_puts[identity] = headers
         self.dirty = True
 
     def flush(self) -> None:
         if not self.dirty:
             return
-        if save_snapshot(
-            self.path,
-            ("cpip-metadata", _CACHE_VERSION, self.entries),
-        ):
+        
+        try:
+            # Batch insert/replace dirty entries
+            items = [
+                (identity[0], identity[1], identity[2], marshal.dumps(headers))
+                for identity, headers in self._pending_puts.items()
+            ]
+            self.conn.executemany(
+                "INSERT OR REPLACE INTO metadata (path, size, mtime, headers) VALUES (?, ?, ?, ?)",
+                items,
+            )
+            self.conn.commit()
+            self._pending_puts.clear()
             self.dirty = False
+        except Exception:
+            pass
+
+    def __del__(self) -> None:
+        try:
+            self.flush()
+            self.conn.close()
+        except Exception:
+            pass
 
 
 def metadata_identity(path: str | os.PathLike[str]) -> MetadataIdentity | None:
