@@ -640,18 +640,19 @@ class Range(Generic[VersionType]):
         return not self.is_empty
 
 
+def _interval_sort_key(interval: Interval) -> tuple[Any, ...]:
+    lower = interval[0]
+    if lower is NEGATIVE_INFINITY:
+        return (0,)
+    return (1, lower, 0 if interval[1] else 1)
+
+
 def _normalize_intervals(intervals: list[Interval]) -> tuple[Interval, ...]:
     """Sort intervals by lower bound and merge overlapping or adjacent ones."""
     if not intervals:
         return ()
 
-    def sort_key(interval: Interval) -> tuple[Any, ...]:
-        lower, lower_inclusive, _upper, _upper_inclusive = interval
-        if lower is NEGATIVE_INFINITY:
-            return (0,)
-        return (1, lower, 0 if lower_inclusive else 1)
-
-    intervals.sort(key=sort_key)
+    intervals.sort(key=_interval_sort_key)
 
     merged: list[Interval] = [intervals[0]]
     for lower, lower_inclusive, upper, upper_inclusive in intervals[1:]:
