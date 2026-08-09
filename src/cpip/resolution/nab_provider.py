@@ -11,6 +11,7 @@ from cpip._vendor.nab_resolver.types import Incompatibility, RangeProtocol
 from cpip.core.metadata import InstalledDistribution, find_installed
 from cpip.core.wheel import WheelCandidate
 from cpip.core.packaging import (
+    InvalidVersion,
     Requirement,
     SpecifierSet,
     Version,
@@ -53,6 +54,30 @@ class InstalledCandidate:
         return self.distribution.canonical_name
 
 
+# Fewer than two exact pins cannot intersect to nothing.
+_MIN_PINS_TO_DISAGREE = 2
+
+
+def _exact_pin(requirement: Requirement) -> Version | None:
+    """The single release a ``==`` requirement names, or None.
+
+    Anything else -- a range, several clauses, a wildcard, an unparseable
+    version -- has no unique release and so cannot narrow a domain to a point.
+    """
+    clauses = requirement.specifier.specifiers
+    if len(clauses) != 1:
+        return None
+
+    clause = clauses[0]
+    if clause.operator != "==" or clause.version.endswith("*"):
+        return None
+
+    try:
+        return Version(clause.version)
+    except InvalidVersion:
+        return None
+
+
 def _key(requirement: Requirement) -> str:
     name = requirement.name
     if name.startswith(("file://", "http://", "https://")):
@@ -80,6 +105,12 @@ class NabProvider:
         self.display_requirements: dict[str, Requirement] = {}
         self._version_cache: dict[tuple[object, ...], tuple[Version, ...]] = {}
         self._installed_cache: dict[str, InstalledCandidate | None] = {}
+        # Forward-check memos. Keyed on catalog facts, which do not move
+        # during a resolution, so none of these need invalidating.
+        self._preflight_cache: dict[tuple[str, Version], bool] = {}
+        self._catalog_candidate_cache: dict[str, dict[Version, object | None]] = {}
+        self._catalog_version_cache: dict[str, tuple[Version, ...]] = {}
+        self._domain_cache: dict[tuple[str, str], frozenset[Version]] = {}
         self._dependency_cache: dict[
             tuple[str, Version, tuple[str, ...]], Mapping[str, Range[Version]]
         ] = {}
@@ -315,7 +346,7 @@ class NabProvider:
         ):
             selected = installed.version
         else:
-            selected = max(matching)
+            selected = self._newest_viable(package, matching)
         if installed is not None and selected == installed.version:
             self.records[(package, selected)] = installed
             return selected
@@ -357,6 +388,186 @@ class NabProvider:
 
         self.records[(package, selected)] = candidate
         return selected
+
+    def _newest_viable(self, package: str, matching: list[Version]) -> Version:
+        """Pick the newest version whose exact pins are not already impossible.
+
+        The resolver has no lookahead: it decides a version, decides its
+        dependencies, and only then discovers that two of them pin the same
+        package to different releases.  Each such candidate costs a decision
+        per dependency plus a conflict, and every conflict leaves behind an
+        incompatibility that all later propagation re-scans.  On a wheelhouse
+        whose releases disagree pairwise that is quadratic, and the resolver
+        spends it before reaching the one release that works.
+
+        Looking one level past the pins is enough to rule those out up front.
+        Restores the behavior of ``preflight_exact_dependencies``, which the
+        deleted local-wheelhouse kernel ran for exactly this reason.
+
+        Rejecting a satisfiable version would silently return an older
+        solution, so this defers to the resolver on anything it cannot decide
+        exactly -- and if it rejects *every* candidate it defers as well,
+        rather than claiming a graph is unsolvable on the strength of a
+        conservative check.
+        """
+        if len(matching) == 1:
+            # Nothing to choose between, so looking ahead cannot change the
+            # answer -- and the metadata it would read is not free.
+            return matching[0]
+
+        newest_first = sorted(matching, reverse=True)
+        for version in newest_first:
+            if not self._pins_are_impossible(package, version):
+                return version
+        return newest_first[0]
+
+    def _pins_are_impossible(self, package: str, version: Version) -> bool:
+        """Whether this version's ``==`` pins force an empty version domain.
+
+        Conservative by construction: every branch that cannot be decided
+        exactly answers ``False`` so the resolver stays authoritative.  Only a
+        provable emptiness -- two pins whose dependency requirements share a
+        package but no version -- answers ``True``.
+        """
+        cache_key = (package, version)
+        cached = self._preflight_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        verdict = self._compute_pins_are_impossible(package, version)
+        self._preflight_cache[cache_key] = verdict
+        return verdict
+
+    def _compute_pins_are_impossible(self, package: str, version: Version) -> bool:
+        if not isinstance(self.provider, CandidateProvider):
+            return False
+
+        candidate = self._catalog_candidate(package, version)
+        if candidate is None:
+            return False
+
+        extras = self.requirements[package].extras
+
+        # Two pins are the minimum that can disagree, so count them before
+        # reading any child metadata. Requirements are already parsed, making
+        # this the cheap half of the check and the common exit.
+        pins: list[tuple[Requirement, Version]] = []
+        for dependency in getattr(candidate, "dependencies", ()):
+            if not marker_applies(dependency.marker, extras=extras):
+                continue
+            if dependency.url is not None:
+                # A direct URL is an artifact identity, not a version domain.
+                return False
+            pinned = _exact_pin(dependency)
+            if pinned is None:
+                return False
+            pins.append((dependency, pinned))
+
+        if len(pins) < _MIN_PINS_TO_DISAGREE:
+            return False
+
+        domains: dict[str, frozenset[Version]] = {}
+
+        for dependency, pinned in pins:
+            child = self._catalog_candidate(_key(dependency), pinned)
+            if child is None:
+                # The pin names a release the catalog does not offer. The
+                # resolver reports that far better than a silent skip would.
+                return False
+
+            for grandchild in getattr(child, "dependencies", ()):
+                if not marker_applies(grandchild.marker, extras=dependency.extras):
+                    continue
+                if grandchild.url is not None:
+                    continue
+
+                name = _key(grandchild)
+                allowed = self._satisfying_versions(name, grandchild)
+                narrowed = domains.get(name)
+                narrowed = allowed if narrowed is None else narrowed & allowed
+                if not narrowed:
+                    return True
+                domains[name] = narrowed
+
+        return False
+
+    def _catalog_candidate(self, package: str, version: Version) -> object | None:
+        """The single catalog entry for one release, or None if not unique.
+
+        Ambiguity is not a rejection: more than one artifact for a release
+        means the choice belongs to the resolver's own evaluation.
+        """
+        return self._catalog_by_version(package).get(version)
+
+    def _catalog_by_version(self, package: str) -> dict[Version, object | None]:
+        """Index a package's catalog entries by release, in one query.
+
+        Asking per release would run the whole candidate pipeline once per
+        version, which is the same quadratic shape the forward check exists to
+        avoid.  Candidate objects are cheap -- only reading ``dependencies``
+        loads metadata -- so building the whole index costs one query.
+        """
+        cached = self._catalog_candidate_cache.get(package)
+        if cached is not None:
+            return cached
+
+        try:
+            found = tuple(self.provider.find_candidates(parse_requirement(package)))
+        except Exception:
+            # Metadata that will not load is the resolver's problem to report.
+            found = ()
+
+        index: dict[Version, object | None] = {}
+        for candidate in found:
+            version = candidate.version
+            # A release with more than one artifact is ambiguous here.
+            index[version] = None if version in index else candidate
+
+        self._catalog_candidate_cache[package] = index
+        return index
+
+    def _satisfying_versions(
+        self,
+        package: str,
+        requirement: Requirement,
+    ) -> frozenset[Version]:
+        """Catalog releases of ``package`` that satisfy ``requirement``."""
+        cache_key = (package, str(requirement.specifier))
+        cached = self._domain_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        specifier = requirement.specifier
+        domain = frozenset(
+            version
+            for version in self._catalog_versions(package)
+            if specifier.contains(version, allow_prereleases=True)
+        )
+        self._domain_cache[cache_key] = domain
+        return domain
+
+    def _catalog_versions(self, package: str) -> tuple[Version, ...]:
+        """Every release of ``package`` the sources offer.
+
+        Deliberately not ``_versions``, which answers for a package the
+        resolver already tracks; a pin can name one it has never seen.
+        """
+        cached = self._catalog_version_cache.get(package)
+        if cached is not None:
+            return cached
+
+        try:
+            versions = tuple(
+                summary.version
+                for summary in self.provider.available_versions(
+                    parse_requirement(package),
+                )
+            )
+        except Exception:
+            versions = ()
+
+        self._catalog_version_cache[package] = versions
+        return versions
 
     def _retry_including_yanked(
         self,
