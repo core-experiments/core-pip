@@ -14,8 +14,6 @@ if TYPE_CHECKING:
     from collections.abc import Iterable
 
 
-
-
 VERSION_RE = re.compile(
     r"""
 
