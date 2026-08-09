@@ -508,8 +508,7 @@ class CandidateMaterializer:
 
             if self.vcs_revision(url) is None:
                 local = self.ensure_local_text(candidate)
-
-            remove_temp_directory(local)
+                remove_temp_directory(local)
 
             return None
 
@@ -903,47 +902,48 @@ class CandidateMaterializer:
             if candidate.link.kind in SOURCE_ARTIFACT_KINDS:
                 path = path_text
 
-                if (
-                    candidate.link.kind is ArtifactKind.SOURCE_TREE
-                    and candidate.link.subdirectory_fragment
-                ):
-                    path = os.path.join(path, candidate.link.subdirectory_fragment)
+                try:
+                    if (
+                        candidate.link.kind is ArtifactKind.SOURCE_TREE
+                        and candidate.link.subdirectory_fragment
+                    ):
+                        path = os.path.join(path, candidate.link.subdirectory_fragment)
 
-                with tempfile.TemporaryDirectory(prefix="cpip-metadata-") as temp_dir:
-                    if candidate.link.kind is ArtifactKind.SDIST:
-                        path = unpack_source_internal(path, temp_dir)
+                    with tempfile.TemporaryDirectory(prefix="cpip-metadata-") as temp_dir:
+                        if candidate.link.kind is ArtifactKind.SDIST:
+                            path = unpack_source_internal(path, temp_dir)
 
-                    validate_build_requirements(path)
+                        validate_build_requirements(path)
 
-                    try:
-                        project = prepare_project_metadata(
-                            path,
-                            build_constraints=self.build_constraints,
-                            build_isolation=self.build_isolation,
-                        )
+                        try:
+                            project = prepare_project_metadata(
+                                path,
+                                build_constraints=self.build_constraints,
+                                build_isolation=self.build_isolation,
+                            )
 
-                    except BuildError as exc:
-                        metadata = self.pypi_metadata(candidate, requested_extras)
+                        except BuildError as exc:
+                            metadata = self.pypi_metadata(candidate, requested_extras)
 
-                        if metadata is None:
-                            raise BuildError(
-                                f"Failed to build '{candidate.name}': {exc}",
-                            ) from exc
+                            if metadata is None:
+                                raise BuildError(
+                                    f"Failed to build '{candidate.name}': {exc}",
+                                ) from exc
 
-                    else:
-                        metadata = CandidateMetadata(
-                            name=project.name,
-                            version=Version(project.version),
-                            dependencies=project_dependencies(
-                                project,
-                                requested_extras,
-                            ),
-                            provided_extras=project_provided_extras(project),
-                            requires_python=project.requires_python,
-                        )
-
-                if vcs_path is not None:
-                    remove_temp_directory(vcs_path)
+                        else:
+                            metadata = CandidateMetadata(
+                                name=project.name,
+                                version=Version(project.version),
+                                dependencies=project_dependencies(
+                                    project,
+                                    requested_extras,
+                                ),
+                                provided_extras=project_provided_extras(project),
+                                requires_python=project.requires_python,
+                            )
+                finally:
+                    if vcs_path is not None:
+                        remove_temp_directory(vcs_path)
 
             else:
                 with (

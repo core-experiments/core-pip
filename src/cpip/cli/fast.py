@@ -1,7 +1,7 @@
 """Narrow command fast paths and the argv shapes they recognize.
 
 Each module here handles one deliberately small command shape: ``install``
-(:mod:`cpip.cli.fast.install`), ``lock``, and ``list``. A fast path is a
+(``fast_install``), ``lock``, and ``list``. A fast path is a
 conservative recognizer, never separate command semantics; it returns ``None``
 when an argument, target state, source shape, or feature falls outside its
 subset, and normal command dispatch stays available after every decline.
@@ -22,31 +22,16 @@ from cpip.cli.lock_format import render_wheel_lock, write_lock_output
 from cpip.core.appdirs import configured_cache_dir
 from cpip.core.packaging import canonicalize_name
 
-# ``run_cached_remote`` needs an exact-pin remote plan: quiet, an explicit
-# target that does not exist yet, and no local wheelhouse.
 REMOTE_EXACT_OPTIONS = ("--ignore-installed", "--no-compile", "--target")
-
-# ``run`` needs the no-index local wheelhouse shape and an empty target.
 LOCAL_WHEELHOUSE_OPTIONS = (
     "--no-index",
     "--ignore-installed",
     "--no-compile",
     "--target",
 )
-
-# ``run_local_fallback`` also accepts a non-empty target being upgraded in
-# place, which ``run`` declines.
 LOCAL_UPGRADE_OPTIONS = ("--no-index", "--upgrade", "--no-compile", "--target")
-
-# The local install shapes, minus the flag that distinguishes a fresh install
-# from an upgrade. A quiet invocation of any of them must not configure
-# logging.
 LOCAL_INSTALL_OPTIONS = ("--no-index", "--no-compile", "--target")
 
-
-# ==============================================================================
-# Shared Fast Path Parsing Helpers (formerly fast/args.py)
-# ==============================================================================
 
 def option_value(args: list[str], index: int) -> str | None:
     """Return a following option value, or ``None`` for an invalid option."""
@@ -100,16 +85,12 @@ def extend_requirements(
         and path.endswith(".toml")
     ):
         return False
-    values = read_requirements(path)
-    if values is None:
+    value = read_requirements(path)
+    if value is None:
         return False
-    target.extend(values)
+    target.extend(value)
     return True
 
-
-# ==============================================================================
-# Fast List Path (formerly fast/list.py)
-# ==============================================================================
 
 FORMATS = frozenset(("columns", "json", "freeze"))
 LIST_VALUE_OPTIONS = ("--path", "--format", "--exclude")
@@ -274,10 +255,6 @@ def run_list(args: list[str]) -> int | None:
     )
     return 0
 
-
-# ==============================================================================
-# Fast Lock Path (formerly fast/lock.py)
-# ==============================================================================
 
 class LockOptions:
     __slots__ = ("find_links", "no_index", "output", "requirements")
@@ -480,10 +457,6 @@ def run_lock(args: list[str]) -> int | None:
     return 0
 
 
-# ==============================================================================
-# Dispatch and Startup logic
-# ==============================================================================
-
 def _has_all(options: list[str], names: tuple[str, ...]) -> bool:
     return all(name in options for name in names)
 
@@ -524,7 +497,7 @@ def run_before_startup(args: list[str]) -> tuple[int | None, bool]:
     if command != "install":
         return None, False
 
-    from cpip.cli.fast import install
+    import cpip.cli.fast_install as install
     if (
         "--quiet" in options
         and "--no-index" not in options
@@ -553,7 +526,7 @@ def run_install_after_startup(args: list[str]) -> int | None:
     if not args or args[0] != "install":
         return None
 
-    from cpip.cli.fast import install
+    import cpip.cli.fast_install as install
     return install.run(args[1:])
 
 

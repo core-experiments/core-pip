@@ -18,7 +18,7 @@ from cpip.build.metadata import InstalledDistributionStore
 from cpip.cli.config import SourceConfig, load_source_config
 from cpip.cli.common import ArgumentParser as ArgumentParser_internal, target_prefix
 from cpip.cli.dependency_groups import group_items, parse_dependency_groups
-from cpip.cli.fast import install as fast_install
+import cpip.cli.fast_install as fast_install
 from cpip.cli.requirements import (
     bundle_install_requirements,
     collect_requirements,

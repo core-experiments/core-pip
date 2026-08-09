@@ -170,6 +170,14 @@ def parse_pylock(
 
                 hashes = _distribution_hashes(distribution, package_name)
 
+                version = _distribution_string(package, "version") or _sdist_version(
+                    _distribution_string(distribution, "name")
+                    or posixpath.basename(link),
+                    package_name,
+                )
+
+                requirement = f"{package_name}=={version}"
+
             else:
                 link = pylock_location(
                     reference,
@@ -177,16 +185,19 @@ def parse_pylock(
                     or _distribution_string(distribution, "url"),
                 )
 
-            parsed = parse_wheel_filename(
-                _distribution_string(distribution, "name") or posixpath.basename(link),
-            )
+                parsed = parse_wheel_filename(
+                    _distribution_string(distribution, "name")
+                    or posixpath.basename(link),
+                )
 
-            if parsed is None:
-                raise InstallationError(f"Invalid wheel filename for {package_name!r}")
+                if parsed is None:
+                    raise InstallationError(
+                        f"Invalid wheel filename for {package_name!r}",
+                    )
 
-            _, version = parsed
+                _, version = parsed
 
-            requirement = f"{package_name}=={version}"
+                requirement = f"{package_name}=={version}"
 
         else:
             if provider is not None and "source" not in (

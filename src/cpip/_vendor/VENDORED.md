@@ -1,8 +1,9 @@
 # Vendored dependencies
 
-This directory contains the following runtime dependency set for the HTTP
-transport. Versions are intentionally pinned so cpip remains usable without
-packages installed in the host environment.
+This directory contains the vendored runtime dependency set: the HTTP
+transport stack plus the dependency resolver and its typing shim. Versions
+are intentionally pinned so cpip remains usable without packages installed
+in the host environment.
 
 | Package | Version | License |
 | --- | --- | --- |
@@ -15,6 +16,6 @@ packages installed in the host environment.
 | typing_extensions | 4.16.0 | PSF-2.0 |
 
 The corresponding license texts are under `licenses/`. To refresh this stack,
-resolve the pinned requests release for Python 3.9, copy the package sources
+resolve each pinned release above for Python 3.9, copy the package sources
 and license texts here, remove generated caches and native optional modules,
 then update this file and run the full test suite.
