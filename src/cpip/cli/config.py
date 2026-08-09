@@ -1,14 +1,35 @@
+"""Read ``cpip.conf`` / ``cpip.ini`` and the ``CPIP_*`` environment.
+
+This is a reader.  There is no ``cpip config`` command, so nothing here writes
+configuration back out; if one is ever added, give it a written spec and tests
+rather than restoring the untested writer API this module used to carry.
+
+It also owns where package sources come from -- :class:`SourceConfig`,
+:func:`load_source_config`, and :func:`resolve_sources` -- because the answer
+is the same for every command and the install fast path needs it without
+paying for :mod:`cpip.cli.requirements`.
+
+Keep this module import-light: the install fast path loads it on startup.
+"""
+
 from __future__ import annotations
 
 import configparser
 import os
 import sys
 import sysconfig
+from typing import TYPE_CHECKING
 
 from cpip.core.errors import ConfigurationError
+from cpip.index.config import DEFAULT_INDEX_URL
+
+if TYPE_CHECKING:
+    # Annotation only: argparse is a measurable import on the fast path.
+    import argparse
 
 INTERNAL_CONFIG_KEYS = frozenset(("CPIP_VERSION", "CPIP_HELP", "CPIP_CONFIG_FILE"))
-NON_CONFIG_KEYS = frozenset(("CPIP_VERSION", "CPIP_HELP"))
+
+NO_INDEX_VALUES = frozenset(("1", "true", "yes", "on"))
 
 CONFIG_BASENAME = "cpip.conf" if os.name != "nt" else "cpip.ini"
 
@@ -24,20 +45,6 @@ class ConfigLocation:
     def __init__(self, kind: str, path: str) -> None:
         self.kind = kind
         self.path = path
-
-
-class ConfigDebugView:
-    __slots__ = ("env_vars", "locations", "values")
-
-    def __init__(
-        self,
-        env_vars: tuple[tuple[str, str], ...],
-        locations: tuple[ConfigLocation, ...],
-        values: tuple[tuple[str, str, str], ...],
-    ) -> None:
-        self.env_vars = env_vars
-        self.locations = locations
-        self.values = values
 
 
 class ConfigurationStore:
@@ -81,66 +88,6 @@ class ConfigurationStore:
             return self.get(key)
         except ConfigurationError:
             return None
-
-    def set(self, location: ConfigLocation, key: str, value: str) -> None:
-        parser = self.read_single(location.path)
-        section, option = split_key(key)
-        if not parser.has_section(section):
-            parser.add_section(section)
-        parser.set(section, option.replace("_", "-"), value)
-        write_parser(location.path, parser)
-
-    def unset(self, location: ConfigLocation, key: str) -> None:
-        parser = self.read_single(location.path)
-        section, option = split_key(key)
-        if not parser.has_section(section):
-            raise ConfigurationError(f"No such key - {key}")
-        removed = False
-        for candidate in option_spellings(option):
-            removed = parser.remove_option(section, candidate) or removed
-        if not removed:
-            raise ConfigurationError(f"No such key - {key}")
-        if not list(parser.items(section)):
-            parser.remove_section(section)
-        write_parser(location.path, parser)
-
-    def items(self) -> list[tuple[str, str]]:
-        values: dict[str, str] = {}
-        for section in self.parser_internal.sections():
-            for option, value in self.parser_internal.items(section):
-                values[f"{section}.{option.replace('_', '-')}"] = value
-        return sorted(values.items())
-
-    def debug_view(self) -> ConfigDebugView:
-        values: list[tuple[str, str, str]] = []
-        for location in config_locations():
-            parser = self.read_single(location.path)
-            for section in parser.sections():
-                for option, value in parser.items(section):
-                    values.append(
-                        (
-                            location.kind,
-                            f"{section}.{option.replace('_', '-')}",
-                            value,
-                        ),
-                    )
-        env_vars = sorted(
-            (key, value)
-            for key, value in os.environ.items()
-            if key.startswith("CPIP_")
-            and key not in NON_CONFIG_KEYS
-            and key != "CPIP_CONFIG_FILE"
-        )
-        return ConfigDebugView(
-            env_vars=tuple(env_vars),
-            locations=tuple(config_locations()),
-            values=tuple(values),
-        )
-
-    def read_single(self, path: str) -> RawConfigParser_internal:
-        parser = new_parser()
-        parser.read(path, encoding="utf-8")
-        return parser
 
 
 def config_locations() -> list[ConfigLocation]:
@@ -200,12 +147,6 @@ def option_spellings(option: str) -> tuple[str, ...]:
     return (dotted, underscored)
 
 
-def write_parser(path: str, parser: RawConfigParser_internal) -> None:
-    os.makedirs(os.path.dirname(path) or os.curdir, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as file:
-        parser.write(file)
-
-
 def new_parser() -> RawConfigParser_internal:
     return RawConfigParser_internal()
 
@@ -215,3 +156,106 @@ def user_config_path() -> str:
     if xdg:
         return os.path.join(xdg, "cpip", CONFIG_BASENAME)
     return os.path.join(os.path.expanduser("~"), ".config", CONFIG_BASENAME)
+
+
+class SourceConfig:
+    """Where a command looks for distributions."""
+
+    __slots__ = ("extra_index_urls", "find_links", "index_url", "no_index")
+
+    def __init__(
+        self,
+        find_links: list[str],
+        index_url: str | None,
+        extra_index_urls: list[str],
+        no_index: bool,
+    ) -> None:
+        self.find_links = find_links
+
+        self.index_url = index_url
+
+        self.extra_index_urls = extra_index_urls
+
+        self.no_index = no_index
+
+
+def load_source_config(command: str | None = None) -> SourceConfig:
+    """Read configured sources for ``command``, then apply ``CPIP_*`` overrides."""
+
+    store = ConfigurationStore()
+
+    try:
+        store.load()
+
+    except ConfigurationError:
+        return SourceConfig([], DEFAULT_INDEX_URL, [], False)
+
+    def configured(option: str) -> str | None:
+        if command is not None:
+            value = store.get_optional(f"{command}.{option}")
+
+            if value is not None:
+                return value
+
+        return store.get_optional(f"global.{option}")
+
+    raw_find_links = configured("find-links")
+
+    find_links = (
+        []
+        if raw_find_links is None
+        else [line.strip() for line in raw_find_links.splitlines() if line.strip()]
+    )
+
+    index_url = configured("index-url") or DEFAULT_INDEX_URL
+
+    raw_extra_index_urls = configured("extra-index-url")
+
+    extra_index_urls = (
+        []
+        if raw_extra_index_urls is None
+        else [
+            line.strip() for line in raw_extra_index_urls.splitlines() if line.strip()
+        ]
+    )
+
+    no_index_value = configured("no-index")
+
+    no_index = (
+        no_index_value is not None and no_index_value.strip().lower() in NO_INDEX_VALUES
+    )
+
+    if (value := os.environ.get("CPIP_FIND_LINKS")) is not None:
+        find_links = value.split()
+
+    if (value := os.environ.get("CPIP_INDEX_URL")) is not None:
+        index_url = value
+
+    if (value := os.environ.get("CPIP_EXTRA_INDEX_URL")) is not None:
+        extra_index_urls = value.split()
+
+    if (value := os.environ.get("CPIP_NO_INDEX")) is not None:
+        no_index = value.strip().lower() in NO_INDEX_VALUES
+
+    return SourceConfig(find_links, index_url, extra_index_urls, no_index)
+
+
+def resolve_sources(
+    options: argparse.Namespace,
+    config: SourceConfig,
+) -> SourceConfig:
+    """Apply command-line source options over configured defaults.
+
+    ``install`` deliberately does not use this: it concatenates configured and
+    command-line find-links and gates the index URL on whether one was given
+    explicitly.  See ``install_options.requirement_bundle``.
+    """
+
+    find_links = getattr(options, "find_links", None) or config.find_links
+
+    return SourceConfig(
+        find_links,
+        options.index_url or config.index_url,
+        options.extra_index_url or config.extra_index_urls,
+        options.no_index or config.no_index,
+    )

@@ -69,8 +69,7 @@ class SSLVerificationError(DiagnosticCpipError):
     def __init__(self, url: str, host: str, error: Exception) -> None:
         super().__init__(
             message=(
-                "Failed to establish a secure connection to "
-                f"{host} while fetching {url}"
+                f"Failed to establish a secure connection to {host} while fetching {url}"
             ),
             context=str(error),
             hint_stmt="You may need to use --cert or check your proxy/firewall configuration",

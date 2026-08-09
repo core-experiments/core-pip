@@ -38,26 +38,6 @@ def validate_member_parts(name: str) -> tuple[str, ...]:
     return parts
 
 
-def validate_member(name: str) -> tuple[str, ...]:
-    return validate_member_parts(name)
-
-
-def destination_internal(
-    target: InstallTarget,
-    relative: tuple[str, ...],
-    *,
-    resolved_directories: DestinationCache | None = None,
-    resolved_roots: ResolvedRoots | None = None,
-) -> str:
-    return destination_internal_parts(
-        target,
-        relative,
-        relative,
-        resolved_directories=resolved_directories,
-        resolved_roots=resolved_roots,
-    )
-
-
 def destination_internal_parts(
     target: InstallTarget,
     parts: tuple[str, ...],
@@ -73,24 +53,6 @@ def destination_internal_parts(
         resolved_directories=resolved_directories,
         resolved_roots=resolved_roots,
     )
-
-
-def destination_internal_parts_with_text(
-    target: InstallTarget,
-    parts: tuple[str, ...],
-    display_relative: tuple[str, ...] | str,
-    *,
-    resolved_directories: DestinationCache | None = None,
-    resolved_roots: ResolvedRoots | None = None,
-) -> tuple[str, str]:
-    destination_text = destination_internal_parts_text(
-        target,
-        parts,
-        display_relative,
-        resolved_directories=resolved_directories,
-        resolved_roots=resolved_roots,
-    )
-    return destination_text, destination_text
 
 
 def destination_internal_parts_text(
@@ -125,40 +87,6 @@ def destination_internal_parts_text(
         resolved_directories=resolved_directories,
         resolved_roots=resolved_roots,
     )
-
-
-def safe_destination(
-    root: str,
-    relative: tuple[str, ...],
-    *,
-    resolved_directories: DestinationCache | None = None,
-    resolved_roots: ResolvedRoots | None = None,
-) -> str:
-    return _safe_destination_parts_with_text(
-        root,
-        relative,
-        relative,
-        resolved_directories=resolved_directories,
-        resolved_roots=resolved_roots,
-    )
-
-
-def _safe_destination_parts(
-    root: str,
-    parts: tuple[str, ...],
-    display_relative: tuple[str, ...] | str,
-    *,
-    resolved_directories: DestinationCache | None = None,
-    resolved_roots: ResolvedRoots | None = None,
-) -> str:
-    destination_text = _safe_destination_parts_with_text(
-        root,
-        parts,
-        display_relative,
-        resolved_directories=resolved_directories,
-        resolved_roots=resolved_roots,
-    )
-    return destination_text
 
 
 def _safe_destination_parts_with_text(
@@ -250,7 +178,3 @@ def copy_member_with_metadata(
         return metadata
     encoded = base64.urlsafe_b64encode(digest.digest())
     return f"sha256={encoded.rstrip(b'=').decode('ascii')}", str(size)
-
-
-def is_script_member(relative: tuple[str, ...]) -> bool:
-    return len(relative) >= 2 and relative[-2] == "scripts"

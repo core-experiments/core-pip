@@ -10,6 +10,7 @@ from typing import NamedTuple
 
 from cpip.core.packaging import Version, canonicalize_name
 from cpip.core.urls import path_to_url
+from cpip.core.wheel import parse_wheel_filename
 from cpip.index.links import SOURCE_ARCHIVE_SUFFIXES
 
 
@@ -124,8 +125,6 @@ class DirectoryIndex:
                 continue
             wheel = parse_wheel_filename_fast(filename)
             if wheel is None and filename.endswith(".whl"):
-                from cpip.core.wheel import parse_wheel_filename
-
                 wheel = parse_wheel_filename(filename)
             if wheel is not None:
                 project_name = wheel[0]
@@ -190,6 +189,6 @@ def project_version_from_filename(filename: str) -> tuple[str, Version] | None:
     if not sep or not name or not version:
         return None
     try:
-        return name.replace("_", "-"), Version(version)
+        return canonicalize_name(name), Version(version)
     except ValueError:
         return None

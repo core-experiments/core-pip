@@ -4,23 +4,24 @@ This page is the map for finding code and preserving architectural boundaries.
 It describes the current runtime paths, their owners, and the invariants that
 performance work must retain.
 
-The source of truth for allowed package dependencies is
-`[tool.cpip.architecture]` in `pyproject.toml`. The source of truth for runtime
-behavior is the implementation named in each section. The architecture tests
-in `tests/test_workspace_boundaries.py` enforce the declared runtime import
-graph and reject cycles.
+The source of truth for runtime behavior is the implementation named in each
+section. The allowed package dependencies below are a **convention, not a
+checked constraint**: nothing in the build or the test suite currently enforces
+them, so an import that crosses a boundary will land unless a reviewer catches
+it. Treat the tables here as the thing to read before adding a cross-package
+import, and say so in review when one is added.
 
 ## Start here
 
 | Question | Start at | Then follow |
 | --- | --- | --- |
 | What happens when `cpip` starts? | `src/cpip/cli/entrypoint.py:main` | bootstrap output, narrow fast paths, fallback dispatch |
-| Where is a command implemented? | `src/cpip/cli/commands/registry.py` | its lazy `CommandSpec` and `run_*` function |
-| How does install choose a plan? | `src/cpip/cli/commands/install.py:run_install` | `install_plan.py`, cached plans, wheelhouse plans, `ResolutionEngine` |
-| How are dependencies resolved? | `src/cpip/resolution/engine/api.py:ResolutionEngine` | `runtime.py`, `propagation.py`, then `loop.py` |
+| Where is a command implemented? | `src/cpip/cli/registry.py` | its `CommandSpec` and the `run_*` function in `cli/<name>.py` |
+| How does install choose a plan? | `src/cpip/cli/install.py:run_install` | `install_plan.py`, cached plans, wheelhouse plans, `ResolutionEngine` |
+| How are dependencies resolved? | `src/cpip/resolution/api.py:ResolutionEngine` | `nab_provider.py`, then `_vendor/nab_resolver/` |
 | Where do index candidates come from? | `src/cpip/index/provider.py:CandidateProvider` | sources, link evaluation, lazy materialization |
 | How does an artifact become local? | `src/cpip/index/artifacts.py:ArtifactLocator` | artifact cache, HTTP cache, network session |
-| How are selected candidates prepared? | `src/cpip/resolution/engine/output.py:prepare_install_candidates` | candidate materialization and wheel archive preparation |
+| How are selected candidates prepared? | `src/cpip/install/output.py:prepare_install_candidates` | candidate materialization and wheel archive preparation |
 | How are wheels installed? | `src/cpip/install/wheel_transaction.py:install_wheels_transactionally` | archive cache, direct transaction, staged transaction |
 | Where are persistent caches defined? | the cache owner listed below | `core/marshal_cache.py` for small snapshots and `cli/cache.py` for command-facing management |
 | How are build backends invoked? | `src/cpip/build/build_backend.py:ProjectBuilder` | backend hooks and `build/build.py:build_wheel_from_source` |
@@ -36,33 +37,50 @@ entrypoint.
 ```text
 console script / cpip.__init__:main / python -m cpip
   -> cli.entrypoint:main
-       +--> dependency-light help, version, and command help
-       +--> cli.commands.fast_lock:run
-       +--> cli.fast_install:run_cached_remote
-       +--> cli.fast_install:run_local_fallback
-       +--> cli.fast_install:run
-       +--> cli.fast_list:run
-       `--> cli._fallback_main:run
-              +--> configure execution context and logging when required
-              +--> create a global temporary-directory context when required
-              +--> retry the general install fast path when eligible
-              `--> cli._main_fallback:run
-                     +--> fast lock, then normal lock if it declines
-                     `--> cli.commands.registry:get_command_runner
+       +--> command help, for `<command> --help`
+       +--> cli.entrypoint:handle_global_commands
+              +--> no arguments, --help, `help [command]`, --version
+              +--> the --require-virtualenv gate
+              `--> unknown command names
+       +--> cli.fast:run_before_startup
+              +--> cli.fast.lock:run
+              +--> cli.fast.install:run_cached_remote
+              +--> cli.fast.install:run_local_fallback
+              +--> cli.fast.install:run
+              `--> cli.fast.list:run
+       +--> configure execution context and logging when required
+       +--> cli.fast:run_install_after_startup, when no install fast path ran
+       +--> create a global temporary-directory context when required
+       `--> cli.entrypoint:run_command
+              +--> cli.fast:run_lock_after_startup, then the lock command
+              `--> CommandSpec.load_runner
 ```
 
-The entrypoint parses only the global options needed to choose a route. Fast
-paths are conservative recognizers, not separate command semantics. They
-return `None` when an argument, target state, source shape, or feature is not
-supported. Fallback dispatch must remain available after every declined fast
+`handle_global_commands` runs before any fast path, so every command --
+including the ones a fast path is about to accept -- passes the
+`--require-virtualenv` gate. It answers help and version *before* that gate,
+so `cpip --require-virtualenv --help` still works outside a virtualenv.
+
+The entrypoint imports the command registry at module load, but the registry
+holds only module *paths*: `CommandSpec.module` calls `importlib.import_module`
+on first access, so importing `cpip.cli.registry` costs 7 `cpip` modules, not
+14 command modules. Startup pays for a command only once dispatch reaches it.
+Fast paths remain conservative recognizers, not separate command semantics.
+They return `None` when an argument, target state, source shape, or feature is
+not supported. Normal dispatch must remain available after every declined fast
 path.
 
-The command registry stores module and function names instead of imported
-callables. It imports a command module only after that command is selected.
-`CommandSpec.needs_logging` and `CommandSpec.needs_tempdir` keep unnecessary
-startup work out of lightweight commands. New process-level behavior belongs
-in `cli.entrypoint`; new command behavior belongs in its command module and
-`CommandSpec`.
+Within a command module, imports are top level: the resolver, installer, index,
+and build subtrees load when their owning module loads, and no command hoists
+`from X import Y` into a function to hide that cost. The exceptions are
+deliberate and confined to the startup path -- `cli.entrypoint` and
+`cli.fast.__init__` defer their imports so a declined command pays only for the
+token tests, and VCS backends and PEP 517 build backends are resolved by name
+at runtime. `CommandSpec.needs_logging`, `needs_tempdir`, and
+`needs_execution_context` keep unnecessary startup work out of lightweight
+commands; prefer adding a spec field over testing a command name in
+`cli.entrypoint`. New process-level behavior belongs in `cli.entrypoint`; new
+command behavior belongs in its command module and `CommandSpec`.
 
 The install startup routes cover three different target states:
 
@@ -77,8 +95,45 @@ The install startup routes cover three different target states:
   the minimal resolver but delegates replacement to the archive or normal
   transactional installer.
 
-`fast_list` and `fast_lock` follow the same recognition rule: handle only the
-declared subset and return control to normal command dispatch otherwise.
+`cli.fast.list` and `cli.fast.lock` follow the same recognition rule: handle
+only the declared subset and return control to normal command dispatch
+otherwise.
+
+The `cli.fast` package owns both halves of a fast path: the cheap argv gates in
+its `__init__.py` and the parsers behind them. `cli.entrypoint` calls
+`run_before_startup` once, asks `suppresses_logging` whether a quiet fast shape
+means logging should be skipped, and retries `run_install_after_startup` /
+`run_lock_after_startup` once startup has completed. Keep new recognition rules
+in `cli.fast`; `cli.entrypoint` should not name a command. The package stays
+import-light so a declined command pays for nothing but the token tests, and
+each fast path module is imported only once its shape matches.
+
+### Shared ownership inside `cli`
+
+Every command reaches for the same small set of things. Each has exactly one
+owner; add to the owner rather than re-deriving locally.
+
+| Concern | Owner |
+| --- | --- |
+| Config files, `CPIP_*` overrides, and where sources come from | `cli/config.py` (`ConfigurationStore`, `SourceConfig`, `load_source_config`, `resolve_sources`) |
+| Requirement collection, `--config-settings`, proxy environment | `cli/requirements.py` |
+| `--group` splitting and dependency-group files | `cli/dependency_groups.py` |
+| Lock serialization and lock output | `cli/lock_format.py` (imports nothing, so fast paths can share it) |
+| Cache directory policy | `core/appdirs.py` (`resolve_cache_dir`, `configured_cache_dir`) |
+| Resolver report to CLI diagnostic | `cli/resolution_errors.py` |
+| Installed package sets for conflict checks | `build/check.py` |
+
+`install` deliberately does not use `resolve_sources`: it concatenates
+configured and command-line find-links and gates the index URL on whether one
+was passed explicitly. The lock commands deliberately use
+`configured_cache_dir`, not `resolve_cache_dir`: their caching is opt-in.
+Divergences like these are documented at the call site rather than merged away.
+
+`cli/fast/*` re-implements name normalization, requirement parsing, METADATA
+scanning, JSON escaping, and a minimal wheelhouse resolver. That duplication is
+deliberate -- it buys startup time by never importing `core.wheel`,
+`build.metadata`, `index`, `resolution`, `json`, or `email.parser` -- and
+should not be consolidated into the shared implementations.
 
 ## Installation planning
 
@@ -86,14 +141,14 @@ The ordinary non-editable dependency batch follows three planning lanes in
 priority order:
 
 ```text
-cli.commands.install:run_install
+cli.install:run_install
   -> cli.requirements: collect roots, constraints, sources, and policy
   -> plan selection
        +--> exact remote plan receipt -> CachedInstallPlan
        +--> local pure-wheel adapter  -> InstallPlan
        `--> ResolutionEngine.resolve -> ResolutionResult
   -> deduplicate selected candidates
-  -> resolution.engine.output:prepare_install_candidates
+  -> install.output:prepare_install_candidates
        +--> materialize lazy winning candidates
        `--> prepare immutable wheel archives when caching is enabled
   -> execute the wheel batch
@@ -126,70 +181,54 @@ are converted to wheels during candidate materialization, not by
 ## Resolution engine
 
 `ResolutionEngine` is the public configuration and result boundary. It keeps
-the public API small and delegates execution to `ResolutionRuntime`.
+the public API small and delegates the search itself to the vendored
+`nab_resolver`. cpip retains ownership of candidate discovery, metadata, and
+artifact materialization and exposes them to the search through a provider
+adapter.
 
 ```text
-ResolutionEngine.resolve
-  -> ResolutionRuntime.resolve_plan
-       -> coerce and validate root requirements
-       -> reset per-resolution state and ReleaseFrontier
-       -> propagation.try_resolve
-            +--> guarded local-wheelhouse kernel
-            `--> guarded finite-domain kernel
-       -> SearchLoop.search_internal when no kernel accepts the input
-            +--> SelectionOperations
-            +--> CandidateProvider
-            +--> ConflictLearning
-            `--> PolicyChecks and ValidationOperations
-       -> installation ordering and InstallPlan assembly
-       -> collect resolver, frontier, and materializer metrics
-  -> ResolutionResult.from_plan
+ResolutionEngine.resolve                       (resolution/api.py)
+  -> inputs.coerce_requirements                (root requirement coercion)
+  -> NabProvider(self.provider, context=...)   (resolution/nab_provider.py)
+       `--> wraps CandidateProvider            (index/provider.py)
+  -> NabProvider.add_roots
+  -> nab_resolver.resolver.Resolver.resolve    (_vendor/nab_resolver/)
+       +--> Resolver asks the adapter for versions and dependencies
+       `--> on failure: nab_resolver.report.format_error
+  -> ResolutionResult / ResolvedRequirement    (resolution/model.py)
 ```
 
-The specialized propagation kernels are semantic optimizations. Their
-eligibility checks reject unsupported provider instrumentation, source and URL
-requirements, constraints, hash modes, marker forms, installed-state shapes,
-and workload shapes. A kernel miss or unsupported case must enter the generic
-search loop without changing behavior.
+`NabProvider` is the whole contract between cpip and the search. It answers
+`choose_version`, `get_dependencies`, `has_satisfying_version`, and
+`prioritize`, and it owns the conflict-reporting hooks (`narrow_for_display`,
+`widen_decision`, `consume_pending_clauses`). Anything the resolver needs to
+know about the index, installed state, or policy arrives through it.
 
-`ResolutionRuntime` composes three implementation domains:
-
-- `SearchLoop` owns the authoritative stateful search and backtracking loop.
-- `ConflictLearning` owns learned incompatibilities, watches, activity, and
-  version-domain reasoning.
-- `PolicyChecks` combines candidate policy, Python compatibility, requirement
-  validation, and hash validation.
-
-`resolution/engine/context.py` contains type-only protocols for configuration,
-engine state, search state, and operation boundaries. They describe shared
-state without creating another runtime resolver API.
+When the search fails, `nab_resolver` raises its own `ResolutionError` carrying
+an incompatibility. `api.py` renders it with `format_error` and then restores
+the user's original specifier text, because the provider models dependency
+ranges as the finite set of available versions and an empty set would otherwise
+print `<empty>` instead of the requirement the user typed.
 
 ### Resolver module ownership
 
-- `api.py` owns `ResolutionConfig`, the public `ResolutionEngine` façade, and
-  conversion to `ResolutionResult`; it does not own the search state machine.
-- `runtime.py` owns one invocation's orchestration, mutable caches, selected
-  state, graph assembly, and metrics collection.
+- `api.py` owns the public `ResolutionEngine` façade, root coercion, error
+  rendering, and conversion to `ResolutionResult`. It does not own the search.
+- `nab_provider.py` owns the adapter: candidate lookup, version choice,
+  dependency exposure, prioritization, and display narrowing.
+- `config.py` owns `ResolutionConfig`, the resolution policy value object.
 - `model.py` owns source-independent public result values.
-- `metrics.py` owns the metrics schema exported on `ResolutionResult`.
-- `state/` owns agendas, domains, requests, plans, and requirement sets.
-- `input/` owns requirement coercion, input contracts and models, and
-  requirements-file parsing.
-- `propagation.py` owns guarded resolution kernels. It must decline any shape
-  for which it cannot preserve canonical resolver semantics.
-- `frontier.py` owns per-resolution release catalogs, compact version domains,
-  masks, and frontier metrics. It is not persistent storage.
-- `loop.py` owns generic search, frames, selection, and backtracking.
-- `selection.py` owns installed-distribution satisfaction, requirement
-  ordering, candidate counts, and provider filtering.
-- `conflict_learning.py` owns learned incompatibilities and conflict activity;
-  it must not perform network access or installation.
-- `policy.py` and `validation.py` own candidate policy, diagnostics, Python
-  compatibility, and requirement/source hash validation.
-- `algorithms.py` owns stateless candidate, version, hash, graph, and URL
-  primitives. It must not acquire resolver state or command-line policy.
-- `output.py` owns source-hash finalization, winner materialization,
-  installation ordering, and pipelined wheel archive preparation.
+- `inputs.py`, `input_models.py`, `input_paths.py`, and `input_requirements.py`
+  own requirement coercion, input contracts, and path/URL requirement forms.
+- `files/` owns requirements-file and pylock parsing (`parser.py`,
+  `pylock.py`, `options.py`, `models.py`, `contracts.py`).
+- `archive.py` owns wheelhouse availability signalling
+  (`WheelhouseUnavailable`).
+- `_vendor/nab_resolver/` owns the search itself: propagation, decisions,
+  conflict learning, ranges, and error reporting. Treat it as vendored code.
+
+Note that `install/output.py` — not this package — owns source-hash
+finalization, winner materialization, and pipelined wheel archive preparation.
 
 ## Local wheelhouse resolution
 
@@ -199,13 +238,13 @@ an implementation arrow between them.
 The process-level fast installer uses a minimal resolver:
 
 ```text
-cli.fast_install:run
-  -> cli.fast_install:resolve_simple_wheelhouse
+cli.fast.install:run
+  -> cli.fast.install:resolve_simple_wheelhouse
        +--> scan wheel filenames
        +--> read selected wheel metadata through WheelArchive
        +--> recursively satisfy the supported requirement subset
        `--> reuse FastInstallMetadataCache plans and metadata
-  -> cli.fast_install:install_resolved_pure_wheels
+  -> cli.fast.install:install_resolved_pure_wheels
   -> cache a cloneable install tree after success
 ```
 
@@ -215,21 +254,23 @@ tree without resolving or extracting the wheels again.
 The canonical engine uses the richer wheelhouse source:
 
 ```text
-ResolutionEngine.resolve_wheelhouse
-  -> resolution.engine.sources.wheelhouse.engine:resolve
-       -> catalog, metadata, compatibility checks, and search
+ResolutionEngine.resolve_wheelhouse            (resolution/api.py)
+  -> ResolutionEngine(find_links=..., no_index=True, ignore_installed=True)
+  -> ResolutionEngine.resolve                  (the ordinary nab path)
        -> ResolutionResult
 ```
 
-The canonical wheelhouse engine is also used by the normal install plan adapter
-and by the resolver's guarded local-wheelhouse propagation kernel. It supports
-the canonical candidate/result boundary; the process-level resolver exists to
-keep startup and object construction out of a deliberately narrow command
-shape.
+There is no separate wheelhouse search. `resolve_wheelhouse` is a thin
+convenience constructor: it pins the engine to local `find_links` with the
+index disabled and then runs the same resolution as everything else. The
+process-level resolver in `cli/fast/install.py` exists to keep startup and
+object construction out of a deliberately narrow command shape, which is why
+the two implementations stay separate.
 
 `install_resolved_pure_wheels` accepts only the small candidate shape needed by
-the shortcut (`canonical_name` and `path`). That shape is currently expressed
-by `cli.fast_install.PureWheelCandidate`; it is a compatibility seam, not a
+the shortcut (`canonical_name` and `path`). That shape is owned by
+`core.wheel.PureWheelCandidate`, which both `core.wheel.WheelCandidate` and the
+fast installer's own candidate satisfy. It is a compatibility seam, not a
 domain owner. New shared candidate abstractions belong in `core` or `install`,
 not in `cli`.
 
@@ -320,6 +361,15 @@ empty explicit target and validates archive paths, purelib layout, duplicate
 destinations, and unsupported wheel features before writing. It cleans partial
 writes and returns `False` when the normal transaction must take over.
 
+The empty-target requirement is a safety precondition, not only an eligibility
+rule. Member-name validation exists in two strengths: the staged routes use
+`install/wheel_archive.py:validate_member_parts` together with a resolved-parent
+containment check, because they write into populated targets where a path
+component may already be a symlink. The hybrid uses the cheaper lexical
+`cli/fast/install.py:is_safe_member`, which is sound only because the target is
+known empty and every member is written as a regular file. Relaxing the
+emptiness requirement means adopting the resolving check.
+
 `install/preparer.py` and `install/wheel_builder.py` support build-environment
 and compatibility/bootstrap flows. They are not the starting point for an
 ordinary resolved install.
@@ -340,8 +390,7 @@ use cloneable directory trees.
 | `index/metadata_cache.py` | `metadata-v2.marshal` | parsed local wheel headers keyed by absolute path, size, and modification time |
 | `index/candidate_metadata_cache.py` | `candidate-metadata-v2.marshal` | dependency metadata safe to reuse during resolution |
 | `index/release_facts_cache.py` | `release-facts-v1.marshal` | deterministic release-level rejection reasons |
-| `resolution/engine/sources/wheelhouse/` | wheelhouse catalog and metadata snapshots | local source identities, parsed metadata, and compatibility inputs |
-| `cli/fast_install_cache.py` | `fast-install-v3.marshal` and `fast-install-trees-v1/` | narrow local plans, wheel metadata, and cloneable completed targets |
+| `cli/fast/install_cache.py` | `fast-install-v3.marshal` and `fast-install-trees-v1/` | narrow local plans, wheel metadata, and cloneable completed targets |
 | `install/wheel_archive_cache.py` | `archive-v1/` | validated, unpacked immutable wheel trees keyed by wheel digest |
 | `install/wheel_archive_cache.py` | `resolution-v2/` | short-lived exact-pin plan receipts referencing validated archives |
 
@@ -386,7 +435,7 @@ there explicitly.
 | `install` | targets, inventories, archive preparation, extraction, direct URLs, transactions | index page parsing |
 | `cli` | argument parsing, requirement collection, command dispatch, presentation, narrow command fast paths | reusable lower-level package mechanics |
 
-The allowed runtime imports are declared in `pyproject.toml`:
+The allowed runtime imports are:
 
 | Domain | May import at runtime |
 | --- | --- |
@@ -400,10 +449,14 @@ The allowed runtime imports are declared in `pyproject.toml`:
 | `install` | `core`, `platform`, `network`, `build`, `index`, `resolution`, `vcs` |
 | `cli` | every lower domain |
 
-`tests/test_workspace_boundaries.py` parses runtime imports, checks that every
-edge is allowed, and checks the resulting graph for cycles. Imports guarded by
-`TYPE_CHECKING` are intentionally excluded, so type-only dependencies still
-require review. Vendored code is outside these first-party domains.
+This table is enforced by review, not by a test. Vendored code is outside these
+first-party domains.
+
+Type-only imports deserve the same scrutiny as runtime ones. A `TYPE_CHECKING`
+guard hides a boundary crossing from import-time behavior but not from the
+design: `core/wheel.py` carried a `TYPE_CHECKING` import of a candidate class
+from `cli` for exactly this reason, and the fix was to move the shared shape
+down into `core`, not to leave the edge guarded.
 
 When a change appears to fit two packages, keep policy in the higher-level
 owner and put only reusable mechanics in the lower-level package. A lower
@@ -414,10 +467,18 @@ domain must not import a higher domain merely to reuse a convenience type.
 These boundaries are part of behavior, not benchmark-only implementation
 details:
 
-1. `cli.entrypoint` imports only bootstrap data until it knows which route is
-   needed. Help, version, and command help must not import the fallback graph.
-2. Command registration remains lazy. Adding a command must not import its
-   implementation during general startup.
+1. First-party `cpip` modules use top-level imports throughout, and
+   `cli.entrypoint` eagerly loads the command registry, which in turn eagerly
+   imports every command module. A `cpip` process therefore imports the full
+   first-party graph (resolver, installer, index, platform, build, network) on
+   startup, including for `--help`/`--version`. The only work that may remain
+   deferred is genuinely non-first-party or dynamic: optional dependencies
+   (`keyring`, `virtualenv`/`venv`), VCS backends selected by scheme, and PEP 517
+   build backends selected by config name.
+2. Command *modules* are loaded eagerly by the registry, so adding a command is
+   part of the steady-state import graph and must respect the domain-ownership
+   rules in the package-ownership table. Only dynamic dispatch — VCS backends by
+   scheme and build backends by config name — remains import-deferred.
 3. Fast command paths recognize only semantics they implement completely and
    return `None` or `False` before unsupported behavior is committed.
 4. Candidate discovery, metadata parsing, artifact localization, and source
@@ -445,13 +506,13 @@ For a CLI bug, begin at `cli/entrypoint.py` and determine whether a fast path
 accepted the command. If not, inspect the command's `CommandSpec` and `run_*`
 function.
 
-For an install-planning bug, begin at `cli/commands/install.py`, identify which
+For an install-planning bug, begin at `cli/install.py`, identify which
 of the cached, local-wheelhouse, or canonical resolver lanes produced the
-plan, then inspect `resolution/engine/output.py` for winner preparation.
+plan, then inspect `install/output.py` for winner preparation.
 
-For a resolver bug, begin at `ResolutionEngine.resolve` and
-`ResolutionRuntime.resolve_internal`. Determine whether `propagation.try_resolve`
-returned a kernel result or the generic `SearchLoop` ran before descending into
+For a resolver bug, begin at `ResolutionEngine.resolve` and the `NabProvider`
+adapter. Determine whether the wrong answer came from candidate discovery
+(`index/provider.py`) or from the search itself before descending into
 selection, provider, conflict, or policy code.
 
 For an index or metadata bug, follow `CandidateProvider` through link
@@ -472,16 +533,18 @@ transaction or invalidation policy.
 Useful searches:
 
 ```sh
-rg -n "run_cached_remote|run_local_fallback|run_fast_install|run_fast_list" src/cpip
-rg -n "ResolutionEngine|resolve_internal|try_resolve|SearchLoop|ReleaseFrontier" src/cpip/resolution
+rg -n "run_before_startup|run_install_after_startup|run_cached_remote|run_local_fallback" src/cpip
+rg -n "ResolutionEngine|NabProvider|resolve_wheelhouse|coerce_requirements" src/cpip/resolution
 rg -n "CandidateProvider|CandidateEvaluator|CandidateMaterializer|CandidateStream" src/cpip/index
 rg -n "ArtifactLocator|ArtifactCache|prepare_install_candidates" src/cpip
 rg -n "install_wheels_transactionally|install_wheels_from_archive_cache|install_wheels_directly" src/cpip
 rg -n "load_snapshot|save_snapshot|load_cached_install_plan|save_cached_install_plan" src/cpip
 ```
 
-Run the boundary tests after changing package ownership or imports:
+After changing package ownership or imports, check the new edges against the
+dependency table above by hand -- there is no boundary test to run:
 
 ```sh
-uv run pytest tests/test_workspace_boundaries.py -q
+rg -n "^from cpip\.|^import cpip\." src/cpip/<changed-package> | \
+  grep -v "cpip\.<changed-package>"
 ```

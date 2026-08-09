@@ -22,9 +22,3 @@ def response_chunks(
     chunk_size: int = DOWNLOAD_CHUNK_SIZE,
 ) -> Generator[bytes, None, None]:
     yield from response.iter_content(chunk_size)
-
-
-def raise_connection_error(error: Exception, *, url: str, timeout: Any) -> None:
-    """Retained as a transport-independent error boundary."""
-    del timeout
-    raise NetworkConnectionError(str(error), request=url) from error

@@ -8,7 +8,24 @@ import os
 from typing import Any, cast
 
 from cpip.core.errors import InstallationError
-from cpip.core.packaging import canonicalize_name
+from cpip.core.names import canonicalize_name
+
+
+def group_items(values: list[str]) -> list[tuple[str, str]]:
+    """Split ``--group`` values into ``(pyproject file, group name)`` pairs.
+
+    A bare ``NAME`` reads the group from ``pyproject.toml``; ``FILE:NAME``
+    names the file explicitly.
+    """
+
+    result: list[tuple[str, str]] = []
+    for value in values:
+        filename, separator, group = value.partition(":")
+        if separator:
+            result.append((filename, group))
+        else:
+            result.append(("pyproject.toml", filename))
+    return result
 
 
 def parse_dependency_groups(items: list[tuple[str, str]]) -> list[str]:

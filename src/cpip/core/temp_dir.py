@@ -11,7 +11,7 @@ from collections.abc import Callable, Generator
 from contextlib import ExitStack, contextmanager
 from typing import Any, TypeVar
 
-from cpip.core.misc import enum
+from cpip.core.utils import enum
 
 logger = logging.getLogger(__name__)
 T_internal = TypeVar("T_internal", bound="TempDirectory")

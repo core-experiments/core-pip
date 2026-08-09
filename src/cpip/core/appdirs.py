@@ -19,6 +19,27 @@ def user_cache_dir(appname: str) -> str:
     return os.path.join(home, ".cache", appname)
 
 
+def resolve_cache_dir(explicit: str | None = None) -> str:
+    """The cache a command should use: explicit, then ``CPIP_CACHE_DIR``, then default.
+
+    Callers that must honor ``--no-cache-dir`` check that themselves; this
+    answers only "which directory".
+    """
+
+    return explicit or os.environ.get("CPIP_CACHE_DIR") or user_cache_dir("cpip")
+
+
+def configured_cache_dir() -> str | None:
+    """``CPIP_CACHE_DIR`` only, or ``None`` when no cache is configured.
+
+    The lock commands use this rather than :func:`resolve_cache_dir`: their
+    caching is opt-in, so an unset variable means "do not cache", not "use the
+    default cache".
+    """
+
+    return os.environ.get("CPIP_CACHE_DIR")
+
+
 def site_config_dirs(appname: str) -> list[str]:
     if sys.platform == "win32":
         common = os.environ.get("PROGRAMDATA", r"C:\ProgramData")

@@ -34,8 +34,7 @@ class VenvImportError(DiagnosticCpipError):
         super().__init__(
             message="Cannot import the 'venv' module of the Python standard library",
             context=(
-                "This is a symptom of a broken/modified Python, which cannot be used "
-                "with cpip."
+                "This is a symptom of a broken/modified Python, which cannot be used with cpip."
             ),
             note_stmt="This is an issue with the Python installation itself, not cpip.",
             hint_stmt=hint_stmt,

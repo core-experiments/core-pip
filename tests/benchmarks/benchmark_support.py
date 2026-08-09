@@ -4,18 +4,20 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import itertools
 import json
+import tempfile
 import zipfile
 from pathlib import Path
 
+from cpip.core import packaging as packaging_module
 from cpip.core import wheel as wheel_module
 from cpip.core.packaging import canonicalize_name, parse_requirement
+from cpip.index import metadata_cache as metadata_cache_module
 
 SHA256_PLACEHOLDER = "a" * 64
 METADATA_PLACEHOLDER = "b" * 64
 
-# Frozen requirement excerpts model the large, repeatedly reported resolver
-# workloads without making the default benchmark suite depend on PyPI uptime.
 REAL_WORLD_CORPORA = {
     "airflow": (
         "apache-airflow[postgres,redis]>=2.8,<3",
@@ -363,13 +365,47 @@ def simple_index_json(count: int = 400) -> str:
     )
 
 
+_COLD_CACHE_ROOT: Path | None = None
+_COLD_CACHE_SEQUENCE = itertools.count()
+
+
+def cold_metadata_cache_dir() -> str:
+    """A never-before-used metadata cache directory.
+
+    Production always configures one, so a benchmark that leaves it unset
+    measures a materializer with no persistent cache at all -- a code path no
+    install takes. Handing out a fresh directory each call keeps the
+    production path exercised while the measurement stays cold, which is what
+    the ``reset_caches`` at the top of every benchmark is asking for.
+    """
+    global _COLD_CACHE_ROOT
+    if _COLD_CACHE_ROOT is None:
+        _COLD_CACHE_ROOT = Path(tempfile.mkdtemp(prefix="cpip-bench-metadata-"))
+    directory = _COLD_CACHE_ROOT / str(next(_COLD_CACHE_SEQUENCE))
+    directory.mkdir(parents=True, exist_ok=True)
+    return str(directory)
+
+
 def reset_caches() -> None:
-    """Drop the memoization that would otherwise hide parsing work."""
+    """Drop the memoization that would otherwise hide parsing work.
+
+    Every process-global cache on the resolution path belongs here.  One that
+    is missed does not fail anything -- it quietly turns the second and later
+    iterations of a benchmark into warm runs, so the reported figure measures
+    a steady state the first call never sees and a regression in the cold path
+    cannot show up at all.
+    """
     canonicalize_name.cache_clear()
     parse_requirement.cache_clear()
+    packaging_module._marker_applies_cached.cache_clear()
+    packaging_module.Version.from_cache_state.cache_clear()
+    packaging_module.Requirement.from_cache_state.cache_clear()
+    wheel_module._parse_wheel_filename.cache_clear()
     wheel_module.parsed_wheel_version.cache_clear()
     wheel_module.parsed_wheel_tags.cache_clear()
     wheel_module.wheel_tag_rank.cache_clear()
     wheel_module.wheel_metadata_cache.clear()
-    wheel_module.preloaded_wheel_metadata_cache.clear()
     wheel_module.wheel_dependency_cache.clear()
+    # Persistent wheel metadata caches are one instance per directory per
+    # process, so they outlive the provider that opened them.
+    metadata_cache_module._CACHE_INSTANCES.clear()

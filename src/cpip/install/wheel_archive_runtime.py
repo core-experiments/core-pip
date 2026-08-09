@@ -7,6 +7,12 @@ import os
 import zipfile
 from typing import TYPE_CHECKING, Any
 
+from cpip.install.wheel_archive_cache import CachedWheelArchive
+from cpip.resolution.archive import (
+    WheelArchive,
+    WheelhouseUnavailable,
+)
+
 if TYPE_CHECKING:
     from cpip.core.wheel import WheelCandidate
 
@@ -18,7 +24,9 @@ class RawWheelInfo:
 
     def __init__(self, filename: str, file_size: int, external_attr: int) -> None:
         self.filename = filename
+
         self.file_size = file_size
+
         self.external_attr = external_attr
 
     def is_dir(self) -> bool:
@@ -32,7 +40,9 @@ class RawWheelArchive:
 
     def __init__(self, file: Any, archive: Any) -> None:
         self._file = file
+
         self._archive = archive
+
         self._infos = [
             RawWheelInfo(
                 name,
@@ -41,6 +51,7 @@ class RawWheelArchive:
             )
             for name, member in archive.members.items()
         ]
+
         self.NameToInfo = {info.filename: info for info in self._infos}
 
     def infolist(self) -> list[RawWheelInfo]:
@@ -51,6 +62,7 @@ class RawWheelArchive:
 
     def read(self, member: str | RawWheelInfo) -> bytes:
         name = member if isinstance(member, str) else member.filename
+
         return self._archive.read(name)
 
     def open(self, member: RawWheelInfo) -> io.BytesIO:
@@ -86,9 +98,13 @@ class CachedWheelInfo:
         mode: int,
     ) -> None:
         self.filename = filename
+
         self.file_size = int(size)
+
         self.external_attr = mode << 16
+
         self.record_metadata = (digest, size)
+
         self.source_path = os.path.join(tree, *filename.split("/"))
 
     def is_dir(self) -> bool:
@@ -105,6 +121,7 @@ class CachedWheelTreeArchive:
             CachedWheelInfo(layout.tree, relative, digest, size, mode)
             for relative, digest, size, mode in layout.entries
         ]
+
         self.NameToInfo = {info.filename: info for info in self._infos}
 
     def infolist(self) -> list[CachedWheelInfo]:
@@ -115,6 +132,7 @@ class CachedWheelTreeArchive:
 
     def read(self, member: str | CachedWheelInfo) -> bytes:
         info = self.NameToInfo[member] if isinstance(member, str) else member
+
         with open(info.source_path, "rb") as file:
             return file.read()
 
@@ -136,40 +154,48 @@ def open_wheel_archive(
     candidate: WheelCandidate,
 ) -> zipfile.ZipFile | RawWheelArchive | CachedWheelTreeArchive:
     """Open a fast raw archive when its members fit the streaming contract."""
-    from cpip.resolution.engine.sources.wheelhouse.archive import (
-        WheelArchive,
-        WheelhouseUnavailable,
-    )
 
     layout = getattr(candidate, "wheel_layout", None)
-    if layout is not None:
-        from cpip.install.wheel_archive_cache import CachedWheelArchive
 
+    if layout is not None:
         if isinstance(layout, CachedWheelArchive):
             return CachedWheelTreeArchive(layout)
+
     if layout is not None:
         # The resolver layout predates external mode bits; retain ZipInfo for
+
         # those candidates so executable members keep their original modes.
+
         return zipfile.ZipFile(path)
+
     members = None
+
     if members is not None and any(
         member[0] not in {0, 8} or member[2] > 1024 * 1024
         for member in members.values()
     ):
         return zipfile.ZipFile(path)
+
     try:
         file = open(path, "rb")
+
         archive = WheelArchive(file, members=members)
+
     except (OSError, ValueError, WheelhouseUnavailable):
         try:
             file.close()
+
         except UnboundLocalError:
             pass
+
         return zipfile.ZipFile(path)
+
     if any(
         member[0] not in {0, 8} or member[3] > 1024 * 1024
         for member in archive.members.values()
     ):
         file.close()
+
         return zipfile.ZipFile(path)
+
     return RawWheelArchive(file, archive)

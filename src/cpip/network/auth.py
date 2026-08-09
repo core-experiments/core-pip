@@ -24,7 +24,7 @@ from functools import cache
 from os.path import commonpath
 from typing import Any, NamedTuple
 
-from cpip.core.contracts import AuthInfo
+from cpip.core.utils import AuthInfo
 from cpip.core.urls import remove_auth_from_url, split_auth_netloc_from_url
 
 logger = logging.getLogger(__name__)
@@ -175,8 +175,7 @@ class KeyRingCliProvider(KeyRingBaseProvider):
             and "--mode=creds" in errs
         ):
             raise RuntimeError(
-                "Keyring util is outdated; must be at least version 25.2.1, "
-                "please upgrade it",
+                "Keyring util is outdated; must be at least version 25.2.1, please upgrade it",
             )
 
         if res.returncode:

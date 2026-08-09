@@ -23,8 +23,8 @@ from cpip.install.target import InstallTarget
 from cpip.install.uninstall import DistributionUninstaller
 from cpip.install.unpacking import unzip_file
 from cpip.install.wheel_transaction import WheelInstaller
-from cpip.resolution.engine import ResolutionEngine
-from cpip.resolution.engine.input.files import parse_requirements
+from cpip.resolution.api import ResolutionEngine
+from cpip.resolution.files import parse_requirements
 from pytest_codspeed import BenchmarkFixture
 
 

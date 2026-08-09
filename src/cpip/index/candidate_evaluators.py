@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import platform
 from collections.abc import Sequence
 from functools import lru_cache
 from typing import TypeVar
@@ -30,6 +31,8 @@ from cpip.index.source_models import (
 
 CandidateT = TypeVar("CandidateT", bound=CandidateRecord)
 
+_UNKNOWN_DIRECT_SOURCE_VERSION = Version("0")
+
 
 class CandidateEvaluator:
     __slots__ = (
@@ -54,12 +57,19 @@ class CandidateEvaluator:
         hashes: Hashes | None = None,
     ) -> None:
         self.project_name_internal = project_name
+
         self.supported_tags_internal = tuple(supported_tags)
+
         self.supported_tag_ranks = supported_tag_ranks(self.supported_tags_internal)
+
         self.specifier_internal = specifier
+
         self.release_control_internal = release_control
+
         self.prefer_binary_internal = prefer_binary
+
         self.hashes_internal = hashes
+
         self.allowed_hashes_internal = allowed_hashes(hashes)
 
     @classmethod
@@ -76,6 +86,7 @@ class CandidateEvaluator:
     ) -> CandidateEvaluator:
         if target_python is None and target is None:
             supported_tags = get_supported()
+
         elif target is not None:
             supported_tags = get_supported(
                 version=target.python_version,
@@ -83,9 +94,12 @@ class CandidateEvaluator:
                 impl=target.implementation,
                 abis=list(target.abis),
             )
+
         else:
             assert target_python is not None
+
             supported_tags = target_python.get_sorted_tags()
+
         return cls(
             project_name,
             supported_tags=supported_tags,
@@ -100,6 +114,7 @@ class CandidateEvaluator:
         candidates: list[CandidateT],
     ) -> list[CandidateT]:
         allow_prereleases = self.allow_prereleases_internal()
+
         if allow_prereleases is None:
             specifier_allows_prereleases = any(
                 spec.operator != "==="
@@ -107,6 +122,7 @@ class CandidateEvaluator:
                 and spec.parsed_version.is_prerelease
                 for spec in self.specifier_internal.specifiers
             )
+
             if specifier_allows_prereleases:
                 applicable = [
                     candidate
@@ -116,6 +132,7 @@ class CandidateEvaluator:
                         allow_prereleases=True,
                     )
                 ]
+
             else:
                 stable = [
                     candidate
@@ -123,8 +140,10 @@ class CandidateEvaluator:
                     if not candidate.version.is_prerelease
                     and self.specifier_internal.contains(candidate.version)
                 ]
+
                 if stable:
                     applicable = stable
+
                 else:
                     applicable = [
                         candidate
@@ -134,6 +153,7 @@ class CandidateEvaluator:
                             allow_prereleases=True,
                         )
                     ]
+
         else:
             applicable = [
                 candidate
@@ -144,6 +164,7 @@ class CandidateEvaluator:
                     allow_prereleases=allow_prereleases,
                 )
             ]
+
         return filter_unallowed_hashes(
             applicable,
             hashes=self.hashes_internal,
@@ -153,6 +174,7 @@ class CandidateEvaluator:
     def allow_prereleases_internal(self) -> bool | None:
         if self.release_control_internal is None:
             return None
+
         return self.release_control_internal.allows_prereleases(
             self.project_name_internal,
         )
@@ -168,6 +190,7 @@ class CandidateEvaluator:
         target: TargetContext | None,
     ) -> CandidateRecord | RejectedCandidate:
         parsed = InstallationCandidate.from_link(link, target=target)
+
         return CandidateEvaluator.evaluate_parsed_link(
             link,
             parsed,
@@ -188,52 +211,69 @@ class CandidateEvaluator:
         allow_source: bool,
     ) -> CandidateRecord | RejectedCandidate:
         """Apply requirement-specific policy to an already parsed link."""
+
+        unnamed_direct = CandidateEvaluator.is_unnamed_direct_requirement(
+            requirement,
+        )
+
         if link.kind is ArtifactKind.WHEEL and not allow_binary:
             return CandidateEvaluator.reject(
                 link,
                 RejectionReason.UNSUPPORTED_ARTIFACT,
                 "binary distributions are disabled",
             )
+
         if link.kind in SOURCE_ARTIFACT_KINDS and not allow_source:
             return CandidateEvaluator.reject(
                 link,
                 RejectionReason.UNSUPPORTED_ARTIFACT,
                 "source distributions are disabled",
             )
+
         if isinstance(parsed, RejectedCandidate):
             # Direct archive URLs often have non-distribution filenames (for
+
             # example GitHub's ``master.zip``).  Keep those installable by
+
             # deferring identity/version discovery to the build step, but do
+
             # not mask invalid source-tree metadata this way.
+
             if (
-                CandidateEvaluator.is_unnamed_direct_requirement(requirement)
+                unnamed_direct
                 and link.kind is ArtifactKind.SDIST
                 and parsed.reason is RejectionReason.INVALID_VERSION
             ):
                 parsed = CandidateRecord(
                     name=requirement.name,
-                    version=Version("0"),
+                    version=_UNKNOWN_DIRECT_SOURCE_VERSION,
                     link=link,
                 )
+
             else:
                 return parsed
-        if not CandidateEvaluator.is_unnamed_direct_requirement(requirement) and (
-            parsed.canonical_name != requirement.canonical_name
-        ):
+
+        if not unnamed_direct and parsed.canonical_name != requirement.canonical_name:
             return CandidateEvaluator.reject(
                 link,
                 RejectionReason.DIFFERENT_PROJECT,
                 f"wrong project name: {parsed.name}",
             )
+
         # A direct source URL with a non-distribution filename is represented
+
         # by the placeholder version 0 until its build metadata is available.
+
         # Applying an exact constraint to that placeholder rejects the source
+
         # before it can be built and inspected.
+
         unknown_direct_source_version = (
-            CandidateEvaluator.is_unnamed_direct_requirement(requirement)
+            unnamed_direct
             and link.kind in SOURCE_ARTIFACT_KINDS
-            and parsed.version == Version("0")
+            and parsed.version == _UNKNOWN_DIRECT_SOURCE_VERSION
         )
+
         if not unknown_direct_source_version and not requirement.is_satisfied_by(
             parsed.version,
         ):
@@ -242,6 +282,7 @@ class CandidateEvaluator:
                 RejectionReason.VERSION_MISMATCH,
                 f"{parsed.version} does not satisfy {requirement.specifier}",
             )
+
         if link.requires_python:
             try:
                 if not CandidateEvaluator.requires_python_matches(link.requires_python):
@@ -250,12 +291,14 @@ class CandidateEvaluator:
                         RejectionReason.REQUIRES_PYTHON,
                         f"requires Python {link.requires_python}",
                     )
+
             except ValueError:
                 return CandidateEvaluator.reject(
                     link,
                     RejectionReason.REQUIRES_PYTHON,
                     f"invalid Requires-Python: {link.requires_python}",
                 )
+
         if link.is_yanked and not (
             allow_yanked or CandidateEvaluator.is_exact_pin(requirement)
         ):
@@ -264,18 +307,21 @@ class CandidateEvaluator:
                 RejectionReason.YANKED,
                 link.yanked_reason or "yanked",
             )
+
         if link.kind is ArtifactKind.WHEEL and parsed.tag_rank is None:
             return CandidateEvaluator.reject(
                 link,
                 RejectionReason.UNSUPPORTED_WHEEL,
                 "wheel tags are not supported by this interpreter",
             )
+
         if link.kind not in INSTALLABLE_ARTIFACT_KINDS:
             return CandidateEvaluator.reject(
                 link,
                 RejectionReason.UNSUPPORTED_ARTIFACT,
                 f"{link.kind.value} candidates are not installable yet",
             )
+
         return parsed
 
     @staticmethod
@@ -286,20 +332,21 @@ class CandidateEvaluator:
         )
 
     @staticmethod
-    @lru_cache(maxsize=128)
+    @lru_cache(maxsize=4096)
     def requires_python_matches(requires_python: str) -> bool:
-        import platform
-
         return SpecifierSet(requires_python).contains(platform.python_version())
 
     @staticmethod
     def is_unnamed_direct_requirement(requirement: Requirement) -> bool:
         if requirement.name == "editable-placeholder" and requirement.url is not None:
             return True
+
         if requirement.url is not None:
             return True
+
         if requirement.raw.startswith("file:"):
             return True
+
         return requirement.raw.startswith((".", "/", "~")) or is_windows_path(
             requirement.raw,
         )
@@ -313,7 +360,9 @@ class CandidateEvaluator:
         candidates: list[InstallationCandidate],
     ) -> BestCandidateResult:
         applicable = self.get_applicable_candidates(candidates)
+
         best = self.sort_best_candidate(applicable)
+
         return BestCandidateResult(candidates, applicable, best)
 
     def sort_best_candidate(
@@ -322,6 +371,7 @@ class CandidateEvaluator:
     ) -> InstallationCandidate | None:
         if not candidates:
             return None
+
         return max(candidates, key=self.sort_key_internal)
 
     def sort_key_internal(
@@ -329,49 +379,72 @@ class CandidateEvaluator:
         candidate: InstallationCandidate,
     ) -> tuple[int, int, Version, int, int, int, int, tuple[int, str] | tuple[()]]:
         digest = None
+
         if candidate.link.hashes is not None:
             digest = candidate.link.hashes.get("sha256")
+
         allowed = self.allowed_hashes_internal
+
         hash_rank = int(bool(allowed and digest in allowed))
+
         yanked_rank = -1 if candidate.link.is_yanked else 0
+
         wheel_rank = 0
+
         egg_fragment_rank = 1
+
         tag_rank = -1_000_000
+
         build_tag: tuple[int, str] | tuple[()] = ()
+
         if candidate.wheel is not None:
             wheel_rank = 1
+
             supported_matches = (
                 rank
                 for file_tag in candidate.wheel.tags
                 if (rank := self.supported_tag_ranks.get(str(file_tag).lower()))
                 is not None
             )
+
             best_rank = min(supported_matches, default=None)
+
             if best_rank is not None:
                 tag_rank = -best_rank
+
             build_tag = legacy_build_tag(candidate.wheel.build_tag)
+
         elif (
             candidate.link.kind is ArtifactKind.WHEEL
             or candidate.link.filename.endswith(".whl")
         ):
             try:
                 wheel = Wheel(candidate.link.filename)
+
                 wheel_rank = 1
+
                 supported_matches = (
                     rank
                     for file_tag in wheel.file_tags
                     if (rank := self.supported_tag_ranks.get(str(file_tag).lower()))
                     is not None
                 )
+
                 best_rank = min(supported_matches, default=None)
+
                 if best_rank is not None:
                     tag_rank = -best_rank
+
                 build_tag = wheel.build_tag
+
             except InvalidWheelFilename:
                 pass
+
         if candidate.link.egg_fragment is not None:
             egg_fragment_rank = 0
+
         binary_preference = wheel_rank if self.prefer_binary_internal else 0
+
         return (
             hash_rank,
             yanked_rank,

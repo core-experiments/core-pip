@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+# The build backend reads this literal to resolve a dynamic project version,
+# and regenerates <package>/_version.py into the wheel it builds.  Keeping it
+# a literal here also keeps a module import off every startup.
 __version__ = "0.0.1"
 
 
@@ -8,6 +11,10 @@ def main(args: list[str] | None = None) -> int:
 
     For additional details, see https://github.com/pypa/cpip/issues/7498.
     """
+
+    # Deferred so that importing any cpip module does not drag in the CLI.
+    # This package is also its own PEP 517 build backend, so an eager import
+    # here would charge every build for an argument parser it never uses.
     from cpip.cli.entrypoint import main as main_internal
 
     return main_internal(args, version=None, location=__file__)

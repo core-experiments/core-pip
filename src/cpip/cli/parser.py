@@ -1,4 +1,13 @@
-"""Shared command-line parser behavior."""
+"""The argparse subclasses every command parser is built from.
+
+Split out of ``cli.common`` so that importing it is a decision a command
+makes, not a toll the entrypoint pays: ``argparse`` costs several
+milliseconds and no route that only resolves a command name needs it.
+
+The base classes here are evaluated at class-creation time, so this module
+cannot be made lazy -- separating it is the only way to keep its cost off the
+startup path.
+"""
 
 from __future__ import annotations
 

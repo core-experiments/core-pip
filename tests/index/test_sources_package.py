@@ -10,10 +10,11 @@ from cpip.cli.main import main
 from cpip.core.packaging import Requirement, Version, parse_requirement
 from cpip.core.wheel import TargetContext
 from cpip.index.cache import origin_hashes
+from cpip.index.catalog_cache import save_links
 from cpip.index.candidate_evaluators import CandidateEvaluator
 from cpip.index.candidate_materialization import CandidateMaterializer
 from cpip.index.candidates import InstallationCandidate
-from cpip.index.directory_index import local_source_files
+from cpip.index.directory_index import local_source_files, project_version_from_filename
 from cpip.index.links import Link
 from cpip.index.provider import CandidateProvider
 from cpip.index.source_locations import FindLinksSource, SimpleIndexSource
@@ -27,6 +28,7 @@ from cpip.index.source_models import (
 )
 from cpip.index.vcs import is_immutable_vcs_link, vcs_reference
 from cpip.network.http import HttpResponse
+from cpip.network.cache import SafeFileCache
 
 from .wheel_helpers import make_sdist, make_wheel
 
@@ -65,6 +67,17 @@ def test_local_source_files_uses_directory_entry_types(
     monkeypatch.setattr(Path, "iterdir", fail_iterdir)
 
     assert local_source_files(os.fspath(tmp_path)) == (os.fspath(artifact),)
+
+
+def test_source_archive_filename_normalizes_project_name() -> None:
+    assert project_version_from_filename("PyHive-0.7.0.tar.gz") == (
+        "pyhive",
+        Version("0.7.0"),
+    )
+    assert project_version_from_filename("Demo_Pkg-1.0.zip") == (
+        "demo-pkg",
+        Version("1.0"),
+    )
 
 
 def test_find_links_reuses_local_artifact_identity_until_refresh(
@@ -223,6 +236,61 @@ def test_candidate_provider_prunes_versions_before_materialization(
     assert materialized == [Version("1.0")]
 
 
+def test_warm_catalog_stream_constructs_only_consumed_links(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cache = SafeFileCache(os.fspath(tmp_path / "cache"))
+    page_url = "https://index.invalid/simple/demo/"
+    links = [
+        Link.from_url(
+            f"https://files.invalid/demo-{version}-py3-none-any.whl",
+            source_url=page_url,
+        )
+        for version in ("1.0", "2.0")
+    ]
+    save_links(cache, page_url, links)
+
+    class Session:
+        def __init__(self) -> None:
+            self.cache = cache
+
+        @staticmethod
+        def has_fresh_cached_response(url: str) -> bool:
+            del url
+            return True
+
+    requirement = parse_requirement("demo")
+    first_provider = CandidateProvider.from_options(
+        index_url="https://index.invalid/simple",
+        session=Session(),
+    )
+    assert [
+        candidate.version
+        for candidate in first_provider.applicable_candidate_records(requirement)
+    ] == [Version("2.0"), Version("1.0")]
+    first_provider.close()
+
+    provider = CandidateProvider.from_options(
+        index_url="https://index.invalid/simple",
+        session=Session(),
+    )
+    link_from_record = provider.link_from_catalog_record
+    constructed: list[str] = []
+
+    def counting_link_from_record(record: tuple[object, ...], source_url: str) -> Link:
+        constructed.append(str(record[0]))
+        return link_from_record(record, source_url)
+
+    monkeypatch.setattr(provider, "link_from_catalog_record", counting_link_from_record)
+    records = provider.lazy_catalog_records(requirement)
+
+    assert records is not None
+    assert next(records).version == Version("2.0")
+    assert constructed == ["https://files.invalid/demo-2.0-py3-none-any.whl"]
+    provider.close()
+
+
 def test_candidate_provider_scans_find_links_once(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -267,6 +335,33 @@ def test_local_find_links_do_not_start_catalog_prefetcher(tmp_path: Path) -> Non
     )
 
     assert provider.prefetcher is None
+
+
+def test_warm_remote_indexes_do_not_start_catalog_prefetcher() -> None:
+    checks = 0
+
+    class Session:
+        @staticmethod
+        def has_fresh_cached_response(url: str) -> bool:
+            nonlocal checks
+            del url
+            checks += 1
+            return True
+
+    provider = CandidateProvider.from_options(
+        index_url="https://index.invalid/simple",
+        session=Session(),
+    )
+
+    provider.prefetch_available_versions(
+        (parse_requirement("first"), parse_requirement("second")),
+    )
+    provider.prefetch_available_versions(
+        (parse_requirement("first"), parse_requirement("second")),
+    )
+
+    assert provider.prefetcher is None
+    assert checks == 2
 
 
 def test_exact_catalog_prefetch_starts_wheel_metadata(
@@ -538,6 +633,37 @@ def test_pypi_release_metadata_is_shared_by_artifacts() -> None:
     assert session.calls == 1
     assert [item.name for item in first_metadata.dependencies] == ["base"]
     assert [item.name for item in second_metadata.dependencies] == ["base", "extra"]
+
+
+def test_pypi_release_metadata_404_falls_back_to_artifact() -> None:
+    candidate = CandidateRecord(
+        name="legacy",
+        version=Version("1.0"),
+        link=Link.from_url(
+            "https://files.pythonhosted.org/packages/legacy-1.0.tar.gz",
+            source_url="https://pypi.org/simple/legacy/",
+        ),
+    )
+
+    class Session:
+        calls = 0
+
+        def get(self, url: str) -> HttpResponse:
+            self.calls += 1
+            return HttpResponse(
+                status_code=404,
+                reason="Not Found",
+                url=url,
+                headers={},
+                raw=io.BytesIO(),
+            )
+
+    session = Session()
+    materializer = CandidateMaterializer(dry_run=True, session=session)
+
+    assert materializer.pypi_metadata(candidate, frozenset()) is None
+    assert materializer.pypi_metadata(candidate, frozenset()) is None
+    assert session.calls == 1
 
 
 @pytest.mark.parametrize("dry_run", [False, True])
@@ -1117,7 +1243,8 @@ def test_candidate_provider_only_builds_highest_ranked_source_candidate(
     preferred = candidates[:2]
 
     assert Path(preferred[0].path).is_file()
-    assert built == [newest.name]
+    # nab keeps source candidates lazy until they are selected/materialized.
+    assert built == []
     assert [str(candidate.version) for candidate in preferred] == ["3.0", "1.0"]
 
 

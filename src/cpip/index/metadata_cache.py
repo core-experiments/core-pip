@@ -6,7 +6,7 @@ import atexit
 import os
 from typing import TypeAlias, cast
 
-from cpip.core.marshal_cache import load_snapshot, save_snapshot
+from cpip.core.utils import load_snapshot, save_snapshot
 
 MetadataHeaders: TypeAlias = dict[str, list[str]]
 MetadataIdentity: TypeAlias = tuple[str, int, int]

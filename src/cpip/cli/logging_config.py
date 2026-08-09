@@ -1,12 +1,18 @@
-"""Configure logging for the CLI lifecycle."""
+"""Logging setup for commands that produce log output.
+
+Split out of ``cli.common`` because ``logging`` is one of the more expensive
+stdlib imports (it pulls ``traceback`` and, on newer interpreters,
+``dataclasses`` and ``inspect``) and commands that only print to stdout never
+need it.  ``CommandSpec.needs_logging`` decides who pays.
+
+``CpipFormatter`` derives from ``logging.Formatter``, so the import is
+evaluated at class-creation time and cannot itself be deferred.
+"""
 
 from __future__ import annotations
 
 import logging
 import sys
-
-VERBOSE = 15
-logging.addLevelName(VERBOSE, "VERBOSE")
 
 
 class BrokenStdoutLoggingError(BrokenPipeError):

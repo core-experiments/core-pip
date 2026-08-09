@@ -130,12 +130,14 @@ def unpack_source_internal(source: str, destination: str) -> str:
     ):
         with tarfile.open(source_text) as archive:
             archive.extractall(destination_text)
+    elif zipfile.is_zipfile(source_text):
+        with zipfile.ZipFile(source_text) as archive:
+            archive.extractall(destination_text)
+    elif tarfile.is_tarfile(source_text):
+        with tarfile.open(source_text) as archive:
+            archive.extractall(destination_text)
     else:
         raise BuildError(f"Unsupported source archive: {source}")
-    return single_project_root_internal(destination)
-
-
-def single_project_root(destination: str) -> str:
     return single_project_root_internal(destination)
 
 

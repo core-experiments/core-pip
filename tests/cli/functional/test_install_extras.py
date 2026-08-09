@@ -6,7 +6,6 @@ from pathlib import Path
 import pytest
 from cpip_test_support import (
     CpipTestEnvironment,
-    ResolverVariant,
     TestData,
     create_basic_wheel_for_package,
 )
@@ -202,21 +201,19 @@ def test_install_requirements_no_r_flag(script: CpipTestEnvironment) -> None:
 
 
 @pytest.mark.parametrize(
-    "extra_to_install, simple_version, fails_on_legacy",
+    "extra_to_install, simple_version",
     [
-        ("", "3.0", False),
-        ("[extra1]", "2.0", True),
-        ("[extra2]", "1.0", True),
-        ("[extra1,extra2]", "1.0", True),
+        ("", "3.0"),
+        ("[extra1]", "2.0"),
+        ("[extra2]", "1.0"),
+        ("[extra1,extra2]", "1.0"),
     ],
 )
 @pytest.mark.usefixtures("data")
 def test_install_extra_merging(
     script: CpipTestEnvironment,
-    resolver_variant: ResolverVariant,
     extra_to_install: str,
     simple_version: str,
-    fails_on_legacy: bool,
 ) -> None:
     # Check that extra specifications in the extras section are honoured.
     pkga_path = script.scratch_path / "pkga"
@@ -235,12 +232,11 @@ def test_install_extra_merging(
 
     result = script.cpip_install_local(
         f"{pkga_path}{extra_to_install}",
-        expect_error=(fails_on_legacy and resolver_variant == "legacy"),
+        expect_error=False,
     )
 
-    if not fails_on_legacy or resolver_variant == "resolvelib":
-        expected = f"Successfully installed pkga-0.1 simple-{simple_version}"
-        assert expected in result.stdout
+    expected = f"Successfully installed pkga-0.1 simple-{simple_version}"
+    assert expected in result.stdout
 
 
 def test_install_extras(script: CpipTestEnvironment) -> None:

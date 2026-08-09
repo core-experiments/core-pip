@@ -17,8 +17,14 @@ from cpip.core.errors import (
 from cpip.core.format_control import FormatControl
 from cpip.core.release_control import ReleaseControl
 from cpip.core.temp_dir import TempDirectory
+from cpip.index.provider import CandidateProvider
 from cpip.install.build_env.base import Prefix
-from cpip.install.requirements import installed_packages_summary
+from cpip.install.preparer import RequirementPreparer
+from cpip.install.requirements import RequirementInstaller, installed_packages_summary
+from cpip.install.wheel_builder import WheelBuilder
+from cpip.resolution.api import ResolutionEngine
+from cpip.resolution.inputs import resolve_requirement_set
+from cpip.resolution.input_requirements import install_req_from_line
 
 if TYPE_CHECKING:
     from cpip.build.cache import WheelCache
@@ -37,16 +43,27 @@ class NamedRequirement(Protocol):
 
 class BuildOptions(Protocol):
     format_control: FormatControl
+
     release_control: ReleaseControl | None
+
     index_urls: list[str]
+
     find_links: list[str]
+
     proxy: str | None
+
     no_proxy_env: bool
+
     trusted_hosts: tuple[str, ...]
+
     custom_cert: str | None
+
     client_cert: str | None
+
     prefer_binary: bool
+
     uploaded_prior_to: datetime.datetime | None
+
     session: NetworkSession
 
 
@@ -84,20 +101,31 @@ class BuildConfiguration:
         uploaded_prior_to: datetime.datetime | None = None,
     ) -> None:
         self.session = session
+
         self.format_control = (
             format_control if format_control is not None else FormatControl()
         )
+
         self.release_control = (
             release_control if release_control is not None else ReleaseControl()
         )
+
         self.index_urls = index_urls if index_urls is not None else []
+
         self.find_links = find_links if find_links is not None else []
+
         self.proxy = proxy
+
         self.no_proxy_env = no_proxy_env
+
         self.trusted_hosts = trusted_hosts
+
         self.custom_cert = custom_cert
+
         self.client_cert = client_cert
+
         self.prefer_binary = prefer_binary
+
         self.uploaded_prior_to = uploaded_prior_to
 
 
@@ -107,8 +135,7 @@ class InstallWheelBuildError(DiagnosticCpipError):
     def __init__(self, failed: list[InstallRequirement]) -> None:
         super().__init__(
             message=(
-                "Failed to build installable wheels for some "
-                "pyproject.toml based projects"
+                "Failed to build installable wheels for some pyproject.toml based projects"
             ),
             context=", ".join(requirement.name or "" for requirement in failed),
             hint_stmt=None,
@@ -128,6 +155,7 @@ class BuildDependencyInstallError(DiagnosticCpipError):
     ) -> None:
         if isinstance(cause, CpipError):
             note = "This is likely not a problem with cpip."
+
         else:
             note = (
                 "cpip crashed unexpectedly. Please file an issue on cpip's issue "
@@ -135,23 +163,29 @@ class BuildDependencyInstallError(DiagnosticCpipError):
             )
 
         message = "Cannot install build dependencies"
+
         if req:
             message += f" for {req}"
+
         if log_lines is None:
             context = "See above for more details."
+
         else:
             if isinstance(cause, CpipError):
                 log_lines.append(f"ERROR: {cause}")
+
             else:
                 log_lines.extend(
                     "".join(traceback.format_exception(cause)).splitlines(),
                 )
+
             context = (
                 f"Installing {' '.join(build_reqs)}\n"
                 f"[{len(log_lines)} lines of output]\n"
                 + "\n".join(log_lines)
                 + "\n[end of output]"
             )
+
         super().__init__(
             message=message,
             context=context,
@@ -163,14 +197,24 @@ class BuildDependencyInstallError(DiagnosticCpipError):
 class InprocessBuildEnvironmentInstaller:
     """Install build dependencies via the already running cpip process.
 
+
+
     This contains a stripped down version of the install command with
+
     only the logic necessary for installing build dependencies. The
+
     finder, session, build tracker, and wheel cache are reused, but new
+
     instances of everything else are created as needed.
 
+
+
     Options are inherited from the parent install command unless
+
     they don't make sense for build dependencies (in which case, they
+
     are hard-coded, see comments below).
+
     """
 
     def __init__(
@@ -182,11 +226,10 @@ class InprocessBuildEnvironmentInstaller:
         build_constraints: Sequence[InstallRequirement] = (),
         verbosity: int = 0,
     ) -> None:
-        from cpip.index.provider import CandidateProvider
-        from cpip.install.preparer import RequirementPreparer
-
         self.build_constraints_internal = build_constraints
+
         self.wheel_cache_internal = wheel_cache
+
         self.provider_internal = CandidateProvider.from_options(
             find_links=options.find_links,
             index_url=options.index_urls[0] if options.index_urls else None,
@@ -197,6 +240,7 @@ class InprocessBuildEnvironmentInstaller:
         )
 
         build_dir = TempDirectory(kind="build-env-install", globally_managed=True)
+
         self.preparer_internal = RequirementPreparer(
             build_isolation_installer=self,
             # Inherited options or state.
@@ -226,7 +270,9 @@ class InprocessBuildEnvironmentInstaller:
         for_req: InstallRequirement | None,
     ) -> None:
         """Install entrypoint. Manages output capturing and error handling."""
+
         capture_ctx = nullcontext(StringIO())
+
         logger.info("Installing %s ...", kind)
 
         try:
@@ -235,10 +281,15 @@ class InprocessBuildEnvironmentInstaller:
 
         except DiagnosticCpipError as exc:
             # Format similar to a nested subprocess error, where the
+
             # causing error is shown first, followed by the build error.
+
             logger.info(textwrap.dedent(stream.getvalue()))
+
             logger.error("%s", exc)
+
             logger.info("")
+
             raise BuildDependencyInstallError(
                 for_req,
                 requirements,
@@ -248,10 +299,13 @@ class InprocessBuildEnvironmentInstaller:
 
         except Exception as exc:
             logs: list[str] | None = textwrap.dedent(stream.getvalue()).splitlines()
+
             if isinstance(exc, CpipError):
                 logger.error("%s", exc)
+
             else:
                 logger.exception("cpip crashed unexpectedly")
+
             raise BuildDependencyInstallError(
                 for_req,
                 requirements,
@@ -261,20 +315,18 @@ class InprocessBuildEnvironmentInstaller:
 
     def install_impl(self, requirements: Iterable[str], prefix: Prefix) -> None:
         """Core build dependency install logic."""
-        from cpip.install.requirements import RequirementInstaller
-        from cpip.install.wheel_builder import WheelBuilder
-        from cpip.resolution.engine.input.requirements import install_req_from_line
 
         ireqs = [install_req_from_line(req, user_supplied=True) for req in requirements]
-        ireqs.extend(self.build_constraints_internal)
 
-        from cpip.resolution.engine import ResolutionEngine
+        ireqs.extend(self.build_constraints_internal)
 
         resolver = ResolutionEngine(
             provider=self.provider_internal,
             ignore_installed=True,
         )
-        resolved_set = resolver.resolve_requirement_set(ireqs)
+
+        resolved_set = resolve_requirement_set(resolver, ireqs)
+
         self.preparer_internal.prepare_linked_requirements_more(
             resolved_set.requirements.values(),
         )
@@ -282,9 +334,11 @@ class InprocessBuildEnvironmentInstaller:
         reqs_to_build = [
             r for r in resolved_set.requirements_to_install if not r.is_wheel
         ]
+
         _, build_failures = WheelBuilder(self.wheel_cache_internal, verify=True).build(
             reqs_to_build,
         )
+
         if build_failures:
             raise InstallWheelBuildError(build_failures)
 
@@ -296,9 +350,10 @@ class InprocessBuildEnvironmentInstaller:
             pycompile=False,
             script_executable=prefix.python_executable,
         ).install_all(
-            resolver.get_installation_order(resolved_set),
+            list(resolved_set.requirements_to_install),
         )
 
         env = InstalledDistributionStore(paths=list(prefix.lib_dirs)).iter()
+
         if summary := installed_packages_summary(installed, env):
             logger.info(summary)

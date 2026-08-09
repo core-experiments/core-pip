@@ -8,7 +8,7 @@ from cpip.build.metadata import (
     InstalledDistributionStore,
     InstalledMetadataDistribution,
 )
-from cpip.core.packaging import canonicalize_name
+from cpip.core.names import canonicalize_name
 from cpip.install.target import InstallTarget
 from cpip.install.uninstall import DistributionUninstaller
 from cpip.install.wheel_transaction import (

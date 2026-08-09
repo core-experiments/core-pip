@@ -13,14 +13,26 @@ from collections.abc import Collection
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, cast
 
+from cpip.core.direct_url import DirectUrl
+from cpip.core.metadata import find_installed, iter_installed_distributions
+from cpip.core.packaging import (
+    SpecifierSet,
+    Version,
+    canonicalize_name,
+    marker_applies,
+    parse_requirement,
+)
+from cpip.core.urls import url_to_path
+from cpip.core.wheel import parse_wheel, read_wheel_metadata_file
+
 if TYPE_CHECKING:
-    from cpip.core.direct_url import DirectUrl
     from cpip.core.metadata import InstalledDistribution
-    from cpip.core.packaging import Requirement, SpecifierSet, Version
+    from cpip.core.packaging import Requirement
 
 
 def egg_link_names(raw_name: str) -> list[str]:
     """Return the filename variants used by setuptools for an egg-link."""
+
     return [
         re.sub("[^A-Za-z0-9.]+", "-", raw_name) + ".egg-link",
         f"{raw_name}.egg-link",
@@ -29,19 +41,25 @@ def egg_link_names(raw_name: str) -> list[str]:
 
 def egg_link_path_from_sys_path(raw_name: str) -> str | None:
     """Find an egg-link for ``raw_name`` by walking the interpreter path."""
+
     for path_item in sys.path:
         for egg_link_name in egg_link_names(raw_name):
             egg_link = os.path.join(path_item, egg_link_name)
+
             if os.path.isfile(egg_link):
                 return egg_link
+
     return None
 
 
 def parse_entry_points(text: str | None) -> list[SimpleNamespace]:
     if not text:
         return []
+
     parser = configparser.ConfigParser(delimiters=("=",), strict=False)
+
     parser.read_string(text)
+
     return [
         SimpleNamespace(name=name, value=value, group=group)
         for group in parser.sections()
@@ -61,8 +79,11 @@ class MetadataDistribution:
         entry_points_text: str | None = None,
     ) -> None:
         self.metadata = metadata
+
         self.location_internal = location
+
         self.info_location_internal = info_location
+
         self.entry_points_text_internal = entry_points_text
 
     @property
@@ -75,14 +96,19 @@ class MetadataDistribution:
         directory: str,
     ) -> MetadataDistribution:
         metadata_path = os.path.join(directory, "METADATA")
+
         with open(metadata_path, encoding="utf-8") as file:
             metadata = email.parser.Parser().parsestr(file.read())
+
         entry_points_path = os.path.join(directory, "entry_points.txt")
+
         try:
             with open(entry_points_path, encoding="utf-8") as file:
                 entry_points_text = file.read()
+
         except OSError:
             entry_points_text = None
+
         return cls(
             metadata,
             location=os.path.dirname(directory),
@@ -106,11 +132,12 @@ class MetadataDistribution:
         name: str,
         location: str,
     ) -> MetadataDistribution:
-        from cpip.core.wheel import parse_wheel, read_wheel_metadata_file
-
         info_dir, _ = parse_wheel(archive, name)
+
         contents = read_wheel_metadata_file(archive, f"{info_dir}/METADATA")
+
         metadata = email.parser.BytesParser().parsebytes(contents)
+
         return cls(
             metadata,
             location=location,
@@ -132,8 +159,10 @@ class MetadataDistribution:
         project_name: str,
     ) -> MetadataDistribution:
         metadata = email.parser.BytesParser().parsebytes(contents)
+
         if metadata.get("Name") is None:
             metadata["Name"] = project_name
+
         return cls(metadata, location=None, info_location=None)
 
     @property
@@ -150,8 +179,6 @@ class MetadataDistribution:
 
     @property
     def canonical_name(self) -> str:
-        from cpip.core.packaging import canonicalize_name
-
         return canonicalize_name(self.raw_name)
 
     @property
@@ -160,24 +187,21 @@ class MetadataDistribution:
 
     @property
     def version(self) -> Version:
-        from cpip.core.packaging import Version
-
         return Version(self.raw_version)
 
     @property
     def requires_python(self) -> SpecifierSet:
-        from cpip.core.packaging import SpecifierSet
-
         return SpecifierSet(str(self.metadata.get("Requires-Python", "")))
 
     def iter_dependencies(self, extras: tuple[str, ...] = ()) -> list[Requirement]:
-        from cpip.core.packaging import marker_applies, parse_requirement
-
         dependencies: list[Requirement] = []
+
         for value in self.metadata.get_all("Requires-Dist", []):
             requirement = parse_requirement(value)
+
             if marker_applies(requirement.marker, extras=extras):
                 dependencies.append(requirement)
+
         return dependencies
 
     def iter_raw_dependencies(self) -> list[str]:
@@ -187,8 +211,6 @@ class MetadataDistribution:
         return parse_entry_points(self.entry_points_text_internal)
 
     def iter_provided_extras(self) -> list[str]:
-        from cpip.core.packaging import canonicalize_name
-
         return [
             canonicalize_name(value)
             for value in self.metadata.get_all("Provides-Extra", [])
@@ -197,9 +219,12 @@ class MetadataDistribution:
 
     def read_text(self, path: str) -> str:
         info_location = self.info_location_internal
+
         if info_location is None or self.location_internal == info_location:
             raise FileNotFoundError(path)
+
         target = os.path.join(info_location, path)
+
         with open(target, encoding="utf-8") as file:
             return file.read()
 
@@ -214,6 +239,7 @@ class InstalledMetadataDistribution:
         user_site: str | None = None,
     ) -> None:
         self.distribution_internal = distribution
+
         self.user_site_internal = user_site
 
     @property
@@ -227,6 +253,7 @@ class InstalledMetadataDistribution:
     @property
     def info_location(self) -> str | None:
         location = self.distribution_internal.metadata_location
+
         return str(location) if location is not None else None
 
     @property
@@ -243,8 +270,6 @@ class InstalledMetadataDistribution:
 
     @property
     def version(self) -> Version:
-        from cpip.core.packaging import Version
-
         return Version(self.raw_version)
 
     @property
@@ -280,15 +305,22 @@ class InstalledMetadataDistribution:
             "provides-dist": True,
             "obsoletes-dist": True,
         }
+
         result: dict[str, object] = {}
+
         for field, multiple in fields.items():
             header = field.title()
+
             values = self.metadata.get_all(header)
+
             if values:
                 result[field.replace("-", "_")] = values if multiple else values[0]
+
         payload = self.metadata.get_payload()
+
         if isinstance(payload, str) and payload:
             result["description"] = payload
+
         return result
 
     @property
@@ -303,6 +335,7 @@ class InstalledMetadataDistribution:
                 for line in self.read_text("INSTALLER").splitlines()
                 if line.strip()
             )
+
         except (FileNotFoundError, StopIteration):
             return ""
 
@@ -310,8 +343,10 @@ class InstalledMetadataDistribution:
     def requested(self) -> bool:
         try:
             self.read_text("REQUESTED")
+
         except FileNotFoundError:
             return False
+
         return True
 
     @property
@@ -340,22 +375,22 @@ class InstalledMetadataDistribution:
 
     @property
     def direct_url(self) -> DirectUrl | None:
-        from cpip.core.direct_url import DirectUrl
-
         try:
             return DirectUrl.from_json(self.read_text("direct_url.json"))
+
         except (FileNotFoundError, ValueError):
             return None
 
     @property
     def editable_project_location(self) -> str | None:
         direct_url = self.direct_url
-        if direct_url and direct_url.is_local_editable():
-            from cpip.core.urls import url_to_path
 
+        if direct_url and direct_url.is_local_editable():
             return url_to_path(direct_url.url)
+
         if self.info_location and self.info_location.endswith(".egg-info"):
             egg_link_root = os.path.dirname(self.info_location)
+
             try:
                 with os.scandir(egg_link_root) as entries:
                     egg_link = next(
@@ -366,19 +401,26 @@ class InstalledMetadataDistribution:
                         ),
                         None,
                     )
+
             except OSError:
                 egg_link = None
+
             if egg_link is not None:
                 with open(egg_link, encoding="utf-8") as file:
                     lines = file.read().splitlines()
+
                 if lines:
                     return lines[0]
+
             egg_link = egg_link_path_from_sys_path(self.raw_name)
+
             if egg_link is not None:
                 with open(egg_link, encoding="utf-8") as file:
                     lines = file.read().splitlines()
+
                 if lines:
                     return lines[0]
+
         return None
 
     @property
@@ -387,8 +429,6 @@ class InstalledMetadataDistribution:
 
     @property
     def requires_python(self) -> SpecifierSet:
-        from cpip.core.packaging import SpecifierSet
-
         return SpecifierSet(str(self.metadata.get("Requires-Python", "")))
 
     @property
@@ -412,8 +452,6 @@ class InstalledMetadataDistribution:
         return self.metadata.get_all("Requires-Dist", [])
 
     def iter_provided_extras(self) -> list[str]:
-        from cpip.core.packaging import canonicalize_name
-
         return [
             canonicalize_name(value)
             for value in self.metadata.get_all("Provides-Extra", [])
@@ -429,8 +467,10 @@ class InstalledMetadataDistribution:
                 return [
                     line for line in self.read_text("installed-files.txt").splitlines()
                 ]
+
             except FileNotFoundError:
                 return []
+
         return self.distribution_internal.files()
 
     def iter_distutils_script_names(self) -> list[str]:
@@ -439,15 +479,19 @@ class InstalledMetadataDistribution:
     def iter_entry_points(self) -> list[SimpleNamespace]:
         try:
             entry_points = self.read_text("entry_points.txt")
+
         except FileNotFoundError:
             return []
+
         return parse_entry_points(entry_points)
 
     def is_file(self, path: str) -> bool:
         try:
             self.read_text(path)
+
         except FileNotFoundError:
             return False
+
         return True
 
 
@@ -461,6 +505,7 @@ class InstalledDistributionStore:
         user_site: str | None = None,
     ) -> None:
         self.paths = paths
+
         self.user_site = user_site
 
     def iter(
@@ -473,45 +518,51 @@ class InstalledDistributionStore:
         skip: Collection[str] | None = None,
         names: Collection[str] | None = None,
     ) -> list[InstalledMetadataDistribution]:
-        from cpip.core.metadata import iter_installed_distributions
-
         result: list[InstalledMetadataDistribution] = []
+
         for distribution in iter_installed_distributions(self.paths, names=names):
             view = InstalledMetadataDistribution(
                 distribution,
                 user_site=self.user_site,
             )
+
             if local_only and not view.local:
                 continue
+
             if user_only and not view.in_usersite:
                 continue
+
             if editables_only and not view.editable:
                 continue
+
             if not include_editables and view.editable:
                 continue
+
             if skip is not None and view.canonical_name in skip:
                 continue
+
             result.append(view)
+
         return result
 
     def find(self, name: str) -> InstalledMetadataDistribution | None:
-        from cpip.core.packaging import canonicalize_name
-
         if self.paths is not None and self.user_site is None:
-            from cpip.core.metadata import find_installed
-
             distribution = find_installed(name, self.paths)
+
             return (
                 InstalledMetadataDistribution(distribution, user_site=self.user_site)
                 if distribution is not None
                 else None
             )
+
         canonical = canonicalize_name(name)
+
         distributions = [
             distribution
             for distribution in self.iter()
             if distribution.canonical_name == canonical
         ]
+
         return next(
             (
                 distribution

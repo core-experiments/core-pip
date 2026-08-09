@@ -17,8 +17,9 @@ from contextlib import nullcontext
 from typing import TYPE_CHECKING, Any, cast
 
 from cpip.core.errors import InstallationError
-from cpip.core.packaging import canonicalize_name
+from cpip.core.names import canonicalize_name
 from cpip.core.wheel import WheelCandidate, parse_wheel, wheel_candidate
+from cpip.build.metadata import InstalledDistributionStore
 from cpip.install.target import InstallTarget
 from cpip.install.transaction import InstallTransaction, normalized_internal
 from cpip.install.wheel_archive import (
@@ -31,7 +32,18 @@ from cpip.install.wheel_archive import (
     validate_member_parts,
     zip_mode,
 )
+from cpip.install.wheel_archive_cache import (
+    CachedWheelArchive,
+    install_wheels_from_archive_cache,
+)
 from cpip.install.wheel_archive_runtime import CachedWheelInfo, open_wheel_archive
+from cpip.install.wheel_scripts import (
+    entry_point_scripts,
+    rewrite_shebang,
+    script_matches,
+    script_text,
+    write_windows_script,
+)
 from cpip.install.wheel_state import (
     InstalledTargetInventory,
     compiled_files,
@@ -42,10 +54,15 @@ from cpip.install.wheel_transaction_direct import (
     direct_batch_preflight,
     install_wheels_directly,
 )
+from cpip.platform.clone import clone_path
 
 if TYPE_CHECKING:
-    from cpip.build.metadata import InstalledMetadataDistribution
+    from cpip.build.metadata import (
+        InstalledDistributionStore,
+        InstalledMetadataDistribution,
+    )
     from cpip.core.direct_url import DirectUrl
+
     from cpip.install.wheel_state import InstalledWheelDistribution
 
     ExistingDistribution = InstalledMetadataDistribution | InstalledWheelDistribution
@@ -171,8 +188,6 @@ def install_wheel_internal(
         if target_inventory is not None:
             existing = target_inventory.find(candidate.canonical_name)
         elif _target_has_distribution_metadata(target):
-            from cpip.build.metadata import InstalledDistributionStore
-
             existing = InstalledDistributionStore(
                 paths=[os.fspath(root) for root in target.library_roots],
             ).find(candidate.name)
@@ -190,14 +205,6 @@ def install_wheel_internal(
         print(f"Uninstalling {existing.raw_name}-{existing.raw_version}")
     if direct and transaction is None:
         raise ValueError("direct wheel installation needs a transaction")
-    if not direct:
-        from cpip.install.wheel_scripts import (
-            entry_point_scripts,
-            rewrite_shebang,
-            script_matches,
-            script_text,
-            write_windows_script,
-        )
 
     stage_context = (
         nullcontext(target.purelib)
@@ -250,8 +257,6 @@ def install_wheel_internal(
             archive = cast("Any", archive)
             if validated_dist_info is None:
                 layout = getattr(candidate, "wheel_layout", None)
-                from cpip.install.wheel_archive_cache import CachedWheelArchive
-
                 if isinstance(layout, CachedWheelArchive):
                     validated_dist_info = layout.dist_info
                 elif layout is not None:
@@ -344,8 +349,6 @@ def install_wheel_internal(
                         clone_sources.add(source_text)
                         metadata = cached_member.record_metadata
                     elif cached_member is not None and not direct:
-                        from cpip.platform.clone import clone_path
-
                         clone_path(cached_member.source_path, source_text)
                         metadata = cached_member.record_metadata
                     else:
@@ -720,10 +723,6 @@ def install_wheels_transactionally(
             candidate.source_kind in {None, "wheel"} for candidate in planned_candidates
         )
     ):
-        from cpip.install.wheel_archive_cache import (
-            install_wheels_from_archive_cache,
-        )
-
         cached_result = install_wheels_from_archive_cache(
             requests,
             planned_candidates,

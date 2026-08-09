@@ -6,7 +6,6 @@ from pathlib import Path
 import pytest
 from cpip_test_support import (
     CpipTestEnvironment,
-    ResolverVariant,
     TestData,
     assert_all_changes,
     pyversion,  # noqa: F401
@@ -39,7 +38,6 @@ def test_invalid_upgrade_strategy_causes_error(script: CpipTestEnvironment) -> N
 
 def test_only_if_needed_does_not_upgrade_deps_when_satisfied(
     script: CpipTestEnvironment,
-    resolver_variant: ResolverVariant,
 ) -> None:
     """It doesn't upgrade a dependency if it already satisfies the requirements."""
     script.cpip_install_local("simple==2.0")
@@ -56,10 +54,7 @@ def test_only_if_needed_does_not_upgrade_deps_when_satisfied(
         script.site_packages / "simple-2.0.dist-info"
     ) not in result.files_deleted, "should not have uninstalled simple==2.0"
 
-    msg = "Requirement already satisfied"
-    if resolver_variant == "legacy":
-        msg = msg + ", skipping upgrade: simple"
-    assert msg in result.stdout, (
+    assert "Requirement already satisfied" in result.stdout, (
         "did not print correct message for not-upgraded requirement"
     )
 
@@ -146,7 +141,6 @@ def test_upgrade_if_requested(script: CpipTestEnvironment) -> None:
 def test_upgrade_with_newest_already_installed(
     script: CpipTestEnvironment,
     data: TestData,
-    resolver_variant: ResolverVariant,
 ) -> None:
     """If the newest version of a package is already installed, the package should
     not be reinstalled and the user should be informed.
@@ -169,10 +163,7 @@ def test_upgrade_with_newest_already_installed(
         "simple",
     )
     assert not result.files_created, "simple upgraded when it should not have"
-    if resolver_variant == "resolvelib":
-        msg = "Requirement already satisfied"
-    else:
-        msg = "already up-to-date"
+    msg = "Requirement already satisfied"
     assert msg in result.stdout, result.stdout
 
 

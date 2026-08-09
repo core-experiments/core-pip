@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.metadata
 import os
+import site
 import sysconfig
 from collections.abc import Collection, Iterable
 from email.message import Message
@@ -29,15 +30,23 @@ class InstalledDistribution:
         raw: importlib.metadata.Distribution,
     ) -> None:
         self.name = name
+
         self.version = version
+
         self.location = location
+
         self.metadata_location = metadata_location
+
         self.raw = raw
 
     name: str
+
     version: str
+
     location: str
+
     metadata_location: str | None
+
     raw: importlib.metadata.Distribution
 
     @property
@@ -50,20 +59,26 @@ class InstalledDistribution:
 
     def dependencies(self, extras: Iterable[str] = ()) -> list[Requirement]:
         result: list[Requirement] = []
+
         for value in self.raw.metadata.get_all("Requires-Dist", []):
             req = parse_requirement(value)
+
             if marker_applies(req.marker, extras=extras):
                 result.append(req)
+
         return result
 
     def read_text(self, name: str) -> str:
         text = self.raw.read_text(name)
+
         if text is None:
             raise FileNotFoundError(name)
+
         return text
 
     def files(self) -> list[str]:
         files = self.raw.files or ()
+
         return sorted(str(file) for file in files)
 
 
@@ -71,18 +86,8 @@ def default_lib_path() -> str:
     return sysconfig.get_paths()["purelib"]
 
 
-def default_scripts_path() -> str:
-    return sysconfig.get_paths()["scripts"]
-
-
 def user_lib_path() -> str:
-    import site
-
     return site.getusersitepackages()
-
-
-def user_scripts_path() -> str:
-    return sysconfig.get_path("scripts", f"{os.name}_user")
 
 
 def _iter_installed_distributions(
@@ -92,26 +97,38 @@ def _iter_installed_distributions(
     canonical_names = (
         {canonicalize_name(name) for name in names} if names is not None else None
     )
+
     if paths is None:
         distributions = importlib.metadata.distributions()
+
     else:
         distribution_paths = [os.fspath(path) for path in paths]
+
         distributions = importlib.metadata.distributions(path=distribution_paths)
+
     for dist in distributions:
         metadata = cast("Any", dist.metadata)
+
         name = metadata.get("Name")
+
         version = dist.version
+
         if not name or not version:
             continue
+
         if (
             canonical_names is not None
             and canonicalize_name(name) not in canonical_names
         ):
             continue
+
         metadata_location = getattr(dist, "_path", None)
+
         location = str(dist.locate_file(""))
+
         if metadata_location is None or str(location) == "<memory>":
             continue
+
         yield InstalledDistribution(
             name=name,
             # Keep the metadata spelling intact.  Installed distributions
@@ -141,7 +158,9 @@ def find_installed(
     paths: Iterable[str] | None = None,
 ) -> InstalledDistribution | None:
     canonical = canonicalize_name(name)
+
     for dist in _iter_installed_distributions(paths, {canonical}):
         if dist.canonical_name == canonical:
             return dist
+
     return None

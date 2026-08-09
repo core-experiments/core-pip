@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 from cpip.core.packaging import (
+    Requirement,
     SpecifierSet,
     Version,
     canonicalize_name,
@@ -23,6 +24,13 @@ def test_parse_requirement_with_extras_specifier_and_marker() -> None:
     assert requirement.extras == {"pdf", "ssl"}
     assert requirement.marker == 'python_version >= "3.11"'
     assert requirement.is_satisfied_by("1.2")
+
+
+def test_unconstrained_requirement_preserves_prerelease_filtering() -> None:
+    requirement = parse_requirement("demo-pkg")
+
+    assert requirement.is_satisfied_by("1.0rc1")
+    assert not requirement.is_satisfied_by("1.0rc1", allow_prereleases=False)
 
 
 def test_standard_requirement_skips_url_parsing(
@@ -48,6 +56,22 @@ def test_parse_requirement_reuses_immutable_result() -> None:
     cache = parse_requirement.cache_info()
     assert cache.misses == 1
     assert cache.hits == 1
+
+
+def test_requirement_cache_state_roundtrip() -> None:
+    original = parse_requirement(
+        'Demo-Pkg[PDF,SSL]~=1.2,!=1.5; python_version >= "3.11"',
+    )
+    state = original.cache_state_internal()
+
+    restored = Requirement.from_cache_state(state)
+    restored_again = Requirement.from_cache_state(state)
+
+    assert restored_again is restored
+    assert restored == original
+    assert restored.canonical_name == "demo-pkg"
+    assert restored.is_satisfied_by("1.4")
+    assert not restored.is_satisfied_by("1.5")
 
 
 def test_canonicalize_requirement() -> None:
@@ -87,6 +111,23 @@ def test_version_orders_epoch_and_dev_releases() -> None:
 
 
 @pytest.mark.parametrize(
+    "raw",
+    ["1.2.3", "1!2.0rc1.post2.dev3+linux-x86_64", "0.0.0"],
+)
+def test_version_cache_state_roundtrip(raw: str) -> None:
+    original = Version(raw)
+    restored = Version.from_cache_state(original.cache_state_internal())
+    restored_again = Version.from_cache_state(original.cache_state_internal())
+
+    assert restored == original
+    assert restored_again is restored
+    assert hash(restored) == hash(original)
+    assert str(restored) == str(original)
+    assert restored.release == original.release
+    assert restored.is_prerelease == original.is_prerelease
+
+
+@pytest.mark.parametrize(
     "specifier, expected_lower, expected_upper",
     [
         (">=1,<2", (Version("1"), True), (Version("2"), False)),
@@ -103,6 +144,20 @@ def test_specifier_set_bounds(
     expected_upper: tuple[Version, bool] | None,
 ) -> None:
     assert SpecifierSet(specifier).bounds() == (expected_lower, expected_upper)
+
+
+def test_specifier_set_bounds_are_memoized() -> None:
+    specifier = SpecifierSet(">=1,<2")
+    first = specifier.bounds()
+    assert specifier.bounds() is first
+
+
+def test_empty_specifier_set_preserves_prerelease_filtering() -> None:
+    specifier = SpecifierSet()
+
+    assert specifier.contains("1.0")
+    assert not specifier.contains("1.0rc1")
+    assert specifier.contains("1.0rc1", allow_prereleases=True)
 
 
 @pytest.mark.parametrize(

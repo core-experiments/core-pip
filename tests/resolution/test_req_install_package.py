@@ -10,8 +10,8 @@ from unittest import mock
 import pytest
 from cpip.core.errors import InstallationError, InvalidWheelFilename
 from cpip.core.packaging import Requirement, SpecifierSet
-from cpip.resolution.engine.input.paths import get_url_from_path, looks_like_path
-from cpip.resolution.engine.input.requirements import (
+from cpip.resolution.input_paths import get_url_from_path, looks_like_path
+from cpip.resolution.input_requirements import (
     install_req_from_editable,
     install_req_from_line,
     parse_editable,

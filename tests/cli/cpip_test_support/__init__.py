@@ -18,7 +18,7 @@ from hashlib import sha256
 from io import BytesIO, StringIO
 from pathlib import Path
 from textwrap import dedent
-from typing import Any, AnyStr, Literal, Protocol, cast
+from typing import Any, AnyStr, Protocol, cast
 from urllib.request import pathname2url
 from zipfile import ZipFile
 
@@ -34,8 +34,6 @@ from cpip_test_support.venv import VirtualEnvironment
 from cpip_test_support.wheel import make_wheel
 from packaging.utils import canonicalize_name
 from scripttest import FoundDir, FoundFile, ProcResult, TestFileEnvironment
-
-ResolverVariant = Literal["resolvelib", "legacy"]
 
 WORKSPACE_ROOT = pathlib.Path(__file__).resolve().parents[3]
 DATA_DIR = pathlib.Path(__file__).resolve().parents[1].joinpath("data")
@@ -420,9 +418,7 @@ def check_stderr(
 class CpipTestEnvironment(TestFileEnvironment):
     """A specialized TestFileEnvironment for testing cpip"""
 
-    #
-    # Attribute naming convention
-    # ---------------------------
+    # Attribute naming convention:
     #
     # Instances of this class have many attributes representing paths
     # in the filesystem.  To keep things straight, absolute paths have
@@ -1356,10 +1352,7 @@ class ScriptFactory(Protocol):
 
 CertFactory = Callable[[], str]
 
-# -------------------------------------------------------------------------
-# Accommodations for Windows path and URL changes in recent Python releases
-# -------------------------------------------------------------------------
-
+# Accommodations for Windows path and URL changes in recent Python releases.
 # Trailing slashes are now preserved on Windows, matching POSIX behaviour.
 # BPO: https://github.com/python/cpython/issues/126212
 does_pathname2url_preserve_trailing_slash = pathname2url("C:\\foo\\").endswith("/")

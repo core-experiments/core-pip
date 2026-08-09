@@ -10,6 +10,7 @@ import tempfile
 from collections.abc import Iterable
 
 from cpip.core.errors import InstallationError
+from cpip.platform.clone import clone_path
 
 
 def _read_staged_source(path: str | None) -> bytes:
@@ -203,8 +204,6 @@ class InstallTransaction:
                 if item.contents is None:
                     assert item.source_text is not None
                     if item.clone:
-                        from cpip.platform.clone import clone_path
-
                         clone_path(item.source_text, item.destination_text)
                     else:
                         try:

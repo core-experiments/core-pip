@@ -8,35 +8,42 @@ import logging
 import os
 import shutil
 
+from cpip.index.artifacts import ArtifactLocator
+from cpip.index.cache import origin_hashes, wheel_cache_path
 from cpip.index.links import Link
 from cpip.index.source_models import CandidateRecord
+from cpip.index.vcs import is_immutable_vcs_link, vcs_reference
 
 logger = logging.getLogger(__name__)
 
 
 def source_hashes_for_link(link: Link) -> dict[str, str]:
-    from cpip.index.artifacts import ArtifactLocator
-
     hashes = dict(link.hashes)
+
     if hashes:
         return hashes
+
     local = ArtifactLocator().local_path(link.url)
+
     if local is not None:
         try:
             with open(local, "rb") as file:
                 return {"sha256": hashlib.sha256(file.read()).hexdigest()}
+
         except OSError:
             return {}
+
     return {}
 
 
 def cache_identity(url: str) -> str:
     """Return the stable cache key for an artifact URL."""
-    from cpip.index.vcs import is_immutable_vcs_link, vcs_reference
 
     if is_immutable_vcs_link(url):
         reference = vcs_reference(url)
+
         return f"{reference.vcs}+{reference.repo_url}@{reference.requested_revision}"
+
     return url
 
 
@@ -44,17 +51,18 @@ def cached_wheel_for_link(
     wheel_cache_dir: str | os.PathLike[str] | None,
     url: str,
 ) -> tuple[str, dict[str, str] | None] | None:
-    from cpip.index.cache import origin_hashes
-
     if wheel_cache_dir is None:
         return None
+
     digest = hashlib.sha256(cache_identity(url).encode("utf-8")).hexdigest()
+
     entry_dir_text = os.path.join(
         os.fspath(wheel_cache_dir),
         digest[:2],
         digest[2:4],
         digest,
     )
+
     try:
         with os.scandir(entry_dir_text) as entries:
             wheels = sorted(
@@ -62,10 +70,13 @@ def cached_wheel_for_link(
                 for entry in entries
                 if entry.name.endswith(".whl") and entry.is_file()
             )
+
     except OSError:
         return None
+
     if not wheels:
         return None
+
     return wheels[0], origin_hashes(os.path.join(entry_dir_text, "origin.json"))
 
 
@@ -74,17 +85,20 @@ def cache_built_wheel(
     candidate: CandidateRecord,
     wheel: str,
 ) -> None:
-    from cpip.index.cache import wheel_cache_path
-
     if wheel_cache_dir is None:
         return
+
     entry_dir_text = wheel_cache_path(
         os.fspath(wheel_cache_dir),
         cache_identity(candidate.link.url),
     )
+
     os.makedirs(entry_dir_text, exist_ok=True)
+
     shutil.copy2(wheel, os.path.join(entry_dir_text, os.path.basename(wheel)))
+
     origin = {"archive_info": {"hashes": source_hashes_for_link(candidate.link)}}
+
     with open(
         os.path.join(entry_dir_text, "origin.json"),
         "w",

@@ -12,7 +12,7 @@ from cpip.build.cache import WheelCache
 from cpip.build.metadata import MetadataDistribution
 from cpip.build.wheels import build_wheel_pep517
 from cpip.core.errors import InvalidWheelFilename, UnsupportedWheel
-from cpip.core.filesystem import ensure_dir
+from cpip.core.utils import ensure_dir
 from cpip.core.hashes import hash_file
 from cpip.core.packaging import (
     InvalidVersion,
@@ -72,15 +72,13 @@ def verify_one(req: InstallRequirement, wheel_path: str) -> None:
     w = Wheel(os.path.basename(wheel_path))
     if w.name != canonical_name:
         raise InvalidWheelFilename(
-            f"Wheel has unexpected file name: expected {canonical_name!r}, "
-            f"got {w.name!r}",
+            f"Wheel has unexpected file name: expected {canonical_name!r}, got {w.name!r}",
         )
     dist = MetadataDistribution.from_wheel(wheel_path, canonical_name)
     dist_verstr = str(dist.version)
     if canonicalize_version(dist_verstr) != canonicalize_version(w.version):
         raise InvalidWheelFilename(
-            f"Wheel has unexpected file name: expected {dist_verstr!r}, "
-            f"got {w.version!r}",
+            f"Wheel has unexpected file name: expected {dist_verstr!r}, got {w.version!r}",
         )
     metadata_version_value = dist.metadata_version
     if metadata_version_value is None:

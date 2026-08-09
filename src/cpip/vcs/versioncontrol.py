@@ -14,9 +14,8 @@ from typing import (
     cast,
 )
 
-from cpip.core.contracts import AuthInfo
+from cpip.core.utils import AuthInfo, display_path
 from cpip.core.errors import InstallationError
-from cpip.core.filesystem import display_path
 from cpip.core.subprocess import CommandArgs, format_command_args
 
 from .errors import BadCommand
@@ -75,8 +74,7 @@ def find_path_to_project_root_from_repo_root(
             # We've traversed up to the root of the filesystem without
             # finding a Python project.
             logger.warning(
-                "Could not find a Python project for directory %s (tried all "
-                "parent directories)",
+                "Could not find a Python project for directory %s (tried all parent directories)",
                 orig_location,
             )
             return None
