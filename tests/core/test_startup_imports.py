@@ -167,13 +167,6 @@ def test_fast_lock_produces_output_on_cache_hit(tmp_path: Path) -> None:
     assert output.is_file()
 
 
-# --- Design guard: lazy startup imports were removed ---------------------------------
-# The command entrypoint now imports the command registry eagerly at module load so
-# that ``cpip --help`` and other top-level routes resolve through a single, flat
-# import graph instead of deferring registration. This test pins that decision so
-# the lazy-import path is not accidentally reintroduced.
-
-
 def test_entrypoint_eagerly_loads_command_registry() -> None:
     modules = imported_modules(["--help"])
 

@@ -13,19 +13,34 @@ Three entry points cover three target states, all guarded by
 
 from __future__ import annotations
 
-import os
-import sys
-from collections.abc import Iterable, Sequence
-
-from cpip.cli.config import load_source_config
 import atexit
 import hashlib
 import marshal
+import os
 import stat
+import sys
 import tempfile
+from collections.abc import Iterable, Sequence
 
+from cpip.cli.config import load_source_config
 from cpip.cli.fast import consume_option, extend_requirements
+from cpip.core.appdirs import resolve_cache_dir
+from cpip.core.packaging import Version
 from cpip.core.utils import load_snapshot, save_snapshot
+from cpip.core.wheel import PureWheelCandidate, WheelCandidate
+from cpip.core.wheel import parse_wheel_filename as parse_wheel_filename_core
+from cpip.install.target import InstallTarget
+from cpip.install.wheel_archive_cache import (
+    exact_install_plan_key_from_strings,
+    install_wheels_from_archive_cache,
+    load_cached_install_plan,
+    prepare_cached_wheel,
+)
+from cpip.platform.clone import clone_path
+from cpip.resolution.archive import (
+    WheelArchive,
+    WheelhouseUnavailable,
+)
 
 VERSION = 3
 NAME = "fast-install-v3.marshal"
@@ -364,6 +379,7 @@ class FastInstallMetadataCache:
             finally:
                 if temporary:
                     import shutil
+
                     shutil.rmtree(temporary, ignore_errors=True)
         self.plans[key] = (value[0], tree_key)
         self.dirty = True
@@ -376,23 +392,6 @@ class FastInstallMetadataCache:
             ("cpip-fast-install", VERSION, self.entries, self.plans),
         ):
             self.dirty = False
-from cpip.core.appdirs import resolve_cache_dir
-from cpip.core.packaging import Version
-from cpip.core.wheel import PureWheelCandidate, WheelCandidate
-from cpip.core.wheel import parse_wheel_filename as parse_wheel_filename_core
-from cpip.install.target import InstallTarget
-from cpip.install.wheel_archive_cache import (
-    exact_install_plan_key_from_strings,
-    install_wheels_from_archive_cache,
-    load_cached_install_plan,
-    prepare_cached_wheel,
-)
-from cpip.platform.clone import clone_path
-
-from cpip.resolution.archive import (
-    WheelArchive,
-    WheelhouseUnavailable,
-)
 
 
 class FastCandidate(PureWheelCandidate):

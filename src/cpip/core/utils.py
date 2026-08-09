@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import errno
-import logging
 import marshal
 import os
 import sys
@@ -13,12 +12,10 @@ from typing import Any
 AuthInfo = tuple[str | None, str | None]
 
 
-
 def enum(*sequential: str, **named: str) -> Any:
     values: dict[str, object] = dict(zip(sequential, range(len(sequential))), **named)
     values["reverse_mapping"] = {value: key for key, value in values.items()}
     return type("Enum", (), values)
-
 
 
 class ExecutionContext:
@@ -40,7 +37,6 @@ def current_version() -> str | None:
     return context.version
 
 
-
 CURRENT_PYTHON_VERSION_INFO = sys.version_info
 CURRENT_PYTHON_VERSION = (
     f"{CURRENT_PYTHON_VERSION_INFO.major}.{CURRENT_PYTHON_VERSION_INFO.minor}"
@@ -51,7 +47,6 @@ CURRENT_PYTHON_VERSION_FULL = ".".join(
 )
 CURRENT_PYTHON_MAJOR_TAG = f"py{CURRENT_PYTHON_VERSION_INFO.major}"
 CURRENT_PYTHON_FULL_TAG = f"py{CURRENT_PYTHON_VERSION_DIGITS}"
-
 
 
 def ensure_dir(path: str) -> None:
@@ -72,7 +67,6 @@ def display_path(path: str) -> str:
     if relative == os.pardir or relative.startswith(os.pardir + os.sep):
         return path
     return os.path.join(".", relative)
-
 
 
 def load_snapshot(path: str | os.PathLike[str]) -> object | None:

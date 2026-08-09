@@ -8,9 +8,6 @@ import sys
 from cpip.cli.common import BROKEN_STDOUT, VIRTUALENV_NOT_FOUND
 from cpip.cli.registry import COMMAND_SPECS, CommandSpec, get_command
 
-# Keep command discovery in one place.  The registry also owns command loading,
-# parser factories, and lifecycle requirements; deriving these sets here keeps
-# global-option handling and help output in sync with dispatch.
 VISIBLE_COMMAND_NAMES = tuple(spec.name for spec in COMMAND_SPECS if spec.visible)
 COMMAND_NAMES = frozenset(spec.name for spec in COMMAND_SPECS)
 

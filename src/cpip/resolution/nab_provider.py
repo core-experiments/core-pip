@@ -5,7 +5,9 @@ from dataclasses import dataclass
 from urllib.parse import urlsplit
 
 from cpip._vendor.nab_resolver.ranges import Range
+from cpip._vendor.nab_resolver.types import Incompatibility, RangeProtocol
 from cpip.core.metadata import InstalledDistribution, find_installed
+from cpip.core.wheel import WheelCandidate
 from cpip.core.packaging import (
     Requirement,
     SpecifierSet,
@@ -66,7 +68,9 @@ class NabProvider:
         self.constraints = self.context.constraints
         self.ignore_requires_python = self.context.ignore_requires_python
         self.python_version = self.context.python_version
-        self.records: dict[tuple[str, Version], object] = {}
+        self.records: dict[
+            tuple[str, Version], WheelCandidate | InstalledCandidate
+        ] = {}
         self.requirements: dict[str, Requirement] = {}
         self.display_requirements: dict[str, Requirement] = {}
         self._version_cache: dict[tuple[object, ...], tuple[Version, ...]] = {}
@@ -200,26 +204,25 @@ class NabProvider:
         )
 
     def choose_version(
-        self, package: str, version_range: Range[Version]
+        self, package: str, version_range: RangeProtocol[Version]
     ) -> Version | None:
         requirement = self.requirements[package]
         constraints = self._constraint_for(package)
         url_constraints = tuple(
             constraint for constraint in constraints if constraint.url is not None
         )
-        if len(url_constraints) > 1:
-            identities = {
-                canonical_url(constraint.url) for constraint in url_constraints
-            }
-            if len(identities) > 1:
-                return None
+        constraint_urls = tuple(
+            canonical_url(url)
+            for constraint in url_constraints
+            if (url := constraint.url) is not None
+        )
+        if len(set(constraint_urls)) > 1:
+            return None
+        requirement_url = requirement.url
         if (
-            requirement.url is not None
-            and url_constraints
-            and any(
-                canonical_url(requirement.url) != canonical_url(constraint.url)
-                for constraint in url_constraints
-            )
+            requirement_url is not None
+            and constraint_urls
+            and any(canonical_url(requirement_url) != url for url in constraint_urls)
         ):
             return None
         candidate_requirement = requirement
@@ -385,7 +388,7 @@ class NabProvider:
         return selected
 
     def has_satisfying_version(
-        self, package: str, version_range: Range[Version]
+        self, package: str, version_range: RangeProtocol[Version]
     ) -> bool:
         return any(
             version in version_range for version in self._eligible_versions(package)
@@ -591,7 +594,7 @@ class NabProvider:
     def prioritize(
         self,
         package: str,
-        version_range: Range[Version],
+        version_range: RangeProtocol[Version],
         conflict_counts: Mapping[str, int],
         culprit_counts: Mapping[str, int] | None = None,
     ) -> tuple[int, int, str]:
@@ -602,12 +605,12 @@ class NabProvider:
 
     def receive_partial_solution_hint(
         self,
-        positive_ranges: Mapping[str, Range[Version]],
+        positive_ranges: Mapping[str, RangeProtocol[Version]],
         decisions: Mapping[str, Version],
     ) -> None:
         return None
 
-    def consume_pending_clauses(self) -> list[object]:
+    def consume_pending_clauses(self) -> list[Incompatibility[str, Version]]:
         return []
 
     def consume_force_backtrack_targets(self) -> list[str]:
@@ -617,8 +620,8 @@ class NabProvider:
         return None
 
     def narrow_for_display(
-        self, package: str, constraint: Range[Version]
-    ) -> Range[Version]:
+        self, package: str, constraint: RangeProtocol[Version]
+    ) -> RangeProtocol[Version]:
         return constraint
 
     def add_root(self, requirement: Requirement) -> tuple[str, Range[Version]]:

@@ -186,7 +186,6 @@ def check_sidecar_matches_wheel(
         )
 
 
-
 def direct_url_from_link(
     link: Link,
     *,
@@ -221,7 +220,6 @@ def direct_url_from_link(
     if link.is_existing_dir:
         return DirectUrl(url=link.url, dir_info=DirInfo())
     return DirectUrl(url=link.url, archive_info=ArchiveInfo(hashes=link.hashes or None))
-
 
 
 def prepare_editable_source(
@@ -333,7 +331,6 @@ def prepare_editable_source(
                 f"{python_version} not in '{metadata.requires_python}'",
             )
     return source_path, direct_url, metadata
-
 
 
 class ReportItem:

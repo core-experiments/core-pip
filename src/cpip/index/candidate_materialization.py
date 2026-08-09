@@ -909,7 +909,9 @@ class CandidateMaterializer:
                     ):
                         path = os.path.join(path, candidate.link.subdirectory_fragment)
 
-                    with tempfile.TemporaryDirectory(prefix="cpip-metadata-") as temp_dir:
+                    with tempfile.TemporaryDirectory(
+                        prefix="cpip-metadata-"
+                    ) as temp_dir:
                         if candidate.link.kind is ArtifactKind.SDIST:
                             path = unpack_source_internal(path, temp_dir)
 

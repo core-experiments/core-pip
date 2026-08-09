@@ -62,7 +62,10 @@ from cpip.install.wheel_archive_cache import (
     prepare_cached_wheel,
     save_cached_install_plan,
 )
-from cpip.install.wheel_transaction import WheelInstaller, install_wheels_transactionally
+from cpip.install.wheel_transaction import (
+    WheelInstaller,
+    install_wheels_transactionally,
+)
 from cpip.platform.virtualenv import running_under_virtualenv
 from cpip.resolution.api import ResolutionEngine
 from cpip.resolution.input_requirements import install_req_from_line
@@ -74,10 +77,6 @@ if TYPE_CHECKING:
 
 INDEX_URL_OPTIONS = frozenset(("-i", "--index-url"))
 
-
-# ==============================================================================
-# Helper structures and classes
-# ==============================================================================
 
 @dataclass(frozen=True)
 class InstallRuntimeSetup:
@@ -138,10 +137,6 @@ class InstallOutcome:
             return
         self.report_items.append(ReportItem(**fields))
 
-
-# ==============================================================================
-# CLI Argument Normalization and Option Combinations
-# ==============================================================================
 
 def normalize_install_args(args: list[str], options: frozenset[str]) -> list[str]:
     normalized: list[str] = []
@@ -539,10 +534,6 @@ def prepare_install(args: list[str], parser: Any) -> PreparedInstall:
     )
 
 
-# ==============================================================================
-# Planning & Provider Logic
-# ==============================================================================
-
 def intersect_hashes(left: Hashes, right: Hashes) -> Hashes:
     return Hashes(
         {
@@ -682,10 +673,6 @@ def cached_remote_plan_key(
 
     return exact_install_plan_key(tuple(requirements), context)
 
-
-# ==============================================================================
-# Executing Installation
-# ==============================================================================
 
 def target_library_is_empty(target: InstallTarget) -> bool:
     seen: set[str] = set()
@@ -848,10 +835,6 @@ def report_install_summary(
         for item in outcome.installed:
             print(f"installed {item}")
 
-
-# ==============================================================================
-# Editable Handling
-# ==============================================================================
 
 def install_editables(
     execution: Any,
@@ -1036,10 +1019,6 @@ def install_editables(
             editable=True,
         )
 
-
-# ==============================================================================
-# Main Command Runner
-# ==============================================================================
 
 def run_install(args: list[str]) -> int:
     prepared = prepare_install(args, create_parser())

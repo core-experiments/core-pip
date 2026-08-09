@@ -14,8 +14,6 @@ from cpip.core.packaging import canonicalize_name, parse_requirement
 SHA256_PLACEHOLDER = "a" * 64
 METADATA_PLACEHOLDER = "b" * 64
 
-# Frozen requirement excerpts model the large, repeatedly reported resolver
-# workloads without making the default benchmark suite depend on PyPI uptime.
 REAL_WORLD_CORPORA = {
     "airflow": (
         "apache-airflow[postgres,redis]>=2.8,<3",

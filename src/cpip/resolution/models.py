@@ -13,7 +13,6 @@ if TYPE_CHECKING:
     from cpip.core.packaging import Requirement
 
 
-
 @dataclass(frozen=True, slots=True)
 class ResolutionConfig:
     """Complete policy and source configuration for one resolution."""
@@ -32,7 +31,6 @@ class ResolutionConfig:
     require_hashes: bool = False
     compute_source_hashes: bool = True
     upgrade_strategy: str = "only-if-needed"
-
 
 
 class RequirementInput(Protocol):
@@ -62,7 +60,6 @@ class RequirementInput(Protocol):
     def is_satisfied_by(self, candidate: object) -> bool: ...
 
 
-
 @dataclass(frozen=True, slots=True)
 class ResolvedRequirement:
     """A requirement satisfied by an already-installed distribution."""
@@ -80,7 +77,6 @@ class ResolutionResult:
     conflicts: tuple[str, ...] = ()
     satisfied: tuple[ResolvedRequirement, ...] = ()
     metrics: Mapping[str, int | float] = MappingProxyType({})
-
 
 
 def canonical_url(url: str) -> str:

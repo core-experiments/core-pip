@@ -418,9 +418,7 @@ def check_stderr(
 class CpipTestEnvironment(TestFileEnvironment):
     """A specialized TestFileEnvironment for testing cpip"""
 
-    #
-    # Attribute naming convention
-    # ---------------------------
+    # Attribute naming convention:
     #
     # Instances of this class have many attributes representing paths
     # in the filesystem.  To keep things straight, absolute paths have
@@ -1354,10 +1352,7 @@ class ScriptFactory(Protocol):
 
 CertFactory = Callable[[], str]
 
-# -------------------------------------------------------------------------
-# Accommodations for Windows path and URL changes in recent Python releases
-# -------------------------------------------------------------------------
-
+# Accommodations for Windows path and URL changes in recent Python releases.
 # Trailing slashes are now preserved on Windows, matching POSIX behaviour.
 # BPO: https://github.com/python/cpython/issues/126212
 does_pathname2url_preserve_trailing_slash = pathname2url("C:\\foo\\").endswith("/")

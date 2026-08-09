@@ -15,9 +15,7 @@ from __future__ import annotations
 import marshal
 import os
 import sys
-from collections.abc import Iterable, Sequence
 
-from cpip.cli.config import load_source_config
 from cpip.cli.lock_format import render_wheel_lock, write_lock_output
 from cpip.core.appdirs import configured_cache_dir
 from cpip.core.packaging import canonicalize_name
@@ -427,6 +425,7 @@ def run_lock(args: list[str]) -> int | None:
         return 0
 
     from cpip.resolution.api import ResolutionEngine
+
     plan = ResolutionEngine.resolve_wheelhouse(options.find_links, options.requirements)
     if plan is None:
         return None
@@ -439,6 +438,7 @@ def run_lock(args: list[str]) -> int | None:
         digest = (candidate.source_hashes or {}).get("sha256")
         if digest is None:
             import hashlib
+
             with open(candidate.path, "rb") as wheel_file:
                 digest = hashlib.sha256(wheel_file.read()).hexdigest()
         packages.append(
@@ -498,6 +498,7 @@ def run_before_startup(args: list[str]) -> tuple[int | None, bool]:
         return None, False
 
     import cpip.cli.fast_install as install
+
     if (
         "--quiet" in options
         and "--no-index" not in options
@@ -527,6 +528,7 @@ def run_install_after_startup(args: list[str]) -> int | None:
         return None
 
     import cpip.cli.fast_install as install
+
     return install.run(args[1:])
 
 

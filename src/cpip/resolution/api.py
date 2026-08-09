@@ -16,7 +16,7 @@ from cpip.resolution.models import (
     ResolutionResult,
     ResolutionConfig,
 )
-from cpip.resolution.nab_provider import NabProvider
+from cpip.resolution.nab_provider import InstalledCandidate, NabProvider
 from cpip.resolution.inputs import (
     coerce_requirements,
 )
@@ -89,9 +89,6 @@ class ResolutionEngine:
         | Iterable[InstallRequirement]
         | list[str],
     ) -> ResolutionResult:
-        # nab-resolver owns the search; cpip continues to own candidate
-        # discovery, metadata, and artifact materialization through the
-        # provider adapter.
         from cpip._vendor.nab_resolver.resolver import Resolver
 
         requirements = coerce_requirements(self, requirements_input)
@@ -146,12 +143,12 @@ class ResolutionEngine:
         satisfied = tuple(
             ResolvedRequirement(adapter.requirements[package], record.distribution)
             for package, record in selected_records
-            if getattr(record, "source_kind", None) == "installed"
+            if isinstance(record, InstalledCandidate)
         )
         candidates = tuple(
             record
             for _, record in selected_records
-            if getattr(record, "source_kind", None) != "installed"
+            if not isinstance(record, InstalledCandidate)
         )
         result = ResolutionResult(
             candidates=candidates,

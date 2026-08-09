@@ -13,8 +13,6 @@ from cpip_test_support import (
     create_test_package_with_setup,
 )
 
-# Build dependencies can be installed in a subprocess (default) or in process
-# (--use-feature=inprocess-build-deps); constraint handling must match for both.
 INSTALLER_ARGS = [
     pytest.param([], id="subprocess"),
     pytest.param(["--use-feature=inprocess-build-deps"], id="inprocess"),

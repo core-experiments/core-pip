@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import email.message
 import email.utils
+import enum
 import io
 import json
 import logging
@@ -33,7 +34,14 @@ logger = logging.getLogger(__name__)
 
 RETRY_STATUS_CODES = frozenset((500, 502, 503, 520, 527))
 
-_MISSING_CACHE_EXPIRY = object()
+
+class _MissingCacheExpiry(enum.Enum):
+    """Single-member enum so ``is not`` narrowing keeps the ``float | None`` type."""
+
+    TOKEN = enum.auto()
+
+
+_MISSING_CACHE_EXPIRY = _MissingCacheExpiry.TOKEN
 
 
 class HttpRequest:

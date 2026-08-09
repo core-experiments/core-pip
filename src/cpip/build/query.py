@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import string
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Collection, Iterable, Iterator, Mapping
 from email.parser import Parser
 from typing import TYPE_CHECKING, Any, NamedTuple
 
@@ -26,7 +26,6 @@ if TYPE_CHECKING:
 
 LatestInfo = Mapping[str, tuple[Any, str]]
 PackageSet = dict[str, "PackageDetails"]
-
 
 
 def normalize_project_url_label(label: str) -> str:
@@ -104,7 +103,6 @@ def iter_installed_package_info(
         )
 
 
-
 def select_installed_distributions(
     *,
     paths: list[str] | None = None,
@@ -114,7 +112,7 @@ def select_installed_distributions(
     include_editables: bool = True,
     excludes: Iterable[str] = (),
     not_required: bool = False,
-    skip: Iterable[str] = (),
+    skip: Collection[str] = (),
     user_site: str | None = None,
 ) -> list[InstalledMetadataDistribution]:
     """Return installed distributions after applying listing filters."""
@@ -261,7 +259,6 @@ def format_list_freeze(
         result.append(requirement)
 
     return result
-
 
 
 class PackageDetails:

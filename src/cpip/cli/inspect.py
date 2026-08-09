@@ -24,10 +24,6 @@ from cpip.core.target_python import get_supported as get_supported_tags
 from cpip.core.urls import path_to_url
 
 
-# ==============================================================================
-# cpip check
-# ==============================================================================
-
 def create_check_parser() -> ArgumentParser:
     return ArgumentParser(prog="cpip check")
 
@@ -88,10 +84,6 @@ def run_check(args: list[str]) -> int:
     return 1
 
 
-# ==============================================================================
-# cpip hash
-# ==============================================================================
-
 def create_hash_parser() -> ArgumentParser:
     parser = ArgumentParser(prog="cpip hash")
     parser.add_argument("files", nargs="+")
@@ -119,10 +111,6 @@ def run_hash(args: list[str]) -> int:
         )
     return 0
 
-
-# ==============================================================================
-# cpip show
-# ==============================================================================
 
 def create_show_parser() -> ArgumentParser:
     parser = ArgumentParser(prog="cpip show")
@@ -220,10 +208,6 @@ def run_show(args: list[str]) -> int:
 
     return 0
 
-
-# ==============================================================================
-# cpip inspect
-# ==============================================================================
 
 def create_inspect_parser() -> ArgumentParser:
     parser = ArgumentParser(prog="cpip inspect")
