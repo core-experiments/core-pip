@@ -246,9 +246,7 @@ def scan_resolver() -> tuple[Any, StubProvider]:
         [], IncompatibilityCause.DEPENDENCY
     )
     for package in ("alpha", "beta"):
-        resolver.solution.derive(
-            package, Range.full(), positive=True, cause=cause
-        )
+        resolver.solution.derive(package, Range.full(), positive=True, cause=cause)
     return resolver, stub
 
 
@@ -271,9 +269,7 @@ def test_a_moved_range_rebuilds_the_key() -> None:
     cause: Incompatibility[Any, Any] = Incompatibility(
         [], IncompatibilityCause.DEPENDENCY
     )
-    resolver.solution.derive(
-        "alpha", Range.at_least(5), positive=False, cause=cause
-    )
+    resolver.solution.derive("alpha", Range.at_least(5), positive=False, cause=cause)
     assert choose(resolver) == "beta"
 
 
@@ -323,9 +319,7 @@ def test_a_provider_without_the_method_rebuilds_every_key() -> None:
         stub.priorities["beta"] = -1
         assert choose(resolver) == "beta"
     finally:
-        StubProvider.consume_priority_invalidations = (
-            _ORIGINAL_CONSUME  # type: ignore[assignment]
-        )
+        StubProvider.consume_priority_invalidations = _ORIGINAL_CONSUME  # type: ignore[assignment]
 
 
 _ORIGINAL_CONSUME = StubProvider.consume_priority_invalidations

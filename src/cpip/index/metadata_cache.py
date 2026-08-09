@@ -7,7 +7,7 @@ import marshal
 import os
 import sqlite3
 import threading
-from typing import TypeAlias, cast
+from typing import TypeAlias
 
 MetadataHeaders: TypeAlias = dict[str, list[str]]
 MetadataIdentity: TypeAlias = tuple[str, int, int]
@@ -21,7 +21,15 @@ _CACHE_INSTANCES: dict[str, WheelMetadataCache] = {}
 class WheelMetadataCache:
     """Process-local metadata cache backed by an incremental SQLite database."""
 
-    __slots__ = ("_db_exists", "_pending_puts", "conn", "dirty", "entries", "lock", "path")
+    __slots__ = (
+        "_db_exists",
+        "_pending_puts",
+        "conn",
+        "dirty",
+        "entries",
+        "lock",
+        "path",
+    )
 
     def __init__(self, cache_dir: str | os.PathLike[str]) -> None:
         self.path = os.path.join(os.fspath(cache_dir), _CACHE_NAME)
@@ -170,7 +178,7 @@ class WheelMetadataCache:
     def flush(self) -> None:
         if not self.dirty:
             return
-        
+
         with self.lock:
             try:
                 # Batch insert/replace dirty entries

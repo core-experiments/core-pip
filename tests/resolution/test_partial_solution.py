@@ -120,7 +120,9 @@ def drive(seed: int, steps: int = 200) -> None:
             version = rng.choice(VERSIONS)
             positive = rng.random() < 0.5
             constraint = (
-                Range.at_least(version) if rng.random() < 0.5 else Range.less_than(version)
+                Range.at_least(version)
+                if rng.random() < 0.5
+                else Range.less_than(version)
             )
             solution.derive(package, constraint, positive=positive, cause=CAUSE)
         elif solution.decision_level > 0:
