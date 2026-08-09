@@ -58,6 +58,37 @@ class InstalledCandidate:
 _MIN_PINS_TO_DISAGREE = 2
 
 
+def _implied_range(specifier: SpecifierSet) -> Range[Version]:
+    """Widen a specifier to the interval that contains everything it admits.
+
+    ``bounds`` drops ``!=``, ``===`` and ``==X.*`` and reads ``~=`` as its
+    half-open interval, and it is blind to pre-release rules.  Every one of
+    those is a widening, which is the direction a rejection needs: an empty
+    intersection of intervals that each contain *more* than their specifier is
+    empty for the specifiers too.
+
+    Working in intervals rather than over the catalog also keeps the answer
+    independent of which releases the active policy happens to admit -- a
+    yanked-only release cannot turn a possible fan-out into a rejected one.
+    """
+    lower, upper = specifier.bounds()
+    result: Range[Version] = Range.full()
+
+    if lower is not None:
+        version, inclusive = lower
+        result = result & (
+            Range.at_least(version) if inclusive else Range.greater_than(version)
+        )
+
+    if upper is not None:
+        version, inclusive = upper
+        result = result & (
+            Range.at_most(version) if inclusive else Range.less_than(version)
+        )
+
+    return result
+
+
 def _exact_pin(requirement: Requirement) -> Version | None:
     """The single release a ``==`` requirement names, or None.
 
@@ -109,8 +140,6 @@ class NabProvider:
         # during a resolution, so none of these need invalidating.
         self._preflight_cache: dict[tuple[str, Version], bool] = {}
         self._catalog_candidate_cache: dict[str, dict[Version, object | None]] = {}
-        self._catalog_version_cache: dict[str, tuple[Version, ...]] = {}
-        self._domain_cache: dict[tuple[str, str], frozenset[Version]] = {}
         self._dependency_cache: dict[
             tuple[str, Version, tuple[str, ...]], Mapping[str, Range[Version]]
         ] = {}
@@ -466,7 +495,7 @@ class NabProvider:
         if len(pins) < _MIN_PINS_TO_DISAGREE:
             return False
 
-        domains: dict[str, frozenset[Version]] = {}
+        domains: dict[str, Range[Version]] = {}
 
         for dependency, pinned in pins:
             child = self._catalog_candidate(_key(dependency), pinned)
@@ -482,10 +511,10 @@ class NabProvider:
                     continue
 
                 name = _key(grandchild)
-                allowed = self._satisfying_versions(name, grandchild)
+                implied = _implied_range(grandchild.specifier)
                 narrowed = domains.get(name)
-                narrowed = allowed if narrowed is None else narrowed & allowed
-                if not narrowed:
+                narrowed = implied if narrowed is None else narrowed & implied
+                if narrowed.is_empty:
                     return True
                 domains[name] = narrowed
 
@@ -525,49 +554,6 @@ class NabProvider:
 
         self._catalog_candidate_cache[package] = index
         return index
-
-    def _satisfying_versions(
-        self,
-        package: str,
-        requirement: Requirement,
-    ) -> frozenset[Version]:
-        """Catalog releases of ``package`` that satisfy ``requirement``."""
-        cache_key = (package, str(requirement.specifier))
-        cached = self._domain_cache.get(cache_key)
-        if cached is not None:
-            return cached
-
-        specifier = requirement.specifier
-        domain = frozenset(
-            version
-            for version in self._catalog_versions(package)
-            if specifier.contains(version, allow_prereleases=True)
-        )
-        self._domain_cache[cache_key] = domain
-        return domain
-
-    def _catalog_versions(self, package: str) -> tuple[Version, ...]:
-        """Every release of ``package`` the sources offer.
-
-        Deliberately not ``_versions``, which answers for a package the
-        resolver already tracks; a pin can name one it has never seen.
-        """
-        cached = self._catalog_version_cache.get(package)
-        if cached is not None:
-            return cached
-
-        try:
-            versions = tuple(
-                summary.version
-                for summary in self.provider.available_versions(
-                    parse_requirement(package),
-                )
-            )
-        except Exception:
-            versions = ()
-
-        self._catalog_version_cache[package] = versions
-        return versions
 
     def _retry_including_yanked(
         self,
