@@ -23,9 +23,10 @@ from pathlib import Path
 
 import pytest
 from cpip.core.errors import ResolutionError
-from cpip.core.packaging import parse_requirement
+from cpip.core.packaging import Version, parse_requirement
 from cpip.index.provider import CandidateProvider
 from cpip.resolution.api import ResolutionEngine
+from cpip.resolution.models import ResolutionConfig
 from cpip.resolution.nab_provider import NabProvider, _exact_pin
 
 _BENCHMARKS = Path(__file__).resolve().parents[1] / "benchmarks"
@@ -174,6 +175,70 @@ def resolve_or_raise(wheelhouse: Path, roots: list[str]) -> None:
         ignore_installed=True,
     )
     engine.resolve(roots)
+
+
+def test_verdicts_are_not_reused_across_extras(tmp_path: Path) -> None:
+    """Extras gate which dependencies apply, so they must key the memo.
+
+    A verdict reached under narrower extras, reused after they widen, skips a
+    version that the wider set may well allow.
+    """
+    wheelhouse = tmp_path / "wheelhouse"
+    wheelhouse.mkdir()
+    make_wheel(wheelhouse, "app", "1.0.0")
+
+    provider = CandidateProvider.from_options(
+        find_links=[str(wheelhouse)],
+        no_index=True,
+    )
+    adapter = NabProvider(provider, ResolutionConfig(ignore_installed=True))
+    adapter.requirements["app"] = parse_requirement("app")
+
+    adapter._pins_are_impossible("app", Version("1.0.0"))
+    narrow = dict(adapter._preflight_cache)
+
+    adapter.requirements["app"] = parse_requirement("app[extra]")
+    adapter._pins_are_impossible("app", Version("1.0.0"))
+
+    assert len(adapter._preflight_cache) == len(narrow) + 1, (
+        "widening extras reused the earlier verdict"
+    )
+
+
+def test_unreadable_metadata_is_undecidable_not_fatal(tmp_path: Path) -> None:
+    """A release whose metadata will not load must not fail the resolution."""
+    wheelhouse = tmp_path / "wheelhouse"
+    wheelhouse.mkdir()
+    make_wheel(wheelhouse, "app", "1.0.0")
+
+    class Exploding:
+        version = Version("1.0.0")
+
+        @property
+        def dependencies(self) -> tuple[object, ...]:
+            raise OSError("metadata is unreachable")
+
+    provider = CandidateProvider.from_options(
+        find_links=[str(wheelhouse)],
+        no_index=True,
+    )
+    adapter = NabProvider(provider, ResolutionConfig(ignore_installed=True))
+    adapter.requirements["app"] = parse_requirement("app")
+    adapter._catalog_candidate_cache["app"] = {Version("1.0.0"): Exploding()}
+
+    assert adapter._pins_are_impossible("app", Version("1.0.0")) is False
+
+
+def test_malformed_requires_python_rejects_without_raising() -> None:
+    """The index provider treats bad metadata as incompatible; so must this."""
+
+    class BadMetadata:
+        requires_python = "not a specifier"
+
+    provider = CandidateProvider.from_options(no_index=True)
+    adapter = NabProvider(provider, ResolutionConfig(ignore_installed=True))
+
+    assert adapter._requires_python_rejects(BadMetadata()) is True
 
 
 @pytest.mark.parametrize(

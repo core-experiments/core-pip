@@ -58,6 +58,21 @@ class InstalledCandidate:
 _MIN_PINS_TO_DISAGREE = 2
 
 
+def _dependencies_or_none(candidate: object) -> tuple[Requirement, ...] | None:
+    """A candidate's dependencies, or None when its metadata will not load.
+
+    Reading ``dependencies`` is what pulls metadata, which for a source
+    artifact means a build and for a remote one a request.  The forward check
+    asks this of releases the resolver may never select, so a release with
+    broken or unreachable metadata must read as undecidable rather than take
+    the whole resolution down with it -- a different release may well resolve.
+    """
+    try:
+        return tuple(getattr(candidate, "dependencies", ()))
+    except Exception:
+        return None
+
+
 def _implied_range(specifier: SpecifierSet) -> Range[Version]:
     """Widen a specifier to the interval that contains everything it admits.
 
@@ -136,9 +151,11 @@ class NabProvider:
         self.display_requirements: dict[str, Requirement] = {}
         self._version_cache: dict[tuple[object, ...], tuple[Version, ...]] = {}
         self._installed_cache: dict[str, InstalledCandidate | None] = {}
-        # Forward-check memos. Keyed on catalog facts, which do not move
-        # during a resolution, so none of these need invalidating.
-        self._preflight_cache: dict[tuple[str, Version], bool] = {}
+        # Forward-check memos. The catalog ones are keyed on facts that do not
+        # move during a resolution. The verdict is not: it depends on the
+        # package's active extras, which widen as extras are merged, so those
+        # are part of its key.
+        self._preflight_cache: dict[tuple[str, Version, tuple[str, ...]], bool] = {}
         self._catalog_candidate_cache: dict[str, dict[Version, object | None]] = {}
         self._dependency_cache: dict[
             tuple[str, Version, tuple[str, ...]], Mapping[str, Range[Version]]
@@ -458,16 +475,25 @@ class NabProvider:
         provable emptiness -- two pins whose dependency requirements share a
         package but no version -- answers ``True``.
         """
-        cache_key = (package, version)
+        # Extras gate which dependencies apply, and merging one in widens the
+        # set. A verdict reached under narrower extras must not be reused
+        # after they grow, or a viable version gets skipped.
+        extras = tuple(sorted(self.requirements[package].extras))
+        cache_key = (package, version, extras)
         cached = self._preflight_cache.get(cache_key)
         if cached is not None:
             return cached
 
-        verdict = self._compute_pins_are_impossible(package, version)
+        verdict = self._compute_pins_are_impossible(package, version, extras)
         self._preflight_cache[cache_key] = verdict
         return verdict
 
-    def _compute_pins_are_impossible(self, package: str, version: Version) -> bool:
+    def _compute_pins_are_impossible(
+        self,
+        package: str,
+        version: Version,
+        extras: tuple[str, ...],
+    ) -> bool:
         if not isinstance(self.provider, CandidateProvider):
             return False
 
@@ -475,13 +501,15 @@ class NabProvider:
         if candidate is None:
             return False
 
-        extras = self.requirements[package].extras
-
         # Two pins are the minimum that can disagree, so count them before
         # reading any child metadata. Requirements are already parsed, making
         # this the cheap half of the check and the common exit.
+        dependencies = _dependencies_or_none(candidate)
+        if dependencies is None:
+            return False
+
         pins: list[tuple[Requirement, Version]] = []
-        for dependency in getattr(candidate, "dependencies", ()):
+        for dependency in dependencies:
             if not marker_applies(dependency.marker, extras=extras):
                 continue
             if dependency.url is not None:
@@ -504,7 +532,11 @@ class NabProvider:
                 # resolver reports that far better than a silent skip would.
                 return False
 
-            for grandchild in getattr(child, "dependencies", ()):
+            grandchildren = _dependencies_or_none(child)
+            if grandchildren is None:
+                return False
+
+            for grandchild in grandchildren:
                 if not marker_applies(grandchild.marker, extras=dependency.extras):
                     continue
                 if grandchild.url is not None:
@@ -613,12 +645,19 @@ class NabProvider:
         declaration then says nothing about the target.
         """
         requires_python = getattr(candidate, "requires_python", None)
-        return bool(
-            not self.ignore_requires_python
-            and self.python_version is None
-            and requires_python
-            and not CandidateEvaluator.requires_python_matches(requires_python),
-        )
+        if (
+            self.ignore_requires_python
+            or self.python_version is not None
+            or not requires_python
+        ):
+            return False
+
+        try:
+            return not CandidateEvaluator.requires_python_matches(requires_python)
+        except ValueError:
+            # An unparseable declaration is a rejection, not a crash --
+            # matching how available_versions treats the same metadata.
+            return True
 
     def _alternative_for_requires_python(
         self,
