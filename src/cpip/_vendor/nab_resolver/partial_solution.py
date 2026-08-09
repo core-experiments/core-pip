@@ -244,8 +244,6 @@ class PartialSolution(Generic[PackageType, VersionType]):
             entries = self._assignments_by_package.get(package)
             if entries:
                 entries.pop()
-                if assignment.is_decision:
-                    self._decided_versions.pop(package, None)
 
         self._decision_level = target_level
 
@@ -270,7 +268,17 @@ class PartialSolution(Generic[PackageType, VersionType]):
                 else:
                     self._negative_ranges[package] = last_entry.cum_negative
                 
-                if last_entry.cum_positive is not None and package not in self._decided_versions:
+                last_decision_version = None
+                for assignment in entries:
+                    if assignment.is_decision:
+                        last_decision_version = assignment.version
+                
+                if last_decision_version is None:
+                    self._decided_versions.pop(package, None)
+                else:
+                    self._decided_versions[package] = last_decision_version
+                
+                if last_entry.cum_positive is not None and last_decision_version is None:
                     self._undecided.add(package)
                 else:
                     self._undecided.discard(package)
