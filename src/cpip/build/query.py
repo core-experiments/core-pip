@@ -6,23 +6,19 @@ import json
 import string
 from collections.abc import Collection, Iterable, Iterator, Mapping
 from email.parser import Parser
-from typing import TYPE_CHECKING, Any, NamedTuple
+from typing import Any, NamedTuple
 
 from cpip.core.cpip_version import CPIP_DISTRIBUTION_NAMES
 from cpip.core.packaging import (
     Requirement,
     Version,
     canonicalize_name,
-    default_environment,
     marker_applies,
     parse_requirement,
 )
 from cpip.core.wheel import WheelTag, wheel_tag_rank
 
 from .metadata import InstalledDistributionStore, InstalledMetadataDistribution
-
-if TYPE_CHECKING:
-    pass
 
 LatestInfo = Mapping[str, tuple[Any, str]]
 PackageSet = dict[str, "PackageDetails"]
@@ -88,7 +84,11 @@ def iter_installed_package_info(
         homepage = dist.metadata.get("Home-page", "")
         if not homepage:
             for project_url in project_urls:
-                label, url = project_url.split(",", maxsplit=1)
+                # A third-party wheel can ship a Project-URL with no comma;
+                # that is malformed, not a reason for ``cpip show`` to fail.
+                label, separator, url = project_url.partition(",")
+                if not separator:
+                    continue
                 if normalize_project_url_label(label) == "homepage":
                     homepage = url.strip()
                     break
@@ -262,11 +262,19 @@ def format_list_freeze(
 
 
 class PackageDetails:
+    """One installed distribution as :func:`check_package_set` sees it.
+
+    ``version`` is ``None`` when the installed metadata carries a version that
+    is not PEP 440.  Such a distribution is still installed, so it must stay in
+    the set -- dropping it would report every dependent as missing it -- but
+    nothing can be compared against it.
+    """
+
     __slots__ = ("dependencies", "requested_extras", "version")
 
     def __init__(
         self,
-        version: Version,
+        version: Version | None,
         dependencies: tuple[Requirement, ...],
         requested_extras: frozenset[str] = frozenset(),
     ) -> None:
@@ -277,7 +285,7 @@ class PackageDetails:
     @classmethod
     def from_dependencies(
         cls,
-        version: Version,
+        version: Version | None,
         dependencies: list[Requirement],
         requested_extras: frozenset[str] = frozenset(),
     ) -> PackageDetails:
@@ -285,22 +293,7 @@ class PackageDetails:
 
 
 def marker_allows(requirement: Requirement, requested_extras: frozenset[str]) -> bool:
-    if not requirement.marker:
-        return True
-    if not requested_extras:
-        return evaluate_marker(requirement.marker, "")
-    return any(evaluate_marker(requirement.marker, extra) for extra in requested_extras)
-
-
-def evaluate_marker(marker: str, extra: str) -> bool:
-    text = marker.strip()
-    if text.startswith("extra !="):
-        value = text.split("!=", 1)[1].strip().strip("\"'")
-        return default_environment(extra)["extra"] != value
-    if text.startswith("extra =="):
-        value = text.split("==", 1)[1].strip().strip("\"'")
-        return default_environment(extra)["extra"] == value
-    return True
+    return marker_applies(requirement.marker, extras=requested_extras)
 
 
 def check_package_set(
@@ -319,6 +312,10 @@ def check_package_set(
             dependency = package_set.get(canonical)
             if dependency is None:
                 missing.setdefault(name, []).append((canonical, requirement))
+                continue
+            if dependency.version is None:
+                # Installed, but with a version no specifier can be compared
+                # against. Reporting a conflict would be a guess.
                 continue
             if not requirement.is_satisfied_by(dependency.version):
                 conflicting.setdefault(name, []).append(
@@ -358,13 +355,22 @@ def package_set_from_dependencies(
     Callers pass the dependency map separately because the install command
     reuses it to index dependents; ``cpip check`` does not.
     """
-    return {
-        dist.canonical_name: PackageDetails.from_dependencies(
-            Version(dist.raw_version),
+    package_set: PackageSet = {}
+
+    for dist in distributions:
+        try:
+            version = Version(dist.raw_version)
+        except ValueError:
+            # A legacy or vendor-patched distribution can carry a non-PEP 440
+            # version. It is still installed, so keep it in the set.
+            version = None
+
+        package_set[dist.canonical_name] = PackageDetails.from_dependencies(
+            version,
             dependencies_by_name[dist.canonical_name],
         )
-        for dist in distributions
-    }
+
+    return package_set
 
 
 def metadata_errors(

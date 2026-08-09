@@ -439,8 +439,14 @@ def run_lock(args: list[str]) -> int | None:
         if digest is None:
             import hashlib
 
-            with open(candidate.path, "rb") as wheel_file:
-                digest = hashlib.sha256(wheel_file.read()).hexdigest()
+            try:
+                with open(candidate.path, "rb") as wheel_file:
+                    digest = hashlib.sha256(wheel_file.read()).hexdigest()
+            except OSError:
+                # A wheel that vanished or became unreadable after resolution
+                # is a fast-path miss, not a reason to fail the command:
+                # normal lock handling still gets its turn.
+                return None
         packages.append(
             (
                 candidate.name,
