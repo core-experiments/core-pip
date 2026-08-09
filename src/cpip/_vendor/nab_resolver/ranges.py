@@ -388,10 +388,84 @@ class Range(Generic[VersionType]):
         return Range(tuple(result))
 
     def __sub__(self, other: object) -> Range[VersionType]:
-        """Set difference: versions in self but not in other."""
+        """Set difference: versions in self but not in other.
+
+        Carves each of this range's intervals directly, rather than building
+        the complement of ``other`` and intersecting with it.  Conflict
+        analysis subtracts on every probe of the assignment trail, so the
+        intermediate complement was pure allocation.
+        """
         if not isinstance(other, Range):
             return NotImplemented
-        return self & ~other
+
+        right_intervals = other._intervals
+        right_count = len(right_intervals)
+        result: list[Interval] = []
+        right_index = 0
+
+        for left in self._intervals:
+            lower, lower_inclusive, upper, upper_inclusive = left
+
+            # Retire right intervals that finish below this one; they cannot
+            # touch it or anything after it.
+            while right_index < right_count and _ends_before(
+                right_intervals[right_index], left
+            ):
+                right_index += 1
+
+            exhausted = False
+            scan = right_index
+
+            while scan < right_count:
+                remainder = (lower, lower_inclusive, upper, upper_inclusive)
+                right = right_intervals[scan]
+                if _ends_before(remainder, right):
+                    break
+
+                right_lower, right_lower_inclusive, right_upper, right_upper_inc = right
+
+                # Keep the part of the remainder below this right interval.
+                if right_lower is not NEGATIVE_INFINITY and not _interval_is_empty(
+                    lower,
+                    lower_inclusive=lower_inclusive,
+                    upper=right_lower,
+                    upper_inclusive=not right_lower_inclusive,
+                ):
+                    result.append(
+                        (
+                            lower,
+                            lower_inclusive,
+                            right_lower,
+                            not right_lower_inclusive,
+                        ),
+                    )
+
+                if right_upper is POSITIVE_INFINITY:
+                    exhausted = True
+                    break
+
+                # Resume above this right interval.
+                lower, lower_inclusive = right_upper, not right_upper_inc
+                if _interval_is_empty(
+                    lower,
+                    lower_inclusive=lower_inclusive,
+                    upper=upper,
+                    upper_inclusive=upper_inclusive,
+                ):
+                    exhausted = True
+                    break
+
+                scan += 1
+
+            if not exhausted and not _interval_is_empty(
+                lower,
+                lower_inclusive=lower_inclusive,
+                upper=upper,
+                upper_inclusive=upper_inclusive,
+            ):
+                result.append((lower, lower_inclusive, upper, upper_inclusive))
+
+        return Range(tuple(result))
 
     def is_subset(self, other: Range[VersionType]) -> bool:
         """Return whether every version in self is also in other.

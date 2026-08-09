@@ -166,3 +166,16 @@ def test_hash_is_stable_and_matches_equality() -> None:
     assert left == right
     assert hash(left) == hash(right)
     assert hash(left) == hash(left)
+
+
+@pytest.mark.parametrize("seed", range(12))
+def test_difference_matches_complement_and_intersect(seed: int) -> None:
+    """``a - b`` carves intervals directly; it must equal ``a & ~b``."""
+
+    rng = random.Random(seed + 100)
+
+    for _ in range(300):
+        left, right = random_range(rng), random_range(rng)
+
+        assert (left - right)._intervals == (left & ~right)._intervals
+        assert members(left - right) == members(left) - members(right)
