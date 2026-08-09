@@ -18,6 +18,8 @@ import os
 import shutil
 import stat
 import sys
+from collections.abc import Callable
+from typing import cast
 
 _FICLONE = 0x40049409
 
@@ -55,8 +57,10 @@ def _darwin_clone(source: str, destination: str) -> bool:
     if function is None:
         return False
 
+    function = cast("Callable[[bytes, bytes, int], int]", function)
+
     if (
-        function(  # ty: ignore[call-non-callable]
+        function(
             os.fsencode(source),
             os.fsencode(destination),
             0,
