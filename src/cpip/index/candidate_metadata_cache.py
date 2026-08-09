@@ -7,6 +7,7 @@ import json
 import marshal
 import os
 import sqlite3
+import threading
 from typing import cast
 
 from cpip.core.utils import load_snapshot
@@ -27,23 +28,25 @@ class CandidateMetadataCache:
     """Process-local metadata cache backed by an incremental SQLite database."""
 
     __slots__ = (
+        "_pending_puts",
+        "_pending_req_states",
+        "_pending_ver_states",
+        "conn",
         "decoded",
         "decoded_requirements",
         "dirty",
         "entries",
+        "lock",
         "path",
         "requirement_states",
         "validated",
         "version_states",
-        "conn",
-        "_pending_puts",
-        "_pending_req_states",
-        "_pending_ver_states",
     )
 
     def __init__(self, cache_dir: str | os.PathLike[str]) -> None:
         self.path = os.path.join(os.fspath(cache_dir), NAME)
         os.makedirs(os.path.dirname(self.path), exist_ok=True)
+        self.lock = threading.RLock()
         
         self.entries: dict[CacheKey, CacheValue] = {}
         self.decoded: dict[CacheKey, CandidateMetadata] = {}
@@ -72,19 +75,20 @@ class CandidateMetadataCache:
             except Exception:
                 pass
                 
-        if legacy_payload is not None:
-            # It's a legacy marshal file. Rename it so we can create SQLite database.
-            temp_path = self.path + ".migration"
-            try:
-                os.rename(self.path, temp_path)
+        with self.lock:
+            if legacy_payload is not None:
+                # It's a legacy marshal file. Rename it so we can create SQLite database.
+                temp_path = self.path + ".migration"
+                try:
+                    os.rename(self.path, temp_path)
+                    self._init_sqlite()
+                    self.migrate_payload(legacy_payload)
+                    os.remove(temp_path)
+                except Exception:
+                    # If migration fails, try to clean up and init fresh
+                    self._init_sqlite()
+            else:
                 self._init_sqlite()
-                self.migrate_payload(legacy_payload)
-                os.remove(temp_path)
-            except Exception:
-                # If migration fails, try to clean up and init fresh
-                self._init_sqlite()
-        else:
-            self._init_sqlite()
         
         # Run other legacy migrations if SQLite is still empty
         self.load_other_legacy()
@@ -92,7 +96,7 @@ class CandidateMetadataCache:
 
     def _init_sqlite(self) -> None:
         try:
-            self.conn = sqlite3.connect(self.path)
+            self.conn = sqlite3.connect(self.path, check_same_thread=False)
             self.conn.execute("PRAGMA journal_mode=WAL")
             self.conn.execute("PRAGMA busy_timeout=5000")
             self.conn.execute(
@@ -112,7 +116,7 @@ class CandidateMetadataCache:
                 os.remove(self.path)
             except OSError:
                 pass
-            self.conn = sqlite3.connect(self.path)
+            self.conn = sqlite3.connect(self.path, check_same_thread=False)
             self.conn.execute("PRAGMA journal_mode=WAL")
             self.conn.execute("PRAGMA busy_timeout=5000")
             self.conn.execute(
@@ -209,12 +213,16 @@ class CandidateMetadataCache:
         value = self.entries.get(key)
         if value is None:
             # Query SQLite
-            try:
-                row = self.conn.execute(
-                    "SELECT value FROM candidate_metadata WHERE key = ?",
-                    (json.dumps(key),),
-                ).fetchone()
-                if row is not None:
+            with self.lock:
+                try:
+                    row = self.conn.execute(
+                        "SELECT value FROM candidate_metadata WHERE key = ?",
+                        (json.dumps(key),),
+                    ).fetchone()
+                except sqlite3.Error:
+                    row = None
+            if row is not None:
+                try:
                     value = marshal.loads(row[0])
                     if self.valid_value(value):
                         if len(self.entries) >= MAX_ENTRIES:
@@ -223,8 +231,8 @@ class CandidateMetadataCache:
                             self.decoded.pop(evicted, None)
                             self.validated.discard(evicted)
                         self.entries[key] = value
-            except Exception:
-                pass
+                except Exception:
+                    pass
 
         if value is None or (key not in self.validated and not self.valid_value(value)):
             if value is not None:
@@ -268,16 +276,20 @@ class CandidateMetadataCache:
         state = self.requirement_states.get(raw)
         if state is None:
             # Query SQLite
-            try:
-                row = self.conn.execute(
-                    "SELECT state FROM requirement_states WHERE raw = ?",
-                    (raw,),
-                ).fetchone()
-                if row is not None:
+            with self.lock:
+                try:
+                    row = self.conn.execute(
+                        "SELECT state FROM requirement_states WHERE raw = ?",
+                        (raw,),
+                    ).fetchone()
+                except sqlite3.Error:
+                    row = None
+            if row is not None:
+                try:
                     state = marshal.loads(row[0])
                     self.requirement_states[raw] = state
-            except Exception:
-                pass
+                except Exception:
+                    pass
 
         if state is not None:
             try:
@@ -304,16 +316,20 @@ class CandidateMetadataCache:
         state = self.version_states.get(raw)
         if state is None:
             # Query SQLite
-            try:
-                row = self.conn.execute(
-                    "SELECT state FROM version_states WHERE raw = ?",
-                    (raw,),
-                ).fetchone()
-                if row is not None:
+            with self.lock:
+                try:
+                    row = self.conn.execute(
+                        "SELECT state FROM version_states WHERE raw = ?",
+                        (raw,),
+                    ).fetchone()
+                except sqlite3.Error:
+                    row = None
+            if row is not None:
+                try:
                     state = marshal.loads(row[0])
                     self.version_states[raw] = state
-            except Exception:
-                pass
+                except Exception:
+                    pass
 
         if state is not None:
             try:
@@ -339,12 +355,16 @@ class CandidateMetadataCache:
         value = self.entries.get(key)
         if value is None:
             # Query SQLite
-            try:
-                row = self.conn.execute(
-                    "SELECT value FROM candidate_metadata WHERE key = ?",
-                    (json.dumps(key),),
-                ).fetchone()
-                if row is not None:
+            with self.lock:
+                try:
+                    row = self.conn.execute(
+                        "SELECT value FROM candidate_metadata WHERE key = ?",
+                        (json.dumps(key),),
+                    ).fetchone()
+                except sqlite3.Error:
+                    row = None
+            if row is not None:
+                try:
                     value = marshal.loads(row[0])
                     if self.valid_value(value):
                         if len(self.entries) >= MAX_ENTRIES:
@@ -353,8 +373,8 @@ class CandidateMetadataCache:
                             self.decoded.pop(evicted, None)
                             self.validated.discard(evicted)
                         self.entries[key] = value
-            except Exception:
-                pass
+                except Exception:
+                    pass
                 
         if value is None:
             return False
@@ -404,56 +424,58 @@ class CandidateMetadataCache:
         if not self.dirty:
             return
         
-        try:
-            # Batch insert pending candidate metadata
-            items = [
-                (json.dumps(k), marshal.dumps(v))
-                for k, v in self._pending_puts.items()
-                if self.valid_key(k) and self.valid_value(v)
-            ]
-            if items:
-                self.conn.executemany(
-                    "INSERT OR REPLACE INTO candidate_metadata (key, value) VALUES (?, ?)",
-                    items,
-                )
-            
-            # Batch insert pending requirement states
-            req_items = [
-                (raw, marshal.dumps(state))
-                for raw, state in self._pending_req_states.items()
-            ]
-            if req_items:
-                self.conn.executemany(
-                    "INSERT OR REPLACE INTO requirement_states (raw, state) VALUES (?, ?)",
-                    req_items,
-                )
-                
-            # Batch insert pending version states
-            ver_items = [
-                (raw, marshal.dumps(state))
-                for raw, state in self._pending_ver_states.items()
-            ]
-            if ver_items:
-                self.conn.executemany(
-                    "INSERT OR REPLACE INTO version_states (raw, state) VALUES (?, ?)",
-                    ver_items,
-                )
-                
-            self.conn.commit()
-            self._pending_puts.clear()
-            self._pending_req_states.clear()
-            self._pending_ver_states.clear()
-            self.dirty = False
-        except (sqlite3.Error, ValueError, TypeError):
+        with self.lock:
             try:
-                self.conn.rollback()
-            except sqlite3.Error:
-                pass
+                # Batch insert pending candidate metadata
+                items = [
+                    (json.dumps(k), marshal.dumps(v))
+                    for k, v in self._pending_puts.items()
+                    if self.valid_key(k) and self.valid_value(v)
+                ]
+                if items:
+                    self.conn.executemany(
+                        "INSERT OR REPLACE INTO candidate_metadata (key, value) VALUES (?, ?)",
+                        items,
+                    )
+                
+                # Batch insert pending requirement states
+                req_items = [
+                    (raw, marshal.dumps(state))
+                    for raw, state in self._pending_req_states.items()
+                ]
+                if req_items:
+                    self.conn.executemany(
+                        "INSERT OR REPLACE INTO requirement_states (raw, state) VALUES (?, ?)",
+                        req_items,
+                    )
+                    
+                # Batch insert pending version states
+                ver_items = [
+                    (raw, marshal.dumps(state))
+                    for raw, state in self._pending_ver_states.items()
+                ]
+                if ver_items:
+                    self.conn.executemany(
+                        "INSERT OR REPLACE INTO version_states (raw, state) VALUES (?, ?)",
+                        ver_items,
+                    )
+                    
+                self.conn.commit()
+                self._pending_puts.clear()
+                self._pending_req_states.clear()
+                self._pending_ver_states.clear()
+                self.dirty = False
+            except (sqlite3.Error, ValueError, TypeError):
+                try:
+                    self.conn.rollback()
+                except sqlite3.Error:
+                    pass
 
     def __del__(self) -> None:
         try:
             self.flush()
-            self.conn.close()
+            with self.lock:
+                self.conn.close()
         except Exception:
             pass
 

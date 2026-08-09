@@ -6,6 +6,7 @@ import atexit
 import marshal
 import os
 import sqlite3
+import threading
 from typing import TypeAlias, cast
 
 MetadataHeaders: TypeAlias = dict[str, list[str]]
@@ -20,35 +21,37 @@ _CACHE_INSTANCES: dict[str, WheelMetadataCache] = {}
 class WheelMetadataCache:
     """Process-local metadata cache backed by an incremental SQLite database."""
 
-    __slots__ = ("dirty", "entries", "path", "conn", "_pending_puts")
+    __slots__ = ("_pending_puts", "conn", "dirty", "entries", "lock", "path")
 
     def __init__(self, cache_dir: str | os.PathLike[str]) -> None:
         self.path = os.path.join(os.fspath(cache_dir), _CACHE_NAME)
         # Create directories if they do not exist
         os.makedirs(os.path.dirname(self.path), exist_ok=True)
+        self.lock = threading.RLock()
         
-        try:
-            self.conn = sqlite3.connect(self.path)
-            self.conn.execute("PRAGMA journal_mode=WAL")
-            self.conn.execute("PRAGMA busy_timeout=5000")
-            self.conn.execute(
-                "CREATE TABLE IF NOT EXISTS metadata ("
-                "path TEXT, size INTEGER, mtime INTEGER, headers BLOB, "
-                "PRIMARY KEY (path, size, mtime))"
-            )
-        except sqlite3.Error:
+        with self.lock:
             try:
-                os.remove(self.path)
-            except OSError:
-                pass
-            self.conn = sqlite3.connect(self.path)
-            self.conn.execute("PRAGMA journal_mode=WAL")
-            self.conn.execute("PRAGMA busy_timeout=5000")
-            self.conn.execute(
-                "CREATE TABLE IF NOT EXISTS metadata ("
-                "path TEXT, size INTEGER, mtime INTEGER, headers BLOB, "
-                "PRIMARY KEY (path, size, mtime))"
-            )
+                self.conn = sqlite3.connect(self.path, check_same_thread=False)
+                self.conn.execute("PRAGMA journal_mode=WAL")
+                self.conn.execute("PRAGMA busy_timeout=5000")
+                self.conn.execute(
+                    "CREATE TABLE IF NOT EXISTS metadata ("
+                    "path TEXT, size INTEGER, mtime INTEGER, headers BLOB, "
+                    "PRIMARY KEY (path, size, mtime))"
+                )
+            except sqlite3.Error:
+                try:
+                    os.remove(self.path)
+                except OSError:
+                    pass
+                self.conn = sqlite3.connect(self.path, check_same_thread=False)
+                self.conn.execute("PRAGMA journal_mode=WAL")
+                self.conn.execute("PRAGMA busy_timeout=5000")
+                self.conn.execute(
+                    "CREATE TABLE IF NOT EXISTS metadata ("
+                    "path TEXT, size INTEGER, mtime INTEGER, headers BLOB, "
+                    "PRIMARY KEY (path, size, mtime))"
+                )
         
         self.entries: dict[MetadataIdentity, MetadataHeaders] = {}
         self._pending_puts: dict[MetadataIdentity, MetadataHeaders] = {}
@@ -82,11 +85,15 @@ class WheelMetadataCache:
         value = self.entries.get(identity)
         if value is None:
             # Query SQLite
-            cursor = self.conn.execute(
-                "SELECT headers FROM metadata WHERE path = ? AND size = ? AND mtime = ?",
-                identity,
-            )
-            row = cursor.fetchone()
+            with self.lock:
+                try:
+                    cursor = self.conn.execute(
+                        "SELECT headers FROM metadata WHERE path = ? AND size = ? AND mtime = ?",
+                        identity,
+                    )
+                    row = cursor.fetchone()
+                except sqlite3.Error:
+                    row = None
             if row is not None:
                 try:
                     value = marshal.loads(row[0])
@@ -108,11 +115,15 @@ class WheelMetadataCache:
         value = self.entries.get(identity)
         if value is None:
             # Query SQLite
-            cursor = self.conn.execute(
-                "SELECT headers FROM metadata WHERE path = ? AND size = ? AND mtime = ?",
-                identity,
-            )
-            row = cursor.fetchone()
+            with self.lock:
+                try:
+                    cursor = self.conn.execute(
+                        "SELECT headers FROM metadata WHERE path = ? AND size = ? AND mtime = ?",
+                        identity,
+                    )
+                    row = cursor.fetchone()
+                except sqlite3.Error:
+                    row = None
             if row is not None:
                 try:
                     value = marshal.loads(row[0])
@@ -148,29 +159,31 @@ class WheelMetadataCache:
         if not self.dirty:
             return
         
-        try:
-            # Batch insert/replace dirty entries
-            items = [
-                (identity[0], identity[1], identity[2], marshal.dumps(headers))
-                for identity, headers in self._pending_puts.items()
-            ]
-            self.conn.executemany(
-                "INSERT OR REPLACE INTO metadata (path, size, mtime, headers) VALUES (?, ?, ?, ?)",
-                items,
-            )
-            self.conn.commit()
-            self._pending_puts.clear()
-            self.dirty = False
-        except (sqlite3.Error, ValueError, TypeError):
+        with self.lock:
             try:
-                self.conn.rollback()
-            except sqlite3.Error:
-                pass
+                # Batch insert/replace dirty entries
+                items = [
+                    (identity[0], identity[1], identity[2], marshal.dumps(headers))
+                    for identity, headers in self._pending_puts.items()
+                ]
+                self.conn.executemany(
+                    "INSERT OR REPLACE INTO metadata (path, size, mtime, headers) VALUES (?, ?, ?, ?)",
+                    items,
+                )
+                self.conn.commit()
+                self._pending_puts.clear()
+                self.dirty = False
+            except (sqlite3.Error, ValueError, TypeError):
+                try:
+                    self.conn.rollback()
+                except sqlite3.Error:
+                    pass
 
     def __del__(self) -> None:
         try:
             self.flush()
-            self.conn.close()
+            with self.lock:
+                self.conn.close()
         except Exception:
             pass
 
