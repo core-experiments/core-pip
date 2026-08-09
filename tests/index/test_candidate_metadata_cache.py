@@ -47,6 +47,29 @@ def test_candidate_metadata_cache_roundtrip(tmp_path: Path) -> None:
     assert "1.2.3" in cache.version_states
 
 
+def test_candidate_metadata_cache_defers_database_creation(tmp_path: Path) -> None:
+    """A resolve that only misses must not pay to create the database."""
+    key = ("https://example.test/cold.whl", "1", (), "sha256:cold")
+
+    cache = CandidateMetadataCache(tmp_path)
+    assert not cache.contains(key)
+    assert cache.get(key) is None
+    assert not (tmp_path / NAME).exists()
+
+    cache.put(
+        key,
+        CandidateMetadata(
+            name="cold",
+            version=Version("1"),
+            dependencies=(),
+            provided_extras=frozenset(),
+            requires_python=None,
+        ),
+    )
+    cache.flush()
+    assert (tmp_path / NAME).is_file()
+
+
 def test_candidate_metadata_cache_validates_entries_lazily(tmp_path: Path) -> None:
     valid_key = ("https://example.test/valid.whl", "1", (), "sha256:valid")
     invalid_key = ("https://example.test/invalid.whl", "1", (), "sha256:bad")

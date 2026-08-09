@@ -14,6 +14,7 @@ def make_wheel(
     version: str,
     *,
     requires: list[str] | None = None,
+    wheel_version: str = "1.0",
 ) -> Path:
     dist = project.replace("-", "_")
     wheel = wheelhouse / f"{dist}-{version}-py3-none-any.whl"
@@ -29,7 +30,7 @@ def make_wheel(
             f"{requires_metadata}"
         ),
         f"{dist}-{version}.dist-info/WHEEL": (
-            "Wheel-Version: 1.0\n"
+            f"Wheel-Version: {wheel_version}\n"
             "Generator: test\n"
             "Root-Is-Purelib: true\n"
             "Tag: py3-none-any\n"

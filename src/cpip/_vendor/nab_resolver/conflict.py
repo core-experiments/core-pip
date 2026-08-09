@@ -477,6 +477,9 @@ def maybe_restart(
     resolver.solution = PartialSolution(range_type=resolver.range_type)
     resolver.solution.decide(ROOT, resolver.root_version)
     resolver.pending_targeted_backtrack.clear()
+    # Every range the cached sort keys were built from is gone with the old
+    # partial solution, and the new one has nothing to report as touched.
+    resolver.priority_keys.clear()
     resolver.stats.targeted_backtracks = 0
 
     return restart_threshold * 2, restarts_remaining - 1, True

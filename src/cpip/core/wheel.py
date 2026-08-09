@@ -28,6 +28,7 @@ from .wheel_metadata import (
 
 if TYPE_CHECKING:
     from email.message import Message
+    from typing import NoReturn
 
 
 class PureWheelCandidate:
@@ -158,6 +159,7 @@ class WheelCandidate(PureWheelCandidate):
 class WheelTag:
     __slots__ = (
         "_abi_lower",
+        "_hash",
         "_interpreter_lower",
         "_platform_lower",
         "_platform_parts",
@@ -167,32 +169,72 @@ class WheelTag:
     )
 
     def __init__(self, interpreter: str, abi: str, platform: str) -> None:
-        self.interpreter = interpreter
+        # Written through object.__setattr__ because __setattr__ below refuses
+        # every assignment: a tag lives in sets and dictionary keys, and both
+        # the cached hash and the cached lowercase forms would go stale if one
+        # were rewritten in place.
+        setter = object.__setattr__
 
-        self.abi = abi
+        setter(self, "interpreter", interpreter)
 
-        self.platform = platform
+        setter(self, "abi", abi)
 
-        self._interpreter_lower = interpreter.lower()
+        setter(self, "platform", platform)
 
-        self._abi_lower = abi.lower()
+        setter(self, "_interpreter_lower", interpreter.lower())
 
-        self._platform_lower = platform.lower()
+        setter(self, "_abi_lower", abi.lower())
 
-        if self._platform_lower.startswith(("macosx_", "android_")):
-            self._platform_parts = tuple(self._platform_lower.split("_", 3))
+        platform_lower = platform.lower()
 
-        elif self._platform_lower.startswith("ios_"):
-            self._platform_parts = tuple(self._platform_lower.split("_", 4))
+        setter(self, "_platform_lower", platform_lower)
+
+        # Tags are hashed far more often than they are built -- ranking one
+        # wheel re-hashes the whole supported-tag tuple to probe
+        # wheel_tag_rank's cache, so this runs per candidate per tag, while a
+        # process builds only a handful of tags.
+        setter(self, "_hash", hash((interpreter, abi, platform)))
+
+        if platform_lower.startswith(("macosx_", "android_")):
+            parts = tuple(platform_lower.split("_", 3))
+
+        elif platform_lower.startswith("ios_"):
+            parts = tuple(platform_lower.split("_", 4))
 
         else:
-            self._platform_parts = None
+            parts = None
+
+        setter(self, "_platform_parts", parts)
+
+    def __setattr__(self, name: str, value: object) -> NoReturn:
+        """Refuse mutation; the hash and lowercase forms are cached."""
+        raise AttributeError(
+            f"{type(self).__name__} is immutable, cannot set {name!r}",
+        )
+
+    def __delattr__(self, name: str) -> NoReturn:
+        """Refuse deletion for the same reason as :meth:`__setattr__`."""
+        raise AttributeError(
+            f"{type(self).__name__} is immutable, cannot delete {name!r}",
+        )
 
     interpreter: str
 
     abi: str
 
     platform: str
+
+    # Declared because __init__ writes them through object.__setattr__, which
+    # no checker can follow back to an attribute.
+    _interpreter_lower: str
+
+    _abi_lower: str
+
+    _platform_lower: str
+
+    _platform_parts: tuple[str, ...] | None
+
+    _hash: int
 
     def __str__(self) -> str:
         return f"{self.interpreter}-{self.abi}-{self.platform}"
@@ -208,7 +250,7 @@ class WheelTag:
         )
 
     def __hash__(self) -> int:
-        return hash((self.interpreter, self.abi, self.platform))
+        return self._hash
 
 
 class WheelFile:

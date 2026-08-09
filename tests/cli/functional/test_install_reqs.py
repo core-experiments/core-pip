@@ -522,7 +522,9 @@ def test_constraints_local_install_causes_error(
         expect_error=True,
     )
     # Because singlemodule only has 0.0.1 available.
-    assert "No matching distribution found for singlemodule" in result.stderr, str(result)
+    assert "No matching distribution found for singlemodule" in result.stderr, str(
+        result
+    )
 
 
 def test_constraints_constrain_to_local_editable(

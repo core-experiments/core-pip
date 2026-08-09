@@ -1153,6 +1153,12 @@ def install_resolved_pure_wheels(
 
             record_rows: dict[str, tuple[str, str, str]] = {}
 
+            # A wheel may ship its own RECORD, in which case extraction below
+            # already added it to the rollback list.  Noting it here keeps the
+            # duplicate check off ``created_files``, which grows to one entry
+            # per installed file and so made the check cost O(wheels x files).
+            record_is_member = False
+
             if not reuse_record:
                 import base64
                 import csv
@@ -1175,16 +1181,18 @@ def install_resolved_pure_wheels(
                         "/",
                     )
 
-                if not reuse_record and relative != record_relative:
-                    digest = base64.urlsafe_b64encode(
-                        hashlib.sha256(contents).digest(),
-                    ).rstrip(b"=")
+                    if relative == record_relative:
+                        record_is_member = True
+                    else:
+                        digest = base64.urlsafe_b64encode(
+                            hashlib.sha256(contents).digest(),
+                        ).rstrip(b"=")
 
-                    record_rows[relative] = (
-                        relative,
-                        f"sha256={digest.decode('ascii')}",
-                        str(len(contents)),
-                    )
+                        record_rows[relative] = (
+                            relative,
+                            f"sha256={digest.decode('ascii')}",
+                            str(len(contents)),
+                        )
 
             installer = os.path.join(target, dist_info, "INSTALLER")
 
@@ -1242,7 +1250,7 @@ def install_resolved_pure_wheels(
                         record_rows[name] for name in sorted(record_rows)
                     )
 
-                if record_path not in created_files:
+                if not record_is_member:
                     created_files.append(record_path)
 
     except (OSError, ValueError):

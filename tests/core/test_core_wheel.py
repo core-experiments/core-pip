@@ -192,3 +192,35 @@ def test_wheel_candidate_reuses_metadata_across_extras(
 
     assert [item.name for item in base.dependencies] == ["base"]
     assert [item.name for item in feature.dependencies] == ["base", "optional"]
+
+
+def test_wheel_tag_refuses_mutation() -> None:
+    """The cached hash and lowercase forms only hold if a tag cannot change.
+
+    A tag lives in sets and dictionary keys -- ``supported_wheel_tags`` and
+    ``wheel_tag_rank``'s cache both depend on it -- so a rewritten field would
+    leave the hash pointing at the old value and silently corrupt lookups.
+    """
+    tag = WheelTag("py3", "none", "any")
+
+    for attribute in ("interpreter", "abi", "platform", "_hash"):
+        with pytest.raises(AttributeError, match="immutable"):
+            setattr(tag, attribute, "changed")
+
+    with pytest.raises(AttributeError, match="immutable"):
+        del tag.interpreter
+
+    assert tag == WheelTag("py3", "none", "any")
+    assert hash(tag) == hash(WheelTag("py3", "none", "any"))
+
+
+def test_wheel_tag_hash_matches_equality() -> None:
+    """Equal tags must be interchangeable as dictionary keys."""
+    first = WheelTag("cp312", "cp312", "macosx_11_0_arm64")
+    second = WheelTag("cp312", "cp312", "macosx_11_0_arm64")
+    other = WheelTag("cp312", "cp312", "manylinux_2_17_x86_64")
+
+    assert first == second
+    assert hash(first) == hash(second)
+    assert len({first, second, other}) == 2
+    assert {first: "value"}[second] == "value"

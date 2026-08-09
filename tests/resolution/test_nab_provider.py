@@ -43,7 +43,10 @@ class FakeProvider:
 
     def available_versions(self, requirement):
         self.available_calls += 1
-        return tuple(SimpleNamespace(version=version) for version in self.versions[requirement.name])
+        return tuple(
+            SimpleNamespace(version=version)
+            for version in self.versions[requirement.name]
+        )
 
     def find_candidates(self, requirement, *, allowed_versions):
         if allowed_versions is None:
@@ -52,7 +55,7 @@ class FakeProvider:
                 for (name, _), candidate in self.candidates.items()
                 if name == requirement.name
             )
-        return (self.candidates[(requirement.name, next(iter(allowed_versions)))] ,)
+        return (self.candidates[(requirement.name, next(iter(allowed_versions)))],)
 
 
 def test_constraints_apply_to_transitive_dependencies() -> None:
@@ -78,7 +81,9 @@ def test_has_satisfying_version_applies_requirement_and_constraints() -> None:
     adapter = NabProvider(FakeProvider(), ResolutionConfig(constraints=("dep==2",)))
     package, _ = adapter.add_root(parse_requirement("dep<2"))
 
-    assert not adapter.has_satisfying_version(package, adapter._finite_range((Version("1"), Version("2"))))
+    assert not adapter.has_satisfying_version(
+        package, adapter._finite_range((Version("1"), Version("2")))
+    )
 
 
 def test_version_discovery_is_cached_for_same_requirement_state() -> None:
