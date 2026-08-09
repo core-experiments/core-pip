@@ -37,8 +37,24 @@ def disjoint_by_set_algebra(left: Range, right: Range) -> bool:
     return (left & right).is_empty
 
 
+def contains_by_linear_scan(candidate: Range, version: object) -> bool:
+    """The scan the binary search in ``__contains__`` replaced."""
+
+    for lower, lower_inclusive, upper, upper_inclusive in candidate._intervals:
+        if lower is not NEGATIVE_INFINITY and (
+            version < lower or (version == lower and not lower_inclusive)
+        ):
+            continue
+        if upper is not POSITIVE_INFINITY and (
+            version > upper or (version == upper and not upper_inclusive)
+        ):
+            continue
+        return True
+    return False
+
+
 def members(candidate: Range) -> set[float]:
-    return {probe for probe in PROBES if probe in candidate}
+    return {probe for probe in PROBES if contains_by_linear_scan(candidate, probe)}
 
 
 def build(intervals: list[tuple]) -> Range:
@@ -68,6 +84,16 @@ def random_range(rng: random.Random) -> Range:
                 (lower, rng.choice([True, False]), POSITIVE_INFINITY, False),
             )
     return build(intervals)
+
+
+@pytest.mark.parametrize("seed", range(12))
+def test_contains_matches_a_linear_scan(seed: int) -> None:
+    rng = random.Random(seed)
+
+    for _ in range(200):
+        candidate = random_range(rng)
+        for probe in PROBES:
+            assert (probe in candidate) == contains_by_linear_scan(candidate, probe)
 
 
 @pytest.mark.parametrize("seed", range(12))

@@ -252,18 +252,41 @@ class Range(Generic[VersionType]):
         return len(self._intervals) == 0
 
     def __contains__(self, version: object) -> bool:
-        """Test whether version falls within this range."""
-        for lower, lower_inclusive, upper, upper_inclusive in self._intervals:
-            if lower is not NEGATIVE_INFINITY and (
-                version < lower or (version == lower and not lower_inclusive)
-            ):
-                continue
-            if upper is not POSITIVE_INFINITY and (
-                version > upper or (version == upper and not upper_inclusive)
-            ):
-                continue
+        """Test whether version falls within this range.
+
+        Intervals are sorted and non-overlapping, so at most one can hold the
+        version: the last one starting at or below it.  Binary search finds
+        that one, which matters because callers test every release of a
+        package against the same range.
+        """
+        intervals = self._intervals
+        low = 0
+        high = len(intervals)
+
+        while low < high:
+            middle = (low + high) // 2
+            lower = intervals[middle][0]
+            if lower is NEGATIVE_INFINITY or not version < lower:
+                low = middle + 1
+            else:
+                high = middle
+
+        if low == 0:
+            return False
+
+        lower, lower_inclusive, upper, upper_inclusive = intervals[low - 1]
+
+        if (
+            lower is not NEGATIVE_INFINITY
+            and version == lower
+            and not lower_inclusive
+        ):
+            return False
+
+        if upper is POSITIVE_INFINITY:
             return True
-        return False
+
+        return not (version > upper or (version == upper and not upper_inclusive))
 
     def __and__(self, other: object) -> Range[VersionType]:
         """Compute the intersection of two ranges (versions in both)."""
