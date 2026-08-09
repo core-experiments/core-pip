@@ -25,7 +25,7 @@ def test_repr_does_not_trigger_the_import() -> None:
     assert repr(proxy) == "<lazy module 'cpip.core.errors' (not imported)>"
     assert proxy._lazy_module is None
 
-    proxy.CpipError
+    assert proxy.CpipError is not None
 
     assert repr(proxy) == "<lazy module 'cpip.core.errors' (imported)>"
 
@@ -39,9 +39,9 @@ def test_attribute_access_matches_the_real_module() -> None:
 def test_module_is_resolved_once() -> None:
     proxy = lazy_module("cpip.core.errors")
 
-    proxy.CpipError
+    assert proxy.CpipError is not None
     resolved = proxy._lazy_module
-    proxy.InstallationError
+    assert proxy.InstallationError is not None
 
     assert proxy._lazy_module is resolved
 
@@ -50,12 +50,12 @@ def test_missing_module_raises_the_original_error() -> None:
     proxy = lazy_module("cpip.does_not_exist")
 
     with pytest.raises(ModuleNotFoundError, match="cpip.does_not_exist"):
-        proxy.anything
+        getattr(proxy, "anything")  # noqa: B009
 
 
 def test_missing_attribute_raises_from_the_real_module() -> None:
     with pytest.raises(AttributeError, match="no_such_name"):
-        lazy_module("cpip.core.errors").no_such_name
+        getattr(lazy_module("cpip.core.errors"), "no_such_name")  # noqa: B009
 
 
 def test_nothing_reaches_sys_modules_until_first_use() -> None:
