@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from contextlib import nullcontext
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
 from cpip._vendor.nab_resolver.ranges import Range
@@ -19,6 +21,9 @@ from cpip.core.packaging import (
 from cpip.index.candidate_evaluators import CandidateEvaluator
 from cpip.index.provider import CandidateProvider
 from cpip.resolution.models import ResolutionConfig, canonical_url, url_name
+
+if TYPE_CHECKING:
+    from contextlib import AbstractContextManager
 
 
 class InstalledCandidate:
@@ -152,16 +157,12 @@ class NabProvider:
         if installed is not None and installed.version not in versions:
             versions += (installed.version,)
         if not versions and requirement.url is None:
-            previous_allow_yanked = getattr(self.provider, "allow_yanked", None)
-            if previous_allow_yanked is False:
-                self.provider.allow_yanked = True
-            try:
+            # Nothing matched under the active policy. Look again with yanked
+            # releases admitted so the package is at least known to exist.
+            with self._yanked_allowed():
                 fallback_candidates = tuple(
                     self.provider.find_candidates(parse_requirement(package))
                 )
-            finally:
-                if previous_allow_yanked is False:
-                    self.provider.allow_yanked = False
             if fallback_candidates:
                 unyanked = tuple(
                     candidate
@@ -175,6 +176,17 @@ class NabProvider:
                 return versions
         self._version_cache[cache_key] = versions
         return versions
+
+    def _yanked_allowed(self) -> AbstractContextManager[None]:
+        """Scope a yanked-release fallback, when the provider supports one.
+
+        Stand-in providers used in tests implement only the query methods, so
+        fall back to leaving policy alone rather than probing for attributes
+        at each call site.
+        """
+        if isinstance(self.provider, CandidateProvider):
+            return self.provider.yanked_allowed()
+        return nullcontext()
 
     def _allows(self, package: str, version: Version) -> bool:
         if not version.is_prerelease or self.allow_prereleases:
@@ -319,73 +331,118 @@ class NabProvider:
                     allowed_versions=frozenset({selected}),
                 ),
             )
-        if not candidates and getattr(self.provider, "allow_yanked", None) is False:
-            self.provider.allow_yanked = True
-            try:
-                fallback = tuple(
-                    self.provider.find_candidates(parse_requirement(package))
-                )
-                usable = [
-                    item
-                    for item in fallback
-                    if item.version in version_range
-                    and item.version in matching
-                    and all(
-                        constraint.specifier.contains(
-                            item.version,
-                            allow_prereleases=True,
-                        )
-                        for constraint in constraints
-                    )
-                    and getattr(item, "yanked_reason", None) is None
-                ]
-                if usable:
-                    candidate = max(usable, key=lambda item: item.version)
-                    selected = candidate.version
-                    candidates = (candidate,)
-                else:
-                    candidates = tuple(
-                        self.provider.find_candidates(
-                            parse_requirement(package),
-                            allowed_versions=frozenset({selected}),
-                        ),
-                    )
-            finally:
-                self.provider.allow_yanked = False
+        if not candidates:
+            retried = self._retry_including_yanked(
+                package,
+                selected,
+                matching=matching,
+                constraints=constraints,
+                version_range=version_range,
+            )
+            if retried is not None:
+                selected, candidates = retried
         if not candidates:
             return None
         candidate = candidates[0]
-        candidate_requires_python = getattr(candidate, "requires_python", None)
-        if (
-            not self.ignore_requires_python
-            and self.python_version is None
-            and candidate_requires_python
-            and not CandidateEvaluator.requires_python_matches(
-                candidate_requires_python
+
+        if self._requires_python_rejects(candidate):
+            alternative = self._alternative_for_requires_python(
+                candidate_requirement,
+                selected,
+                matching=matching,
             )
-        ):
-            for fallback in sorted(matching, reverse=True):
-                if fallback == selected:
-                    continue
-                alternatives = tuple(
-                    self.provider.find_candidates(
-                        candidate_requirement, allowed_versions=frozenset({fallback})
-                    )
-                )
-                if alternatives and (
-                    self.ignore_requires_python
-                    or self.python_version is not None
-                    or not getattr(alternatives[0], "requires_python", None)
-                    or CandidateEvaluator.requires_python_matches(
-                        alternatives[0].requires_python
-                    )
-                ):
-                    selected, candidate = fallback, alternatives[0]
-                    break
-            else:
+            if alternative is None:
                 return None
+            selected, candidate = alternative
+
         self.records[(package, selected)] = candidate
         return selected
+
+    def _retry_including_yanked(
+        self,
+        package: str,
+        selected: Version,
+        *,
+        matching: list[Version],
+        constraints: tuple[Requirement, ...],
+        version_range: RangeProtocol[Version],
+    ) -> tuple[Version, tuple[WheelCandidate, ...]] | None:
+        """Look again with yanked releases admitted, or ``None`` to give up.
+
+        Reached only when the active policy offered no artifact for a version
+        the resolver already selected.  A release can be absent because every
+        artifact for it is yanked, and admitting those makes the package
+        resolvable again; an unyanked release found this way is preferred.
+
+        There is nothing to relax when the provider already admits yanked
+        releases, so that case declines rather than widening the search.
+        """
+        if not isinstance(self.provider, CandidateProvider):
+            return None
+        if self.provider.allow_yanked:
+            return None
+
+        with self.provider.yanked_allowed():
+            fallback = tuple(self.provider.find_candidates(parse_requirement(package)))
+            usable = [
+                item
+                for item in fallback
+                if item.version in version_range
+                and item.version in matching
+                and all(
+                    constraint.specifier.contains(
+                        item.version,
+                        allow_prereleases=True,
+                    )
+                    for constraint in constraints
+                )
+                and item.yanked_reason is None
+            ]
+            if usable:
+                candidate = max(usable, key=lambda item: item.version)
+                return candidate.version, (candidate,)
+
+            return selected, tuple(
+                self.provider.find_candidates(
+                    parse_requirement(package),
+                    allowed_versions=frozenset({selected}),
+                ),
+            )
+
+    def _requires_python_rejects(self, candidate: WheelCandidate) -> bool:
+        """Whether this interpreter falls outside the candidate's Requires-Python.
+
+        Skipped when the caller targets another interpreter, since the
+        declaration then says nothing about the target.
+        """
+        requires_python = getattr(candidate, "requires_python", None)
+        return bool(
+            not self.ignore_requires_python
+            and self.python_version is None
+            and requires_python
+            and not CandidateEvaluator.requires_python_matches(requires_python),
+        )
+
+    def _alternative_for_requires_python(
+        self,
+        candidate_requirement: Requirement,
+        selected: Version,
+        *,
+        matching: list[Version],
+    ) -> tuple[Version, WheelCandidate] | None:
+        """Walk back to the newest release this interpreter can install."""
+        for fallback in sorted(matching, reverse=True):
+            if fallback == selected:
+                continue
+            alternatives = tuple(
+                self.provider.find_candidates(
+                    candidate_requirement,
+                    allowed_versions=frozenset({fallback}),
+                )
+            )
+            if alternatives and not self._requires_python_rejects(alternatives[0]):
+                return fallback, alternatives[0]
+        return None
 
     def has_satisfying_version(
         self, package: str, version_range: RangeProtocol[Version]

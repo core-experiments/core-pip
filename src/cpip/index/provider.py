@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import datetime
 import hashlib
 import os
@@ -2203,6 +2204,26 @@ class CandidateProvider:
                 yield candidate
 
         return generate()
+
+    @contextlib.contextmanager
+    def yanked_allowed(self) -> Iterator[None]:
+        """Admit yanked releases for the duration of the block.
+
+        Yanked releases are excluded by policy, but a caller that has found
+        nothing else may deliberately fall back to one.  Owning the flip here
+        keeps the relaxation scoped and exception-safe instead of leaving
+        callers to save and restore ``allow_yanked`` themselves.
+
+        ``find_candidates`` can return a lazily evaluated stream, so consume
+        the result inside the block; a stream materialized afterwards sees the
+        restored policy.
+        """
+        previous = self.allow_yanked
+        self.allow_yanked = True
+        try:
+            yield
+        finally:
+            self.allow_yanked = previous
 
     def find_candidates(
         self,
