@@ -876,10 +876,16 @@ class NabProvider:
 
     @staticmethod
     def _finite_range(versions: tuple[Version, ...] | list[Version]) -> Range[Version]:
-        result = Range.empty()
-        for version in versions:
-            result = result | Range.singleton(version)
-        return result
+        """A range holding exactly ``versions``, built in one pass.
+
+        Unioning singletons one at a time re-sorts and re-merges the whole
+        interval list on every step, so a package with many releases pays
+        O(n^2 log n) to describe its own catalog -- and this runs for every
+        dependency edge.  Distinct versions give disjoint, non-touching
+        singletons, so sorting once produces exactly what ``Range`` wants.
+        """
+        ordered = sorted(set(versions))
+        return Range(tuple((version, True, version, True) for version in ordered))
 
     def begin_decision_scan(self) -> None:
         return None

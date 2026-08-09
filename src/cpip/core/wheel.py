@@ -158,6 +158,7 @@ class WheelCandidate(PureWheelCandidate):
 class WheelTag:
     __slots__ = (
         "_abi_lower",
+        "_hash",
         "_interpreter_lower",
         "_platform_lower",
         "_platform_parts",
@@ -178,6 +179,11 @@ class WheelTag:
         self._abi_lower = abi.lower()
 
         self._platform_lower = platform.lower()
+
+        # Tags are immutable and are hashed far more often than they are
+        # built: ranking one wheel re-hashes the whole supported-tag tuple to
+        # probe wheel_tag_rank's cache, so this runs per candidate per tag.
+        self._hash = hash((interpreter, abi, platform))
 
         if self._platform_lower.startswith(("macosx_", "android_")):
             self._platform_parts = tuple(self._platform_lower.split("_", 3))
@@ -208,7 +214,7 @@ class WheelTag:
         )
 
     def __hash__(self) -> int:
-        return hash((self.interpreter, self.abi, self.platform))
+        return self._hash
 
 
 class WheelFile:
