@@ -137,6 +137,33 @@ def _min_upper_bound(left: Interval, right: Interval) -> tuple[Bound, bool]:
     return left_upper, left_upper_inc
 
 
+def _ends_before(right: Interval, left: Interval) -> bool:
+    """Return True if ``right`` finishes below everything in ``left``."""
+    right_upper, right_upper_inclusive = right[2], right[3]
+    left_lower, left_lower_inclusive = left[0], left[1]
+    if right_upper is POSITIVE_INFINITY or left_lower is NEGATIVE_INFINITY:
+        return False
+    if right_upper == left_lower:
+        # They meet at a single point, shared only if both ends include it.
+        return not (right_upper_inclusive and left_lower_inclusive)
+    return bool(right_upper < left_lower)
+
+
+def _advance_left(left: Interval, right: Interval) -> bool:
+    """Return True if the merge walk should step ``left`` rather than ``right``.
+
+    Whichever interval ends first cannot overlap anything further along the
+    other side, so it is the one to retire.
+    """
+    left_upper = left[2]
+    right_upper = right[2]
+    if left_upper is POSITIVE_INFINITY:
+        return right_upper is POSITIVE_INFINITY
+    if right_upper is POSITIVE_INFINITY:
+        return True
+    return bool(left_upper <= right_upper)
+
+
 def _interval_is_empty(
     lower: Bound,
     *,
@@ -162,11 +189,12 @@ class Range(Generic[VersionType]):
     The list is sorted by lower bound and intervals do not overlap or touch.
     """
 
-    __slots__ = ("_intervals",)
+    __slots__ = ("_hash", "_intervals")
 
     def __init__(self, intervals: tuple[Interval, ...] = ()) -> None:
         """Create a range from pre-sorted, non-overlapping intervals."""
         self._intervals = intervals
+        self._hash = 0
 
     @classmethod
     def empty(cls) -> Range[VersionType]:
@@ -343,25 +371,84 @@ class Range(Generic[VersionType]):
         return self & ~other
 
     def is_subset(self, other: Range[VersionType]) -> bool:
-        """Return whether every version in self is also in other."""
-        return (self - other).is_empty
+        """Return whether every version in self is also in other.
+
+        Walks both interval lists once and stops at the first uncovered
+        interval.  The set-difference formulation this replaces built a whole
+        complement and a whole intersection only to ask whether the result was
+        empty, which dominates resolution on packages with many releases.
+        """
+        right_intervals = other._intervals
+        right_count = len(right_intervals)
+        right_index = 0
+
+        for left in self._intervals:
+            # Skip right intervals that end before this one starts; they can
+            # never cover it, and neither can they cover anything later.
+            while right_index < right_count and _ends_before(
+                right_intervals[right_index], left
+            ):
+                right_index += 1
+
+            if right_index >= right_count:
+                return False
+
+            # Intervals are normalized -- sorted, non-overlapping and
+            # non-touching -- so consecutive right intervals always have a gap
+            # between them.  A left interval is therefore covered only if a
+            # single right interval contains all of it.
+            right = right_intervals[right_index]
+            lower, lower_inclusive = _max_lower_bound(left, right)
+            upper, upper_inclusive = _min_upper_bound(left, right)
+
+            if (lower, lower_inclusive, upper, upper_inclusive) != left:
+                return False
+
+        return True
 
     def is_superset(self, other: Range[VersionType]) -> bool:
         """Return whether every version in other is also in self."""
         return other.is_subset(self)
 
     def is_disjoint(self, other: Range[VersionType]) -> bool:
-        """Return whether self and other share no version."""
-        return (self & other).is_empty
+        """Return whether self and other share no version.
+
+        Stops at the first shared version rather than materializing the whole
+        intersection.
+        """
+        left_intervals = self._intervals
+        right_intervals = other._intervals
+        left_count = len(left_intervals)
+        right_count = len(right_intervals)
+        left_index = right_index = 0
+
+        while left_index < left_count and right_index < right_count:
+            left = left_intervals[left_index]
+            right = right_intervals[right_index]
+
+            lower, lower_inclusive = _max_lower_bound(left, right)
+            upper, upper_inclusive = _min_upper_bound(left, right)
+
+            if not _interval_is_empty(
+                lower,
+                lower_inclusive=lower_inclusive,
+                upper=upper,
+                upper_inclusive=upper_inclusive,
+            ):
+                return False
+
+            if _advance_left(left, right):
+                left_index += 1
+            else:
+                right_index += 1
+
+        return True
 
     def relation(self, other: Range[VersionType]) -> RangeRelation:
-        """Return how self's members sit against other's.
-
-        Asked separately here; an implementation may answer both in one walk.
-        """
+        """Return how self's members sit against other's."""
+        if self.is_empty:
+            return _EMPTY_REL
         if self.is_subset(other):
-            if self.is_disjoint(other):
-                return _EMPTY_REL
             return _SUBSET_REL
         if self.is_disjoint(other):
             return _DISJOINT_REL
@@ -376,8 +463,17 @@ class Range(Generic[VersionType]):
 
     @override
     def __hash__(self) -> int:
-        """Hash based on interval tuples."""
-        return hash(self._intervals)
+        """Hash the interval tuple once; ranges are immutable.
+
+        Ranges are used as cache keys during propagation, where a range over
+        a package with many releases would otherwise be re-hashed -- walking
+        every interval and every version in it -- on each lookup.
+        """
+        cached = self._hash
+        if cached == 0:
+            cached = hash(self._intervals) or 1
+            self._hash = cached
+        return cached
 
     @override
     def __repr__(self) -> str:

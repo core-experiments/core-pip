@@ -19,3 +19,12 @@ The corresponding license texts are under `licenses/`. To refresh this stack,
 resolve each pinned release above for Python 3.9, copy the package sources
 and license texts here, remove generated caches and native optional modules,
 then update this file and run the full test suite.
+
+## Local patches
+
+A refresh overwrites these. Re-apply them, or land them upstream first and
+drop the entry once the pinned version carries the change.
+
+| Package | Patch | Why |
+| --- | --- | --- |
+| nab-resolver | `ranges.py`: `is_subset`, `is_disjoint`, `relation`, and `Range.__hash__` | `is_subset` and `is_disjoint` built a whole complement and intersection only to ask whether the result was empty, and `relation` called them up to three times. They now walk the interval lists once and stop early, and a range hashes its intervals once instead of on every cache lookup. On a 64-release backtracking workload this removes 85% of `Range.__and__` calls and about 40% of resolution time. Behavior is unchanged: `tests/resolution/test_ranges.py` differential-tests the walks against the set-algebra definitions they replace. |
