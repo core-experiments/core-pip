@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import sys
 
-from cpip.cli.common import BROKEN_STDOUT, VIRTUALENV_NOT_FOUND
+from cpip.cli.exit_codes import BROKEN_STDOUT, VIRTUALENV_NOT_FOUND
 from cpip.cli.registry import COMMAND_SPECS, CommandSpec, get_command
 
 VISIBLE_COMMAND_NAMES = tuple(spec.name for spec in COMMAND_SPECS if spec.visible)
@@ -344,7 +344,7 @@ def main(
             and not quiet_fast_command
             and not os.environ.get("CPIP_QUIET")
         ):
-            from cpip.cli.common import configure_logging
+            from cpip.cli.logging_config import configure_logging
 
             configure_logging(log_file)
 
@@ -393,7 +393,7 @@ def main(
         if verbosity > 0:
             import traceback
 
-            from cpip.cli.common import BrokenStdoutLoggingError
+            from cpip.cli.logging_config import BrokenStdoutLoggingError
 
             try:
                 raise BrokenStdoutLoggingError() from exc

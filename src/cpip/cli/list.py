@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sys
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from cpip.build.query import (
     format_list_columns,
@@ -11,69 +11,23 @@ from cpip.build.query import (
     format_list_json,
     select_installed_distributions,
 )
-from cpip.cli.common import ArgumentParser, target_paths
-from cpip.cli.config import load_source_config, resolve_sources
-from cpip.core.format_control import FormatControl
+from cpip.cli.parsers.list import create_parser
+from cpip.cli.target import target_paths
+from cpip.core.lazy import lazy_module
 from cpip.core.metadata import stdlib_pkgs, user_lib_path
-from cpip.core.packaging import parse_requirement
-from cpip.index.provider import CandidateProvider
 
-
-def create_parser() -> ArgumentParser:
-    parser = ArgumentParser(prog="cpip list")
-
-    parser.add_argument("-o", "--outdated", action="store_true")
-
-    parser.add_argument("-u", "--uptodate", action="store_true")
-
-    parser.add_argument("-e", "--editable", action="store_true")
-
-    parser.add_argument("-l", "--local", action="store_true")
-
-    parser.add_argument("--user", action="store_true")
-
-    parser.add_argument("--path", action="append", default=[])
-
-    parser.add_argument("--not-required", action="store_true")
-
-    parser.add_argument("--exclude", action="append", default=[])
-
-    parser.add_argument("--find-links", "-f", action="append", default=[])
-
-    parser.add_argument("--index-url", "-i")
-
-    parser.add_argument("--extra-index-url", action="append", default=[])
-
-    parser.add_argument("--no-index", action="store_true")
-
-    parser.add_argument("--pre", action="store_true")
-
-    parser.add_argument("--all-releases", action="append", default=[])
-
-    parser.add_argument("--only-final", action="append", default=[])
-
-    parser.add_argument(
-        "--exclude-editable",
-        action="store_false",
-        dest="include_editable",
-        default=True,
-    )
-
-    parser.add_argument(
-        "--include-editable",
-        action="store_true",
-        dest="include_editable",
-    )
-
-    parser.add_argument("-v", "--verbose", action="count", default=0)
-
-    parser.add_argument(
-        "--format",
-        choices=("columns", "json", "freeze"),
-        default="columns",
-    )
-
-    return parser
+# Only --outdated/--uptodate consult an index, and that branch is what drags
+# in the candidate provider and everything under it.  A plain listing should
+# not pay for a subsystem it never reaches.
+if TYPE_CHECKING:
+    from cpip.cli import config
+    from cpip.core import format_control, packaging
+    from cpip.index import provider as index_provider
+else:
+    config = lazy_module("cpip.cli.config")
+    format_control = lazy_module("cpip.core.format_control")
+    index_provider = lazy_module("cpip.index.provider")
+    packaging = lazy_module("cpip.core.packaging")
 
 
 def run_list(args: list[str]) -> int:
@@ -110,14 +64,14 @@ def run_list(args: list[str]) -> int:
     latest: dict[str, tuple[Any, str]] = {}
 
     if options.outdated or options.uptodate:
-        sources = resolve_sources(options, load_source_config("list"))
+        sources = config.resolve_sources(options, config.load_source_config("list"))
 
-        provider = CandidateProvider.from_options(
+        provider = index_provider.CandidateProvider.from_options(
             find_links=sources.find_links,
             index_url=sources.index_url,
             extra_index_urls=sources.extra_index_urls,
             no_index=sources.no_index,
-            format_control=FormatControl(),
+            format_control=format_control.FormatControl(),
         )
 
         assert provider.release_control is not None
@@ -130,7 +84,7 @@ def run_list(args: list[str]) -> int:
 
         for dist in distributions:
             candidates = provider.evaluate_links(
-                parse_requirement(dist.raw_name),
+                packaging.parse_requirement(dist.raw_name),
             ).accepted
 
             allow_prereleases = provider.release_control.allows_prereleases(

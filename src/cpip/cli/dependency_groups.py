@@ -8,7 +8,7 @@ import os
 from typing import Any, cast
 
 from cpip.core.errors import InstallationError
-from cpip.core.packaging import canonicalize_name
+from cpip.core.names import canonicalize_name
 
 
 def group_items(values: list[str]) -> list[tuple[str, str]]:

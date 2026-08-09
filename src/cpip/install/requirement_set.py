@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Generic, TypeVar
 
-from cpip.core.packaging import canonicalize_name
+from cpip.core.names import canonicalize_name
 
 if TYPE_CHECKING:
     from cpip.resolution.models import RequirementInput

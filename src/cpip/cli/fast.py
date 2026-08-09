@@ -18,7 +18,7 @@ import sys
 
 from cpip.cli.lock_format import render_wheel_lock, write_lock_output
 from cpip.core.appdirs import configured_cache_dir
-from cpip.core.packaging import canonicalize_name
+from cpip.core.names import canonicalize_name
 
 REMOTE_EXACT_OPTIONS = ("--ignore-installed", "--no-compile", "--target")
 LOCAL_WHEELHOUSE_OPTIONS = (

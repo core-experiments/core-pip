@@ -3,10 +3,10 @@ from __future__ import annotations
 from types import ModuleType
 from typing import TYPE_CHECKING
 
-from cpip.cli.common import ArgumentParser
-
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+    from cpip.cli.parser import ArgumentParser
 
     CommandRunner = Callable[[list[str]], int]
 
@@ -14,14 +14,24 @@ if TYPE_CHECKING:
 
 
 class CommandSpec:
+    """How to reach one command without importing the rest of them.
+
+    Both module paths are strings, so a spec costs nothing until dispatch
+    needs it.  ``parser_module`` is separate from ``module_path`` on purpose:
+    ``cpip install --help`` has to build a parser but must not load the
+    installer to do it.
+    """
+
     __slots__ = (
         "_module",
+        "_parser_module",
         "module_path",
         "name",
         "needs_execution_context",
         "needs_logging",
         "needs_tempdir",
         "parser_factory",
+        "parser_module_path",
         "runner",
         "visible",
     )
@@ -36,10 +46,13 @@ class CommandSpec:
         needs_logging: bool = True,
         needs_tempdir: bool = True,
         needs_execution_context: bool = True,
+        parser_module_path: str | None = None,
     ) -> None:
         self.name = name
         self.module_path = module_path
+        self.parser_module_path = parser_module_path or f"cpip.cli.parsers.{name}"
         self._module: ModuleType | None = None
+        self._parser_module: ModuleType | None = None
         self.runner = runner
         self.parser_factory = parser_factory
         self.visible = visible
@@ -55,6 +68,14 @@ class CommandSpec:
             self._module = import_module(self.module_path)
         return self._module
 
+    @property
+    def parser_module(self) -> ModuleType:
+        if self._parser_module is None:
+            from importlib import import_module
+
+            self._parser_module = import_module(self.parser_module_path)
+        return self._parser_module
+
     def load_runner(self) -> CommandRunner | None:
         if self.runner is None:
             return None
@@ -63,9 +84,11 @@ class CommandSpec:
 
     def create_parser(self) -> ArgumentParser:
         if self.parser_factory is not None:
-            factory: ParserFactory = getattr(self.module, self.parser_factory)
+            factory: ParserFactory = getattr(self.parser_module, self.parser_factory)
 
             return factory()
+
+        from cpip.cli.parser import ArgumentParser
 
         return ArgumentParser(prog=f"cpip {self.name}")
 
@@ -94,6 +117,7 @@ COMMAND_SPECS = (
         "cpip.cli.inspect",
         "run_show",
         parser_factory="create_show_parser",
+        parser_module_path="cpip.cli.parsers.inspect",
         needs_logging=False,
         needs_tempdir=False,
     ),
@@ -102,6 +126,7 @@ COMMAND_SPECS = (
         "cpip.cli.inspect",
         "run_inspect",
         parser_factory="create_inspect_parser",
+        parser_module_path="cpip.cli.parsers.inspect",
         needs_logging=False,
         needs_tempdir=False,
     ),
@@ -110,6 +135,7 @@ COMMAND_SPECS = (
         "cpip.cli.inspect",
         "run_hash",
         parser_factory="create_hash_parser",
+        parser_module_path="cpip.cli.parsers.inspect",
         needs_logging=False,
         needs_tempdir=False,
     ),
@@ -118,6 +144,7 @@ COMMAND_SPECS = (
         "cpip.cli.inspect",
         "run_check",
         parser_factory="create_check_parser",
+        parser_module_path="cpip.cli.parsers.inspect",
         needs_logging=False,
         needs_tempdir=False,
     ),

@@ -7,7 +7,7 @@ import fnmatch
 import os
 import sys
 
-from cpip.cli.common import ArgumentParser
+from cpip.cli.parsers.cache import create_parser
 from cpip.core.appdirs import user_cache_dir
 from cpip.core.errors import CommandError
 
@@ -169,24 +169,6 @@ class CacheManager:
             self.wheel_dir,
             len(self.wheel_files()),
         )
-
-
-def create_parser() -> ArgumentParser:
-    parser = ArgumentParser(prog="cpip cache")
-
-    parser.add_argument("command", choices=("dir", "info", "list", "remove", "purge"))
-
-    parser.add_argument("pattern", nargs="?")
-
-    parser.add_argument("--format", choices=("human", "abspath"), default="human")
-
-    parser.add_argument("--cache-dir")
-
-    parser.add_argument("--no-cache-dir", action="store_true")
-
-    parser.add_argument("-v", "--verbose", action="count", default=0)
-
-    return parser
 
 
 def run_cache(args: list[str]) -> int:

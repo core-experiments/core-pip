@@ -11,7 +11,7 @@ from cpip.build.build_backend import prepare_project_metadata
 from cpip.cli.fast import read_requirements
 from cpip.cli.lock_format import LOCK_HEADER, toml_string, write_lock_output
 from cpip.core.appdirs import configured_cache_dir
-from cpip.cli.common import ArgumentParser
+from cpip.cli.parsers.lock import create_parser
 from cpip.core.errors import CommandError
 from cpip.core.format_control import FormatControl
 from cpip.core.packaging import parse_requirement
@@ -138,41 +138,6 @@ def render_lock(packages: list[dict[str, object]]) -> str:
         lines.append("")
 
     return "\n".join(lines)
-
-
-def create_parser() -> ArgumentParser:
-    """Resolve requirements and write a PEP 751 ``pylock.toml`` file."""
-
-    parser = ArgumentParser(prog="cpip lock", allow_abbrev=False)
-
-    parser.add_argument("requirements", nargs="*")
-
-    parser.add_argument("-e", "--editable", action="append", default=[])
-
-    parser.add_argument("-r", "--requirement", action="append", default=[])
-
-    parser.add_argument(
-        "-c",
-        "--constraint",
-        dest="constraints",
-        metavar="CONSTRAINT",
-        action="append",
-        default=[],
-    )
-
-    parser.add_argument("-f", "--find-links", action="append", default=[])
-
-    parser.add_argument("--no-index", action="store_true")
-
-    parser.add_argument("--no-binary", action="append", default=[])
-
-    parser.add_argument("--no-build-isolation", action="store_true")
-
-    parser.add_argument("--quiet", action="store_true")
-
-    parser.add_argument("--output", default="pylock.toml")
-
-    return parser
 
 
 def run_lock(args: list[str]) -> int:

@@ -15,7 +15,7 @@ from cpip.build.metadata import (
     InstalledDistributionStore,
     InstalledMetadataDistribution,
 )
-from cpip.cli.common import ArgumentParser
+from cpip.cli.parsers.freeze import create_parser
 from cpip.core.cpip_version import CPIP_DISTRIBUTION_NAMES
 from cpip.core.errors import InstallationError
 from cpip.core.metadata import stdlib_pkgs
@@ -370,24 +370,6 @@ class FrozenRequirement:
             req = f"-e {req}"
 
         return "\n".join(list(self.comments) + [str(req)]) + "\n"
-
-
-def create_parser() -> ArgumentParser:
-    parser = ArgumentParser(prog="cpip freeze")
-
-    parser.add_argument("-r", "--requirement", action="append", default=[])
-
-    parser.add_argument("--all", action="store_true")
-
-    parser.add_argument("--user", action="store_true")
-
-    parser.add_argument("--path", action="append", default=[])
-
-    parser.add_argument("--exclude", action="append", default=[])
-
-    parser.add_argument("--exclude-editable", action="store_true")
-
-    return parser
 
 
 def run_freeze(args: list[str]) -> int:

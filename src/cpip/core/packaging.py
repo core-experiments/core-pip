@@ -8,11 +8,13 @@ import urllib.parse
 from functools import lru_cache
 from typing import TYPE_CHECKING, Any, cast
 
+from cpip.core.names import NORMALIZE_RE, canonicalize_name
+
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
 
-NORMALIZE_RE = re.compile(r"[-_.]+")
+
 
 VERSION_RE = re.compile(
     r"""
@@ -64,11 +66,6 @@ VERSION_RE = re.compile(
 REQ_NAME_RE = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)")
 
 SPEC_RE = re.compile(r"(===|==|!=|~=|<=|>=|<|>)\s*([^,]+)")
-
-
-@lru_cache(maxsize=4096)
-def canonicalize_name(name: str) -> str:
-    return NORMALIZE_RE.sub("-", name).lower()
 
 
 def canonicalize_version(version: str) -> str:

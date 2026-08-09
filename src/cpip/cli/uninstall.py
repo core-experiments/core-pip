@@ -6,29 +6,10 @@ import os
 import site
 
 from cpip.build.metadata import InstalledDistributionStore
-from cpip.cli.common import ArgumentParser, target_paths
+from cpip.cli.parsers.uninstall import create_parser
+from cpip.cli.target import target_paths
 from cpip.core.packaging import parse_requirement
 from cpip.install.requirements import RequirementInstaller
-
-
-def create_parser() -> ArgumentParser:
-    parser = ArgumentParser(prog="cpip uninstall")
-
-    parser.add_argument("packages", nargs="*")
-
-    parser.add_argument(
-        "-r",
-        "--requirement",
-        dest="requirement_files",
-        action="append",
-        default=[],
-    )
-
-    parser.add_argument("-v", "--verbose", action="count", default=0)
-
-    parser.add_argument("-y", "--yes", action="store_true")
-
-    return parser
 
 
 def run_uninstall(args: list[str]) -> int:

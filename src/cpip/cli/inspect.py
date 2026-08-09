@@ -2,42 +2,49 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 import os
 import sys
+from typing import TYPE_CHECKING
 
-from cpip.build.query import (
-    check_package_set,
-    installed_dependencies_by_name,
-    metadata_errors,
-    package_set_from_dependencies,
-    unsupported_distributions,
-    iter_installed_package_info,
+from cpip.cli.parsers.inspect import (
+    create_check_parser,
+    create_hash_parser,
+    create_inspect_parser,
+    create_show_parser,
 )
-from cpip.build.metadata import InstalledDistributionStore
-from cpip.cli.common import ArgumentParser
-from cpip.core.cpip_version import CPIP_DISTRIBUTION_NAMES, get_cpip_version
-from cpip.core.metadata import stdlib_pkgs
-from cpip.core.packaging import canonicalize_name, default_environment
-from cpip.core.target_python import get_supported as get_supported_tags
-from cpip.core.urls import path_to_url
+from cpip.core.lazy import lazy_module
 
-
-def create_check_parser() -> ArgumentParser:
-    return ArgumentParser(prog="cpip check")
+# This module implements four commands with very different appetites: ``hash``
+# digests files and needs none of the metadata stack, while ``check`` and
+# ``inspect`` need most of it.  Binding the heavy modules lazily means each
+# command pays only for what it actually reaches.
+if TYPE_CHECKING:
+    from cpip.build import metadata as build_metadata
+    from cpip.build import query
+    from cpip.core import cpip_version, packaging, target_python, urls
+    from cpip.core import metadata as core_metadata
+else:
+    build_metadata = lazy_module("cpip.build.metadata")
+    core_metadata = lazy_module("cpip.core.metadata")
+    cpip_version = lazy_module("cpip.core.cpip_version")
+    packaging = lazy_module("cpip.core.packaging")
+    query = lazy_module("cpip.build.query")
+    target_python = lazy_module("cpip.core.target_python")
+    urls = lazy_module("cpip.core.urls")
 
 
 def run_check(args: list[str]) -> int:
     create_check_parser().parse_args(args)
 
-    distributions = InstalledDistributionStore().iter(skip=CPIP_DISTRIBUTION_NAMES)
-    package_set = package_set_from_dependencies(
+    distributions = build_metadata.InstalledDistributionStore().iter(
+        skip=cpip_version.CPIP_DISTRIBUTION_NAMES
+    )
+    package_set = query.package_set_from_dependencies(
         distributions,
-        installed_dependencies_by_name(distributions),
+        query.installed_dependencies_by_name(distributions),
     )
 
-    errors = metadata_errors(distributions)
+    errors = query.metadata_errors(distributions)
     if errors:
         for line in errors:
             print(line, file=sys.stderr)
@@ -45,10 +52,12 @@ def run_check(args: list[str]) -> int:
 
     unsupported = [
         f"{dist.raw_name} {dist.raw_version} is not supported on this platform"
-        for dist in unsupported_distributions(distributions, get_supported_tags())
+        for dist in query.unsupported_distributions(
+            distributions, target_python.get_supported()
+        )
     ]
 
-    missing, conflicting = check_package_set(package_set)
+    missing, conflicting = query.check_package_set(package_set)
 
     if not missing and not conflicting and not unsupported:
         print("No broken requirements found.")
@@ -61,19 +70,19 @@ def run_check(args: list[str]) -> int:
         distribution = next(
             dist
             for dist in distributions
-            if dist.canonical_name == canonicalize_name(name)
+            if dist.canonical_name == packaging.canonicalize_name(name)
         )
         for _, requirement in requirements:
             print(
                 f"{name} {distribution.version} requires "
-                f"{canonicalize_name(requirement.name)}, which is not installed.",
+                f"{packaging.canonicalize_name(requirement.name)}, which is not installed.",
             )
 
     for name, requirements in sorted(conflicting.items()):
         distribution = next(
             dist
             for dist in distributions
-            if dist.canonical_name == canonicalize_name(name)
+            if dist.canonical_name == packaging.canonicalize_name(name)
         )
         for conflict_name, version, requirement in requirements:
             print(
@@ -84,19 +93,9 @@ def run_check(args: list[str]) -> int:
     return 1
 
 
-def create_hash_parser() -> ArgumentParser:
-    parser = ArgumentParser(prog="cpip hash")
-    parser.add_argument("files", nargs="+")
-    parser.add_argument(
-        "-a",
-        "--algorithm",
-        default="sha256",
-        choices=sorted(hashlib.algorithms_available),
-    )
-    return parser
-
-
 def run_hash(args: list[str]) -> int:
+    import hashlib
+
     options = create_hash_parser().parse_args(args)
     for filename in options.files:
         digest = hashlib.new(options.algorithm)
@@ -112,14 +111,6 @@ def run_hash(args: list[str]) -> int:
     return 0
 
 
-def create_show_parser() -> ArgumentParser:
-    parser = ArgumentParser(prog="cpip show")
-    parser.add_argument("-f", "--files", action="store_true")
-    parser.add_argument("-v", "--verbose", action="store_true")
-    parser.add_argument("packages", nargs="*")
-    return parser
-
-
 def run_show(args: list[str]) -> int:
     options = create_show_parser().parse_args(args)
 
@@ -129,7 +120,7 @@ def run_show(args: list[str]) -> int:
 
     infos = {
         info.distribution.canonical_name: info
-        for info in iter_installed_package_info(
+        for info in query.iter_installed_package_info(
             options.packages,
             include_files=options.files,
         )
@@ -138,12 +129,12 @@ def run_show(args: list[str]) -> int:
     missing = sorted(
         package
         for package in options.packages
-        if canonicalize_name(package) not in infos
+        if packaging.canonicalize_name(package) not in infos
     )
 
     printed = 0
     for package in options.packages:
-        info = infos.get(canonicalize_name(package))
+        info = infos.get(packaging.canonicalize_name(package))
         if info is None:
             continue
 
@@ -209,23 +200,15 @@ def run_show(args: list[str]) -> int:
     return 0
 
 
-def create_inspect_parser() -> ArgumentParser:
-    parser = ArgumentParser(prog="cpip inspect")
-    parser.add_argument("--local", action="store_true")
-    parser.add_argument("--user", action="store_true")
-    parser.add_argument("--path", action="append", default=[])
-    return parser
-
-
 def run_inspect(args: list[str]) -> int:
     options = create_inspect_parser().parse_args(args)
 
-    distributions = InstalledDistributionStore(
+    distributions = build_metadata.InstalledDistributionStore(
         paths=options.path or None,
     ).iter(
         local_only=options.local,
         user_only=options.user,
-        skip=set(stdlib_pkgs),
+        skip=set(core_metadata.stdlib_pkgs),
     )
 
     installed = []
@@ -240,7 +223,7 @@ def run_inspect(args: list[str]) -> int:
             item["direct_url"] = direct_url.to_dict_compat()
         elif (location := dist.editable_project_location) is not None:
             item["direct_url"] = {
-                "url": path_to_url(location),
+                "url": urls.path_to_url(location),
                 "dir_info": {"editable": True},
             }
 
@@ -252,13 +235,15 @@ def run_inspect(args: list[str]) -> int:
 
         installed.append(item)
 
+    import json
+
     print(
         json.dumps(
             {
                 "version": "1",
-                "cpip_version": get_cpip_version(),
+                "cpip_version": cpip_version.get_cpip_version(),
                 "installed": installed,
-                "environment": default_environment(),
+                "environment": packaging.default_environment(),
             },
         ),
     )

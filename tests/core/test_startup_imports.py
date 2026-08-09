@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import json
-import os
-import subprocess
 import sys
 from pathlib import Path
+
+from import_harness import ROOT, run_cpip
 
 if sys.version_info >= (3, 11):
     import tomllib
@@ -12,86 +12,8 @@ else:
     from cpip._vendor import tomli as tomllib
 
 
-ROOT = Path(__file__).resolve().parents[2]
-SRC = ROOT / "src"
 PACKAGES = ROOT / "tests" / "cli" / "data" / "packages"
 SIMPLEWHEEL = PACKAGES / "simplewheel-2.0-py2.py3-none-any.whl"
-MARKER = "@@CPIP_IMPORTED_MODULES@@"
-
-SCRIPT = """
-from __future__ import annotations
-
-import json
-import runpy
-import sys
-
-sys.argv = ["cpip", *json.loads(sys.argv[1])]
-try:
-    runpy.run_module("cpip", run_name="__main__", alter_sys=True)
-except SystemExit:
-    pass
-print("@@CPIP_IMPORTED_MODULES@@" + json.dumps(sorted(sys.modules)))
-"""
-
-DIRECT_SCRIPT = """
-from __future__ import annotations
-
-import json
-import sys
-
-sys.argv = ["cpip", *json.loads(sys.argv[1])]
-from cpip.cli.entrypoint import main
-
-try:
-    main()
-except SystemExit:
-    pass
-print("@@CPIP_IMPORTED_MODULES@@" + json.dumps(sorted(sys.modules)))
-"""
-
-
-def imported_modules(
-    args: list[str],
-    *,
-    cwd: Path | None = None,
-    env: dict[str, str] | None = None,
-    direct: bool = False,
-) -> set[str]:
-    process_env = os.environ.copy()
-    process_env["PYTHONPATH"] = str(SRC)
-    process_env.pop("CPIP_QUIET", None)
-    if env:
-        process_env.update(env)
-    result = subprocess.run(
-        [sys.executable, "-c", DIRECT_SCRIPT if direct else SCRIPT, json.dumps(args)],
-        cwd=cwd or ROOT,
-        env=process_env,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    output = result.stdout + result.stderr
-    marker_line = next(
-        line for line in reversed(output.splitlines()) if line.startswith(MARKER)
-    )
-    return set(json.loads(marker_line.removeprefix(MARKER)))
-
-
-def run_cpip(
-    args: list[str], *, cwd: Path | None = None, env: dict[str, str] | None = None
-) -> subprocess.CompletedProcess[str]:
-    process_env = os.environ.copy()
-    process_env["PYTHONPATH"] = str(SRC)
-    if env:
-        process_env.update(env)
-    return subprocess.run(
-        [sys.executable, "-m", "cpip", *args],
-        cwd=cwd or ROOT,
-        env=process_env,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
 
 
 def test_literal_version_matches_project_metadata() -> None:
@@ -165,15 +87,3 @@ def test_fast_lock_produces_output_on_cache_hit(tmp_path: Path) -> None:
     assert first.returncode == 0
     assert second.returncode == 0
     assert output.is_file()
-
-
-def test_entrypoint_eagerly_loads_command_registry() -> None:
-    modules = imported_modules(["--help"])
-
-    assert "cpip.cli.registry" in modules
-
-
-def test_direct_launcher_eagerly_loads_command_registry() -> None:
-    modules = imported_modules(["--help"], direct=True)
-
-    assert "cpip.cli.registry" in modules

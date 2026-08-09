@@ -17,7 +17,7 @@ from contextlib import nullcontext
 from typing import TYPE_CHECKING, Any, cast
 
 from cpip.core.errors import InstallationError
-from cpip.core.packaging import canonicalize_name
+from cpip.core.names import canonicalize_name
 from cpip.core.wheel import WheelCandidate, parse_wheel, wheel_candidate
 from cpip.build.metadata import InstalledDistributionStore
 from cpip.install.target import InstallTarget
