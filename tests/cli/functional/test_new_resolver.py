@@ -1800,7 +1800,9 @@ def test_new_resolver_fails_on_needed_conflicting_constraints(
         expect_error=True,
     )
 
-    assert "No matching distribution found for test-pkg==0.2.0" in result.stderr, str(result)
+    assert "No matching distribution found for test-pkg==0.2.0" in result.stderr, str(
+        result
+    )
     assert "test-pkg" in result.stderr, str(result)
 
     script.assert_not_installed("test_pkg")
@@ -1845,7 +1847,9 @@ def test_new_resolver_fails_on_conflicting_constraint_and_requirement(
         expect_error=True,
     )
 
-    assert "No matching distribution found for test-pkg==0.2.0" in result.stderr, str(result)
+    assert "No matching distribution found for test-pkg==0.2.0" in result.stderr, str(
+        result
+    )
 
     script.assert_not_installed("test_pkg")
 
