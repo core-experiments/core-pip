@@ -27,12 +27,24 @@ class WheelMetadataCache:
         # Create directories if they do not exist
         os.makedirs(os.path.dirname(self.path), exist_ok=True)
         
-        self.conn = sqlite3.connect(self.path)
-        self.conn.execute(
-            "CREATE TABLE IF NOT EXISTS metadata ("
-            "path TEXT, size INTEGER, mtime INTEGER, headers BLOB, "
-            "PRIMARY KEY (path, size, mtime))"
-        )
+        try:
+            self.conn = sqlite3.connect(self.path)
+            self.conn.execute(
+                "CREATE TABLE IF NOT EXISTS metadata ("
+                "path TEXT, size INTEGER, mtime INTEGER, headers BLOB, "
+                "PRIMARY KEY (path, size, mtime))"
+            )
+        except sqlite3.Error:
+            try:
+                os.remove(self.path)
+            except OSError:
+                pass
+            self.conn = sqlite3.connect(self.path)
+            self.conn.execute(
+                "CREATE TABLE IF NOT EXISTS metadata ("
+                "path TEXT, size INTEGER, mtime INTEGER, headers BLOB, "
+                "PRIMARY KEY (path, size, mtime))"
+            )
         
         self.entries: dict[MetadataIdentity, MetadataHeaders] = {}
         self._pending_puts: dict[MetadataIdentity, MetadataHeaders] = {}

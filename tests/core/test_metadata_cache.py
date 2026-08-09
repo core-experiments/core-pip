@@ -21,9 +21,9 @@ def test_metadata_cache_round_trips_versioned_headers(tmp_path: Path) -> None:
 
 
 def test_metadata_cache_ignores_corrupt_snapshots(tmp_path: Path) -> None:
-    cache_path = tmp_path / "cache" / "metadata-v2.marshal"
+    cache_path = tmp_path / "cache" / "metadata-v2.sqlite"
     cache_path.parent.mkdir()
-    cache_path.write_bytes(b"not a marshal snapshot")
+    cache_path.write_bytes(b"not a sqlite database")
 
     cache = WheelMetadataCache(tmp_path / "cache")
 
