@@ -387,7 +387,7 @@ use cloneable directory trees.
 | `index/catalog_cache.py` | records in the HTTP cache | versioned parsed Simple API links keyed by source URL |
 | `index/artifact_cache.py` | `artifacts-v1/` | immutable bodies by SHA-256 plus normalized-URL receipts and expected-hash validation |
 | `index/candidate_cache.py` | `wheels/` | wheels built from source, keyed by stable source identity |
-| `index/metadata_cache.py` | `metadata-v2.marshal` | parsed local wheel headers keyed by absolute path, size, and modification time |
+| `index/metadata_cache.py` | `metadata-v2.sqlite` | parsed local wheel headers keyed by absolute path, size, and modification time |
 | `index/candidate_metadata_cache.py` | `candidate-metadata-v2.marshal` | dependency metadata safe to reuse during resolution |
 | `index/release_facts_cache.py` | `release-facts-v1.marshal` | deterministic release-level rejection reasons |
 | `cli/fast/install_cache.py` | `fast-install-v3.marshal` and `fast-install-trees-v1/` | narrow local plans, wheel metadata, and cloneable completed targets |

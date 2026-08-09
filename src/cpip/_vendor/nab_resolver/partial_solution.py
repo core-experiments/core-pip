@@ -71,6 +71,9 @@ class Assignment(Generic[PackageType, VersionType]):
     cum_negative: RangeProtocol[VersionType] | None = None
     """Latest negative accumulated range for the package as of this entry."""
 
+    cum_decision: VersionType | None = None
+    """The package's decided version as of this entry, if it had one."""
+
     package_index: int = 0
     """Position in the package's own assignment trail."""
 
@@ -98,6 +101,11 @@ class PartialSolution(Generic[PackageType, VersionType]):
         self._effective_range_cache: dict[
             PackageType, RangeProtocol[VersionType] | None
         ] = {}
+
+        # Packages whose range moved since the last drain. ``prioritize`` is
+        # handed a package's range, so a decision scan that reuses a cached
+        # sort key has to know which ones it may no longer trust.
+        self._touched: set[PackageType] = set()
 
         # Per-package index of trail entries; lets satisfier() avoid the full scan.
         self._assignments_by_package: defaultdict[
@@ -162,6 +170,7 @@ class PartialSolution(Generic[PackageType, VersionType]):
         self._decided_versions[package] = version
         self._effective_range_cache.pop(package, None)
         self._undecided.discard(package)
+        self._touched.add(package)
 
         package_entries = self._assignments_by_package[package]
         assignment = Assignment(
@@ -174,6 +183,7 @@ class PartialSolution(Generic[PackageType, VersionType]):
             positive=True,
             cum_positive=exact_range,
             cum_negative=self._negative_ranges.get(package),
+            cum_decision=version,
             package_index=len(package_entries),
         )
         self._assignments.append(assignment)
@@ -209,6 +219,7 @@ class PartialSolution(Generic[PackageType, VersionType]):
             self._negative_ranges[package] = new_range
 
         self._effective_range_cache.pop(package, None)
+        self._touched.add(package)
 
         package_entries = self._assignments_by_package[package]
         assignment = Assignment(
@@ -221,6 +232,7 @@ class PartialSolution(Generic[PackageType, VersionType]):
             positive=positive,
             cum_positive=self._positive_ranges.get(package),
             cum_negative=self._negative_ranges.get(package),
+            cum_decision=self._decided_versions.get(package),
             package_index=len(package_entries),
         )
         self._assignments.append(assignment)
@@ -230,79 +242,69 @@ class PartialSolution(Generic[PackageType, VersionType]):
         """Remove all assignments above target_level.
 
         Non-chronological backjumping: skips past irrelevant decision levels
-        directly to the cause of the conflict.  Relies on
-        ``Assignment.accumulated_range`` already being cumulative, so each
-        package's surviving state can be rebuilt without re-intersecting.
+        directly to the cause of the conflict.  Every ``cum_*`` field records
+        the package's state as of that entry, so the surviving top entry
+        restores it outright -- no re-intersecting, and no rescan of the
+        package's trail.
         See: https://github.com/dart-lang/pub/blob/master/doc/solver.md#conflict-resolution
         """
+        affected_packages: set[PackageType] = set()
         while self._assignments and self._assignments[-1].decision_level > target_level:
-            self._assignments.pop()
+            assignment = self._assignments.pop()
+            package = assignment.package
+            affected_packages.add(package)
 
-        self._decision_level = target_level
-
-        empty_packages: list[PackageType] = []
-        for package, entries in self._assignments_by_package.items():
-            while entries and entries[-1].decision_level > target_level:
+            entries = self._assignments_by_package.get(package)
+            if entries:
                 entries.pop()
 
+        self._decision_level = target_level
+        self._touched |= affected_packages
+
+        for package in affected_packages:
+            entries = self._assignments_by_package.get(package)
             if not entries:
-                empty_packages.append(package)
+                self._assignments_by_package.pop(package, None)
                 self._positive_ranges.pop(package, None)
                 self._negative_ranges.pop(package, None)
                 self._decided_versions.pop(package, None)
                 self._undecided.discard(package)
             else:
-                self._update_package_state_after_backtrack(package, entries)
+                last_entry = entries[-1]
 
-        for package in empty_packages:
-            del self._assignments_by_package[package]
+                if last_entry.cum_positive is None:
+                    self._positive_ranges.pop(package, None)
+                else:
+                    self._positive_ranges[package] = last_entry.cum_positive
+
+                if last_entry.cum_negative is None:
+                    self._negative_ranges.pop(package, None)
+                else:
+                    self._negative_ranges[package] = last_entry.cum_negative
+
+                decided_version = last_entry.cum_decision
+                if decided_version is None:
+                    self._decided_versions.pop(package, None)
+                else:
+                    self._decided_versions[package] = decided_version
+
+                if last_entry.cum_positive is not None and decided_version is None:
+                    self._undecided.add(package)
+                else:
+                    self._undecided.discard(package)
 
         self._effective_range_cache.clear()
 
-    def _update_package_state_after_backtrack(
-        self,
-        package: PackageType,
-        entries: list[Assignment[PackageType, VersionType]],
-    ) -> None:
-        """Recompute positive/negative/decided state for a package.
+    def drain_touched(self) -> set[PackageType]:
+        """Return packages whose range moved since the last call, and reset.
 
-        Each ``Assignment.accumulated_range`` is already cumulative, so the
-        latest entry of each kind is enough to rebuild state.  Trail levels
-        never decrease, so popping a decision pops every later entry for the
-        same package; a surviving decision is always the current one.
+        ``decide``, ``derive`` and ``backtrack`` are the only writers of a
+        package's range, so recording here is what keeps a cached sort key
+        from outliving the range it was built from.
         """
-        last_pos: RangeProtocol[VersionType] | None = None
-        last_neg: RangeProtocol[VersionType] | None = None
-        last_decision_version: VersionType | None = None
-
-        for assignment in entries:
-            if assignment.is_decision:
-                last_pos = assignment.accumulated_range
-                last_decision_version = assignment.version
-            elif assignment.positive:
-                last_pos = assignment.accumulated_range
-            else:
-                last_neg = assignment.accumulated_range
-
-        if last_pos is None:
-            self._positive_ranges.pop(package, None)
-        else:
-            self._positive_ranges[package] = last_pos
-
-        if last_neg is None:
-            self._negative_ranges.pop(package, None)
-        else:
-            self._negative_ranges[package] = last_neg
-
-        if last_decision_version is None:
-            self._decided_versions.pop(package, None)
-        else:
-            self._decided_versions[package] = last_decision_version
-
-        if last_pos is not None and last_decision_version is None:
-            self._undecided.add(package)
-        else:
-            self._undecided.discard(package)
+        touched = self._touched
+        self._touched = set()
+        return touched
 
     def decisions(self) -> dict[PackageType, VersionType]:
         """Return the current decision map: ``{package: version}``."""

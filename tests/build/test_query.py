@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from cpip.build.query import (
     PackageDetails,
+    _dependent_index,
     check_package_set,
     marker_allows,
     package_set_from_dependencies,
 )
-from cpip.core.packaging import Version, parse_requirement
+from cpip.core.packaging import Version, canonicalize_name, parse_requirement
 
 
 class FakeDistribution:
@@ -76,3 +79,63 @@ def test_version_conflicts_are_still_reported() -> None:
 
     assert missing == {}
     assert list(conflicting) == ["app"]
+
+
+class DependentDistribution:
+    """The slice of an installed distribution that ``_dependent_index`` reads."""
+
+    def __init__(self, raw_name: str, dependencies: list[str]) -> None:
+        self.raw_name = raw_name
+        self.canonical_name = canonicalize_name(raw_name)
+        self.dependencies = dependencies
+        self.dependency_reads = 0
+
+    def iter_dependencies(self) -> list[Any]:
+        self.dependency_reads += 1
+        if self.dependencies == ["<unreadable>"]:
+            raise ValueError("unparseable dependency metadata")
+        return [parse_requirement(item) for item in self.dependencies]
+
+
+def test_dependent_index_groups_by_canonical_name() -> None:
+    """Dependents are matched on the canonical name and keep install order."""
+
+    distributions = [
+        DependentDistribution("First", ["Shared_Dep>=1"]),
+        DependentDistribution("second", ["unrelated"]),
+        DependentDistribution("Third", ["SHARED-DEP", "First"]),
+    ]
+
+    dependents, unavailable = _dependent_index(distributions)  # type: ignore[arg-type]
+
+    assert not unavailable
+    assert dependents["shared-dep"] == ["First", "Third"]
+    assert dependents["first"] == ["Third"]
+    assert "second" not in dependents
+
+
+def test_dependent_index_reads_each_distribution_once() -> None:
+    """The index replaces a per-query rescan of the whole environment."""
+
+    distributions = [
+        DependentDistribution("first", ["shared"]),
+        DependentDistribution("second", ["shared"]),
+    ]
+
+    _dependent_index(distributions)  # type: ignore[arg-type]
+
+    assert [item.dependency_reads for item in distributions] == [1, 1]
+
+
+def test_dependent_index_reports_unreadable_metadata() -> None:
+    """One unparseable distribution makes every answer ``#N/A``, as before."""
+
+    distributions = [
+        DependentDistribution("first", ["shared"]),
+        DependentDistribution("broken", ["<unreadable>"]),
+    ]
+
+    dependents, unavailable = _dependent_index(distributions)  # type: ignore[arg-type]
+
+    assert unavailable
+    assert dependents == {}

@@ -42,7 +42,7 @@ from .types import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Iterable, Mapping
 
 
 __all__ = [
@@ -126,6 +126,23 @@ class ResolverProvider(Protocol[PackageType, VersionType]):
         """
         ...
 
+    def consume_priority_invalidations(self) -> Iterable[PackageType] | None:
+        """Return packages whose ``prioritize``/``is_ready`` answer may have
+        moved since the last call, and reset the record.
+
+        This is what lets ``choose_package_to_decide`` reuse sort keys across
+        scans instead of rebuilding every one.  The resolver already knows
+        when a package's range or conflict counts moved; only the provider
+        knows when its own state did.
+
+        Return ``None`` -- the safe answer, and what a provider that does not
+        track this should give -- to say "I cannot tell you", which makes the
+        resolver rebuild every key. Reporting an incomplete set is not a
+        slower resolution but a differently-ordered one: a stale key silently
+        changes which package is decided next.
+        """
+        ...
+
     def receive_partial_solution_hint(
         self,
         positive_ranges: Mapping[PackageType, RangeProtocol[VersionType]],
@@ -204,6 +221,31 @@ class ResolverProvider(Protocol[PackageType, VersionType]):
         ...
 
 
+class _RecordingCounts(defaultdict):  # type: ignore[type-arg]
+    """A per-package counter that records which packages it moved.
+
+    ``prioritize`` reads these counts, so a decision scan reusing a cached
+    sort key has to know which packages they moved under.  Recording in
+    ``__setitem__`` rather than at the call sites is what makes that
+    complete: every write reaches it, including the ``defaultdict`` miss
+    that inserts a zero and the ``counts[package] += 1`` shorthand.
+    """
+
+    __slots__ = ("_touched",)
+
+    def __init__(
+        self,
+        touched: set[Any],
+        initial: Mapping[Any, int] | None = None,
+    ) -> None:
+        super().__init__(int, initial or {})
+        self._touched = touched
+
+    def __setitem__(self, key: Any, value: int) -> None:
+        self._touched.add(key)
+        super().__setitem__(key, value)
+
+
 @dataclass
 class ResolverStats(Generic[PackageType]):
     """Running statistics for resolution observability.
@@ -227,6 +269,25 @@ class ResolverStats(Generic[PackageType]):
     package_culprit_counts: defaultdict[PackageType, int] = field(
         default_factory=lambda: defaultdict(int)
     )
+    priority_touched: set[PackageType] = field(default_factory=set)
+
+    def __post_init__(self) -> None:
+        self.package_conflict_counts = _RecordingCounts(
+            self.priority_touched,
+            self.package_conflict_counts,
+        )
+        self.package_culprit_counts = _RecordingCounts(
+            self.priority_touched,
+            self.package_culprit_counts,
+        )
+
+    def drain_priority_touched(self) -> set[PackageType]:
+        """Return packages whose counts moved since the last call, and reset."""
+        touched = self.priority_touched
+        self.priority_touched = set()
+        self.package_conflict_counts._touched = self.priority_touched
+        self.package_culprit_counts._touched = self.priority_touched
+        return touched
 
 
 class ResolverObserver(Generic[PackageType, VersionType]):
@@ -343,6 +404,10 @@ class Resolver(Generic[PackageType, VersionType]):
 
         # Memoises the tiebreak tuple in choose_package_to_decide.
         self.tiebreak_cache: dict[PackageType, tuple[int, int, str]] = {}
+
+        # Memoises whole sort keys for the same scan. Entries are dropped as
+        # their inputs move; see choose_package_to_decide.
+        self.priority_keys: dict[PackageType, Any] = {}
 
         # Memoises term_relation's pre-adjustment SetRelation, keyed by
         # (positive, assignment, constraint). Cleared on overflow.
@@ -512,6 +577,7 @@ class Resolver(Generic[PackageType, VersionType]):
         self.root_package_order.clear()
         self.pending_targeted_backtrack.clear()
         self.tiebreak_cache.clear()
+        self.priority_keys.clear()
         self.relation_cache.clear()
 
     def _add_root_requirements(

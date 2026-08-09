@@ -39,6 +39,27 @@ class InstalledPackageInfo(NamedTuple):
     homepage: str
 
 
+def _dependent_index(
+    candidates: Iterable[InstalledMetadataDistribution],
+) -> tuple[dict[str, list[str]], bool]:
+    """Map each canonical name to the raw names of the distributions needing it.
+
+    Built once per call rather than per queried package: ``cpip show a b c``
+    otherwise re-parses every installed distribution's dependencies once per
+    argument.  The flag reports unreadable dependency metadata, which is a
+    property of the environment and so applies to every query alike.
+    """
+    dependents: dict[str, list[str]] = {}
+    for candidate in candidates:
+        try:
+            names = {requirement.name for requirement in candidate.iter_dependencies()}
+        except ValueError:
+            return {}, True
+        for name in {canonicalize_name(name) for name in names}:
+            dependents.setdefault(name, []).append(candidate.raw_name)
+    return dependents, False
+
+
 def iter_installed_package_info(
     query: list[str],
     *,
@@ -49,6 +70,11 @@ def iter_installed_package_info(
         dist.canonical_name: dist for dist in InstalledDistributionStore().iter()
     }
     query_names = [canonicalize_name(name) for name in query]
+    dependents, dependents_unavailable = (
+        _dependent_index(installed.values())
+        if any(name in installed for name in query_names)
+        else ({}, False)
+    )
     for query_name in query_names:
         dist = installed.get(query_name)
         if dist is None:
@@ -62,17 +88,9 @@ def iter_installed_package_info(
         except ValueError:
             requires = sorted(dist.iter_raw_dependencies(), key=str.lower)
 
-        required_by: list[str] = []
-        for candidate in installed.values():
-            try:
-                names = {
-                    requirement.name for requirement in candidate.iter_dependencies()
-                }
-            except ValueError:
-                required_by = ["#N/A"]
-                break
-            if dist.canonical_name in {canonicalize_name(name) for name in names}:
-                required_by.append(candidate.raw_name)
+        required_by = (
+            ["#N/A"] if dependents_unavailable else dependents.get(query_name, [])
+        )
 
         try:
             entry_points = dist.read_text("entry_points.txt").splitlines()

@@ -30,6 +30,7 @@ from cpip.core.wheel import (
     WheelCandidate,
     validate_wheel_with_metadata,
     wheel_candidate,
+    wheel_dist_info_dir,
 )
 from cpip.core.wheel_metadata import parse_metadata_headers
 from cpip.build.build import build_wheel_from_source, unpack_source_internal
@@ -647,66 +648,6 @@ class CandidateMaterializer:
 
                     continue
 
-                if candidate.link.kind is ArtifactKind.WHEEL:
-                    try:
-                        metadata = candidate.metadata()
-
-                    except UnsupportedWheel as exc:
-                        if ".dist-info directory" in str(exc):
-                            yield LazyWheelCandidate(candidate, requirement, self)
-
-                            continue
-
-                        self.invalid_links.add(candidate.link.url)
-
-                        self.remember_negative_fact(negative_key, str(exc))
-
-                        invalid_versions.add(identity)
-
-                        continue
-
-                    except (OSError, ValueError):
-                        self.invalid_links.add(candidate.link.url)
-
-                        self.remember_negative_fact(
-                            negative_key,
-                            "invalid wheel metadata",
-                        )
-
-                        invalid_versions.add(identity)
-
-                        print(
-                            f"WARNING: Ignoring version {candidate.version} of "
-                            f"{candidate.name} since it has invalid metadata",
-                            file=sys.stderr,
-                        )
-
-                        continue
-
-                    if metadata.version != candidate.version:
-                        print(
-                            f"WARNING: {candidate.name} has an inconsistent version: "
-                            f"expected '{candidate.version}', but metadata has "
-                            f"'{metadata.version}'",
-                        )
-
-                        if requirement.extras:
-                            print(
-                                f"Requested {requirement.raw or requirement.name}, "
-                                f"but installing version {metadata.version}",
-                            )
-
-                        self.invalid_links.add(candidate.link.url)
-
-                        self.remember_negative_fact(
-                            negative_key,
-                            "inconsistent wheel version metadata",
-                        )
-
-                        invalid_versions.add(identity)
-
-                        continue
-
                 yield LazyWheelCandidate(candidate, requirement, self)
 
         return CandidateStream(generate())
@@ -953,11 +894,14 @@ class CandidateMaterializer:
                     zipfile.ZipFile(stream) as archive,
                 ):
                     try:
-                        dist_info_dir, wheel_metadata_text = (
-                            validate_wheel_with_metadata(
-                                archive,
-                                os.path.basename(path_text)[:-4].split("-", 1)[0],
-                            )
+                        # Locating the .dist-info directory is all resolution
+                        # needs.  Reading WHEEL for its ``Wheel-Version`` costs
+                        # a second member decompression per candidate, and
+                        # ``include_layout=False`` discards the text anyway;
+                        # ``wheel_transaction`` re-validates before installing.
+                        dist_info_dir = wheel_dist_info_dir(
+                            archive,
+                            os.path.basename(path_text)[:-4].split("-", 1)[0],
                         )
 
                     except UnsupportedWheel as exc:
@@ -969,7 +913,6 @@ class CandidateMaterializer:
                         archive=archive,
                         filename_info=(candidate.name, candidate.version),
                         dist_info_dir=dist_info_dir,
-                        wheel_metadata_text=wheel_metadata_text,
                         include_layout=False,
                         metadata_cache=self.persistent_metadata_cache,
                     )

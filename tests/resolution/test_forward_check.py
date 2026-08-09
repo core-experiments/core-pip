@@ -262,3 +262,36 @@ def test_exact_pin_recognizes_only_unique_releases(
     pinned = _exact_pin(parse_requirement(text))
 
     assert (None if pinned is None else str(pinned)) == expected
+
+
+def test_finite_range_matches_a_union_of_singletons() -> None:
+    """``_finite_range`` builds in one pass what unioning built step by step.
+
+    Unioning re-sorted and re-merged the whole interval list on every step,
+    which is quadratic in a package's release count. The one-pass form has to
+    produce the identical range, including for duplicate and unsorted input.
+    """
+    from cpip._vendor.nab_resolver.ranges import Range
+    from cpip.resolution.nab_provider import NabProvider
+
+    def by_union(versions: list[Version]) -> Range:
+        result: Range = Range.empty()
+        for version in versions:
+            result = result | Range.singleton(version)
+        return result
+
+    rng = random.Random(4)
+    for _ in range(200):
+        versions = [
+            Version(f"1.{rng.randint(0, 20)}.{rng.randint(0, 3)}")
+            for _ in range(rng.randint(0, 12))
+        ]
+        if versions and rng.random() < 0.4:
+            versions += rng.sample(versions, k=min(3, len(versions)))
+        if rng.random() < 0.3:
+            versions.sort(reverse=True)
+
+        assert (
+            NabProvider._finite_range(versions)._intervals
+            == by_union(versions)._intervals
+        )

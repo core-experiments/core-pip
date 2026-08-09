@@ -11,7 +11,9 @@ WINDOWS = sys.platform == "win32"
 
 def path_to_url(path: str) -> str:
     path = normalize_windows_path(path)
-    path = os.path.normpath(os.path.abspath(path))
+    # abspath already normalizes -- it is defined as normpath(join(cwd, path))
+    # -- and this runs once per file when a find-links directory is scanned.
+    path = os.path.abspath(path)
     if WINDOWS:
         from urllib import request
 

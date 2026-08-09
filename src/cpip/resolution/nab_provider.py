@@ -131,6 +131,27 @@ def _key(requirement: Requirement) -> str:
     return canonicalize_name(name)
 
 
+class _RecordingRequirements(dict):
+    """The package -> requirement map, recording every package it replaces.
+
+    ``prioritize`` answers from ``len(_versions(package))``, which follows
+    the package's requirement, and the resolver caches sort keys between
+    decision scans. Recording in ``__setitem__`` rather than at the handful
+    of assignment sites is what keeps that record complete as merging grows
+    new ones.
+    """
+
+    __slots__ = ("touched",)
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.touched: set[str] = set()
+
+    def __setitem__(self, key: str, value: Requirement) -> None:
+        self.touched.add(key)
+        super().__setitem__(key, value)
+
+
 @dataclass
 class NabProvider:
     """Native NAB provider backed by cpip candidate discovery."""
@@ -147,9 +168,18 @@ class NabProvider:
         self.records: dict[
             tuple[str, Version], WheelCandidate | InstalledCandidate
         ] = {}
-        self.requirements: dict[str, Requirement] = {}
+        self.requirements: dict[str, Requirement] = _RecordingRequirements()
         self.display_requirements: dict[str, Requirement] = {}
         self._version_cache: dict[tuple[object, ...], tuple[Version, ...]] = {}
+        # Fast paths in front of ``_version_cache``, whose key costs more to
+        # build than the lookup it guards. A package's entry in
+        # ``self.requirements`` is replaced, never mutated, so an identity
+        # check is enough to notice that the answer may have moved; a miss
+        # just falls through to the content-keyed cache below.
+        self._version_memo: dict[str, tuple[Requirement, tuple[Version, ...]]] = {}
+        self._priority_memo: dict[
+            str, tuple[Requirement, int, tuple[int, int, str]]
+        ] = {}
         self._installed_cache: dict[str, InstalledCandidate | None] = {}
         # Forward-check memos. The catalog ones are keyed on facts that do not
         # move during a resolution. The verdict is not: it depends on the
@@ -213,6 +243,19 @@ class NabProvider:
 
     def _versions(self, package: str) -> tuple[Version, ...]:
         requirement = self.requirements[package]
+        memo = self._version_memo.get(package)
+        if memo is not None and memo[0] is requirement:
+            return memo[1]
+
+        versions = self._versions_uncached(package, requirement)
+        self._version_memo[package] = (requirement, versions)
+        return versions
+
+    def _versions_uncached(
+        self,
+        package: str,
+        requirement: Requirement,
+    ) -> tuple[Version, ...]:
         cache_key = (
             package,
             requirement.specifier.raw,
@@ -876,13 +919,31 @@ class NabProvider:
 
     @staticmethod
     def _finite_range(versions: tuple[Version, ...] | list[Version]) -> Range[Version]:
-        result = Range.empty()
-        for version in versions:
-            result = result | Range.singleton(version)
-        return result
+        """A range holding exactly ``versions``, built in one pass.
+
+        Unioning singletons one at a time re-sorts and re-merges the whole
+        interval list on every step, so a package with many releases pays
+        O(n^2 log n) to describe its own catalog -- and this runs for every
+        dependency edge.  Distinct versions give disjoint, non-touching
+        singletons, so sorting once produces exactly what ``Range`` wants.
+        """
+        ordered = sorted(set(versions))
+        return Range(tuple((version, True, version, True) for version in ordered))
 
     def begin_decision_scan(self) -> None:
         return None
+
+    def consume_priority_invalidations(self) -> list[str]:
+        """Report packages whose priority may have moved, and reset.
+
+        ``is_ready`` is constant here, so a package's priority moves only
+        with its requirement -- which is replaced, never mutated in place.
+        """
+        touched = self.requirements.touched
+        if not touched:
+            return []
+        self.requirements.touched = set()
+        return list(touched)
 
     def prioritize(
         self,
@@ -891,7 +952,18 @@ class NabProvider:
         conflict_counts: Mapping[str, int],
         culprit_counts: Mapping[str, int] | None = None,
     ) -> tuple[int, int, str]:
-        return (len(self._versions(package)), -conflict_counts.get(package, 0), package)
+        # ``choose_package`` runs this for every undecided package on every
+        # decision, so the scan is the hot caller. Only the conflict count
+        # moves between decisions; the version count follows the requirement.
+        conflicts = conflict_counts.get(package, 0)
+        requirement = self.requirements[package]
+        memo = self._priority_memo.get(package)
+        if memo is not None and memo[0] is requirement and memo[1] == conflicts:
+            return memo[2]
+
+        priority = (len(self._versions(package)), -conflicts, package)
+        self._priority_memo[package] = (requirement, conflicts, priority)
+        return priority
 
     def is_ready(self, package: str) -> bool:
         return True
