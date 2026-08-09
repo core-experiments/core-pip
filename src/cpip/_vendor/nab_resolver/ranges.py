@@ -545,9 +545,50 @@ class Range(Generic[VersionType]):
         """Return how self's members sit against other's."""
         if self.is_empty:
             return _EMPTY_REL
-        if self.is_subset(other):
+
+        left_intervals = self._intervals
+        right_intervals = other._intervals
+        left_count = len(left_intervals)
+        right_count = len(right_intervals)
+
+        is_subset = True
+        is_disjoint = True
+        right_index = 0
+
+        for left in left_intervals:
+            # Skip right intervals that end before this left starts.
+            while right_index < right_count and _ends_before(right_intervals[right_index], left):
+                right_index += 1
+
+            if right_index >= right_count:
+                is_subset = False
+                if not is_disjoint:
+                    return _OVERLAPPING_REL
+                break
+
+            right = right_intervals[right_index]
+
+            if _ends_before(left, right):
+                is_subset = False
+                if not is_disjoint:
+                    return _OVERLAPPING_REL
+                continue
+
+            # If we are here, left and right overlap.
+            is_disjoint = False
+            
+            # Check if left is a subset of right
+            lower, lower_inclusive = _max_lower_bound(left, right)
+            upper, upper_inclusive = _min_upper_bound(left, right)
+
+            if (lower, lower_inclusive, upper, upper_inclusive) != left:
+                is_subset = False
+                if not is_disjoint: # always True here
+                    return _OVERLAPPING_REL
+
+        if is_subset:
             return _SUBSET_REL
-        if self.is_disjoint(other):
+        if is_disjoint:
             return _DISJOINT_REL
         return _OVERLAPPING_REL
 

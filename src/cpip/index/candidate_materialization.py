@@ -647,66 +647,6 @@ class CandidateMaterializer:
 
                     continue
 
-                if candidate.link.kind is ArtifactKind.WHEEL:
-                    try:
-                        metadata = candidate.metadata()
-
-                    except UnsupportedWheel as exc:
-                        if ".dist-info directory" in str(exc):
-                            yield LazyWheelCandidate(candidate, requirement, self)
-
-                            continue
-
-                        self.invalid_links.add(candidate.link.url)
-
-                        self.remember_negative_fact(negative_key, str(exc))
-
-                        invalid_versions.add(identity)
-
-                        continue
-
-                    except (OSError, ValueError):
-                        self.invalid_links.add(candidate.link.url)
-
-                        self.remember_negative_fact(
-                            negative_key,
-                            "invalid wheel metadata",
-                        )
-
-                        invalid_versions.add(identity)
-
-                        print(
-                            f"WARNING: Ignoring version {candidate.version} of "
-                            f"{candidate.name} since it has invalid metadata",
-                            file=sys.stderr,
-                        )
-
-                        continue
-
-                    if metadata.version != candidate.version:
-                        print(
-                            f"WARNING: {candidate.name} has an inconsistent version: "
-                            f"expected '{candidate.version}', but metadata has "
-                            f"'{metadata.version}'",
-                        )
-
-                        if requirement.extras:
-                            print(
-                                f"Requested {requirement.raw or requirement.name}, "
-                                f"but installing version {metadata.version}",
-                            )
-
-                        self.invalid_links.add(candidate.link.url)
-
-                        self.remember_negative_fact(
-                            negative_key,
-                            "inconsistent wheel version metadata",
-                        )
-
-                        invalid_versions.add(identity)
-
-                        continue
-
                 yield LazyWheelCandidate(candidate, requirement, self)
 
         return CandidateStream(generate())

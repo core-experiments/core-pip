@@ -235,74 +235,47 @@ class PartialSolution(Generic[PackageType, VersionType]):
         package's surviving state can be rebuilt without re-intersecting.
         See: https://github.com/dart-lang/pub/blob/master/doc/solver.md#conflict-resolution
         """
+        affected_packages: set[PackageType] = set()
         while self._assignments and self._assignments[-1].decision_level > target_level:
-            self._assignments.pop()
+            assignment = self._assignments.pop()
+            package = assignment.package
+            affected_packages.add(package)
+            
+            entries = self._assignments_by_package.get(package)
+            if entries:
+                entries.pop()
+                if assignment.is_decision:
+                    self._decided_versions.pop(package, None)
 
         self._decision_level = target_level
 
-        empty_packages: list[PackageType] = []
-        for package, entries in self._assignments_by_package.items():
-            while entries and entries[-1].decision_level > target_level:
-                entries.pop()
-
+        for package in affected_packages:
+            entries = self._assignments_by_package.get(package)
             if not entries:
-                empty_packages.append(package)
+                self._assignments_by_package.pop(package, None)
                 self._positive_ranges.pop(package, None)
                 self._negative_ranges.pop(package, None)
                 self._decided_versions.pop(package, None)
                 self._undecided.discard(package)
             else:
-                self._update_package_state_after_backtrack(package, entries)
-
-        for package in empty_packages:
-            del self._assignments_by_package[package]
+                last_entry = entries[-1]
+                
+                if last_entry.cum_positive is None:
+                    self._positive_ranges.pop(package, None)
+                else:
+                    self._positive_ranges[package] = last_entry.cum_positive
+                
+                if last_entry.cum_negative is None:
+                    self._negative_ranges.pop(package, None)
+                else:
+                    self._negative_ranges[package] = last_entry.cum_negative
+                
+                if last_entry.cum_positive is not None and package not in self._decided_versions:
+                    self._undecided.add(package)
+                else:
+                    self._undecided.discard(package)
 
         self._effective_range_cache.clear()
-
-    def _update_package_state_after_backtrack(
-        self,
-        package: PackageType,
-        entries: list[Assignment[PackageType, VersionType]],
-    ) -> None:
-        """Recompute positive/negative/decided state for a package.
-
-        Each ``Assignment.accumulated_range`` is already cumulative, so the
-        latest entry of each kind is enough to rebuild state.  Trail levels
-        never decrease, so popping a decision pops every later entry for the
-        same package; a surviving decision is always the current one.
-        """
-        last_pos: RangeProtocol[VersionType] | None = None
-        last_neg: RangeProtocol[VersionType] | None = None
-        last_decision_version: VersionType | None = None
-
-        for assignment in entries:
-            if assignment.is_decision:
-                last_pos = assignment.accumulated_range
-                last_decision_version = assignment.version
-            elif assignment.positive:
-                last_pos = assignment.accumulated_range
-            else:
-                last_neg = assignment.accumulated_range
-
-        if last_pos is None:
-            self._positive_ranges.pop(package, None)
-        else:
-            self._positive_ranges[package] = last_pos
-
-        if last_neg is None:
-            self._negative_ranges.pop(package, None)
-        else:
-            self._negative_ranges[package] = last_neg
-
-        if last_decision_version is None:
-            self._decided_versions.pop(package, None)
-        else:
-            self._decided_versions[package] = last_decision_version
-
-        if last_pos is not None and last_decision_version is None:
-            self._undecided.add(package)
-        else:
-            self._undecided.discard(package)
 
     def decisions(self) -> dict[PackageType, VersionType]:
         """Return the current decision map: ``{package: version}``."""
