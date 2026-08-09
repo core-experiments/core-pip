@@ -153,9 +153,7 @@ def test_memos_never_change_the_answer(
     assert (memoized is None) == (plain is None), (
         f"seed {seed}: the memos changed whether the graph is solvable"
     )
-    assert memoized == plain, (
-        f"seed {seed}: the memos changed the selected versions"
-    )
+    assert memoized == plain, f"seed {seed}: the memos changed the selected versions"
 
 
 def test_memos_never_change_a_backtracking_answer(

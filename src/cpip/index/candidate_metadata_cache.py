@@ -56,12 +56,12 @@ class CandidateMetadataCache:
         self.requirement_states: dict[str, tuple[object, ...]] = {}
         self.version_states: dict[str, tuple[object, ...]] = {}
         self.validated: set[CacheKey] = set()
-        
+
         self._pending_puts: dict[CacheKey, CacheValue] = {}
         self._pending_req_states: dict[str, tuple[object, ...]] = {}
         self._pending_ver_states: dict[str, tuple[object, ...]] = {}
         self.dirty = False
-        
+
         # Check if the file at self.path exists and is a legacy marshal snapshot
         legacy_payload = None
         if self._db_exists:
@@ -161,7 +161,7 @@ class CandidateMetadataCache:
                 entries = cast("dict[CacheKey, CacheValue]", payload[2])
                 req_states = cast("dict[str, tuple[object, ...]]", payload[3])
                 ver_states = cast("dict[str, tuple[object, ...]]", payload[4])
-                
+
                 for k, v in entries.items():
                     if self.valid_key(k) and self.valid_value(v):
                         self._pending_puts[k] = v
@@ -195,7 +195,7 @@ class CandidateMetadataCache:
             return
 
         payload = load_snapshot(legacy_path)
-        if payload:
+        if isinstance(payload, tuple):
             self.migrate_payload(payload)
 
     @staticmethod
@@ -231,7 +231,7 @@ class CandidateMetadataCache:
         decoded = self.decoded.get(key)
         if decoded is not None:
             return decoded
-        
+
         value = self.entries.get(key)
         if value is None:
             # Query SQLite
@@ -266,7 +266,7 @@ class CandidateMetadataCache:
                 self.entries.pop(key, None)
                 self.dirty = True
             return None
-            
+
         self.validated.add(key)
         dependencies: list[Requirement] = []
         for raw in value[2]:
@@ -277,14 +277,14 @@ class CandidateMetadataCache:
                 self.dirty = True
                 return None
             dependencies.append(requirement)
-            
+
         version = self.decode_version(value[1])
         if version is None:
             self.entries.pop(key, None)
             self.validated.discard(key)
             self.dirty = True
             return None
-            
+
         metadata = CandidateMetadata(
             name=value[0],
             version=version,
@@ -299,7 +299,7 @@ class CandidateMetadataCache:
         decoded = self.decoded_requirements.get(raw)
         if decoded is not None:
             return decoded
-        
+
         state = self.requirement_states.get(raw)
         if state is None:
             # Query SQLite
@@ -331,12 +331,12 @@ class CandidateMetadataCache:
             if requirement is not None and requirement.raw == raw:
                 self.decoded_requirements[raw] = requirement
                 return requirement
-                
+
         try:
             requirement = parse_requirement(raw)
         except ValueError:
             return None
-            
+
         state = requirement.cache_state_internal()
         self.requirement_states[raw] = state
         self._pending_req_states[raw] = state
@@ -375,12 +375,12 @@ class CandidateMetadataCache:
                 version = None
             if version is not None and str(version) == raw:
                 return version
-                
+
         try:
             version = Version(raw)
         except ValueError:
             return None
-            
+
         state = version.cache_state_internal()
         self.version_states[raw] = state
         self._pending_ver_states[raw] = state
@@ -417,7 +417,7 @@ class CandidateMetadataCache:
                         self.entries[key] = value
                 except Exception:
                     pass
-                
+
         if value is None:
             return False
         if key in self.validated or self.valid_value(value):
@@ -437,7 +437,7 @@ class CandidateMetadataCache:
             self.entries.pop(evicted)
             self.decoded.pop(evicted, None)
             self.validated.discard(evicted)
-            
+
         value = (
             metadata.name,
             str(metadata.version),
@@ -447,17 +447,17 @@ class CandidateMetadataCache:
         )
         self.entries[key] = value
         self._pending_puts[key] = value
-        
+
         ver_state = metadata.version.cache_state_internal()
         self.version_states[str(metadata.version)] = ver_state
         self._pending_ver_states[str(metadata.version)] = ver_state
-        
+
         for dependency in metadata.dependencies:
             req_state = dependency.cache_state_internal()
             self.requirement_states[dependency.raw] = req_state
             self._pending_req_states[dependency.raw] = req_state
             self.decoded_requirements[dependency.raw] = dependency
-            
+
         self.decoded[key] = metadata
         self.validated.add(key)
         self.dirty = True
@@ -465,7 +465,7 @@ class CandidateMetadataCache:
     def flush(self) -> None:
         if not self.dirty:
             return
-        
+
         with self.lock:
             try:
                 conn = self._writer()
@@ -481,7 +481,7 @@ class CandidateMetadataCache:
                         "INSERT OR REPLACE INTO candidate_metadata (key, value) VALUES (?, ?)",
                         items,
                     )
-                
+
                 # Batch insert pending requirement states
                 req_items = [
                     (raw, marshal.dumps(state))
@@ -492,7 +492,7 @@ class CandidateMetadataCache:
                         "INSERT OR REPLACE INTO requirement_states (raw, state) VALUES (?, ?)",
                         req_items,
                     )
-                    
+
                 # Batch insert pending version states
                 ver_items = [
                     (raw, marshal.dumps(state))
@@ -503,7 +503,7 @@ class CandidateMetadataCache:
                         "INSERT OR REPLACE INTO version_states (raw, state) VALUES (?, ?)",
                         ver_items,
                     )
-                    
+
                 conn.commit()
                 self._pending_puts.clear()
                 self._pending_req_states.clear()

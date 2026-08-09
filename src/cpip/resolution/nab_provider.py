@@ -168,7 +168,7 @@ class NabProvider:
         self.records: dict[
             tuple[str, Version], WheelCandidate | InstalledCandidate
         ] = {}
-        self.requirements: dict[str, Requirement] = _RecordingRequirements()
+        self.requirements: _RecordingRequirements = _RecordingRequirements()
         self.display_requirements: dict[str, Requirement] = {}
         self._version_cache: dict[tuple[object, ...], tuple[Version, ...]] = {}
         # Fast paths in front of ``_version_cache``, whose key costs more to
