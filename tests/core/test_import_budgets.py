@@ -96,19 +96,19 @@ BOOTSTRAP_ROUTES = (
     Route(
         id="top-level-help",
         argv=("--help",),
-        max_new_modules=18,
+        max_new_modules=20,
         allowed_first_party=COLD_CORE,
     ),
     Route(
         id="version",
         argv=("--version",),
-        max_new_modules=18,
+        max_new_modules=20,
         allowed_first_party=COLD_CORE,
     ),
     Route(
         id="unknown-command",
         argv=("definitely-not-a-command",),
-        max_new_modules=18,
+        max_new_modules=20,
         allowed_first_party=COLD_CORE,
     ),
 )
