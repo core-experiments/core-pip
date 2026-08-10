@@ -65,6 +65,11 @@ uv run cpip-bench \
   --benchmark startup-fast-install
 ```
 
+`startup-fast-lock`/`startup-fast-install` measure a single dependency-free
+package against an already-warm cache, isolating per-invocation overhead
+(process start, arg parsing, provider setup) from the graph-resolution cost
+that `lock-warm`/`install-warm` measure against the full offline workload.
+
 To run the Trio/PyPI workload used by uv's public benchmark documentation:
 
 ```console

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -32,10 +33,17 @@ def test_builds_all_offline_commands(tmp_path: Path) -> None:
         )
         assert {command.name.split()[0] for command in commands} == {"cpip", "uv"}
         assert all(command.command for command in commands)
-        assert all(
-            command.command[:3] == [sys.executable, "-m", "cpip_benchmark.runner"]
-            for command in commands
-        )
+        for command in commands:
+            if os.name != "nt":
+                # Neither tool should be routed through the runner.py
+                # subprocess wrapper on POSIX -- env vars ride in Command.env
+                # instead, so hyperfine measures the real tool, not an extra
+                # interpreter hop.
+                assert "cpip_benchmark.runner" not in " ".join(command.command)
+                if command.name.startswith("cpip"):
+                    assert command.env.get("PYTHONPATH")
+                else:
+                    assert command.env == {}
 
 
 def test_generated_fragments_are_not_posix_specific(tmp_path: Path) -> None:

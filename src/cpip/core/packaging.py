@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import platform
 import re
 import sys
 import urllib.parse
@@ -77,6 +76,11 @@ def safe_extra(extra: str) -> str:
 
 
 def default_environment(extra: str | None = None) -> dict[str, str]:
+    # Only reached when a requirement actually carries an environment
+    # marker (see marker_applies' early exit), so keep it off the far more
+    # common marker-free parse's import cost.
+    import platform
+
     impl = platform.python_implementation()
 
     version = platform.python_version()

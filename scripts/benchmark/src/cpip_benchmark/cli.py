@@ -9,7 +9,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from cpip_benchmark.hyperfine import Command, Hyperfine
+from cpip_benchmark.hyperfine import Command, Hyperfine, env_prefix
 from cpip_benchmark.workloads import (
     OFFICIAL_WORKLOAD_NAMES,
     OFFICIAL_WORKLOADS,
@@ -87,12 +87,27 @@ def repo_root() -> Path:
     return Path(__file__).resolve().parents[4]
 
 
-def tool_command(command: list[str], *, env: dict[str, str] | None = None) -> list[str]:
-    wrapped = [sys.executable, "-m", "cpip_benchmark.runner", "run"]
-    for name, value in (env or {}).items():
-        wrapped.extend(["--env", f"{name}={value}"])
-    wrapped.extend(command)
-    return wrapped
+def tool_command(
+    command: list[str], *, env: dict[str, str] | None = None
+) -> tuple[list[str], dict[str, str]]:
+    """Attach ``env`` to ``command`` for hyperfine to run.
+
+    On POSIX this is a plain ``(command, env)`` pair: ``Hyperfine.args()``
+    renders ``env`` as a shell assignment prefix, so no extra process is
+    spawned just to set variables. Windows' shell doesn't support that
+    syntax, so there we fall back to wrapping the command through
+    ``cpip_benchmark.runner run --env ...``, which does the assignment
+    in-process before exec'ing the real command.
+    """
+    if not env:
+        return command, {}
+    if os.name == "nt":
+        wrapped = [sys.executable, "-m", "cpip_benchmark.runner", "run"]
+        for name, value in env.items():
+            wrapped.extend(["--env", f"{name}={value}"])
+        wrapped.extend(command)
+        return wrapped, {}
+    return command, env
 
 
 def cpip_direct_launcher(workspace: Path) -> Path:
@@ -114,20 +129,21 @@ def cpip_command(
     cpip_python: str,
     cpip_console: str | None,
     cpip_launcher: str,
-) -> list[str]:
+    extra_env: dict[str, str] | None = None,
+) -> tuple[list[str], dict[str, str]]:
     if cpip_console is not None:
         command = [cpip_console, *args]
     elif cpip_launcher == "direct":
         command = [cpip_python, str(cpip_direct_launcher(workspace)), *args]
     else:
         command = [cpip_python, "-m", "cpip", *args]
-    return [
-        *tool_command(command, env={"PYTHONPATH": str(repo_root() / "src")}),
-    ]
+    env = {"PYTHONPATH": str(repo_root() / "src")}
+    env.update(extra_env or {})
+    return tool_command(command, env=env)
 
 
 def uv_command(uv_path: str, args: list[str]) -> list[str]:
-    return tool_command([uv_path, *args])
+    return [uv_path, *args]
 
 
 def cleanup_command(paths: list[Path], *, mkdir: list[Path] | None = None) -> str:
@@ -157,7 +173,9 @@ def shell_command(command: list[str]) -> str:
 
 def warm_setup(commands: list[Command], cleanup: list[Path]) -> str:
     parts = [cleanup_command(cleanup)]
-    parts.extend(shell_command(command.command) for command in commands)
+    parts.extend(
+        env_prefix(command.env) + shell_command(command.command) for command in commands
+    )
     return " && ".join(parts)
 
 
@@ -190,84 +208,81 @@ def build_commands(
     incremental_base = manifest["incremental_base_requirements"]
     incremental_update = manifest["incremental_update_requirements"]
 
-    def cpip(args: list[str]) -> list[str]:
+    def cpip(
+        args: list[str], *, extra_env: dict[str, str] | None = None
+    ) -> tuple[list[str], dict[str, str]]:
         return cpip_command(
             args,
             workspace=workspace,
             cpip_python=cpip_python,
             cpip_console=cpip_console,
             cpip_launcher=cpip_launcher,
+            extra_env=extra_env,
         )
+
+    def label(tool: str) -> str:
+        return f"{tool} ({workload_name}/{benchmark})"
+
+    def cpip_step(
+        prepare: str | None, args: list[str], *, extra_env: dict[str, str] | None = None
+    ) -> Command:
+        command, env = cpip(args, extra_env=extra_env)
+        return Command(label("cpip"), prepare, command, env)
+
+    def uv_step(prepare: str | None, args: list[str]) -> Command:
+        return Command(label("uv"), prepare, uv_command(uv_path, args))
 
     if benchmark == "startup-help":
         return [
-            Command("cpip (startup-help)", None, cpip(["--help"])),
-            Command("uv (startup-help)", None, uv_command(uv_path, ["--help"])),
+            cpip_step(None, ["--help"]),
+            uv_step(None, ["--help"]),
         ]
     if benchmark == "startup-version":
         return [
-            Command("cpip (startup-version)", None, cpip(["--version"])),
-            Command("uv (startup-version)", None, uv_command(uv_path, ["--version"])),
+            cpip_step(None, ["--version"]),
+            uv_step(None, ["--version"]),
         ]
     if benchmark == "startup-install-help":
         return [
-            Command("cpip (startup-install-help)", None, cpip(["install", "--help"])),
-            Command(
-                "uv (startup-install-help)",
-                None,
-                uv_command(uv_path, ["pip", "install", "--help"]),
-            ),
+            cpip_step(None, ["install", "--help"]),
+            uv_step(None, ["pip", "install", "--help"]),
         ]
     if benchmark == "startup-lock-help":
         return [
-            Command("cpip (startup-lock-help)", None, cpip(["lock", "--help"])),
-            Command(
-                "uv (startup-lock-help)",
-                None,
-                uv_command(uv_path, ["pip", "compile", "--help"]),
-            ),
+            cpip_step(None, ["lock", "--help"]),
+            uv_step(None, ["pip", "compile", "--help"]),
         ]
     if benchmark == "startup-list-help":
         return [
-            Command("cpip (startup-list-help)", None, cpip(["list", "--help"])),
-            Command(
-                "uv (startup-list-help)",
-                None,
-                uv_command(uv_path, ["pip", "list", "--help"]),
-            ),
+            cpip_step(None, ["list", "--help"]),
+            uv_step(None, ["pip", "list", "--help"]),
         ]
     if benchmark == "startup-invalid-command":
         return [
-            Command(
-                "cpip (startup-invalid-command)",
-                None,
-                cpip(["definitely-not-a-command"]),
-            ),
-            Command(
-                "uv (startup-invalid-command)",
-                None,
-                uv_command(uv_path, ["definitely-not-a-command"]),
-            ),
+            cpip_step(None, ["definitely-not-a-command"]),
+            uv_step(None, ["definitely-not-a-command"]),
         ]
     if benchmark == "startup-list-empty":
         return [
-            Command(
-                "cpip (startup-list-empty)",
+            cpip_step(
                 cleanup_command([cpip_target], mkdir=[cpip_target]),
-                cpip(["list", "--format=json", "--path", str(cpip_target)]),
+                ["list", "--format=json", "--path", str(cpip_target)],
             ),
-            Command(
-                "uv (startup-list-empty)",
+            uv_step(
                 cleanup_command([uv_target], mkdir=[uv_target]),
-                uv_command(
-                    uv_path,
-                    ["pip", "list", "--format=json", "--target", str(uv_target)],
-                ),
+                ["pip", "list", "--format=json", "--target", str(uv_target)],
             ),
         ]
     if benchmark == "startup-fast-lock":
+        # Isolates per-invocation overhead (process start, arg parsing,
+        # provider setup) from graph-resolution cost: a single dependency-free
+        # package against an already-warm cache, versus lock-warm's full
+        # offline graph. If this doesn't scale with lock-warm as the graph
+        # grows, the difference is resolution work, not fixed overhead.
         if wheelhouse is None:
             raise ValueError("startup-fast-lock requires the offline workload")
+        trivial_requirements = workspace / "trivial.in"
+        trivial_requirements.write_text("leaf-0\n", encoding="utf-8")
         cpip_args = [
             "lock",
             "--quiet",
@@ -277,12 +292,12 @@ def build_commands(
             "--output",
             str(cpip_output),
             "-r",
-            source_requirements,
+            str(trivial_requirements),
         ]
         uv_args = [
             "pip",
             "compile",
-            source_requirements,
+            str(trivial_requirements),
             "--quiet",
             "--cache-dir",
             str(uv_cache),
@@ -292,23 +307,22 @@ def build_commands(
             python,
         ]
         uv_args.extend(["--no-index", "--find-links", wheelhouse])
-        cpip_run = cpip(cpip_args)
-        cpip_run[4:4] = ["--env", f"CPIP_CACHE_DIR={cpip_cache}"]
         return [
-            Command(
-                "cpip (startup-fast-lock)", cleanup_command([cpip_output]), cpip_run
+            cpip_step(
+                cleanup_command([cpip_output]),
+                cpip_args,
+                extra_env={"CPIP_CACHE_DIR": str(cpip_cache)},
             ),
-            Command(
-                "uv (startup-fast-lock)",
-                cleanup_command([uv_output]),
-                uv_command(uv_path, uv_args),
-            ),
+            uv_step(cleanup_command([uv_output]), uv_args),
         ]
     if benchmark == "startup-fast-install":
+        # Same isolation as startup-fast-lock, for the install path: one
+        # dependency-free wheel against an already-warm cache, versus
+        # install-warm's full offline requirement set.
         if wheelhouse is None:
             raise ValueError("startup-fast-install requires the offline workload")
-        if install_requirements is None:
-            raise ValueError(f"{workload_name} has no install workload")
+        trivial_install = workspace / "trivial-install.txt"
+        trivial_install.write_text("leaf-0==1.1.0\n", encoding="utf-8")
         cpip_args = [
             "install",
             "--quiet",
@@ -319,7 +333,7 @@ def build_commands(
             "--target",
             str(cpip_target),
             "-r",
-            install_requirements,
+            str(trivial_install),
         ]
         uv_args = [
             "pip",
@@ -332,21 +346,13 @@ def build_commands(
             "--python",
             python,
             "-r",
-            install_requirements,
+            str(trivial_install),
         ]
         cpip_args.extend(["--no-index", "--find-links", wheelhouse])
         uv_args.extend(["--no-index", "--find-links", wheelhouse])
         return [
-            Command(
-                "cpip (startup-fast-install)",
-                cleanup_command([cpip_target]),
-                cpip(cpip_args),
-            ),
-            Command(
-                "uv (startup-fast-install)",
-                cleanup_command([uv_target]),
-                uv_command(uv_path, uv_args),
-            ),
+            cpip_step(cleanup_command([cpip_target]), cpip_args),
+            uv_step(cleanup_command([uv_target]), uv_args),
         ]
 
     if benchmark.startswith("lock-"):
@@ -390,11 +396,13 @@ def build_commands(
         if constraint_requirements is not None:
             cpip_args.extend(["--constraint", constraint_requirements])
             uv_args.extend(["--constraint", constraint_requirements])
-        cpip_run = cpip(cpip_args)
-        cpip_run[4:4] = ["--env", f"CPIP_CACHE_DIR={cpip_cache}"]
         return [
-            Command(f"cpip ({benchmark})", cpip_prepare, cpip_run),
-            Command(f"uv ({benchmark})", uv_prepare, uv_command(uv_path, uv_args)),
+            cpip_step(
+                cpip_prepare,
+                cpip_args,
+                extra_env={"CPIP_CACHE_DIR": str(cpip_cache)},
+            ),
+            uv_step(uv_prepare, uv_args),
         ]
 
     if benchmark == "install-incremental-warm":
@@ -421,7 +429,7 @@ def build_commands(
             "--find-links",
             incremental_wheelhouse,
         ]
-        cpip_base = cpip(
+        cpip_base, cpip_base_env = cpip(
             [
                 "install",
                 "--ignore-installed",
@@ -434,7 +442,7 @@ def build_commands(
             uv_path,
             ["pip", "install", *uv_common, "-r", incremental_base],
         )
-        cpip_update = cpip(
+        cpip_update, cpip_update_env = cpip(
             ["install", "--upgrade", *cpip_common, "-r", incremental_update],
         )
         uv_update = uv_command(
@@ -451,7 +459,7 @@ def build_commands(
         cpip_prepare = " && ".join(
             (
                 cleanup_command([cpip_target]),
-                shell_command(cpip_base),
+                env_prefix(cpip_base_env) + shell_command(cpip_base),
             ),
         )
         uv_prepare = " && ".join(
@@ -461,8 +469,8 @@ def build_commands(
             ),
         )
         return [
-            Command("cpip (install-incremental-warm)", cpip_prepare, cpip_update),
-            Command("uv (install-incremental-warm)", uv_prepare, uv_update),
+            Command(label("cpip"), cpip_prepare, cpip_update, cpip_update_env),
+            Command(label("uv"), uv_prepare, uv_update),
         ]
 
     if benchmark.startswith("install-"):
@@ -519,8 +527,8 @@ def build_commands(
             )
             uv_args.extend(["--no-index", "--find-links", wheelhouse])
         return [
-            Command(f"cpip ({benchmark})", cpip_prepare, cpip(cpip_args)),
-            Command(f"uv ({benchmark})", uv_prepare, uv_command(uv_path, uv_args)),
+            cpip_step(cpip_prepare, cpip_args),
+            uv_step(uv_prepare, uv_args),
         ]
 
     raise ValueError(f"Unknown benchmark: {benchmark}")
@@ -599,7 +607,7 @@ def main() -> None:
                 python=args.python,
             )
             setup = None
-            if benchmark.endswith("warm"):
+            if benchmark.endswith("warm") or benchmark.startswith("startup-fast-"):
                 setup = warm_setup(
                     commands,
                     [
