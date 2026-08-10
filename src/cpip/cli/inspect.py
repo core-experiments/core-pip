@@ -12,14 +12,15 @@ from __future__ import annotations
 
 
 def run_inspect(args: list[str]) -> int:
+    from cpip.cli.parsers.inspect import create_inspect_parser
+
+    options = create_inspect_parser().parse_args(args)
+
     import json
 
     from cpip.build import metadata as build_metadata
-    from cpip.cli.parsers.inspect import create_inspect_parser
     from cpip.core import cpip_version, packaging, urls
     from cpip.core import metadata as core_metadata
-
-    options = create_inspect_parser().parse_args(args)
 
     distributions = build_metadata.InstalledDistributionStore(
         paths=options.path or None,

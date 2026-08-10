@@ -10,15 +10,16 @@ from __future__ import annotations
 def run_show(args: list[str]) -> int:
     import sys
 
-    from cpip.build import query
     from cpip.cli.parsers.inspect import create_show_parser
-    from cpip.core import packaging
 
     options = create_show_parser().parse_args(args)
 
     if not options.packages:
         print("ERROR: Please provide a package name or names.", file=sys.stderr)
         return 1
+
+    from cpip.build import query
+    from cpip.core import packaging
 
     infos = {
         info.distribution.canonical_name: info

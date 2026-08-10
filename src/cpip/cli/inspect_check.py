@@ -8,14 +8,15 @@ from __future__ import annotations
 
 
 def run_check(args: list[str]) -> int:
+    from cpip.cli.parsers.inspect import create_check_parser
+
+    create_check_parser().parse_args(args)
+
     import sys
 
     from cpip.build import metadata as build_metadata
     from cpip.build import query
-    from cpip.cli.parsers.inspect import create_check_parser
     from cpip.core import cpip_version, packaging, target_python
-
-    create_check_parser().parse_args(args)
 
     distributions = build_metadata.InstalledDistributionStore().iter(
         skip=cpip_version.CPIP_DISTRIBUTION_NAMES

@@ -11,15 +11,15 @@ import sys
 from collections.abc import Generator, Iterable
 from typing import NamedTuple
 
-from cpip.build.metadata import (
-    InstalledDistributionStore,
-    InstalledMetadataDistribution,
-)
 from cpip.cli.parsers.freeze import create_parser
 from cpip.core.cpip_version import CPIP_DISTRIBUTION_NAMES
 from cpip.core.errors import InstallationError
-from cpip.core.metadata import stdlib_pkgs
 from cpip.core.packaging import InvalidVersion, canonicalize_name
+
+TYPE_CHECKING = False
+
+if TYPE_CHECKING:
+    from cpip.build.metadata import InstalledMetadataDistribution
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +42,8 @@ def freeze(
     exclude: Iterable[str] = (),
     skip: Iterable[str] = (),
 ) -> Generator[str, None, None]:
+    from cpip.build.metadata import InstalledDistributionStore
+
     installations: dict[str, FrozenRequirement] = {}
 
     excluded = {canonicalize_name(name) for name in exclude}
@@ -379,6 +381,8 @@ class FrozenRequirement:
 
 def run_freeze(args: list[str]) -> int:
     options = create_parser().parse_args(args)
+
+    from cpip.core.metadata import stdlib_pkgs
 
     excluded = {canonicalize_name(name) for name in options.exclude}
 
