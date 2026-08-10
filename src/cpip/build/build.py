@@ -7,8 +7,6 @@ import tempfile
 
 from cpip.core.errors import BuildError
 
-from .build_backend import ProjectBuilder
-
 
 def build_wheel_from_source(
     source: str,
@@ -17,6 +15,12 @@ def build_wheel_from_source(
     build_constraints: list[str] | None = None,
     build_isolation: bool = True,
 ) -> str:
+    # unpack_source()/unpack_source_internal() callers (e.g. cli/lock.py)
+    # never need a real build, so keep build_backend's much heavier import
+    # chain (configparser/email.parser/subprocess/tarfile/zipfile/csv/
+    # hashlib) off that path.
+    from .build_backend import ProjectBuilder
+
     source_text = os.fspath(source)
     output_text = (
         os.fspath(wheel_dir) if wheel_dir is not None else default_wheel_dir_internal()
@@ -49,6 +53,8 @@ def build_editable_from_source(
     build_constraints: list[str] | None = None,
     build_isolation: bool = True,
 ) -> str:
+    from .build_backend import ProjectBuilder
+
     source_text = os.fspath(source)
     output_text = (
         os.fspath(wheel_dir) if wheel_dir is not None else default_wheel_dir_internal()

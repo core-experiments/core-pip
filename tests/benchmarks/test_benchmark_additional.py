@@ -7,7 +7,7 @@ import itertools
 from pathlib import Path
 
 from benchmark_support import make_wheel, reset_caches
-from cpip.build.build_backend import ProjectBuilder
+from cpip.build.build_backend import ProjectBuilder, prepare_project_metadata
 from cpip.build.metadata import InstalledDistributionStore
 from cpip.core.errors import BuildError
 from cpip.core.packaging import SpecifierSet, parse_requirement
@@ -16,7 +16,7 @@ from cpip.index.candidate_materialization import (
     CandidateMaterializer,
     validate_build_requirements,
 )
-from cpip.index.candidates import InstallationCandidate, prepare_project_metadata
+from cpip.index.candidates import InstallationCandidate
 from cpip.index.links import Link
 from cpip.index.provider import CandidateProvider
 from cpip.install.target import InstallTarget

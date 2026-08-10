@@ -3,7 +3,6 @@ from __future__ import annotations
 import os
 from typing import TYPE_CHECKING
 
-from cpip.build.build_backend import prepare_project_metadata
 from cpip.core.errors import BuildError
 from cpip.core.packaging import Version, canonicalize_name
 from cpip.core.temp_dir import remove_temp_directory
@@ -125,6 +124,11 @@ class InstallationCandidate(CandidateRecord):
                 "source tree is not local",
             )
 
+        # Only local source-tree candidates reach this; wheel/sdist-archive
+        # candidates (the common case) never need build_backend's much
+        # heavier import chain.
+        from cpip.build.build_backend import prepare_project_metadata
+
         try:
             metadata = prepare_project_metadata(source_dir)
 
@@ -191,6 +195,8 @@ class InstallationCandidate(CandidateRecord):
 
     @classmethod
     def from_vcs(cls, link: Link) -> InstallationCandidate | RejectedCandidate:
+        from cpip.build.build_backend import prepare_project_metadata
+
         local = None
 
         try:
