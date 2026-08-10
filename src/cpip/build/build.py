@@ -3,9 +3,7 @@ from __future__ import annotations
 import atexit
 import os
 import shutil
-import tarfile
 import tempfile
-import zipfile
 
 from cpip.core.errors import BuildError
 
@@ -120,6 +118,11 @@ def unpack_source(source: str, destination: str) -> str:
 
 
 def unpack_source_internal(source: str, destination: str) -> str:
+    # Only sdist/archive sources reach this -- an already-unpacked directory
+    # source never calls it, so keep tarfile/zipfile off that common path.
+    import tarfile
+    import zipfile
+
     source_text = os.fspath(source)
     destination_text = os.fspath(destination)
     if source_text.endswith(".zip"):
