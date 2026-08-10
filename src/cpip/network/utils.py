@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Generator
-from typing import Any
-
 from cpip.network.exceptions import NetworkConnectionError
+
+TYPE_CHECKING = False
+
+if TYPE_CHECKING:
+    from collections.abc import Generator
+    from typing import Any
 
 HEADERS: dict[str, str] = {"Accept-Encoding": "identity"}
 DOWNLOAD_CHUNK_SIZE = 256 * 1024

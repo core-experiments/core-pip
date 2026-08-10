@@ -5,12 +5,14 @@ import re
 import sys
 import urllib.parse
 from functools import lru_cache
-from typing import TYPE_CHECKING, Any, cast
 
 from cpip.core.names import NORMALIZE_RE, canonicalize_name
 
+TYPE_CHECKING = False
+
 if TYPE_CHECKING:
     from collections.abc import Iterable
+    from typing import Any
 
 
 VERSION_RE = re.compile(
@@ -543,11 +545,7 @@ class SpecifierSet:
         value.raw = state[0]
 
         value.specifiers = tuple(
-            Specifier.from_cache_state(specifier_state)
-            for specifier_state in cast(
-                "tuple[tuple[object, ...], ...]",
-                state[1],
-            )
+            Specifier.from_cache_state(specifier_state) for specifier_state in state[1]  # ty:ignore[not-iterable]
         )
 
         value.text_internal = state[2]
@@ -723,14 +721,12 @@ class Requirement:
         """Restore a previously validated requirement without reparsing it."""
 
         return cls(
-            name=cast("str", state[0]),
-            specifier=SpecifierSet.from_cache_state(
-                cast("tuple[object, ...]", state[1]),
-            ),
-            extras=frozenset(cast("tuple[str, ...]", state[2])),
-            url=cast("str | None", state[3]),
-            marker=cast("str | None", state[4]),
-            raw=cast("str", state[5]),
+            name=state[0],  # ty:ignore[invalid-argument-type]
+            specifier=SpecifierSet.from_cache_state(state[1]),  # ty:ignore[invalid-argument-type]
+            extras=frozenset(state[2]),  # ty:ignore[invalid-argument-type]
+            url=state[3],  # ty:ignore[invalid-argument-type]
+            marker=state[4],  # ty:ignore[invalid-argument-type]
+            raw=state[5],  # ty:ignore[invalid-argument-type]
         )
 
     def cache_state_internal(self) -> tuple[object, ...]:

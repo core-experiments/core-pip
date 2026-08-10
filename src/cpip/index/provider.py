@@ -12,7 +12,6 @@ from collections.abc import Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from threading import RLock
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any
 
 from cpip.core.errors import InstallationError
 from cpip.core.hashes import Hashes
@@ -56,7 +55,11 @@ from cpip.index.source_models import (
     RejectionReason,
 )
 
+TYPE_CHECKING = False
+
 if TYPE_CHECKING:
+    from typing import Any
+
     from cpip.core.format_control import FormatControl
     from cpip.core.wheel import TargetContext, WheelFile
     from cpip.index.candidate_materialization import CandidateStream

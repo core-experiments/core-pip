@@ -12,9 +12,13 @@ import os
 import subprocess
 import sys
 import tempfile
-from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Any
+
+TYPE_CHECKING = False
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+    from typing import Any
 
 
 class HookMissing(Exception):

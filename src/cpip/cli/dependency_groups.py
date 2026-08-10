@@ -5,10 +5,14 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility
     from cpip._vendor import tomli as tomllib
 import os
-from typing import Any, cast
 
 from cpip.core.errors import InstallationError
 from cpip.core.names import canonicalize_name
+
+TYPE_CHECKING = False
+
+if TYPE_CHECKING:
+    from typing import Any
 
 
 def group_items(values: list[str]) -> list[tuple[str, str]]:
@@ -103,7 +107,7 @@ def resolve_group(
                 pending.append(("value", item, next_stack))
                 continue
             if isinstance(item, dict) and set(item) == {"include-group"}:
-                include = cast("dict[str, Any]", item)["include-group"]
+                include = item["include-group"]  # ty:ignore[invalid-argument-type]
                 if not isinstance(include, str):
                     raise InstallationError(
                         f"Dependency group {current_name!r} contains an invalid include.",

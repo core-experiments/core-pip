@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-from typing import TYPE_CHECKING
 
 from cpip.core.errors import BuildError
 from cpip.core.packaging import Version, canonicalize_name
@@ -19,6 +18,8 @@ from cpip.index.source_models import (
     RejectionReason,
 )
 from cpip.index.vcs import materialize_vcs
+
+TYPE_CHECKING = False
 
 if TYPE_CHECKING:
     from cpip.core.wheel import TargetContext, WheelFile

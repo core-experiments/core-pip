@@ -11,10 +11,8 @@ import sys
 import tempfile
 import urllib.parse
 import zipfile
-from collections.abc import Callable, Generator, Iterable, Iterator
 from itertools import chain, islice
 from threading import RLock
-from typing import Any
 
 from cpip.core.errors import BuildError, InstallationError, UnsupportedWheel
 from cpip.core.packaging import (
@@ -56,6 +54,12 @@ from cpip.index.source_models import (
 )
 from cpip.index.vcs import git_revision, is_immutable_vcs_link
 from cpip.index.vcs import vcs_scheme as parse_vcs_scheme
+
+TYPE_CHECKING = False
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Generator, Iterable, Iterator
+    from typing import Any
 
 logger = logging.getLogger(__name__)
 

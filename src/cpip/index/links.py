@@ -7,9 +7,7 @@ import posixpath
 import re
 import stat
 import urllib.parse
-from collections.abc import Mapping
 from enum import Enum
-from typing import Any, cast
 
 from cpip.core.errors import DiagnosticCpipError
 from cpip.core.hashes import Hashes
@@ -23,6 +21,12 @@ from cpip.index.datetime import parse_iso_datetime
 from cpip.index.hashes import SUPPORTED_HASHES, supported_hashes
 from cpip.index.paths import PathComponent
 from cpip.index.source_models import ArtifactKind, MetadataFile
+
+TYPE_CHECKING = False
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+    from typing import Any
 
 VCS_SCHEMES_internal = tuple(f"{scheme}+" for scheme in ("git", "hg", "svn", "bzr"))
 VCS_SCHEMES = frozenset(("git", "hg", "svn", "bzr"))
@@ -47,7 +51,7 @@ HASH_URL_FRAGMENT_RE = re.compile(
 @functools.cache
 def hash_from_url_fragment(url: str) -> tuple[str, str] | None:
     match = HASH_URL_FRAGMENT_RE.search(url)
-    return cast("tuple[str, str] | None", match.groups() if match is not None else None)
+    return match.groups() if match is not None else None  # ty:ignore[invalid-return-type]
 
 
 class InvalidEggFragment(DiagnosticCpipError):

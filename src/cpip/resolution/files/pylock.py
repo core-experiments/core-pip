@@ -6,7 +6,6 @@ import os
 import posixpath
 import re
 import urllib.parse
-from typing import TYPE_CHECKING, cast
 
 try:
     import tomllib
@@ -22,6 +21,8 @@ from cpip.core.utils import CURRENT_PYTHON_VERSION_FULL
 from cpip.core.urls import path_to_url
 from cpip.core.wheel import parse_wheel_filename
 from cpip.resolution.files.models import ParsedRequirement
+
+TYPE_CHECKING = False
 
 if TYPE_CHECKING:
     from cpip.resolution.files.contracts import RequirementSource
@@ -90,9 +91,7 @@ def parse_pylock(
                 f"Cannot select requirements from pylock file {reference!r}",
             )
 
-        package = cast("dict[str, object]", package)
-
-        package_name = cast("str", package["name"])
+        package_name = package["name"]
 
         requires_python = package.get("requires-python")
 
@@ -160,7 +159,7 @@ def parse_pylock(
                         f"there is no source distribution for it in {reference!r}",
                     )
 
-                distribution = cast("dict[str, object]", package["sdist"])
+                distribution = package["sdist"]
 
                 link = pylock_location(
                     reference,
@@ -251,19 +250,19 @@ def _select_distribution(
         distribution = package.get(key)
 
         if isinstance(distribution, dict):
-            return cast("dict[str, object]", distribution), kind
+            return distribution, kind  # ty:ignore[invalid-return-type]
 
     wheels = package.get("wheels")
 
     if isinstance(wheels, list):
         for distribution in wheels:
             if isinstance(distribution, dict):
-                return cast("dict[str, object]", distribution), "wheel"
+                return distribution, "wheel"  # ty:ignore[invalid-return-type]
 
     sdist = package.get("sdist")
 
     if isinstance(sdist, dict):
-        return cast("dict[str, object]", sdist), "sdist"
+        return sdist, "sdist"  # ty:ignore[invalid-return-type]
 
     raise InstallationError("Cannot select a distribution from pylock package")
 
@@ -292,9 +291,7 @@ def _distribution_hashes(
     ):
         raise InstallationError(f"Invalid hashes for {package_name!r}")
 
-    return {
-        cast("str", name): [cast("str", value)] for name, value in raw_hashes.items()
-    }
+    return {name: [value] for name, value in raw_hashes.items()}  # ty:ignore[invalid-return-type]
 
 
 def _sdist_version(filename: str, package_name: str) -> str:

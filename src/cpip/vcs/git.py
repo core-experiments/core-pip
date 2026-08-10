@@ -4,7 +4,6 @@ import logging
 import os.path
 import re
 import urllib.parse
-from typing import Any
 
 from cpip.core.utils import AuthInfo, display_path
 from cpip.core.errors import InstallationError
@@ -21,6 +20,11 @@ from .versioncontrol import (
     find_path_to_project_root_from_repo_root,
     vcs,
 )
+
+TYPE_CHECKING = False
+
+if TYPE_CHECKING:
+    from typing import Any
 
 urlsplit = urllib.parse.urlsplit
 

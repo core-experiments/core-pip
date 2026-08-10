@@ -7,7 +7,6 @@ import hashlib
 import marshal
 import posixpath
 import urllib.parse
-from typing import Any, cast
 
 from cpip.core.packaging import Version
 from cpip.core.wheel import WheelFile, WheelTag, parse_wheel_file
@@ -15,6 +14,11 @@ from cpip.index.datetime import parse_iso_datetime
 from cpip.index.directory_index import project_version_from_filename
 from cpip.index.links import Link
 from cpip.index.source_models import ArtifactKind, MetadataFile
+
+TYPE_CHECKING = False
+
+if TYPE_CHECKING:
+    from typing import Any
 
 VERSION = 7
 PREFIX = "cpip-index-catalog-v7:"
@@ -170,7 +174,7 @@ def _load_catalog_uncached(
             valid_record(record) for record in unparsed
         ):
             return None
-        return cast("CatalogData", (groups, unparsed)), raw
+        return (groups, unparsed), raw
     except (EOFError, TypeError, ValueError, KeyError, IndexError):
         return None
 
@@ -224,11 +228,8 @@ def decode_summary(raw: bytes) -> CatalogSummary | None:
         ):
             return None
         if len(payload) == 3:
-            return cast(
-                "CatalogSummary",
-                (payload[0], payload[1], payload[2], {}),
-            )
-        return cast("CatalogSummary", payload)
+            return (payload[0], payload[1], payload[2], {})  # ty:ignore[invalid-return-type]
+        return payload  # ty:ignore[invalid-return-type]
     try:
         payload = marshal.loads(raw)
     except (EOFError, TypeError, ValueError):
@@ -244,10 +245,7 @@ def decode_summary(raw: bytes) -> CatalogSummary | None:
         or not all(valid_summary_group(group) for group in payload[3])
     ):
         return None
-    return cast(
-        "CatalogSummary",
-        (payload[2], payload[3], payload[4], {}),
-    )
+    return (payload[2], payload[3], payload[4], {})
 
 
 def decode_legacy_summary(raw: bytes) -> CatalogSummary | None:
@@ -262,10 +260,7 @@ def decode_legacy_summary(raw: bytes) -> CatalogSummary | None:
             or not all(valid_summary_group(group) for group in payload[1])
         ):
             return None
-        summary = cast(
-            "CatalogSummary",
-            (payload[0], payload[1], payload[2], {}),
-        )
+        summary = (payload[0], payload[1], payload[2], {})
     else:
         try:
             payload = marshal.loads(raw)
@@ -282,12 +277,9 @@ def decode_legacy_summary(raw: bytes) -> CatalogSummary | None:
             or not all(valid_summary_group(group) for group in payload[3])
         ):
             return None
-        summary = cast(
-            "CatalogSummary",
-            (payload[2], payload[3], payload[4], {}),
-        )
-    summary[1].sort(key=summary_group_sort_key)
-    return summary
+        summary = (payload[2], payload[3], payload[4], {})
+    summary[1].sort(key=summary_group_sort_key)  # ty:ignore[no-matching-overload]
+    return summary  # ty:ignore[invalid-return-type]
 
 
 def load_choices(
@@ -315,7 +307,7 @@ def load_choices(
             or not isinstance(payload[1], dict)
         ):
             return {}
-        choices = cast("CatalogChoices", payload[1])
+        choices = payload[1]
         embed_summary_choices(
             cache,
             url,
@@ -323,9 +315,9 @@ def load_choices(
             target_key,
             allow_binary,
             allow_source,
-            choices,
+            choices,  # ty:ignore[invalid-argument-type]
         )
-        return choices
+        return choices  # ty:ignore[invalid-return-type]
     try:
         payload = marshal.loads(raw)
     except (EOFError, TypeError, ValueError):
@@ -343,7 +335,7 @@ def load_choices(
         )
     ):
         return {}
-    choices = cast("CatalogChoices", payload[3])
+    choices = payload[3]
     save_choices(
         cache,
         url,
@@ -983,10 +975,8 @@ def link_from_record(record: object, *, source_url: str | None = None) -> Link:
         or not all(isinstance(value, str) for value in metadata.values())
     ):
         raise ValueError("invalid catalog metadata")
-    hashes_value = cast("dict[str, str]", hashes) if isinstance(hashes, dict) else None
-    metadata_value = (
-        cast("dict[str, str]", metadata) if isinstance(metadata, dict) else None
-    )
+    hashes_value = hashes if isinstance(hashes, dict) else None
+    metadata_value = metadata if isinstance(metadata, dict) else None
     parsed_upload_time: datetime.datetime | None = None
     if upload_time is not None:
         if not isinstance(upload_time, str):
@@ -997,11 +987,11 @@ def link_from_record(record: object, *, source_url: str | None = None) -> Link:
         parsed_url=urllib.parse.urlsplit(url),
         source_url=source_url,
         text=text,
-        hashes=hashes_value or {},
+        hashes=hashes_value or {},  # ty:ignore[invalid-argument-type]
         requires_python=requires_python if isinstance(requires_python, str) else None,
         yanked_reason=yanked if isinstance(yanked, str) else None,
         metadata_file=(
-            MetadataFile(metadata_value) if metadata_value is not None else None
+            MetadataFile(metadata_value) if metadata_value is not None else None  # ty:ignore[invalid-argument-type]
         ),
         upload_time=parsed_upload_time,
     )

@@ -14,7 +14,6 @@ import tempfile
 import zipfile
 from collections.abc import Iterable
 from contextlib import nullcontext
-from typing import TYPE_CHECKING, Any, cast
 
 from cpip.core.errors import InstallationError
 from cpip.core.names import canonicalize_name
@@ -54,6 +53,8 @@ from cpip.install.wheel_transaction_direct import (
     install_wheels_directly,
 )
 from cpip.platform.clone import clone_path
+
+TYPE_CHECKING = False
 
 if TYPE_CHECKING:
     from cpip.build.metadata import InstalledMetadataDistribution
@@ -252,7 +253,6 @@ def install_wheel_internal(
                 os.chmod(destination, mode)
 
         with open_wheel_archive(path, candidate) as archive:
-            archive = cast("Any", archive)
             if validated_dist_info is None:
                 layout = getattr(candidate, "wheel_layout", None)
                 if isinstance(layout, CachedWheelArchive):
@@ -261,7 +261,7 @@ def install_wheel_internal(
                     validated_dist_info = layout[0]
                 else:
                     validated_dist_info, _ = parse_wheel(
-                        archive,
+                        archive,  # ty:ignore[invalid-argument-type]
                         os.path.basename(path)[:-4].split("-", 1)[0],
                     )
             wheel_record_metadata: dict[str, tuple[str, str]] = {}
@@ -318,11 +318,11 @@ def install_wheel_internal(
                         os.makedirs(source_parent_text, exist_ok=True)
                         stage_directories.add(source_parent_text)
                 if rewrite_metadata or script_member:
-                    contents = archive.read(member)
+                    contents = archive.read(member)  # ty:ignore[invalid-argument-type]
                 elif is_record:
                     contents = None
                 elif direct_content:
-                    contents = archive.read(member)
+                    contents = archive.read(member)  # ty:ignore[invalid-argument-type]
                     direct_content_size += len(contents)
                 else:
                     metadata = wheel_record_metadata.get("/".join(relative_parts))
@@ -351,8 +351,8 @@ def install_wheel_internal(
                         metadata = cached_member.record_metadata
                     else:
                         metadata = copy_member_with_metadata(
-                            archive,
-                            member,
+                            archive,  # ty:ignore[invalid-argument-type]
+                            member,  # ty:ignore[invalid-argument-type]
                             destination_text if direct else source_text,
                             metadata=metadata,
                         )
@@ -371,7 +371,7 @@ def install_wheel_internal(
                             contents = "".join(lines).encode("utf-8")
                             break
                 if direct and contents is not None and not direct_content:
-                    write_direct(destination_text, contents, zip_mode(member))
+                    write_direct(destination_text, contents, zip_mode(member))  # ty:ignore[invalid-argument-type]
                 if contents is not None and not direct_content and not direct:
                     with open(source_text, "wb") as file:
                         file.write(contents)
@@ -387,7 +387,7 @@ def install_wheel_internal(
                         metadata = record_metadata_internal(contents)
                     if direct_content:
                         if direct:
-                            write_direct(destination_text, contents, zip_mode(member))
+                            write_direct(destination_text, contents, zip_mode(member))  # ty:ignore[invalid-argument-type]
                         else:
                             direct_contents[destination_text] = contents
                         direct_metadata[destination_text] = metadata
@@ -395,7 +395,7 @@ def install_wheel_internal(
                         direct_metadata[destination_text] = metadata
                     else:
                         record_metadata[source_text] = metadata
-                mode = zip_mode(member)
+                mode = zip_mode(member)  # ty:ignore[invalid-argument-type]
                 staged.append((source_text, destination_text, destination_text, mode))
                 if relative_name == "RECORD" and relative_parts:
                     record_destination = destination_text
@@ -806,7 +806,7 @@ def install_wheels_transactionally(
                         direct_url=request[2],
                         existing=None,
                         lookup_existing=False,
-                        destination_cache=cast("DestinationCache", cache_for_workers),
+                        destination_cache=cache_for_workers,  # ty:ignore[invalid-argument-type]
                         stage_root=os.path.join(batch_stage, str(index)),
                         transaction=local_transaction,
                     )

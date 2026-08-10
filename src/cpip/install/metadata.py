@@ -6,7 +6,6 @@ import json
 import os
 import shutil
 import sys
-from typing import TYPE_CHECKING, Any, cast
 
 from cpip.build.metadata import InstalledMetadataDistribution, MetadataDistribution
 from cpip.build.build_backend import BackendSpec, prepare_project_metadata
@@ -28,7 +27,11 @@ from cpip.install.source import SourceMetadataPreparation
 from cpip.resolution.input_requirements import install_req_from_editable
 from cpip.vcs.versioncontrol import vcs
 
+TYPE_CHECKING = False
+
 if TYPE_CHECKING:
+    from typing import Any
+
     from cpip.build.build_backend import ProjectMetadata
     from cpip.resolution.req_install import InstallRequirement
 
@@ -107,7 +110,7 @@ class DistributionPreparer:
                 distribution = MetadataDistribution.from_directory(directory)
                 req.set_dist(distribution)
 
-            return cast("MetadataView", distribution)
+            return distribution  # ty:ignore[invalid-return-type]
 
         path = req.local_file_path
         name = req.name

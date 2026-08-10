@@ -2,10 +2,14 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any
 
 from cpip.build.pep517_hooks import HookMissing
 from cpip.core.subprocess import call_subprocess
+
+TYPE_CHECKING = False
+
+if TYPE_CHECKING:
+    from typing import Any
 
 logger = logging.getLogger(__name__)
 

@@ -7,11 +7,15 @@ import json
 import logging
 import os
 import sys
-from typing import Any
 
 from cpip.core.direct_url import DirectUrl
 from cpip.core.utils import CURRENT_PYTHON_VERSION_DIGITS
 from cpip.core.temp_dir import TempDirectory, tempdir_kinds
+
+TYPE_CHECKING = False
+
+if TYPE_CHECKING:
+    from typing import Any
 
 logger = logging.getLogger(__name__)
 

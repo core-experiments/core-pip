@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-from typing import TYPE_CHECKING, Any, cast
 
 from cpip.core.errors import InstallationError
 from cpip.core.wheel import WheelCandidate
@@ -16,7 +15,11 @@ from cpip.install.wheel_archive import (
     validate_member_parts,
 )
 
+TYPE_CHECKING = False
+
 if TYPE_CHECKING:
+    from typing import Any
+
     from cpip.core.direct_url import DirectUrl
 
 DIRECT_CONTENT_BATCH_LIMIT = 4 * 1024 * 1024
@@ -37,14 +40,11 @@ def direct_batch_preflight(
     for request, candidate in zip(requests, candidates):
         if request[2] is not None or not isinstance(candidate.wheel_layout, tuple):
             return None
-        _, raw_members, _ = cast(
-            "tuple[str, tuple[tuple[str, int, int, int, int, int], ...], bool]",
-            candidate.wheel_layout,
-        )
-        member_sets.append(raw_members)
+        _, raw_members, _ = candidate.wheel_layout
+        member_sets.append(raw_members)  # ty:ignore[invalid-argument-type]
         total_size += sum(
             raw_member[4]
-            for raw_member in raw_members
+            for raw_member in raw_members  # ty:ignore[not-iterable]
             if not raw_member[0].endswith("/")
         )
     if total_size <= DIRECT_CONTENT_BATCH_LIMIT:

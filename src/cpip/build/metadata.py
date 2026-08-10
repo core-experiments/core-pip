@@ -7,7 +7,6 @@ import re
 import sys
 from collections.abc import Collection
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, cast
 
 from cpip.core.direct_url import DirectUrl
 from cpip.core.metadata import find_installed, iter_installed_distributions
@@ -20,6 +19,8 @@ from cpip.core.packaging import (
 )
 from cpip.core.urls import url_to_path
 from cpip.core.wheel import parse_wheel, read_wheel_metadata_file
+
+TYPE_CHECKING = False
 
 if TYPE_CHECKING:
     import email.message
@@ -285,7 +286,7 @@ class InstalledMetadataDistribution:
 
     @property
     def metadata(self) -> email.message.Message:
-        return cast("email.message.Message", self.distribution_internal.raw.metadata)
+        return self.distribution_internal.raw.metadata  # ty:ignore[invalid-return-type]
 
     @property
     def metadata_dict(self) -> dict[str, object]:

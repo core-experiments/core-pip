@@ -10,7 +10,6 @@ import re
 import shlex
 import sys
 import urllib.parse
-from typing import TYPE_CHECKING, Any
 
 from cpip.core.errors import InstallationError
 from cpip.core.packaging import parse_requirement
@@ -33,7 +32,11 @@ from cpip.resolution.input_requirements import (
     install_req_from_line,
 )
 
+TYPE_CHECKING = False
+
 if TYPE_CHECKING:
+    from typing import Any
+
     from cpip.resolution.files.contracts import (
         RequirementSession,
         RequirementSource,

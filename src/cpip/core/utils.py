@@ -6,7 +6,11 @@ import errno
 import marshal
 import os
 import sys
-from typing import Any
+
+TYPE_CHECKING = False
+
+if TYPE_CHECKING:
+    from typing import Any
 
 
 AuthInfo = tuple[str | None, str | None]

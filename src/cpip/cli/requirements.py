@@ -6,7 +6,6 @@ import argparse
 import os
 import sys
 import threading
-from typing import TYPE_CHECKING, Any, cast
 
 try:
     import tomllib
@@ -34,7 +33,11 @@ from cpip.resolution.input_requirements import install_req_from_line
 RELEASE_OPTIONS = frozenset(("pre", "all-releases"))
 
 
+TYPE_CHECKING = False
+
 if TYPE_CHECKING:
+    from typing import Any
+
     from cpip.core.wheel import TargetContext
     from cpip.resolution.req_install import InstallRequirement
 
@@ -507,8 +510,8 @@ def collect_requirements(
 
                 if item.options and "config_settings" in item.options:
                     editable_settings[item.requirement] = dict(
-                        cast("dict[str, object]", item.options["config_settings"]),
-                    )
+                        item.options["config_settings"],
+                    )  # ty:ignore[no-matching-overload]
 
             elif item.constraint:
                 validate_constraint_requirement(
@@ -522,7 +525,7 @@ def collect_requirements(
                     store_hashes(
                         constraint_hashes,
                         item.requirement,
-                        cast("dict[str, list[str]]", item.options["hashes"]),
+                        item.options["hashes"],  # ty:ignore[invalid-argument-type]
                     )
 
             else:
@@ -530,14 +533,14 @@ def collect_requirements(
 
                 if item.options and "config_settings" in item.options:
                     requirement_settings[item.requirement] = dict(
-                        cast("dict[str, object]", item.options["config_settings"]),
-                    )
+                        item.options["config_settings"],
+                    )  # ty:ignore[no-matching-overload]
 
                 if item.options and "hashes" in item.options:
                     store_hashes(
                         requirement_hashes,
                         item.requirement,
-                        cast("dict[str, list[str]]", item.options["hashes"]),
+                        item.options["hashes"],  # ty:ignore[invalid-argument-type]
                     )
 
     for filename in constraint_files or []:
@@ -561,7 +564,7 @@ def collect_requirements(
                 store_hashes(
                     constraint_hashes,
                     item.requirement,
-                    cast("dict[str, list[str]]", item.options["hashes"]),
+                    item.options["hashes"],  # ty:ignore[invalid-argument-type]
                 )
 
     provider.locked_links = {name: Link(url) for name, url in locked_links.items()}

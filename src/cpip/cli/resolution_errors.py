@@ -10,7 +10,11 @@ both commands report a failure identically.
 from __future__ import annotations
 
 import re
-from typing import Any
+
+TYPE_CHECKING = False
+
+if TYPE_CHECKING:
+    from typing import Any
 
 
 def resolution_error_message(

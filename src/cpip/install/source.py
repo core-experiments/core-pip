@@ -4,7 +4,6 @@ import logging
 import os
 import zipfile
 from collections.abc import Iterable
-from typing import TYPE_CHECKING, cast
 
 from cpip.core.errors import InstallationError
 from cpip.core.utils import display_path
@@ -15,6 +14,8 @@ from cpip.install.build_env.venv import VenvBuildEnvironment
 from cpip.resolution.req_install import InstallRequirement
 from cpip.vcs.support import hide_url
 from cpip.vcs.versioncontrol import vcs
+
+TYPE_CHECKING = False
 
 if TYPE_CHECKING:
     from cpip.install.build_env.base import BuildEnvironmentInstaller
@@ -99,7 +100,7 @@ class SourceMetadataPreparation:
             if conflicting:
                 self.raise_conflicts(
                     "the backend dependencies",
-                    cast("set[tuple[str, str]]", conflicting),
+                    conflicting,  # ty:ignore[invalid-argument-type]
                 )
             if missing:
                 self.raise_missing_reqs(missing)
@@ -134,7 +135,7 @@ class SourceMetadataPreparation:
         if conflicting:
             self.raise_conflicts(
                 "PEP 517/518 supported requirements",
-                cast("set[tuple[str, str]]", conflicting),
+                conflicting,  # ty:ignore[invalid-argument-type]
             )
         if missing:
             logger.warning(
@@ -175,7 +176,7 @@ class SourceMetadataPreparation:
         if conflicting:
             self.raise_conflicts(
                 "the backend dependencies",
-                cast("set[tuple[str, str]]", conflicting),
+                conflicting,  # ty:ignore[invalid-argument-type]
             )
         with self.req.build_env:
             self.req.build_env.install_requirements(

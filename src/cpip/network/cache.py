@@ -5,10 +5,8 @@ from __future__ import annotations
 import hashlib
 import os
 import shutil
-from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from datetime import datetime
-from typing import Any, BinaryIO
 
 from cpip.core.utils import ensure_dir
 from cpip.platform.filesystem import (
@@ -16,6 +14,12 @@ from cpip.platform.filesystem import (
     copy_directory_permissions,
     replace,
 )
+
+TYPE_CHECKING = False
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Generator
+    from typing import Any, BinaryIO
 
 
 @contextmanager

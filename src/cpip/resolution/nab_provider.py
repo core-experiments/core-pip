@@ -3,7 +3,6 @@ from __future__ import annotations
 from collections.abc import Mapping
 from contextlib import nullcontext
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
 from cpip._vendor.nab_resolver.ranges import Range
@@ -22,6 +21,8 @@ from cpip.core.packaging import (
 from cpip.index.candidate_evaluators import CandidateEvaluator
 from cpip.index.provider import CandidateProvider
 from cpip.resolution.models import ResolutionConfig, canonical_url, url_name
+
+TYPE_CHECKING = False
 
 if TYPE_CHECKING:
     from contextlib import AbstractContextManager

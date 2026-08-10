@@ -6,7 +6,6 @@ import logging
 import os
 import sys
 from dataclasses import dataclass, field, replace
-from typing import TYPE_CHECKING, Any
 
 from cpip.build.build import build_editable_from_source
 from cpip.build.query import (
@@ -71,8 +70,11 @@ from cpip.platform.virtualenv import running_under_virtualenv
 from cpip.resolution.api import ResolutionEngine
 from cpip.resolution.input_requirements import install_req_from_line
 
+TYPE_CHECKING = False
+
 if TYPE_CHECKING:
     import argparse
+    from typing import Any
     from cpip.resolution.models import ResolutionResult
     from cpip.resolution.req_install import InstallRequirement
 

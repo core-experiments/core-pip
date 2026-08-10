@@ -8,10 +8,11 @@ import importlib.util
 import os
 import stat
 from collections.abc import Iterable, Mapping
-from typing import TYPE_CHECKING
 
 from cpip.build.metadata import InstalledDistributionStore
 from cpip.core.errors import InstallationError
+
+TYPE_CHECKING = False
 
 if TYPE_CHECKING:
     from cpip.build.metadata import InstalledMetadataDistribution

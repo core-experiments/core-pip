@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import sys
-from typing import Any
 
 from cpip.build.query import (
     format_list_columns,
@@ -14,6 +13,11 @@ from cpip.build.query import (
 from cpip.cli.parsers.list import create_parser
 from cpip.cli.target import target_paths
 from cpip.core.metadata import stdlib_pkgs, user_lib_path
+
+TYPE_CHECKING = False
+
+if TYPE_CHECKING:
+    from typing import Any
 
 
 def run_list(args: list[str]) -> int:
