@@ -4,33 +4,17 @@ from __future__ import annotations
 
 import os
 import sys
-from typing import TYPE_CHECKING
 
+from cpip.build import metadata as build_metadata
+from cpip.build import query
 from cpip.cli.parsers.inspect import (
     create_check_parser,
     create_hash_parser,
     create_inspect_parser,
     create_show_parser,
 )
-from cpip.core.lazy import lazy_module
-
-# This module implements four commands with very different appetites: ``hash``
-# digests files and needs none of the metadata stack, while ``check`` and
-# ``inspect`` need most of it.  Binding the heavy modules lazily means each
-# command pays only for what it actually reaches.
-if TYPE_CHECKING:
-    from cpip.build import metadata as build_metadata
-    from cpip.build import query
-    from cpip.core import cpip_version, packaging, target_python, urls
-    from cpip.core import metadata as core_metadata
-else:
-    build_metadata = lazy_module("cpip.build.metadata")
-    core_metadata = lazy_module("cpip.core.metadata")
-    cpip_version = lazy_module("cpip.core.cpip_version")
-    packaging = lazy_module("cpip.core.packaging")
-    query = lazy_module("cpip.build.query")
-    target_python = lazy_module("cpip.core.target_python")
-    urls = lazy_module("cpip.core.urls")
+from cpip.core import cpip_version, packaging, target_python, urls
+from cpip.core import metadata as core_metadata
 
 
 def run_check(args: list[str]) -> int:

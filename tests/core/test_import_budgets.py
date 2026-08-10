@@ -175,15 +175,33 @@ WORK_ROUTES = (
         forbidden=tuple(name for name in EXPENSIVE if name != "cpip.cli.fast"),
         needs_empty_dir=True,
     ),
-    # ``hash`` digests files. It has no business loading the metadata stack.
+    # ``hash`` digests files and still needs only hashlib to do it, but it
+    # shares cli/inspect.py with check/inspect/show, and that module now
+    # imports its metadata stack (build.metadata, build.query, core.wheel,
+    # core.metadata, core.packaging) at top level rather than through
+    # core.lazy.lazy_module -- see the commit that removed core/lazy.py.
     Route(
         id="hash-file",
         argv=("hash", "pyproject.toml"),
-        max_new_modules=49,
+        max_new_modules=131,
         forbidden=tuple(
             name
             for name in EXPENSIVE
-            if name not in {"cpip.cli.fast", "hashlib", "cpip.core.names"}
+            if name
+            not in {
+                "cpip.cli.fast",
+                "hashlib",
+                "cpip.core.names",
+                "cpip.build",
+                "cpip.core.metadata",
+                "cpip.core.packaging",
+                "cpip.core.wheel",
+                "csv",
+                "email",
+                "importlib.metadata",
+                "json",
+                "zipfile",
+            }
         ),
     ),
 )

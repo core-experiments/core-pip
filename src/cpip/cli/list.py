@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sys
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from cpip.build.query import (
     format_list_columns,
@@ -11,23 +11,12 @@ from cpip.build.query import (
     format_list_json,
     select_installed_distributions,
 )
+from cpip.cli import config
 from cpip.cli.parsers.list import create_parser
 from cpip.cli.target import target_paths
-from cpip.core.lazy import lazy_module
+from cpip.core import format_control, packaging
 from cpip.core.metadata import stdlib_pkgs, user_lib_path
-
-# Only --outdated/--uptodate consult an index, and that branch is what drags
-# in the candidate provider and everything under it.  A plain listing should
-# not pay for a subsystem it never reaches.
-if TYPE_CHECKING:
-    from cpip.cli import config
-    from cpip.core import format_control, packaging
-    from cpip.index import provider as index_provider
-else:
-    config = lazy_module("cpip.cli.config")
-    format_control = lazy_module("cpip.core.format_control")
-    index_provider = lazy_module("cpip.index.provider")
-    packaging = lazy_module("cpip.core.packaging")
+from cpip.index import provider as index_provider
 
 
 def run_list(args: list[str]) -> int:
