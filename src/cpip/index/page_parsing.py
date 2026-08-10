@@ -108,6 +108,7 @@ class IndexPageParser:
     def links_from_json(self, body: str, url: str) -> list[Link]:
         data = json.loads(body)
         links: list[Link] = []
+        base_url = ensure_trailing_slash(url)
         for file_data in data.get("files", []):
             if not isinstance(file_data, dict):
                 continue
@@ -115,7 +116,7 @@ class IndexPageParser:
             filename = file_data.get("filename")
             if not isinstance(file_url, str):
                 continue
-            absolute = urllib.parse.urljoin(ensure_trailing_slash(url), file_url)
+            absolute = urllib.parse.urljoin(base_url, file_url)
             hashes = file_data.get("hashes")
             yanked = file_data.get("yanked")
             links.append(
@@ -149,6 +150,9 @@ class LinkParser(HTMLParser):
     def __init__(self, page_url: str, link_factory: LinkFactory) -> None:
         super().__init__(convert_charrefs=True)
         self.page_url = page_url
+        # Every link on the page resolves against this same base -- computed
+        # once here instead of once per <a> tag in handle_endtag.
+        self.base_url_internal = ensure_trailing_slash(page_url)
         self.link_factory = link_factory
         self.links: list[Link] = []
         self.current_internal: dict[str, str | None] | None = None
@@ -171,7 +175,7 @@ class LinkParser(HTMLParser):
         if href:
             self.links.append(
                 self.link_factory(
-                    urllib.parse.urljoin(ensure_trailing_slash(self.page_url), href),
+                    urllib.parse.urljoin(self.base_url_internal, href),
                     source_url=self.page_url,
                     text="".join(self.text_internal).strip(),
                     requires_python=self.current_internal.get("data-requires-python"),

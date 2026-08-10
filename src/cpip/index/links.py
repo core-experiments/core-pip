@@ -41,6 +41,7 @@ SOURCE_ARCHIVE_SUFFIXES = (
 WHEEL_EXTENSION = ".whl"
 SUPPORTED_EXTENSIONS = (WHEEL_EXTENSION, *SOURCE_ARCHIVE_SUFFIXES)
 REQ_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+EGG_FRAGMENT_RE = re.compile(r"[#&]egg=([^&]*)")
 HASH_URL_FRAGMENT_RE = re.compile(
     r"[#&]({choices})=([^&]*)".format(
         choices="|".join(re.escape(name) for name in SUPPORTED_HASHES),
@@ -536,7 +537,15 @@ class Link:
         return Hashes({name: [value] for name, value in self.hashes_internal.items()})
 
     def egg_fragment_internal(self) -> str | None:
-        match = re.search(r"[#&]egg=([^&]*)", self.url_internal)
+        url = self.url_internal
+
+        # ``egg=`` fragments are a legacy VCS-URL feature and rare in
+        # practice; skipping the regex for the common case where the
+        # substring is absent avoids firing the engine on every link.
+        if "egg=" not in url:
+            return None
+
+        match = EGG_FRAGMENT_RE.search(url)
         if not match:
             return None
         name = match.group(1)
