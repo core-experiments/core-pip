@@ -2,13 +2,9 @@
 
 from __future__ import annotations
 
-import configparser
-import email.message
-import email.parser
 import os
 import re
 import sys
-import zipfile
 from collections.abc import Collection
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, cast
@@ -26,6 +22,9 @@ from cpip.core.urls import url_to_path
 from cpip.core.wheel import parse_wheel, read_wheel_metadata_file
 
 if TYPE_CHECKING:
+    import email.message
+    import zipfile
+
     from cpip.core.metadata import InstalledDistribution
     from cpip.core.packaging import Requirement
 
@@ -55,6 +54,10 @@ def egg_link_path_from_sys_path(raw_name: str) -> str | None:
 def parse_entry_points(text: str | None) -> list[SimpleNamespace]:
     if not text:
         return []
+
+    # Only reached when a distribution actually declares entry points, so
+    # keep configparser off the common metadata-loading path.
+    import configparser
 
     parser = configparser.ConfigParser(delimiters=("=",), strict=False)
 
@@ -95,6 +98,8 @@ class MetadataDistribution:
         cls,
         directory: str,
     ) -> MetadataDistribution:
+        import email.parser
+
         metadata_path = os.path.join(directory, "METADATA")
 
         with open(metadata_path, encoding="utf-8") as file:
@@ -122,6 +127,8 @@ class MetadataDistribution:
         path: str,
         name: str,
     ) -> MetadataDistribution:
+        import zipfile
+
         with zipfile.ZipFile(path, allowZip64=True) as archive:
             return cls.from_wheel_archive(archive, name, path)
 
@@ -132,6 +139,8 @@ class MetadataDistribution:
         name: str,
         location: str,
     ) -> MetadataDistribution:
+        import email.parser
+
         info_dir, _ = parse_wheel(archive, name)
 
         contents = read_wheel_metadata_file(archive, f"{info_dir}/METADATA")
@@ -158,6 +167,8 @@ class MetadataDistribution:
         contents: bytes,
         project_name: str,
     ) -> MetadataDistribution:
+        import email.parser
+
         metadata = email.parser.BytesParser().parsebytes(contents)
 
         if metadata.get("Name") is None:
