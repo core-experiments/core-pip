@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import shlex
 import shutil
@@ -85,6 +86,36 @@ def print_workloads() -> None:
 
 def repo_root() -> Path:
     return Path(__file__).resolve().parents[4]
+
+
+def _version_of(executable: str) -> str:
+    try:
+        return subprocess.check_output(
+            [executable, "--version"], text=True, stderr=subprocess.STDOUT
+        ).strip()
+    except (OSError, subprocess.CalledProcessError):
+        return "unknown"
+
+
+def collect_run_metadata(*, cpip_python: str, uv_path: str) -> dict[str, str]:
+    """Record what actually ran, so ``cpip-bench-compare`` can catch a
+    mismatched interpreter between two runs instead of silently comparing
+    apples to oranges (a fresh ``uv sync`` with no pin can resolve a
+    different Python version than an existing checkout)."""
+    try:
+        git_commit = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repo_root(),
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+    except (OSError, subprocess.CalledProcessError):
+        git_commit = "unknown"
+    return {
+        "cpip_python_version": _version_of(cpip_python),
+        "uv_version": _version_of(uv_path),
+        "git_commit": git_commit,
+    }
 
 
 def tool_command(
@@ -590,6 +621,13 @@ def main() -> None:
                 parser.error(f"{workload} does not support {benchmark}")
     if not runs:
         parser.error("No supported workload and benchmark combinations selected")
+
+    if args.json and not args.dry_run:
+        metadata = collect_run_metadata(
+            cpip_python=args.cpip_python,
+            uv_path=args.uv_path,
+        )
+        Path("meta.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
 
     with tempfile.TemporaryDirectory(prefix="cpip-bench-") as temporary:
         workspace_root = Path(temporary)

@@ -86,3 +86,19 @@ Official uv workloads are intentionally opt-in because they can depend on
 network latency, current PyPI state, VCS availability, target Python, platform
 wheels, and cache behavior outside this repository. `--list-workloads` reports
 cases with an upstream recommended Python version.
+
+## Comparing two runs
+
+`--json` also writes a `meta.json` recording the interpreter/uv versions and
+git commit used, alongside the per-benchmark `--export-json` files. To
+compare a change against a baseline, run `--json` once per checkout into
+separate directories, then:
+
+```console
+uv run cpip-bench-compare before/ after/
+```
+
+This prints a before/after/delta table per benchmark and tool, and warns if
+`meta.json` shows the two runs used different interpreters -- a fresh `uv
+sync` with no Python pin can silently resolve a different version than an
+existing checkout, which will otherwise look like a real performance change.
