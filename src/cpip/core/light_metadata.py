@@ -96,6 +96,19 @@ def _parse_metadata_text(text: str) -> LightMetadata:
 
 
 def _read_metadata_file(info_location: str) -> LightMetadata | None:
+    # The simplest legacy egg-info layout is a single flat PKG-INFO-formatted
+    # file (no dist-info/PKG-INFO subfile to look inside).
+    if os.path.isfile(info_location):
+        try:
+            with open(info_location, encoding="utf-8", errors="replace") as file:
+                text = file.read()
+        except OSError:
+            return None
+        metadata = _parse_metadata_text(text)
+        if metadata.get("Name") and metadata.get("Version"):
+            return metadata
+        return None
+
     # dist-info uses METADATA; legacy egg-info uses PKG-INFO. Try both, since
     # some setuptools egg-info layouts carry either.
     for filename in ("METADATA", "PKG-INFO"):
@@ -342,10 +355,12 @@ def _iter_root_distributions(
             names = sorted(
                 entry.name
                 for entry in entries
-                if entry.is_dir()
-                and (
-                    entry.name.endswith(".dist-info")
-                    or entry.name.endswith(".egg-info")
+                if (entry.name.endswith(".dist-info") and entry.is_dir())
+                # Legacy egg-info can be a directory (with PKG-INFO inside)
+                # or, for the simplest packages, a single flat metadata file.
+                or (
+                    entry.name.endswith(".egg-info")
+                    and (entry.is_dir() or entry.is_file())
                 )
             )
     except OSError:

@@ -262,6 +262,15 @@ class LazyWheelCandidate(WheelCandidate):
         return self.record_internal.metadata().dependencies
 
     @property
+    def metadata_version(self) -> Version:
+        """The release the candidate's own metadata declares.
+
+        May differ from ``version`` (the catalog/filename-declared release)
+        for a mislabeled or malformed artifact.
+        """
+        return self.record_internal.metadata().version
+
+    @property
     def provided_extras(self) -> frozenset[str]:
         return self.record_internal.metadata().provided_extras
 
