@@ -154,7 +154,15 @@ COMMAND_SPECS = (
         needs_logging=False,
         needs_tempdir=False,
     ),
-    CommandSpec("cache", "cpip.cli.cache", "run_cache"),
+    # ``cache`` only ever lists/removes files under the cache directory --
+    # cli/cache.py never touches logging or a temp directory.
+    CommandSpec(
+        "cache",
+        "cpip.cli.cache",
+        "run_cache",
+        needs_logging=False,
+        needs_tempdir=False,
+    ),
     # ``lock`` writes a lock file rather than running an installed
     # environment, so it never needs the runner/version execution context.
     CommandSpec(

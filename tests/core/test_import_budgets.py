@@ -270,6 +270,14 @@ WORK_ROUTES = (
             }
         ),
     ),
+    # ``cache`` only lists/removes files under the cache directory -- it
+    # never logs or needs a temp directory, so its CommandSpec now says so.
+    Route(
+        id="cache-dir",
+        argv=("cache", "dir"),
+        max_new_modules=54,
+        forbidden=tuple(name for name in EXPENSIVE if name != "cpip.cli.fast"),
+    ),
 )
 
 ROUTES = BOOTSTRAP_ROUTES + COMMAND_HELP_ROUTES + WORK_ROUTES
