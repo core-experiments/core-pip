@@ -117,9 +117,7 @@ def iter_installed_package_info(
     include_files: bool = False,
 ) -> Iterator[InstalledPackageInfo]:
     """Collect presentation-neutral information for named distributions."""
-    installed = {
-        dist.canonical_name: dist for dist in LightDistributionStore().iter()
-    }
+    installed = {dist.canonical_name: dist for dist in LightDistributionStore().iter()}
     query_names = [canonicalize_name(name) for name in query]
     dependents, dependents_unavailable = (
         _dependent_index(installed.values())

@@ -545,7 +545,8 @@ class SpecifierSet:
         value.raw = state[0]
 
         value.specifiers = tuple(
-            Specifier.from_cache_state(specifier_state) for specifier_state in state[1]  # ty:ignore[not-iterable]
+            Specifier.from_cache_state(specifier_state)
+            for specifier_state in state[1]  # ty:ignore[not-iterable]
         )
 
         value.text_internal = state[2]
