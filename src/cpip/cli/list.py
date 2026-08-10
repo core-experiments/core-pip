@@ -11,12 +11,9 @@ from cpip.build.query import (
     format_list_json,
     select_installed_distributions,
 )
-from cpip.cli import config
 from cpip.cli.parsers.list import create_parser
 from cpip.cli.target import target_paths
-from cpip.core import format_control, packaging
 from cpip.core.metadata import stdlib_pkgs, user_lib_path
-from cpip.index import provider as index_provider
 
 
 def run_list(args: list[str]) -> int:
@@ -53,6 +50,13 @@ def run_list(args: list[str]) -> int:
     latest: dict[str, tuple[Any, str]] = {}
 
     if options.outdated or options.uptodate:
+        # Only --outdated/--uptodate consult an index, and that branch is what
+        # drags in the candidate provider and everything under it.  A plain
+        # listing should not pay for a subsystem it never reaches.
+        from cpip.cli import config
+        from cpip.core import format_control, packaging
+        from cpip.index import provider as index_provider
+
         sources = config.resolve_sources(options, config.load_source_config("list"))
 
         provider = index_provider.CandidateProvider.from_options(

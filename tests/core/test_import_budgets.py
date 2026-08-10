@@ -175,23 +175,43 @@ WORK_ROUTES = (
         forbidden=tuple(name for name in EXPENSIVE if name != "cpip.cli.fast"),
         needs_empty_dir=True,
     ),
-    # ``hash`` digests files and still needs only hashlib to do it, but it
-    # shares cli/inspect.py with check/inspect/show, and that module now
-    # imports its metadata stack (build.metadata, build.query, core.wheel,
-    # core.metadata, core.packaging) at top level rather than through
-    # core.lazy.lazy_module -- see the commit that removed core/lazy.py.
+    # ``hash`` digests files and needs only hashlib to do it. It now lives in
+    # its own module (cli/inspect_hash.py) instead of sharing cli/inspect.py
+    # with check/inspect/show, so it no longer pays for their metadata stack.
     Route(
         id="hash-file",
         argv=("hash", "pyproject.toml"),
-        max_new_modules=131,
+        max_new_modules=46,
+        allowed_first_party=COLD_CORE
+        | {
+            "cpip.cli.fast",
+            "cpip.cli.inspect_hash",
+            "cpip.cli.lock_format",
+            "cpip.cli.parser",
+            "cpip.cli.parsers",
+            "cpip.cli.parsers.inspect",
+            "cpip.core",
+            "cpip.core.appdirs",
+            "cpip.core.names",
+        },
+        forbidden=tuple(
+            name for name in EXPENSIVE if name not in {"cpip.cli.fast", "hashlib"}
+        ),
+    ),
+    # A plain ``freeze`` never reads a requirements file, so it should not pay
+    # for requirement-file parsing or resolution's `InstallRequirement`. Points
+    # at an empty directory so the result does not depend on what happens to
+    # be installed (an editable install would otherwise pull in cpip.vcs).
+    Route(
+        id="freeze-plain",
+        argv=("freeze", "--path", "{tmp}"),
+        max_new_modules=127,
         forbidden=tuple(
             name
             for name in EXPENSIVE
             if name
             not in {
                 "cpip.cli.fast",
-                "hashlib",
-                "cpip.core.names",
                 "cpip.build",
                 "cpip.core.metadata",
                 "cpip.core.packaging",
@@ -203,6 +223,7 @@ WORK_ROUTES = (
                 "zipfile",
             }
         ),
+        needs_empty_dir=True,
     ),
 )
 

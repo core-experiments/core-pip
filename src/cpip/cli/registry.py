@@ -114,7 +114,7 @@ COMMAND_SPECS = (
     ),
     CommandSpec(
         "show",
-        "cpip.cli.inspect",
+        "cpip.cli.inspect_show",
         "run_show",
         parser_factory="create_show_parser",
         parser_module_path="cpip.cli.parsers.inspect",
@@ -132,7 +132,7 @@ COMMAND_SPECS = (
     ),
     CommandSpec(
         "hash",
-        "cpip.cli.inspect",
+        "cpip.cli.inspect_hash",
         "run_hash",
         parser_factory="create_hash_parser",
         parser_module_path="cpip.cli.parsers.inspect",
@@ -141,7 +141,7 @@ COMMAND_SPECS = (
     ),
     CommandSpec(
         "check",
-        "cpip.cli.inspect",
+        "cpip.cli.inspect_check",
         "run_check",
         parser_factory="create_check_parser",
         parser_module_path="cpip.cli.parsers.inspect",

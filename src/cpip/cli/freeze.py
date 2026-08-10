@@ -20,11 +20,6 @@ from cpip.core.cpip_version import CPIP_DISTRIBUTION_NAMES
 from cpip.core.errors import InstallationError
 from cpip.core.metadata import stdlib_pkgs
 from cpip.core.packaging import InvalidVersion, canonicalize_name
-from cpip.resolution.files.parser import COMMENT_RE
-from cpip.resolution.input_requirements import (
-    install_req_from_editable,
-    install_req_from_line,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +69,14 @@ def freeze(
         installations[req.canonical_name] = req
 
     if requirement:
+        # Only `-r`/`--requirement` needs requirement-file parsing, so a plain
+        # `cpip freeze` never pays for the resolution package.
+        from cpip.resolution.files.parser import COMMENT_RE
+        from cpip.resolution.input_requirements import (
+            install_req_from_editable,
+            install_req_from_line,
+        )
+
         # the options that don't get turned into an InstallRequirement
 
         # should only be emitted once, even if the same option is in multiple
