@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import string
 from collections.abc import Collection, Iterable, Iterator, Mapping
-from email.parser import Parser
 from typing import Any, NamedTuple
 
 from cpip.core.cpip_version import CPIP_DISTRIBUTION_NAMES
@@ -16,9 +15,13 @@ from cpip.core.packaging import (
     marker_applies,
     parse_requirement,
 )
-from cpip.core.wheel import WheelTag, wheel_tag_rank
 
 from .metadata import InstalledDistributionStore, InstalledMetadataDistribution
+
+TYPE_CHECKING = False
+
+if TYPE_CHECKING:
+    from cpip.core.wheel import WheelTag
 
 LatestInfo = Mapping[str, tuple[Any, str]]
 PackageSet = dict[str, "PackageDetails"]
@@ -173,6 +176,8 @@ def format_list_columns(
     latest: LatestInfo | None = None,
 ) -> tuple[list[list[str]], list[str]]:
     """Build rows and headers for the columns list format."""
+    from email.parser import Parser
+
     header = ["Package", "Version"]
 
     if outdated:
@@ -414,6 +419,8 @@ def unsupported_distributions(
     supported_tags: Iterable[WheelTag],
 ) -> list[InstalledMetadataDistribution]:
     """Return distributions whose wheel tags are unsupported."""
+    from cpip.core.wheel import WheelTag, wheel_tag_rank
+
     supported = tuple(supported_tags)
     result = []
     for dist in distributions:

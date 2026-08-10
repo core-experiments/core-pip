@@ -18,7 +18,6 @@ from cpip.core.packaging import (
     parse_requirement,
 )
 from cpip.core.urls import url_to_path
-from cpip.core.wheel import parse_wheel, read_wheel_metadata_file
 
 TYPE_CHECKING = False
 
@@ -141,6 +140,8 @@ class MetadataDistribution:
         location: str,
     ) -> MetadataDistribution:
         import email.parser
+
+        from cpip.core.wheel import parse_wheel, read_wheel_metadata_file
 
         info_dir, _ = parse_wheel(archive, name)
 
