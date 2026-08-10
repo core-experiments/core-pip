@@ -98,4 +98,4 @@ jobs:
           enable-cache: true
       - run: uv sync --locked --group test --group benchmark
       - name: Functional tests
-        run: uv run pytest tests/cli/functional -n auto
+        run: uv run pytest tests/ -n auto
