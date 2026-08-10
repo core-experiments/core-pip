@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import shutil
-import subprocess
 import tempfile
 import urllib.parse
 
@@ -57,6 +56,10 @@ def materialize_vcs(
     emit_resolution: bool = True,
     prompting: bool = True,
 ) -> str:
+    # Only VCS-sourced candidates reach this; most lock/install requests
+    # never need subprocess.
+    import subprocess
+
     reference = vcs_reference(url)
     if reference.vcs != "git":
         raise OSError(f"Unsupported VCS URL: {url}")
@@ -110,6 +113,8 @@ def materialize_vcs(
 
 
 def git_revision(source_dir: str) -> str:
+    import subprocess
+
     result = subprocess.run(
         ["git", "rev-parse", "HEAD"],
         cwd=source_dir,

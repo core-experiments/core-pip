@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import subprocess
 import sys
 import sysconfig
 from collections.abc import Iterable
@@ -84,6 +83,10 @@ class VenvBuildEnvironment(BuildEnvironment):
                 import venv
             except ImportError:
                 raise VenvImportError
+
+            # Only the stdlib-venv fallback (no virtualenv package installed)
+            # needs subprocess, to bootstrap pip into the new environment.
+            import subprocess
 
             env = venv.EnvBuilder(symlinks=(os.name != "nt"), with_pip=False)
             try:

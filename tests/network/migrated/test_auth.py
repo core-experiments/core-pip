@@ -626,7 +626,7 @@ def test_keyring_cli_get_password(
 ) -> None:
     keyring_subprocess = KeyringSubprocessResult()
     monkeypatch.setattr(cpip.network.auth.shutil, "which", lambda x: "keyring")
-    monkeypatch.setattr(cpip.network.auth.subprocess, "run", keyring_subprocess)
+    monkeypatch.setattr(subprocess, "run", keyring_subprocess)
     auth = MultiDomainBasicAuth(
         index_urls=["http://example.com/path2", "http://example.com/path3"],
         keyring_provider="subprocess",
@@ -674,7 +674,7 @@ def test_keyring_cli_set_password(
     expected_username, expected_password, save = creds
     monkeypatch.setattr(cpip.network.auth.shutil, "which", lambda x: "keyring")
     keyring = KeyringSubprocessResult()
-    monkeypatch.setattr(cpip.network.auth.subprocess, "run", keyring)
+    monkeypatch.setattr(subprocess, "run", keyring)
     auth = MultiDomainBasicAuth(prompting=True, keyring_provider="subprocess")
     monkeypatch.setattr(auth, "get_url_and_credentials", lambda u: (u, None, None))
     monkeypatch.setattr(auth, "prompt_for_password", lambda *a: creds)
@@ -752,7 +752,7 @@ def test_keyring_cli_outdated_version(
     warning = Mock()
 
     monkeypatch.setattr(cpip.network.auth.shutil, "which", lambda x: "keyring")
-    monkeypatch.setattr(cpip.network.auth.subprocess, "run", keyring_subprocess)
+    monkeypatch.setattr(subprocess, "run", keyring_subprocess)
     monkeypatch.setattr(cpip.network.auth.logger, "warning", warning)
     auth = MultiDomainBasicAuth(
         index_urls=["http://example.com/path2", "http://example.com/path3"],
