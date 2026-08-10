@@ -110,13 +110,13 @@ class InvalidVersion(ValueError):
 class Version:
     __slots__ = (
         "_hash",
+        "_public",
         "comparison_key",
         "dev",
         "epoch",
         "local",
         "post",
         "pre",
-        "public",
         "release",
     )
 
@@ -138,7 +138,7 @@ class Version:
 
             self.local = None
 
-            self.public = self.format_public()
+            self._public = None
 
             self.comparison_key = self.build_comparison_key()
 
@@ -194,7 +194,7 @@ class Version:
             else None
         )
 
-        self.public = self.format_public()
+        self._public = None
 
         self.comparison_key = self.build_comparison_key()
 
@@ -219,7 +219,7 @@ class Version:
 
         value.local = state[5]
 
-        value.public = state[6]
+        value._public = state[6]
 
         value.comparison_key = state[7]
 
@@ -238,6 +238,17 @@ class Version:
             self.public,
             self.comparison_key,
         )
+
+    @property
+    def public(self) -> str:
+        public = self._public
+
+        if public is None:
+            public = self.format_public()
+
+            self._public = public
+
+        return public
 
     @property
     def is_prerelease(self) -> bool:
