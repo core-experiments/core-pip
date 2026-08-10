@@ -268,7 +268,8 @@ WORK_ROUTES = (
         forbidden=tuple(
             name
             for name in EXPENSIVE
-            if name not in {"cpip.cli.fast", "cpip.build", "cpip.core.packaging", "json"}
+            if name
+            not in {"cpip.cli.fast", "cpip.build", "cpip.core.packaging", "json"}
         ),
     ),
     Route(
