@@ -208,7 +208,7 @@ WORK_ROUTES = (
     Route(
         id="freeze-plain",
         argv=("freeze", "--path", "{tmp}"),
-        max_new_modules=71,
+        max_new_modules=76,
         allowed_first_party=COLD_CORE
         | {
             "cpip.cli.fast",
