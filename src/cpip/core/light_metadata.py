@@ -100,7 +100,11 @@ def _read_metadata_file(info_location: str) -> LightMetadata | None:
     # some setuptools egg-info layouts carry either.
     for filename in ("METADATA", "PKG-INFO"):
         try:
-            with open(os.path.join(info_location, filename), encoding="utf-8") as file:
+            with open(
+                os.path.join(info_location, filename),
+                encoding="utf-8",
+                errors="replace",
+            ) as file:
                 text = file.read()
         except OSError:
             continue
@@ -394,8 +398,11 @@ class LightDistributionStore:
         roots = self.paths if self.paths is not None else sys.path
 
         result: list[LightDistribution] = []
+        seen: set[str] = set()
         for root in roots:
             for dist in _iter_root_distributions(root, self.user_site):
+                if dist.canonical_name in seen:
+                    continue
                 if (
                     canonical_names is not None
                     and dist.canonical_name not in canonical_names
@@ -411,5 +418,6 @@ class LightDistributionStore:
                     continue
                 if skip is not None and dist.canonical_name in skip:
                     continue
+                seen.add(dist.canonical_name)
                 result.append(dist)
         return result

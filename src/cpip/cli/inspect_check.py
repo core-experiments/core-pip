@@ -47,27 +47,21 @@ def run_check(args: list[str]) -> int:
     for line in unsupported:
         print(line)
 
+    by_name = {dist.canonical_name: dist for dist in distributions}
+
     for name, requirements in sorted(missing.items()):
-        distribution = next(
-            dist
-            for dist in distributions
-            if dist.canonical_name == packaging.canonicalize_name(name)
-        )
+        distribution = by_name[packaging.canonicalize_name(name)]
         for _, requirement in requirements:
             print(
-                f"{name} {distribution.version} requires "
+                f"{name} {distribution.raw_version} requires "
                 f"{packaging.canonicalize_name(requirement.name)}, which is not installed.",
             )
 
     for name, requirements in sorted(conflicting.items()):
-        distribution = next(
-            dist
-            for dist in distributions
-            if dist.canonical_name == packaging.canonicalize_name(name)
-        )
+        distribution = by_name[packaging.canonicalize_name(name)]
         for conflict_name, version, requirement in requirements:
             print(
-                f"{name} {distribution.version} has requirement {requirement}, "
+                f"{name} {distribution.raw_version} has requirement {requirement}, "
                 f"but you have {conflict_name} {version}.",
             )
 

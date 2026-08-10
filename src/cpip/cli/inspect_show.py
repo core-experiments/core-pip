@@ -57,8 +57,11 @@ def run_show(args: list[str]) -> int:
         print(f"Author-email: {metadata.get('Author-email', '')}")
 
         metadata_version = dist.metadata_version or ""
+        parts = metadata_version.split(".") if metadata_version else []
         metadata_version_tuple = (
-            tuple(map(int, metadata_version.split("."))) if metadata_version else ()
+            tuple(int(part) for part in parts)
+            if parts and all(part.isdigit() for part in parts)
+            else ()
         )
 
         if metadata_version_tuple >= (2, 4) and metadata.get("License-Expression"):

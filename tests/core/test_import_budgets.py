@@ -209,6 +209,26 @@ WORK_ROUTES = (
         id="freeze-plain",
         argv=("freeze", "--path", "{tmp}"),
         max_new_modules=71,
+        allowed_first_party=COLD_CORE
+        | {
+            "cpip.cli.fast",
+            "cpip.cli.freeze",
+            "cpip.cli.lock_format",
+            "cpip.cli.logging_config",
+            "cpip.cli.parser",
+            "cpip.cli.parsers",
+            "cpip.cli.parsers.freeze",
+            "cpip.core",
+            "cpip.core.appdirs",
+            "cpip.core.cpip_version",
+            "cpip.core.direct_url",
+            "cpip.core.errors",
+            "cpip.core.light_metadata",
+            "cpip.core.names",
+            "cpip.core.packaging",
+            "cpip.core.urls",
+            "cpip.core.utils",
+        },
         forbidden=tuple(
             name
             for name in EXPENSIVE
@@ -225,6 +245,26 @@ WORK_ROUTES = (
         id="show-nonexistent",
         argv=("show", "definitely-not-a-real-package-xyz"),
         max_new_modules=71,
+        allowed_first_party=COLD_CORE
+        | {
+            "cpip.build",
+            "cpip.build.query",
+            "cpip.cli.fast",
+            "cpip.cli.inspect_show",
+            "cpip.cli.lock_format",
+            "cpip.cli.parser",
+            "cpip.cli.parsers",
+            "cpip.cli.parsers.inspect",
+            "cpip.core",
+            "cpip.core.appdirs",
+            "cpip.core.cpip_version",
+            "cpip.core.direct_url",
+            "cpip.core.light_metadata",
+            "cpip.core.names",
+            "cpip.core.packaging",
+            "cpip.core.urls",
+            "cpip.core.utils",
+        },
         forbidden=tuple(
             name
             for name in EXPENSIVE
@@ -235,6 +275,24 @@ WORK_ROUTES = (
         id="inspect-empty",
         argv=("inspect", "--path", "{tmp}"),
         max_new_modules=71,
+        allowed_first_party=COLD_CORE
+        | {
+            "cpip.cli.fast",
+            "cpip.cli.inspect",
+            "cpip.cli.lock_format",
+            "cpip.cli.parser",
+            "cpip.cli.parsers",
+            "cpip.cli.parsers.inspect",
+            "cpip.core",
+            "cpip.core.appdirs",
+            "cpip.core.cpip_version",
+            "cpip.core.direct_url",
+            "cpip.core.light_metadata",
+            "cpip.core.names",
+            "cpip.core.packaging",
+            "cpip.core.urls",
+            "cpip.core.utils",
+        },
         forbidden=tuple(
             name
             for name in EXPENSIVE

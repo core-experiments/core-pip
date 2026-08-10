@@ -17,11 +17,13 @@ def run_inspect(args: list[str]) -> int:
     options = create_inspect_parser().parse_args(args)
 
     import json
+    import site
 
     from cpip.core import cpip_version, light_metadata, packaging, urls
 
     distributions = light_metadata.LightDistributionStore(
         paths=options.path or None,
+        user_site=site.getusersitepackages(),
     ).iter(
         local_only=options.local,
         user_only=options.user,
