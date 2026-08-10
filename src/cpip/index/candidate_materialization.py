@@ -44,7 +44,6 @@ from cpip.index.candidate_cache import (
 )
 from cpip.index.candidate_metadata_cache import get_candidate_metadata_cache
 from cpip.index.candidate_stream import CandidateStream
-from cpip.index.candidates import prepare_project_metadata
 from cpip.index.metadata_cache import get_wheel_metadata_cache
 from cpip.index.prefetch import Prefetcher
 from cpip.index.release_facts_cache import get_release_facts_cache
@@ -841,6 +840,11 @@ class CandidateMaterializer:
             vcs_path = path_text if candidate.link.is_vcs else None
 
             if candidate.link.kind in SOURCE_ARTIFACT_KINDS:
+                # Only source-tree/sdist candidates reach this; wheel
+                # candidates (the common case) never need build_backend's
+                # much heavier import chain.
+                from cpip.build.build_backend import prepare_project_metadata
+
                 path = path_text
 
                 try:

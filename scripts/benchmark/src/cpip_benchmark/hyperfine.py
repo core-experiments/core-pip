@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import shlex
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 def shell_command(command: list[str]) -> str:
@@ -12,11 +12,25 @@ def shell_command(command: list[str]) -> str:
     return shlex.join(command)
 
 
+def env_prefix(env: dict[str, str] | None) -> str:
+    """A POSIX shell env-assignment prefix, e.g. ``FOO=bar BAZ=qux ``.
+
+    Quotes only the values, so the leading tokens still parse as shell
+    assignments (a fully-quoted ``'FOO=bar'`` token would not). This lets a
+    single command carry per-invocation env vars without spawning a second
+    process just to set them.
+    """
+    if not env:
+        return ""
+    return "".join(f"{name}={shlex.quote(value)} " for name, value in env.items())
+
+
 @dataclass(frozen=True)
 class Command:
     name: str
     prepare: str | None
     command: list[str]
+    env: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -51,7 +65,10 @@ class Hyperfine:
             args.extend(["--command-name", command.name])
         for command in self.commands:
             args.extend(["--prepare", command.prepare or ""])
-        args.extend(shell_command(command.command) for command in self.commands)
+        args.extend(
+            env_prefix(command.env) + shell_command(command.command)
+            for command in self.commands
+        )
         return args
 
     def run(self) -> None:

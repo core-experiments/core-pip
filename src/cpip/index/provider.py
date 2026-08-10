@@ -59,10 +59,7 @@ from cpip.index.source_models import (
 if TYPE_CHECKING:
     from cpip.core.format_control import FormatControl
     from cpip.core.wheel import TargetContext, WheelFile
-    from cpip.index.candidate_materialization import (
-        CandidateMaterializer,
-        CandidateStream,
-    )
+    from cpip.index.candidate_materialization import CandidateStream
 
 
 PYPI_HOSTS = frozenset(("pypi.org", "pypi.python.org"))

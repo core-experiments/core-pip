@@ -583,7 +583,7 @@ def test_pypi_metadata_precedes_sdist_build(
     def fail_build(*args: object, **kwargs: object) -> None:
         pytest.fail("dry-run should not invoke the source build backend")
 
-    monkeypatch.setattr("cpip.index.candidates.prepare_project_metadata", fail_build)
+    monkeypatch.setattr("cpip.build.build_backend.prepare_project_metadata", fail_build)
 
     metadata = materializer.metadata_loader(candidate, parse_requirement("demo")).load()
 
@@ -860,7 +860,7 @@ def test_evaluate_links_propagates_unexpected_source_tree_error(
 
     provider = CandidateProvider.from_options(no_index=True)
     monkeypatch.setattr(
-        "cpip.index.candidates.prepare_project_metadata",
+        "cpip.build.build_backend.prepare_project_metadata",
         lambda *args_internal: (_ for _ in ()).throw(RuntimeError("boom")),
     )
 

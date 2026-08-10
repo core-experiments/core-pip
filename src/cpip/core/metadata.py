@@ -5,8 +5,7 @@ import os
 import site
 import sysconfig
 from collections.abc import Collection, Iterable
-from email.message import Message
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from .packaging import (
     Requirement,
@@ -14,6 +13,9 @@ from .packaging import (
     marker_applies,
     parse_requirement,
 )
+
+if TYPE_CHECKING:
+    from email.message import Message
 
 stdlib_pkgs = {"python", "wsgiref", "argparse"}
 

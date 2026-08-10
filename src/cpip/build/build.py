@@ -3,13 +3,9 @@ from __future__ import annotations
 import atexit
 import os
 import shutil
-import tarfile
 import tempfile
-import zipfile
 
 from cpip.core.errors import BuildError
-
-from .build_backend import ProjectBuilder
 
 
 def build_wheel_from_source(
@@ -19,6 +15,12 @@ def build_wheel_from_source(
     build_constraints: list[str] | None = None,
     build_isolation: bool = True,
 ) -> str:
+    # unpack_source()/unpack_source_internal() callers (e.g. cli/lock.py)
+    # never need a real build, so keep build_backend's much heavier import
+    # chain (configparser/email.parser/subprocess/tarfile/zipfile/csv/
+    # hashlib) off that path.
+    from .build_backend import ProjectBuilder
+
     source_text = os.fspath(source)
     output_text = (
         os.fspath(wheel_dir) if wheel_dir is not None else default_wheel_dir_internal()
@@ -51,6 +53,8 @@ def build_editable_from_source(
     build_constraints: list[str] | None = None,
     build_isolation: bool = True,
 ) -> str:
+    from .build_backend import ProjectBuilder
+
     source_text = os.fspath(source)
     output_text = (
         os.fspath(wheel_dir) if wheel_dir is not None else default_wheel_dir_internal()
@@ -120,6 +124,11 @@ def unpack_source(source: str, destination: str) -> str:
 
 
 def unpack_source_internal(source: str, destination: str) -> str:
+    # Only sdist/archive sources reach this -- an already-unpacked directory
+    # source never calls it, so keep tarfile/zipfile off that common path.
+    import tarfile
+    import zipfile
+
     source_text = os.fspath(source)
     destination_text = os.fspath(destination)
     if source_text.endswith(".zip"):

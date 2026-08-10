@@ -22,7 +22,6 @@ import sys
 import tempfile
 from collections.abc import Iterable, Sequence
 
-from cpip.cli.config import load_source_config
 from cpip.cli.fast import consume_option, extend_requirements
 from cpip.core.appdirs import resolve_cache_dir
 from cpip.core.packaging import Version
@@ -572,6 +571,10 @@ def parse_arguments(args: list[str]) -> InstallOptions | None:
 
 def _remote_index_url() -> str | None:
     """Return the effective sole index, or decline non-default source shapes."""
+
+    # Only the remote-exact-pin fast path reaches here; local/--no-index
+    # installs never need config parsing, so keep it off their import cost.
+    from cpip.cli.config import load_source_config
 
     config = load_source_config("install")
 

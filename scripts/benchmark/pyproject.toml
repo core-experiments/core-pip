@@ -9,6 +9,7 @@ dependencies = [
 
 [project.scripts]
 cpip-bench = "cpip_benchmark.cli:main"
+cpip-bench-compare = "cpip_benchmark.compare:main"
 
 [build-system]
 requires = ["hatchling"]

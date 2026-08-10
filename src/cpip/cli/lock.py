@@ -7,7 +7,6 @@ import tempfile
 from typing import TYPE_CHECKING, cast
 
 from cpip.build.build import unpack_source
-from cpip.build.build_backend import prepare_project_metadata
 from cpip.cli.fast import read_requirements
 from cpip.cli.lock_format import LOCK_HEADER, toml_string, write_lock_output
 from cpip.core.appdirs import configured_cache_dir
@@ -176,6 +175,11 @@ def run_lock(args: list[str]) -> int:
         local_directory = os.path.abspath(value)
 
         if os.path.isdir(local_directory):
+            # Only local-directory, editable, and non-VCS archive-URL
+            # requirements reach build_backend; plain name==version
+            # specifiers never need it.
+            from cpip.build.build_backend import prepare_project_metadata
+
             metadata = prepare_project_metadata(
                 local_directory,
                 build_isolation=False,
@@ -203,6 +207,8 @@ def run_lock(args: list[str]) -> int:
 
         if item.link is not None and not item.link.is_vcs:
             import hashlib
+
+            from cpip.build.build_backend import prepare_project_metadata
 
             source = artifact_locator.ensure_local(item.link.url)
 
@@ -248,6 +254,8 @@ def run_lock(args: list[str]) -> int:
     editable_packages: list[dict] = []
 
     for value in options.editable:
+        from cpip.build.build_backend import prepare_project_metadata
+
         item = install_req_from_line(value)
 
         item.editable = True
@@ -435,6 +443,8 @@ def run_lock(args: list[str]) -> int:
 
                 package_name = candidate.name
                 with tempfile.TemporaryDirectory(prefix="cpip-lock-") as temp_dir:
+                    from cpip.build.build_backend import prepare_project_metadata
+
                     try:
                         project = prepare_project_metadata(
                             unpack_source(archive_path, temp_dir),

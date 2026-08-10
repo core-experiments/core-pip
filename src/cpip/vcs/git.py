@@ -4,7 +4,6 @@ import logging
 import os.path
 import re
 import urllib.parse
-import urllib.request
 from typing import Any
 
 from cpip.core.utils import AuthInfo, display_path
@@ -711,6 +710,8 @@ class Git(VersionControl):
         scheme, netloc, path, query, fragment = urlsplit(url)
 
         if scheme.endswith("file"):
+            import urllib.request
+
             initial_slashes = path[: -len(path.lstrip("/"))]
 
             newpath = initial_slashes + urllib.request.url2pathname(path).replace(

@@ -400,6 +400,47 @@ def test_cached_archive_upgrades_nonempty_target_without_original_wheel(
     )
 
 
+def test_upgrade_falls_back_to_metadata_store_when_discovery_declines(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The InstalledDistributionStore fallback must actually be reachable.
+
+    ``discover_installed_wheels`` returns ``None`` for legacy/ambiguous
+    layouts, and the archive-cache upgrade path falls back to
+    ``InstalledDistributionStore`` for those. That name used to be imported
+    only under ``TYPE_CHECKING``, so this path raised ``NameError`` the one
+    time production would actually take it.
+    """
+    from cpip.install import wheel_state
+    from cpip.install.wheel_archive_cache import prepare_cached_wheel
+
+    old = make_wheel_internal(tmp_path, version="1.0")
+    new = make_wheel_internal(tmp_path, version="2.0")
+    target = tmp_path / "target"
+    install_target = InstallTarget.from_options("owner-demo", target=str(target))
+    WheelInstaller(install_target, pycompile=False).install(old, requested=True)
+
+    monkeypatch.setattr(wheel_state, "discover_installed_wheels", lambda *a, **k: None)
+
+    candidate = wheel_candidate(new).copy_with(source_kind="wheel")
+    archive = prepare_cached_wheel(candidate, str(tmp_path / "cache"))
+    prepared = candidate.copy_with(wheel_layout=archive)
+    new.unlink()
+
+    install_wheels_transactionally(
+        [(new, True, None)],
+        target=install_target,
+        pycompile=False,
+        candidates=[prepared],
+        cache_dir=str(tmp_path / "cache"),
+    )
+
+    assert (target / "owner_demo" / "__init__.py").read_text() == "VALUE = '2.0'\n"
+    assert not (target / "owner_demo-1.0.dist-info").exists()
+    assert (target / "owner_demo-2.0.dist-info").exists()
+
+
 def test_cached_archive_swaps_self_contained_target_for_upgrade(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

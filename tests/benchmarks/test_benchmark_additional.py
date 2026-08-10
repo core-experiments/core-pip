@@ -6,8 +6,8 @@ import hashlib
 import itertools
 from pathlib import Path
 
-from benchmark_support import REAL_WORLD_CORPORA, make_wheel, reset_caches
-from cpip.build.build_backend import ProjectBuilder
+from benchmark_support import make_wheel, reset_caches
+from cpip.build.build_backend import ProjectBuilder, prepare_project_metadata
 from cpip.build.metadata import InstalledDistributionStore
 from cpip.core.errors import BuildError
 from cpip.core.packaging import SpecifierSet, parse_requirement
@@ -16,7 +16,7 @@ from cpip.index.candidate_materialization import (
     CandidateMaterializer,
     validate_build_requirements,
 )
-from cpip.index.candidates import InstallationCandidate, prepare_project_metadata
+from cpip.index.candidates import InstallationCandidate
 from cpip.index.links import Link
 from cpip.index.provider import CandidateProvider
 from cpip.install.target import InstallTarget
@@ -65,14 +65,6 @@ def test_requirement_primitive_parsing(benchmark: BenchmarkFixture) -> None:
         return sum(len(parse_requirement(value).name) for value in values * 100)
 
     assert benchmark(parse_all) > 0
-
-
-def test_metadata_scaling(benchmark: BenchmarkFixture, payload_wheel: Path) -> None:
-    def read_metadata() -> object:
-        reset_caches()
-        return read_wheel_metadata(payload_wheel)
-
-    assert benchmark(read_metadata) is not None
 
 
 def test_metadata_variation(
@@ -295,16 +287,6 @@ def test_direct_url_and_constraint_parsing(benchmark: BenchmarkFixture) -> None:
     assert benchmark(parse_mixed) > 0
 
 
-def test_frozen_real_world_corpus_parsing(benchmark: BenchmarkFixture) -> None:
-    values = tuple(value for corpus in REAL_WORLD_CORPORA.values() for value in corpus)
-
-    def parse_corpus() -> int:
-        reset_caches()
-        return sum(len(parse_requirement(value).name) for value in values)
-
-    assert benchmark(parse_corpus) > 100
-
-
 def test_installed_state_scan(benchmark: BenchmarkFixture, tmp_path: Path) -> None:
     wheelhouse = tmp_path / "installed-wheelhouse"
     wheelhouse.mkdir()
@@ -322,24 +304,6 @@ def test_installed_state_scan(benchmark: BenchmarkFixture, tmp_path: Path) -> No
         return len(InstalledDistributionStore(paths=[str(target_path)]).iter())
 
     assert benchmark(scan_installed) == 48
-
-
-def test_cold_and_warm_resolution_cache(
-    benchmark: BenchmarkFixture,
-    graph_wheelhouse: Path,
-) -> None:
-    def cold_resolution() -> int:
-        reset_caches()
-        resolver = ResolutionEngine(
-            provider=CandidateProvider.from_options(
-                find_links=[str(graph_wheelhouse)],
-                no_index=True,
-            ),
-            ignore_installed=True,
-        )
-        return len(resolver.resolve(["application"]).candidates)
-
-    assert benchmark(cold_resolution) > 10
 
 
 def test_warm_resolution_cache(

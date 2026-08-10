@@ -42,17 +42,13 @@ from cpip.install.wheel_scripts import (
     generate_entry_point_files,
     rewrite_shebang,
 )
-from cpip.install.wheel_state import discover_installed_wheels, existing_paths
 from cpip.platform.clone import clone_path
 from cpip.resolution.models import ResolutionResult
 
 if TYPE_CHECKING:
     from typing import Protocol, TypeVar
 
-    from cpip.build.metadata import (
-        InstalledDistributionStore,
-        InstalledMetadataDistribution,
-    )
+    from cpip.build.metadata import InstalledMetadataDistribution
     from cpip.core.direct_url import DirectUrl
     from cpip.install.target import InstallTarget
     from cpip.install.wheel_state import InstalledWheelDistribution
@@ -1444,6 +1440,12 @@ def install_wheels_from_archive_cache(
         destinations_by_plan: dict[_WheelInstallPlan, set[str]] = {}
 
         if root_existed:
+            from cpip.build.metadata import InstalledDistributionStore
+            from cpip.install.wheel_state import (
+                discover_installed_wheels,
+                existing_paths,
+            )
+
             clone_path(root, stage)
 
             names = {plan.candidate.canonical_name for plan in plans}

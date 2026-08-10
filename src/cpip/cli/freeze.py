@@ -25,8 +25,6 @@ from cpip.resolution.input_requirements import (
     install_req_from_editable,
     install_req_from_line,
 )
-from cpip.vcs.errors import BadCommand
-from cpip.vcs.versioncontrol import RemoteNotFoundError, RemoteNotValidError, vcs
 
 logger = logging.getLogger(__name__)
 
@@ -234,6 +232,10 @@ def get_editable_info(dist: InstalledMetadataDistribution) -> EditableInfo:
     FrozenRequirement.from_dist().
 
     """
+    # Only editable installs reach this, and it's the only place freeze
+    # needs VCS backends -- keep them off every other `cpip freeze` run.
+    from cpip.vcs.errors import BadCommand
+    from cpip.vcs.versioncontrol import RemoteNotFoundError, RemoteNotValidError, vcs
 
     editable_project_location = dist.editable_project_location
 

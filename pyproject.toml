@@ -76,6 +76,13 @@ module-name = "cpip"
 [tool.ruff]
 extend-exclude = ["tests/cli/data", "src/cpip/_vendor"]
 
+[tool.ruff.lint]
+# TC004: catches a real bug class -- a name imported only under
+# TYPE_CHECKING but referenced at runtime raises NameError, and neither
+# mypy nor ruff's default F821 catch it (both treat TYPE_CHECKING blocks
+# as reachable for name resolution).
+extend-select = ["TC004"]
+
 [tool.pytest.ini_options]
 markers = [
     "bzr: tests requiring Bazaar",

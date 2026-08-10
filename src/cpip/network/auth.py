@@ -14,7 +14,6 @@ import logging
 import netrc
 import os
 import shutil
-import subprocess
 import sys
 import sysconfig
 import typing
@@ -152,6 +151,10 @@ class KeyRingCliProvider(KeyRingBaseProvider):
         if self.keyring is None:
             return None
 
+        # Only the keyring-CLI auth backend needs subprocess; keep it off
+        # every other network request.
+        import subprocess
+
         cmd = [self.keyring, "--mode=creds", "--output=json", "get", service_name]
         if username is not None:
             cmd.append(username)
@@ -193,6 +196,8 @@ class KeyRingCliProvider(KeyRingBaseProvider):
         """Mirror the implementation of keyring.set_password using cli"""
         if self.keyring is None:
             return
+        import subprocess
+
         env = os.environ.copy()
         env["PYTHONIOENCODING"] = "utf-8"
         subprocess.run(

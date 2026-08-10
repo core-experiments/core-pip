@@ -19,7 +19,6 @@ from typing import TYPE_CHECKING, Any, cast
 from cpip.core.errors import InstallationError
 from cpip.core.names import canonicalize_name
 from cpip.core.wheel import WheelCandidate, parse_wheel, wheel_candidate
-from cpip.build.metadata import InstalledDistributionStore
 from cpip.install.target import InstallTarget
 from cpip.install.transaction import InstallTransaction, normalized_internal
 from cpip.install.wheel_archive import (
@@ -57,10 +56,7 @@ from cpip.install.wheel_transaction_direct import (
 from cpip.platform.clone import clone_path
 
 if TYPE_CHECKING:
-    from cpip.build.metadata import (
-        InstalledDistributionStore,
-        InstalledMetadataDistribution,
-    )
+    from cpip.build.metadata import InstalledMetadataDistribution
     from cpip.core.direct_url import DirectUrl
 
     from cpip.install.wheel_state import InstalledWheelDistribution
@@ -188,6 +184,8 @@ def install_wheel_internal(
         if target_inventory is not None:
             existing = target_inventory.find(candidate.canonical_name)
         elif _target_has_distribution_metadata(target):
+            from cpip.build.metadata import InstalledDistributionStore
+
             existing = InstalledDistributionStore(
                 paths=[os.fspath(root) for root in target.library_roots],
             ).find(candidate.name)
