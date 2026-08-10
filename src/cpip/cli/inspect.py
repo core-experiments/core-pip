@@ -18,16 +18,14 @@ def run_inspect(args: list[str]) -> int:
 
     import json
 
-    from cpip.build import metadata as build_metadata
-    from cpip.core import cpip_version, packaging, urls
-    from cpip.core import metadata as core_metadata
+    from cpip.core import cpip_version, light_metadata, packaging, urls
 
-    distributions = build_metadata.InstalledDistributionStore(
+    distributions = light_metadata.LightDistributionStore(
         paths=options.path or None,
     ).iter(
         local_only=options.local,
         user_only=options.user,
-        skip=set(core_metadata.stdlib_pkgs),
+        skip=set(light_metadata.stdlib_pkgs),
     )
 
     installed = []

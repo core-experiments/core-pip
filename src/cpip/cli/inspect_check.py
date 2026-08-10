@@ -14,11 +14,10 @@ def run_check(args: list[str]) -> int:
 
     import sys
 
-    from cpip.build import metadata as build_metadata
     from cpip.build import query
-    from cpip.core import cpip_version, packaging, target_python
+    from cpip.core import cpip_version, light_metadata, packaging, target_python
 
-    distributions = build_metadata.InstalledDistributionStore().iter(
+    distributions = light_metadata.LightDistributionStore().iter(
         skip=cpip_version.CPIP_DISTRIBUTION_NAMES
     )
     package_set = query.package_set_from_dependencies(

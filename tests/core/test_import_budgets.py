@@ -198,13 +198,60 @@ WORK_ROUTES = (
             name for name in EXPENSIVE if name not in {"cpip.cli.fast", "hashlib"}
         ),
     ),
-    # A plain ``freeze`` never reads a requirements file, so it should not pay
-    # for requirement-file parsing or resolution's `InstallRequirement`. Points
-    # at an empty directory so the result does not depend on what happens to
-    # be installed (an editable install would otherwise pull in cpip.vcs).
+    # check/show/inspect/freeze all read installed metadata through
+    # core.light_metadata instead of core.metadata now, so none of them
+    # should reach importlib.metadata, email, or cpip.core.wheel (except
+    # check, which genuinely needs cpip.core.wheel for WheelTag compatibility
+    # checking). Points at an empty directory so the result does not depend
+    # on what happens to be installed (an editable install would otherwise
+    # pull in cpip.vcs).
     Route(
         id="freeze-plain",
         argv=("freeze", "--path", "{tmp}"),
+        max_new_modules=71,
+        forbidden=tuple(
+            name
+            for name in EXPENSIVE
+            if name not in {"cpip.cli.fast", "cpip.core.packaging", "json"}
+        ),
+        needs_empty_dir=True,
+    ),
+    # ``show``/``check`` have no ``--path`` option, so these run against the
+    # ambient environment rather than an isolated empty directory. That's
+    # safe here (unlike freeze/list): neither code path imports anything
+    # conditional on *what* is installed, only on the CLI flags given, so the
+    # module set doesn't depend on which packages happen to be present.
+    Route(
+        id="show-nonexistent",
+        argv=("show", "definitely-not-a-real-package-xyz"),
+        max_new_modules=71,
+        forbidden=tuple(
+            name
+            for name in EXPENSIVE
+            if name not in {"cpip.cli.fast", "cpip.build", "cpip.core.packaging", "json"}
+        ),
+    ),
+    Route(
+        id="inspect-empty",
+        argv=("inspect", "--path", "{tmp}"),
+        max_new_modules=71,
+        forbidden=tuple(
+            name
+            for name in EXPENSIVE
+            if name
+            not in {
+                "cpip.cli.fast",
+                "cpip.core.packaging",
+                "json",
+                "platform",
+                "subprocess",
+            }
+        ),
+        needs_empty_dir=True,
+    ),
+    Route(
+        id="check-ambient",
+        argv=("check",),
         max_new_modules=127,
         forbidden=tuple(
             name
@@ -213,17 +260,15 @@ WORK_ROUTES = (
             not in {
                 "cpip.cli.fast",
                 "cpip.build",
-                "cpip.core.metadata",
                 "cpip.core.packaging",
                 "cpip.core.wheel",
-                "csv",
                 "email",
-                "importlib.metadata",
                 "json",
+                "platform",
+                "subprocess",
                 "zipfile",
             }
         ),
-        needs_empty_dir=True,
     ),
 )
 

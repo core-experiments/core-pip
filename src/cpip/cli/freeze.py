@@ -19,7 +19,7 @@ from cpip.core.packaging import InvalidVersion, canonicalize_name
 TYPE_CHECKING = False
 
 if TYPE_CHECKING:
-    from cpip.build.metadata import InstalledMetadataDistribution
+    from cpip.core.light_metadata import LightDistribution
 
 logger = logging.getLogger(__name__)
 
@@ -42,13 +42,13 @@ def freeze(
     exclude: Iterable[str] = (),
     skip: Iterable[str] = (),
 ) -> Generator[str, None, None]:
-    from cpip.build.metadata import InstalledDistributionStore
+    from cpip.core.light_metadata import LightDistributionStore
 
     installations: dict[str, FrozenRequirement] = {}
 
     excluded = {canonicalize_name(name) for name in exclude}
 
-    dists = InstalledDistributionStore(
+    dists = LightDistributionStore(
         paths=paths,
         user_site=site.getusersitepackages(),
     ).iter(local_only=local_only, user_only=user_only)
@@ -218,7 +218,7 @@ def freeze(
             yield str(installation).rstrip() + "\n"
 
 
-def format_as_name_version(dist: InstalledMetadataDistribution) -> str:
+def format_as_name_version(dist: LightDistribution) -> str:
     try:
         dist_version = dist.version
 
@@ -231,7 +231,7 @@ def format_as_name_version(dist: InstalledMetadataDistribution) -> str:
         return f"{dist.raw_name}=={dist_version}"
 
 
-def get_editable_info(dist: InstalledMetadataDistribution) -> EditableInfo:
+def get_editable_info(dist: LightDistribution) -> EditableInfo:
     """Compute and return values (req, comments) for use in
 
     FrozenRequirement.from_dist().
@@ -347,7 +347,7 @@ class FrozenRequirement:
         return canonicalize_name(self.name)
 
     @classmethod
-    def from_dist(cls, dist: InstalledMetadataDistribution) -> FrozenRequirement:
+    def from_dist(cls, dist: LightDistribution) -> FrozenRequirement:
         editable = dist.editable
 
         if editable:
@@ -382,7 +382,7 @@ class FrozenRequirement:
 def run_freeze(args: list[str]) -> int:
     options = create_parser().parse_args(args)
 
-    from cpip.core.metadata import stdlib_pkgs
+    from cpip.core.light_metadata import stdlib_pkgs
 
     excluded = {canonicalize_name(name) for name in options.exclude}
 
