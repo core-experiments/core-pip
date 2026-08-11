@@ -78,7 +78,7 @@ jobs:
           -p no:randomly
 
   functional:
-    name: Functional CLI suite
+    name: Test suite
     runs-on: ubuntu-latest
     # Not required to merge yet. This suite builds virtualenvs and wheels per
     # test, so it is both the slowest and the most environment-sensitive part
