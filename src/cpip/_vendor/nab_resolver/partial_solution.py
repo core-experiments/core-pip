@@ -15,7 +15,7 @@ Reference: https://github.com/dart-lang/pub/blob/master/doc/solver.md#partial-so
 from __future__ import annotations
 
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Generic, cast
 
 from .ranges import Range
@@ -76,6 +76,16 @@ class Assignment(Generic[PackageType, VersionType]):
 
     package_index: int = 0
     """Position in the package's own assignment trail."""
+
+    _effective: RangeProtocol[VersionType] | None = field(
+        default=None, init=False, repr=False, compare=False
+    )
+    """Cached ``cum_positive - cum_negative``, lazily computed by
+    ``PartialSolution._satisfied_at``. ``cum_positive``/``cum_negative`` are
+    fixed once an assignment is on the trail, so the combined range never
+    changes -- but ``satisfier``'s binary search can probe the same trail
+    entry many times across conflict analysis, and the subtraction it
+    otherwise repeats is one of the more expensive Range operations."""
 
 
 class PartialSolution(Generic[PackageType, VersionType]):
@@ -347,13 +357,16 @@ class PartialSolution(Generic[PackageType, VersionType]):
         if is_positive and cum_positive is None:
             return False
 
-        if cum_positive is None:
-            assert assignment.cum_negative is not None
-            effective = ~assignment.cum_negative
-        elif assignment.cum_negative is None:
-            effective = cum_positive
-        else:
-            effective = cum_positive - assignment.cum_negative
+        effective = assignment._effective
+        if effective is None:
+            if cum_positive is None:
+                assert assignment.cum_negative is not None
+                effective = ~assignment.cum_negative
+            elif assignment.cum_negative is None:
+                effective = cum_positive
+            else:
+                effective = cum_positive - assignment.cum_negative
+            assignment._effective = effective
 
         return term.satisfies(effective)
 
