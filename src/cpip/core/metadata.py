@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.metadata
 import os
+import pathlib
 import site
 import sysconfig
 from collections.abc import Collection, Iterable
@@ -29,7 +30,41 @@ def _read_raw_metadata_text(
     ``importlib.metadata.Distribution.metadata``: ``METADATA``, then
     ``PKG-INFO`` for sdist-built distributions, then the bare dist-info path
     for old egg-info installs that have neither.
+
+    ``Distribution.read_text`` goes through ``pathlib.Path.joinpath`` and
+    ``Path.read_text`` for every candidate filename, which is real overhead
+    across a whole-environment scan. When ``raw._path`` is a genuine
+    ``pathlib.Path`` -- true for every finder-discovered on-disk
+    distribution, per ``importlib.metadata``'s own ``FastPath.joinpath``
+    (only rebound to ``zipfile.Path.joinpath`` when the root turns out to be
+    a zip) -- reading through plain ``open()`` is equivalent but cheaper.
+    Anything else (a zipped egg, or a custom finder's own path type) falls
+    back to the original, fully general chain unchanged.
     """
+    path = getattr(raw, "_path", None)
+
+    if isinstance(path, pathlib.Path):
+        base = str(path)
+
+        for filename in ("METADATA", "PKG-INFO", ""):
+            target = base if not filename else os.path.join(base, filename)
+
+            try:
+                with open(target, encoding="utf-8") as file:
+                    text = file.read()
+
+            except (
+                FileNotFoundError,
+                IsADirectoryError,
+                NotADirectoryError,
+                PermissionError,
+            ):
+                continue
+
+            if text:
+                return text
+
+        return None
 
     return raw.read_text("METADATA") or raw.read_text("PKG-INFO") or raw.read_text("")
 
