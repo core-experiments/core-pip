@@ -44,7 +44,7 @@ from cpip.core.packaging import (
 )
 from cpip.core.utils import CURRENT_PYTHON_VERSION_DIGITS, CURRENT_PYTHON_VERSION_FULL
 from cpip.core.urls import url_to_path
-from cpip.core.wheel import TargetContext, wheel_candidate
+from cpip.core.wheel import TargetContext, wheel_candidate_from_path
 from cpip.index.links import Link
 from cpip.index.provider import CandidateProvider
 from cpip.install.metadata import (
@@ -872,7 +872,7 @@ def install_editables(
             build_isolation=not execution.options.no_build_isolation,
         )
 
-        built_candidate = wheel_candidate(built)
+        built_candidate = wheel_candidate_from_path(built)
         editable_requirement = install_req_from_line(editable)
 
         for raw_constraint in execution.bundle.constraints:
@@ -988,9 +988,9 @@ def install_editables(
                 )
 
         if execution.options.dry_run:
-            candidate = wheel_candidate(built)
+            candidate = wheel_candidate_from_path(built)
         else:
-            candidate = wheel_candidate(built)
+            candidate = wheel_candidate_from_path(built)
             install_candidate(
                 candidate,
                 execution.options,
@@ -1143,7 +1143,7 @@ def run_install(args: list[str]) -> int:
                 build_constraints=options.build_constraint_files,
                 build_isolation=not options.no_build_isolation,
             )
-            candidate = wheel_candidate(built)
+            candidate = wheel_candidate_from_path(built)
 
             for raw_constraint in bundle.constraints:
                 constraint = parse_requirement(raw_constraint)

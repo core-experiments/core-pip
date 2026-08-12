@@ -17,7 +17,7 @@ from cpip.cli.requirements import (
 )
 from cpip.core.errors import CommandError
 from cpip.core.format_control import FormatControl
-from cpip.core.wheel import wheel_candidate
+from cpip.core.wheel import wheel_candidate_from_path
 from cpip.index.provider import CandidateProvider
 from cpip.resolution.api import ResolutionEngine
 from cpip.resolution.input_requirements import install_req_from_line
@@ -131,7 +131,7 @@ def run_wheel(args: list[str]) -> int:
 
             source = destination
 
-        built_names.append(wheel_candidate(source).name)
+        built_names.append(wheel_candidate_from_path(source).name)
 
     if built_names:
         print(f"Successfully built {' '.join(sorted(set(built_names)))}")

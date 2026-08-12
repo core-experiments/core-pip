@@ -1036,6 +1036,35 @@ def validate_wheel(source: zipfile.ZipFile, name: str) -> str:
     return validate_wheel_with_metadata(source, name)[0]
 
 
+def wheel_candidate_from_path(path: str) -> WheelCandidate:
+    """Build a WheelCandidate for a wheel not already backed by an open archive.
+
+    ``wheel_candidate(path)`` alone reopens the archive with no dist-info
+    directory in hand, which sends it through the slow, email-based metadata
+    fallback. Validating first and handing the freshly opened archive and
+    dist-info directory into ``wheel_candidate`` directly -- the same thing
+    candidate materialization does during resolution -- takes the fast path
+    instead. Use this instead of a bare ``wheel_candidate(path)`` call
+    whenever there's no already-open archive to reuse (a freshly built
+    wheel, a batch of paths to validate, an install with no pre-resolved
+    candidate).
+    """
+    with (
+        open(path, "rb", buffering=32768) as stream,
+        zipfile.ZipFile(stream) as archive,
+    ):
+        dist_info_dir, wheel_metadata_text = validate_wheel_with_metadata(
+            archive,
+            os.path.basename(path)[:-4].split("-", 1)[0],
+        )
+        return wheel_candidate(
+            path,
+            archive=archive,
+            dist_info_dir=dist_info_dir,
+            wheel_metadata_text=wheel_metadata_text,
+        )
+
+
 def parse_wheel(wheel_zip: zipfile.ZipFile, name: str) -> tuple[str, Message]:
     """Validate a wheel archive and return its metadata directory and WHEEL data."""
 

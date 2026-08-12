@@ -22,6 +22,7 @@ from cpip.core.wheel import (
     validate_wheel,
     validate_wheel_with_metadata,
     wheel_candidate,
+    wheel_candidate_from_path,
 )
 from cpip.install.target import InstallTarget
 from cpip.install.transaction import InstallTransaction, normalized_internal
@@ -163,31 +164,6 @@ class WheelInstaller:
         )
 
 
-def _fast_wheel_candidate(path: str) -> WheelCandidate:
-    """Build a WheelCandidate from a bare path without the slow metadata path.
-
-    ``wheel_candidate(path)`` alone reopens the archive with no dist-info
-    directory in hand, which sends it through the slow, email-based metadata
-    fallback. Validating first and handing the already-open archive and
-    dist-info directory in -- the same thing candidate_materialization.py
-    does during resolution -- takes the fast path instead.
-    """
-    with (
-        open(path, "rb", buffering=32768) as stream,
-        zipfile.ZipFile(stream) as archive,
-    ):
-        dist_info_dir, wheel_metadata_text = validate_wheel_with_metadata(
-            archive,
-            os.path.basename(path)[:-4].split("-", 1)[0],
-        )
-        return wheel_candidate(
-            path,
-            archive=archive,
-            dist_info_dir=dist_info_dir,
-            wheel_metadata_text=wheel_metadata_text,
-        )
-
-
 def install_wheel_internal(
     path: str,
     *,
@@ -210,7 +186,7 @@ def install_wheel_internal(
     target_inventory: InstalledTargetInventory | None = None,
 ) -> WheelCandidate:
     if candidate is None:
-        candidate = _fast_wheel_candidate(path)
+        candidate = wheel_candidate_from_path(path)
     if lookup_existing:
         if target_inventory is not None:
             existing = target_inventory.find(candidate.canonical_name)
@@ -754,7 +730,7 @@ def install_wheels_transactionally(
     planned_candidates = (
         tuple(candidates)
         if candidates is not None
-        else tuple(_fast_wheel_candidate(path) for path, _, _ in requests)
+        else tuple(wheel_candidate_from_path(path) for path, _, _ in requests)
     )
     if len(planned_candidates) != len(requests):
         raise ValueError("candidate count does not match wheel request count")
