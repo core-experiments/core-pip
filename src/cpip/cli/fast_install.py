@@ -24,7 +24,7 @@ from collections.abc import Iterable, Sequence
 
 from cpip.cli.fast import consume_option, extend_requirements
 from cpip.core.appdirs import resolve_cache_dir
-from cpip.core.packaging import Version
+from cpip.core.packaging import EMPTY_FROZENSET, Version
 from cpip.core.utils import load_snapshot, save_snapshot
 from cpip.core.wheel import PureWheelCandidate, WheelCandidate
 from cpip.core.wheel import parse_wheel_filename as parse_wheel_filename_core
@@ -446,7 +446,7 @@ class FastCandidate(PureWheelCandidate):
 
         self.pure: bool | None = None
 
-        self.provided_extras: frozenset[str] = frozenset()
+        self.provided_extras: frozenset[str] = EMPTY_FROZENSET
 
         self.requires_python: str | None = None
 
@@ -1512,7 +1512,7 @@ def run_local_fallback(args: list[str]) -> int | None:
                 version=Version(str(candidate.version)),
                 path=candidate.path,
                 dependencies=(),
-                provided_extras=frozenset(),
+                provided_extras=EMPTY_FROZENSET,
                 requires_python=None,
                 source_kind="wheel",
             )

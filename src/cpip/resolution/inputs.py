@@ -9,7 +9,12 @@ from urllib.parse import unquote, urlsplit
 
 from cpip.core.direct_url import ArchiveInfo, DirInfo
 from cpip.core.hashes import file_hashes
-from cpip.core.packaging import Requirement, SpecifierSet, parse_requirement
+from cpip.core.packaging import (
+    EMPTY_FROZENSET,
+    Requirement,
+    SpecifierSet,
+    parse_requirement,
+)
 from cpip.core.urls import path_to_url, url_to_path
 from cpip.index.links import Link
 from cpip.install.requirement_set import RequirementSet
@@ -77,7 +82,7 @@ def resolve_requirement_set(
             req=Requirement(
                 name=candidate.name,
                 specifier=SpecifierSet(f"=={candidate.version}"),
-                extras=frozenset(),
+                extras=EMPTY_FROZENSET,
                 url=None,
                 marker=None,
                 raw=f"{candidate.name}=={candidate.version}",

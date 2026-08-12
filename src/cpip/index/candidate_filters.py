@@ -7,6 +7,7 @@ from functools import lru_cache
 from typing import TypeVar
 
 from cpip.core.hashes import Hashes
+from cpip.core.packaging import EMPTY_FROZENSET
 from cpip.core.wheel import WheelTag
 from cpip.index.source_models import CandidateRecord
 
@@ -23,7 +24,7 @@ def supported_tag_ranks(tags: tuple[WheelTag, ...]) -> dict[str, int]:
 
 
 def allowed_hashes(hashes: Hashes | None) -> frozenset[str]:
-    return hashes.allowed_digests if hashes is not None else frozenset()
+    return hashes.allowed_digests if hashes is not None else EMPTY_FROZENSET
 
 
 def filter_unallowed_hashes(

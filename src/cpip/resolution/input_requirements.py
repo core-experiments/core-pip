@@ -7,6 +7,7 @@ import stat
 import urllib.parse
 
 from cpip.core.errors import InstallationError, InvalidWheelFilename
+from cpip.core.packaging import EMPTY_FROZENSET
 from cpip.core.packaging import Requirement as ParsedRequirement
 from cpip.core.packaging import parse_requirement
 from cpip.core.urls import path_to_url
@@ -31,7 +32,7 @@ def install_req_from_line(
     permit_editable_wheels: bool = False,
 ) -> InstallRequirement:
     text = line.strip()
-    path_extras: frozenset[str] = frozenset()
+    path_extras: frozenset[str] = EMPTY_FROZENSET
     path_text = text
     if "[" in text and text.endswith("]") and " @ " not in text:
         maybe_path, extras_text = text[:-1].split("[", 1)
