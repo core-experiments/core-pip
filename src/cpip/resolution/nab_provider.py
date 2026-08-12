@@ -28,6 +28,11 @@ TYPE_CHECKING = False
 if TYPE_CHECKING:
     from contextlib import AbstractContextManager
 
+# Version("0") is the "no declared version" sentinel checked against on
+# every candidate in _inconsistent_metadata_rejects; parsing it fresh each
+# call is pure overhead for a fixed value.
+_ZERO_VERSION = Version("0")
+
 
 class InstalledCandidate:
     """NAB candidate backed by an already-installed distribution."""
@@ -818,7 +823,7 @@ class NabProvider:
         the resolver fall back to the next candidate.
         """
         declared_version = getattr(candidate, "version", None)
-        if declared_version is None or declared_version == Version("0"):
+        if declared_version is None or declared_version == _ZERO_VERSION:
             return False
 
         metadata_version = getattr(candidate, "metadata_version", None)
