@@ -343,33 +343,16 @@ class InstallRequirement:
     def match_markers(self, extras_requested: Iterable[str] = ()) -> bool:
         return marker_applies(self.markers, extras=extras_requested)
 
-    def ensure_build_location(
-        self,
-        parent_dir: str,
-        *,
-        autodelete: bool,
-        parallel_builds: bool,
-    ) -> str:
-        del autodelete, parallel_builds
-
+    def ensure_build_location(self, parent_dir: str) -> str:
         root = os.path.realpath(os.path.dirname(parent_dir))
 
         return tempfile.mkdtemp("-build", "cpip-", dir=root)
 
-    def ensure_has_source_dir(
-        self,
-        parent_dir: str,
-        autodelete: bool = False,
-        parallel_builds: bool = False,
-    ) -> None:
+    def ensure_has_source_dir(self, parent_dir: str) -> None:
         """Allocate the source directory used while preparing this requirement."""
 
         if self.source_dir is None:
-            self.source_dir = self.ensure_build_location(
-                parent_dir,
-                autodelete=autodelete,
-                parallel_builds=parallel_builds,
-            )
+            self.source_dir = self.ensure_build_location(parent_dir)
 
     def needs_unpacked_archive(self, archive_source: str | os.PathLike[str]) -> None:
         if self.archive_source_internal is not None:

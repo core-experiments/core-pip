@@ -526,11 +526,7 @@ def test_tmp_build_directory() -> None:
     requirement = InstallRequirement(None, None)
     tmp_dir = tempfile.mkdtemp("-build", "cpip-")
     try:
-        tmp_build_dir = requirement.ensure_build_location(
-            tmp_dir,
-            autodelete=False,
-            parallel_builds=False,
-        )
+        tmp_build_dir = requirement.ensure_build_location(tmp_dir)
         assert os.path.dirname(tmp_build_dir) == os.path.realpath(
             os.path.dirname(tmp_dir),
         )

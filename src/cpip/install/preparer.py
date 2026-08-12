@@ -166,11 +166,7 @@ class RequirementPreparer:
         if req.is_wheel_from_cache:
             logger.info("Using cached %s", req.link.filename)
 
-    def ensure_link_req_src_dir(
-        self,
-        req: InstallRequirement,
-        parallel_builds: bool,
-    ) -> None:
+    def ensure_link_req_src_dir(self, req: InstallRequirement) -> None:
         """Ensure source_dir of a linked InstallRequirement."""
         assert req.link is not None
         # Since source_dir is only set for editable requirements.
@@ -184,12 +180,7 @@ class RequirementPreparer:
             req.source_dir = req.link.file_path
             return
 
-        # We always delete unpacked sdists after cpip runs.
-        req.ensure_has_source_dir(
-            self.build_dir,
-            autodelete=True,
-            parallel_builds=parallel_builds,
-        )
+        req.ensure_has_source_dir(self.build_dir)
         req.ensure_pristine_source_checkout()
 
     def check_download_dir_for_requirement(
@@ -330,7 +321,6 @@ class RequirementPreparer:
     def complete_partial_requirements(
         self,
         partially_downloaded_reqs: Iterable[InstallRequirement],
-        parallel_builds: bool = False,
     ) -> None:
         """Download any requirements which were only fetched by metadata."""
         # Download to a temporary directory. These will be copied over as
@@ -370,13 +360,9 @@ class RequirementPreparer:
         # This step is necessary to ensure all lazy wheels are processed
         # successfully by the 'download', 'wheel', and 'install' commands.
         for req in partially_downloaded_reqs:
-            self.prepare_linked_requirement_internal(req, parallel_builds)
+            self.prepare_linked_requirement_internal(req)
 
-    def prepare_linked_requirement(
-        self,
-        req: InstallRequirement,
-        parallel_builds: bool = False,
-    ) -> MetadataView:
+    def prepare_linked_requirement(self, req: InstallRequirement) -> MetadataView:
         """Prepare a requirement to be obtained from req.link."""
         assert req.link
         self.log_preparing_link(req)
@@ -408,12 +394,11 @@ class RequirementPreparer:
                 return metadata_dist
 
         # None of the optimizations worked, fully prepare the requirement.
-        return self.prepare_linked_requirement_internal(req, parallel_builds)
+        return self.prepare_linked_requirement_internal(req)
 
     def prepare_linked_requirements_more(
         self,
         reqs: Iterable[InstallRequirement],
-        parallel_builds: bool = False,
     ) -> None:
         """Prepare linked requirements more, if needed."""
         reqs = [req for req in reqs if req.link is not None]
@@ -433,19 +418,15 @@ class RequirementPreparer:
             if req.needs_more_preparation:
                 partially_downloaded_reqs.append(req)
             else:
-                self.prepare_linked_requirement_internal(req, parallel_builds)
+                self.prepare_linked_requirement_internal(req)
 
         # TODO: separate this part out from RequirementPreparer when the v1
         # resolver can be removed!
-        self.complete_partial_requirements(
-            partially_downloaded_reqs,
-            parallel_builds=parallel_builds,
-        )
+        self.complete_partial_requirements(partially_downloaded_reqs)
 
     def prepare_linked_requirement_internal(
         self,
         req: InstallRequirement,
-        parallel_builds: bool,
     ) -> MetadataView:
         assert req.link is not None
         link = req.link
@@ -478,7 +459,7 @@ class RequirementPreparer:
                 assert req.link is not None
                 link = req.link
 
-        self.ensure_link_req_src_dir(req, parallel_builds)
+        self.ensure_link_req_src_dir(req)
 
         if link.is_existing_dir:
             local_file = None
