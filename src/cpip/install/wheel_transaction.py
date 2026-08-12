@@ -163,6 +163,31 @@ class WheelInstaller:
         )
 
 
+def _fast_wheel_candidate(path: str) -> WheelCandidate:
+    """Build a WheelCandidate from a bare path without the slow metadata path.
+
+    ``wheel_candidate(path)`` alone reopens the archive with no dist-info
+    directory in hand, which sends it through the slow, email-based metadata
+    fallback. Validating first and handing the already-open archive and
+    dist-info directory in -- the same thing candidate_materialization.py
+    does during resolution -- takes the fast path instead.
+    """
+    with (
+        open(path, "rb", buffering=32768) as stream,
+        zipfile.ZipFile(stream) as archive,
+    ):
+        dist_info_dir, wheel_metadata_text = validate_wheel_with_metadata(
+            archive,
+            os.path.basename(path)[:-4].split("-", 1)[0],
+        )
+        return wheel_candidate(
+            path,
+            archive=archive,
+            dist_info_dir=dist_info_dir,
+            wheel_metadata_text=wheel_metadata_text,
+        )
+
+
 def install_wheel_internal(
     path: str,
     *,
@@ -185,25 +210,7 @@ def install_wheel_internal(
     target_inventory: InstalledTargetInventory | None = None,
 ) -> WheelCandidate:
     if candidate is None:
-        # wheel_candidate(path) alone reopens the archive with no dist-info
-        # directory in hand, which sends it through the slow, email-based
-        # metadata fallback -- the exact cost candidate_materialization.py
-        # avoids by validating first and handing the already-open archive
-        # and dist-info directory in. Do the same here.
-        with (
-            open(path, "rb", buffering=32768) as stream,
-            zipfile.ZipFile(stream) as archive,
-        ):
-            dist_info_dir, wheel_metadata_text = validate_wheel_with_metadata(
-                archive,
-                os.path.basename(path)[:-4].split("-", 1)[0],
-            )
-            candidate = wheel_candidate(
-                path,
-                archive=archive,
-                dist_info_dir=dist_info_dir,
-                wheel_metadata_text=wheel_metadata_text,
-            )
+        candidate = _fast_wheel_candidate(path)
     if lookup_existing:
         if target_inventory is not None:
             existing = target_inventory.find(candidate.canonical_name)
@@ -673,17 +680,31 @@ def validate_wheel_batch(
     destination_cache: DestinationCache | None = None,
 ) -> tuple[WheelCandidate, ...]:
     """Validate a wheel batch before any member of the batch is installed."""
-    candidates = tuple(wheel_candidate(path) for path in paths)
+    candidates: list[WheelCandidate] = []
     destinations: set[str] = set()
     resolved_roots: ResolvedRoots = {}
     resolved_directories = destination_cache if destination_cache is not None else {}
-    for candidate in candidates:
-        path = candidate.path
-        with zipfile.ZipFile(path) as archive:
-            dist_info = validate_wheel(
+    for path in paths:
+        # One archive open covers both the wheel_candidate() metadata read
+        # and the member-destination validation below, instead of opening
+        # the same file twice and sending the first open through
+        # wheel_candidate's slow, email-based fallback for lack of a
+        # dist-info directory to hand it.
+        with (
+            open(path, "rb", buffering=32768) as stream,
+            zipfile.ZipFile(stream) as archive,
+        ):
+            dist_info, wheel_metadata_text = validate_wheel_with_metadata(
                 archive,
                 os.path.basename(path)[:-4].split("-", 1)[0],
             )
+            candidate = wheel_candidate(
+                path,
+                archive=archive,
+                dist_info_dir=dist_info,
+                wheel_metadata_text=wheel_metadata_text,
+            )
+            candidates.append(candidate)
             if validation_cache is not None:
                 validation_cache[path] = dist_info
             for member in archive.infolist():
@@ -705,7 +726,7 @@ def validate_wheel_batch(
                         f"the same path: {destination}",
                     )
                 destinations.add(destination_text)
-    return candidates
+    return tuple(candidates)
 
 
 def install_wheels_transactionally(
@@ -733,7 +754,7 @@ def install_wheels_transactionally(
     planned_candidates = (
         tuple(candidates)
         if candidates is not None
-        else tuple(wheel_candidate(path) for path, _, _ in requests)
+        else tuple(_fast_wheel_candidate(path) for path, _, _ in requests)
     )
     if len(planned_candidates) != len(requests):
         raise ValueError("candidate count does not match wheel request count")
