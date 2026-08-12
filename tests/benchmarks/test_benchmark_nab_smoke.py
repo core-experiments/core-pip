@@ -149,7 +149,9 @@ def test_nab_smoke_pip_deep_backtracking_unsatisfiable(
             resolve(nab_smoke_wheelhouse, ["nab-smoke-pip-unsat-a"])
         except ResolutionError as error:
             return len(str(error))
-        raise AssertionError("pip-deep-backtracking-unsatisfiable unexpectedly resolved")
+        raise AssertionError(
+            "pip-deep-backtracking-unsatisfiable unexpectedly resolved"
+        )
 
     assert benchmark(resolve_unsatisfiable) > 0
 

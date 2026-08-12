@@ -221,7 +221,9 @@ def make_nab_smoke_fixture(wheelhouse: Path) -> None:
     ``test_benchmark_nab_smoke.py`` for which of nab's scenarios have no cpip
     equivalent and were dropped).
     """
-    make_wheel(wheelhouse, "nab-smoke-basic", "1.0.0", requires=["nab-smoke-basic-leaf>=1.0.0"])
+    make_wheel(
+        wheelhouse, "nab-smoke-basic", "1.0.0", requires=["nab-smoke-basic-leaf>=1.0.0"]
+    )
     make_wheel(wheelhouse, "nab-smoke-basic-leaf", "1.0.0")
     make_wheel(wheelhouse, "nab-smoke-basic-leaf", "2.0.0")
 
@@ -289,7 +291,9 @@ def make_nab_pip_backtracking_family(
         elif unsatisfiable:
             dependencies.append(f"{prefix}-c==0.0.0")
         make_wheel(wheelhouse, f"{prefix}-a", version, requires=dependencies)
-        make_wheel(wheelhouse, f"{prefix}-b", version, requires=[f"{prefix}-c=={version}"])
+        make_wheel(
+            wheelhouse, f"{prefix}-b", version, requires=[f"{prefix}-c=={version}"]
+        )
         make_wheel(wheelhouse, f"{prefix}-c", version)
 
 
