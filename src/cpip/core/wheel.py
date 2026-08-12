@@ -336,7 +336,7 @@ class Wheel:
 
 
 class TargetContext:
-    __slots__ = ("abis", "implementation", "platforms", "python_version")
+    __slots__ = ("_hash", "abis", "implementation", "platforms", "python_version")
 
     def __init__(
         self,
@@ -353,6 +353,12 @@ class TargetContext:
 
         self.abis = abis
 
+        # A cached, hashable target is looked up on every wheel candidate
+        # through the unbounded ``supported_wheel_tags`` cache, which must
+        # hash it on every call regardless of whether the result is already
+        # cached.
+        self._hash = hash((platforms, implementation, python_version, abis))
+
     def __eq__(self, other: object) -> bool:
         return isinstance(other, TargetContext) and (
             self.platforms,
@@ -367,9 +373,7 @@ class TargetContext:
         )
 
     def __hash__(self) -> int:
-        return hash(
-            (self.platforms, self.implementation, self.python_version, self.abis),
-        )
+        return self._hash
 
     platforms: tuple[str, ...]
 

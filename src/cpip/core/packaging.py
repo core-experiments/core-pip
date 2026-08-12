@@ -708,6 +708,7 @@ class SpecifierSet:
 class Requirement:
     __slots__ = (
         "_canonical_name",
+        "_is_unnamed_direct",
         "extras",
         "marker",
         "name",
@@ -739,6 +740,8 @@ class Requirement:
 
         self._canonical_name: str | None = None
 
+        self._is_unnamed_direct: bool | None = None
+
     @classmethod
     @lru_cache(maxsize=16384)
     def from_cache_state(cls, state: tuple[object, ...]) -> Requirement:
@@ -769,6 +772,31 @@ class Requirement:
             self._canonical_name = canonicalize_name(self.name)
 
         return self._canonical_name
+
+    @property
+    def is_unnamed_direct(self) -> bool:
+        """Whether this requirement locates an artifact rather than naming one.
+
+        A URL requirement or a bare local path has no metadata to trust until
+        the artifact is fetched, so callers that would otherwise reject on
+        name/version mismatch defer that check.  Every candidate link for a
+        package is evaluated against the same requirement, so this is cached
+        rather than recomputed per link.
+        """
+
+        cached = self._is_unnamed_direct
+
+        if cached is None:
+            cached = (
+                self.url is not None
+                or self.raw.startswith("file:")
+                or self.raw.startswith((".", "/", "~"))
+                or is_windows_path(self.raw)
+            )
+
+            self._is_unnamed_direct = cached
+
+        return cached
 
     def __eq__(self, other: object) -> bool:
         return isinstance(other, Requirement) and (
