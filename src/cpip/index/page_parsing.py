@@ -159,9 +159,11 @@ class LinkParser(HTMLParser):
         self.text_internal: list[str] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        if tag.lower() != "a":
+        # HTMLParser already lowercases tag names before calling this.
+        if tag != "a":
             return
-        self.current_internal = {name.lower(): value for name, value in attrs}
+        # HTMLParser already lowercases attribute names before calling this.
+        self.current_internal = dict(attrs)
         self.text_internal = []
 
     def handle_data(self, data: str) -> None:
@@ -169,7 +171,8 @@ class LinkParser(HTMLParser):
             self.text_internal.append(data)
 
     def handle_endtag(self, tag: str) -> None:
-        if tag.lower() != "a" or self.current_internal is None:
+        # HTMLParser already lowercases tag names before calling this.
+        if tag != "a" or self.current_internal is None:
             return
         href = self.current_internal.get("href")
         if href:

@@ -9,7 +9,7 @@ from typing import TypeVar
 
 from cpip.core.errors import InvalidWheelFilename
 from cpip.core.hashes import Hashes
-from cpip.core.packaging import Requirement, SpecifierSet, Version, is_windows_path
+from cpip.core.packaging import Requirement, SpecifierSet, Version
 from cpip.core.release_control import ReleaseControl
 from cpip.core.target_python import TargetPython, get_supported
 from cpip.core.wheel import TargetContext, Wheel, WheelTag, legacy_build_tag
@@ -338,18 +338,7 @@ class CandidateEvaluator:
 
     @staticmethod
     def is_unnamed_direct_requirement(requirement: Requirement) -> bool:
-        if requirement.name == "editable-placeholder" and requirement.url is not None:
-            return True
-
-        if requirement.url is not None:
-            return True
-
-        if requirement.raw.startswith("file:"):
-            return True
-
-        return requirement.raw.startswith((".", "/", "~")) or is_windows_path(
-            requirement.raw,
-        )
+        return requirement.is_unnamed_direct
 
     @staticmethod
     def reject(link: Link, reason: RejectionReason, detail: str) -> RejectedCandidate:

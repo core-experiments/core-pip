@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 
 from cpip.core.errors import BuildError
-from cpip.core.packaging import Version, canonicalize_name
+from cpip.core.packaging import Version
 from cpip.core.temp_dir import remove_temp_directory
 from cpip.core.wheel import (
     parse_wheel_file,
@@ -44,10 +44,6 @@ class InstallationCandidate(CandidateRecord):
             wheel,
             tag_rank,
         )
-
-    @property
-    def canonical_name(self) -> str:
-        return canonicalize_name(self.name)
 
     def to_record(self) -> CandidateRecord:
         return CandidateRecord(

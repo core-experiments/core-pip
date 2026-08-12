@@ -516,9 +516,9 @@ class SpecifierSet:
         "_bounds_cache",
         "_contains_cache",
         "_explicitly_allows_prereleases",
+        "_text",
         "raw",
         "specifiers",
-        "text_internal",
     )
 
     def __init__(self, value: str = ""):
@@ -531,9 +531,7 @@ class SpecifierSet:
         if self.raw and not self.specifiers:
             raise ValueError(f"invalid version specifier: {value!r}")
 
-        self.text_internal = ",".join(
-            f"{specifier.operator}{specifier.version}" for specifier in self.specifiers
-        )
+        self._text: str | None = None
 
         self._explicitly_allows_prereleases: bool | None = None
 
@@ -560,7 +558,7 @@ class SpecifierSet:
             for specifier_state in state[1]  # ty:ignore[not-iterable]
         )
 
-        value.text_internal = state[2]
+        value._text = state[2]
 
         value._explicitly_allows_prereleases = None
 
@@ -574,8 +572,22 @@ class SpecifierSet:
         return (
             self.raw,
             tuple(specifier.cache_state_internal() for specifier in self.specifiers),
-            self.text_internal,
+            self.text,
         )
+
+    @property
+    def text(self) -> str:
+        text = self._text
+
+        if text is None:
+            text = ",".join(
+                f"{specifier.operator}{specifier.version}"
+                for specifier in self.specifiers
+            )
+
+            self._text = text
+
+        return text
 
     def contains(
         self,
@@ -684,7 +696,7 @@ class SpecifierSet:
         return bool(self.specifiers)
 
     def __str__(self) -> str:
-        return self.text_internal
+        return self.text
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, SpecifierSet):
@@ -696,6 +708,7 @@ class SpecifierSet:
 class Requirement:
     __slots__ = (
         "_canonical_name",
+        "_is_unnamed_direct",
         "extras",
         "marker",
         "name",
@@ -727,6 +740,8 @@ class Requirement:
 
         self._canonical_name: str | None = None
 
+        self._is_unnamed_direct: bool | None = None
+
     @classmethod
     @lru_cache(maxsize=16384)
     def from_cache_state(cls, state: tuple[object, ...]) -> Requirement:
@@ -757,6 +772,31 @@ class Requirement:
             self._canonical_name = canonicalize_name(self.name)
 
         return self._canonical_name
+
+    @property
+    def is_unnamed_direct(self) -> bool:
+        """Whether this requirement locates an artifact rather than naming one.
+
+        A URL requirement or a bare local path has no metadata to trust until
+        the artifact is fetched, so callers that would otherwise reject on
+        name/version mismatch defer that check.  Every candidate link for a
+        package is evaluated against the same requirement, so this is cached
+        rather than recomputed per link.
+        """
+
+        cached = self._is_unnamed_direct
+
+        if cached is None:
+            cached = (
+                self.url is not None
+                or self.raw.startswith("file:")
+                or self.raw.startswith((".", "/", "~"))
+                or is_windows_path(self.raw)
+            )
+
+            self._is_unnamed_direct = cached
+
+        return cached
 
     def __eq__(self, other: object) -> bool:
         return isinstance(other, Requirement) and (

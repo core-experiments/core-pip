@@ -1042,7 +1042,7 @@ class CandidateProvider:
 
         selection_key = (
             requirement.canonical_name,
-            requirement.specifier.text_internal,
+            requirement.specifier.text,
             requirement.extras,
             requirement.url,
             requirement.marker,
@@ -2755,7 +2755,7 @@ class CandidateProvider:
             requirement.canonical_name,
             allow_binary,
             allow_source,
-            requirement.specifier.text_internal,
+            requirement.specifier.text,
             allow_prereleases,
         )
 

@@ -336,7 +336,7 @@ class Wheel:
 
 
 class TargetContext:
-    __slots__ = ("abis", "implementation", "platforms", "python_version")
+    __slots__ = ("_hash", "abis", "implementation", "platforms", "python_version")
 
     def __init__(
         self,
@@ -345,13 +345,38 @@ class TargetContext:
         python_version: str | None = None,
         abis: tuple[str, ...] = (),
     ) -> None:
-        self.platforms = platforms
+        # Written through object.__setattr__ because __setattr__ below
+        # refuses every assignment: a target is looked up in the unbounded
+        # supported_wheel_tags cache by hash, and both the cache entry and
+        # the cached hash below would go stale if a field were rewritten in
+        # place after construction.
+        setter = object.__setattr__
 
-        self.implementation = implementation
+        setter(self, "platforms", platforms)
 
-        self.python_version = python_version
+        setter(self, "implementation", implementation)
 
-        self.abis = abis
+        setter(self, "python_version", python_version)
+
+        setter(self, "abis", abis)
+
+        # A cached, hashable target is looked up on every wheel candidate
+        # through the unbounded ``supported_wheel_tags`` cache, which must
+        # hash it on every call regardless of whether the result is already
+        # cached.
+        setter(self, "_hash", hash((platforms, implementation, python_version, abis)))
+
+    def __setattr__(self, name: str, value: object) -> NoReturn:
+        """Refuse mutation; the hash is cached and used as a cache key."""
+        raise AttributeError(
+            f"{type(self).__name__} is immutable, cannot set {name!r}",
+        )
+
+    def __delattr__(self, name: str) -> NoReturn:
+        """Refuse deletion for the same reason as :meth:`__setattr__`."""
+        raise AttributeError(
+            f"{type(self).__name__} is immutable, cannot delete {name!r}",
+        )
 
     def __eq__(self, other: object) -> bool:
         return isinstance(other, TargetContext) and (
@@ -367,9 +392,7 @@ class TargetContext:
         )
 
     def __hash__(self) -> int:
-        return hash(
-            (self.platforms, self.implementation, self.python_version, self.abis),
-        )
+        return self._hash
 
     platforms: tuple[str, ...]
 
@@ -378,6 +401,10 @@ class TargetContext:
     python_version: str | None
 
     abis: tuple[str, ...]
+
+    # Declared because __init__ writes it through object.__setattr__, which
+    # no checker can follow back to an attribute.
+    _hash: int
 
 
 VERSION_COMPATIBLE = (1, 0)
