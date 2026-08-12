@@ -276,11 +276,7 @@ class Range(Generic[VersionType]):
 
         lower, lower_inclusive, upper, upper_inclusive = intervals[low - 1]
 
-        if (
-            lower is not NEGATIVE_INFINITY
-            and version == lower
-            and not lower_inclusive
-        ):
+        if lower is not NEGATIVE_INFINITY and version == lower and not lower_inclusive:
             return False
 
         if upper is POSITIVE_INFINITY:
@@ -292,11 +288,15 @@ class Range(Generic[VersionType]):
         """Compute the intersection of two ranges (versions in both)."""
         if not isinstance(other, Range):
             return NotImplemented
+        left_intervals = self._intervals
+        right_intervals = other._intervals
+        left_count = len(left_intervals)
+        right_count = len(right_intervals)
         result: list[Interval] = []
         left_index = right_index = 0
-        while left_index < len(self._intervals) and right_index < len(other._intervals):
-            left_interval = self._intervals[left_index]
-            right_interval = other._intervals[right_index]
+        while left_index < left_count and right_index < right_count:
+            left_interval = left_intervals[left_index]
+            right_interval = right_intervals[right_index]
 
             inter_lower, inter_lower_inc = _max_lower_bound(
                 left_interval, right_interval
@@ -548,7 +548,6 @@ class Range(Generic[VersionType]):
 
         left_intervals = self._intervals
         right_intervals = other._intervals
-        left_count = len(left_intervals)
         right_count = len(right_intervals)
 
         is_subset = True
@@ -557,7 +556,9 @@ class Range(Generic[VersionType]):
 
         for left in left_intervals:
             # Skip right intervals that end before this left starts.
-            while right_index < right_count and _ends_before(right_intervals[right_index], left):
+            while right_index < right_count and _ends_before(
+                right_intervals[right_index], left
+            ):
                 right_index += 1
 
             if right_index >= right_count:
@@ -576,14 +577,14 @@ class Range(Generic[VersionType]):
 
             # If we are here, left and right overlap.
             is_disjoint = False
-            
+
             # Check if left is a subset of right
             lower, lower_inclusive = _max_lower_bound(left, right)
             upper, upper_inclusive = _min_upper_bound(left, right)
 
             if (lower, lower_inclusive, upper, upper_inclusive) != left:
                 is_subset = False
-                if not is_disjoint: # always True here
+                if not is_disjoint:  # always True here
                     return _OVERLAPPING_REL
 
         if is_subset:
