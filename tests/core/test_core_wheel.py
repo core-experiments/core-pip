@@ -224,3 +224,52 @@ def test_wheel_tag_hash_matches_equality() -> None:
     assert hash(first) == hash(second)
     assert len({first, second, other}) == 2
     assert {first: "value"}[second] == "value"
+
+
+def test_target_context_refuses_mutation() -> None:
+    """The cached hash only holds if a target cannot change.
+
+    A target is looked up through ``supported_wheel_tags``'s unbounded
+    cache, so a rewritten field would leave the hash pointing at the old
+    value while ``__eq__`` reflected the new one, corrupting the cache.
+    """
+    target = TargetContext(
+        platforms=("linux_x86_64",),
+        implementation="cp",
+        python_version="3.11",
+        abis=("cp311",),
+    )
+
+    for attribute in ("platforms", "implementation", "python_version", "abis", "_hash"):
+        with pytest.raises(AttributeError, match="immutable"):
+            setattr(target, attribute, "changed")
+
+    with pytest.raises(AttributeError, match="immutable"):
+        del target.platforms
+
+    assert target == TargetContext(
+        platforms=("linux_x86_64",),
+        implementation="cp",
+        python_version="3.11",
+        abis=("cp311",),
+    )
+
+
+def test_target_context_hash_matches_equality() -> None:
+    """Equal targets must be interchangeable as dictionary/cache keys."""
+    first = TargetContext(platforms=("linux_x86_64",), implementation="cp")
+    second = TargetContext(platforms=("linux_x86_64",), implementation="cp")
+    other = TargetContext(platforms=("macosx_11_0_arm64",), implementation="cp")
+
+    assert first == second
+    assert hash(first) == hash(second)
+    assert len({first, second, other}) == 2
+    assert {first: "value"}[second] == "value"
+
+
+def test_target_context_cached_tag_lookup_is_stable() -> None:
+    """Equal-but-distinct targets must not fragment the tag cache."""
+    first = TargetContext(platforms=("linux_x86_64",), implementation="cp")
+    second = TargetContext(platforms=("linux_x86_64",), implementation="cp")
+
+    assert supported_wheel_tags(first) is supported_wheel_tags(second)
