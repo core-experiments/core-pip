@@ -2,17 +2,16 @@
 
 from __future__ import annotations
 
-import atexit
 import json
 import marshal
 import os
 import sqlite3
-import threading
 from typing import cast
 
 from cpip.core.utils import load_snapshot
 from cpip.core.packaging import Requirement, Version, parse_requirement
 from cpip.index.source_models import CandidateMetadata
+from cpip.index.sqlite_cache import SqliteBackedCache
 
 VERSION = 3
 NAME = "candidate-metadata-v3.sqlite"
@@ -24,31 +23,23 @@ CacheKey = tuple[str, str, tuple[str, ...], str]
 CacheValue = tuple[str, str, tuple[str, ...], tuple[str, ...], str | None]
 
 
-class CandidateMetadataCache:
+class CandidateMetadataCache(SqliteBackedCache):
     """Process-local metadata cache backed by an incremental SQLite database."""
 
     __slots__ = (
-        "_db_exists",
         "_pending_puts",
         "_pending_req_states",
         "_pending_ver_states",
-        "conn",
         "decoded",
         "decoded_requirements",
-        "dirty",
         "entries",
-        "lock",
-        "path",
         "requirement_states",
         "validated",
         "version_states",
     )
 
     def __init__(self, cache_dir: str | os.PathLike[str]) -> None:
-        self.path = os.path.join(os.fspath(cache_dir), NAME)
-        self.lock = threading.RLock()
-        self.conn: sqlite3.Connection | None = None
-        self._db_exists = os.path.isfile(self.path)
+        super().__init__(os.path.join(os.fspath(cache_dir), NAME))
 
         self.entries: dict[CacheKey, CacheValue] = {}
         self.decoded: dict[CacheKey, CandidateMetadata] = {}
@@ -60,7 +51,6 @@ class CandidateMetadataCache:
         self._pending_puts: dict[CacheKey, CacheValue] = {}
         self._pending_req_states: dict[str, tuple[object, ...]] = {}
         self._pending_ver_states: dict[str, tuple[object, ...]] = {}
-        self.dirty = False
 
         # Check if the file at self.path exists and is a legacy marshal snapshot
         legacy_payload = None
@@ -92,39 +82,6 @@ class CandidateMetadataCache:
 
         # Run other legacy migrations if SQLite is still empty
         self.load_other_legacy()
-        atexit.register(self.flush)
-
-    def _reader(self) -> sqlite3.Connection | None:
-        """Return the connection, or ``None`` while no database exists yet.
-
-        Creating the file costs a WAL journal plus three schema statements,
-        which a resolve that only ever misses should not pay.  An absent
-        database reads as empty instead of being brought into existence.
-        """
-        if self.conn is None and not self._db_exists:
-            return None
-        return self._writer()
-
-    def _writer(self) -> sqlite3.Connection:
-        """Return the connection, opening the database on first real use."""
-        if self.conn is not None:
-            return self.conn
-
-        os.makedirs(os.path.dirname(self.path), exist_ok=True)
-        try:
-            conn = self._open()
-        except sqlite3.Error:
-            # A corrupt file is worth one retry from scratch; a second
-            # failure is the caller's to handle.
-            try:
-                os.remove(self.path)
-            except OSError:
-                pass
-            conn = self._open()
-
-        self.conn = conn
-        self._db_exists = True
-        return conn
 
     def _open(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.path, check_same_thread=False)
@@ -143,10 +100,6 @@ class CandidateMetadataCache:
             "raw TEXT PRIMARY KEY, state BLOB)"
         )
         return conn
-
-    def load(self) -> None:
-        # No-op in SQLite
-        pass
 
     def migrate_payload(self, payload: tuple) -> None:
         try:
@@ -462,68 +415,45 @@ class CandidateMetadataCache:
         self.validated.add(key)
         self.dirty = True
 
-    def flush(self) -> None:
-        if not self.dirty:
-            return
+    def _flush_pending(self, conn: sqlite3.Connection) -> None:
+        # Batch insert pending candidate metadata
+        items = [
+            (json.dumps(k), marshal.dumps(v))
+            for k, v in self._pending_puts.items()
+            if self.valid_key(k) and self.valid_value(v)
+        ]
+        if items:
+            conn.executemany(
+                "INSERT OR REPLACE INTO candidate_metadata (key, value) VALUES (?, ?)",
+                items,
+            )
 
-        with self.lock:
-            try:
-                conn = self._writer()
+        # Batch insert pending requirement states
+        req_items = [
+            (raw, marshal.dumps(state))
+            for raw, state in self._pending_req_states.items()
+        ]
+        if req_items:
+            conn.executemany(
+                "INSERT OR REPLACE INTO requirement_states (raw, state) VALUES (?, ?)",
+                req_items,
+            )
 
-                # Batch insert pending candidate metadata
-                items = [
-                    (json.dumps(k), marshal.dumps(v))
-                    for k, v in self._pending_puts.items()
-                    if self.valid_key(k) and self.valid_value(v)
-                ]
-                if items:
-                    conn.executemany(
-                        "INSERT OR REPLACE INTO candidate_metadata (key, value) VALUES (?, ?)",
-                        items,
-                    )
+        # Batch insert pending version states
+        ver_items = [
+            (raw, marshal.dumps(state))
+            for raw, state in self._pending_ver_states.items()
+        ]
+        if ver_items:
+            conn.executemany(
+                "INSERT OR REPLACE INTO version_states (raw, state) VALUES (?, ?)",
+                ver_items,
+            )
 
-                # Batch insert pending requirement states
-                req_items = [
-                    (raw, marshal.dumps(state))
-                    for raw, state in self._pending_req_states.items()
-                ]
-                if req_items:
-                    conn.executemany(
-                        "INSERT OR REPLACE INTO requirement_states (raw, state) VALUES (?, ?)",
-                        req_items,
-                    )
-
-                # Batch insert pending version states
-                ver_items = [
-                    (raw, marshal.dumps(state))
-                    for raw, state in self._pending_ver_states.items()
-                ]
-                if ver_items:
-                    conn.executemany(
-                        "INSERT OR REPLACE INTO version_states (raw, state) VALUES (?, ?)",
-                        ver_items,
-                    )
-
-                conn.commit()
-                self._pending_puts.clear()
-                self._pending_req_states.clear()
-                self._pending_ver_states.clear()
-                self.dirty = False
-            except (sqlite3.Error, ValueError, TypeError, OSError):
-                if self.conn is not None:
-                    try:
-                        self.conn.rollback()
-                    except sqlite3.Error:
-                        pass
-
-    def __del__(self) -> None:
-        try:
-            self.flush()
-            with self.lock:
-                if self.conn is not None:
-                    self.conn.close()
-        except Exception:
-            pass
+    def _clear_pending(self) -> None:
+        self._pending_puts.clear()
+        self._pending_req_states.clear()
+        self._pending_ver_states.clear()
 
 
 def get_candidate_metadata_cache(

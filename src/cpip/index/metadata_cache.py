@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import atexit
 import marshal
 import os
 import sqlite3
-import threading
 from typing import TypeAlias
+
+from cpip.index.sqlite_cache import SqliteBackedCache
 
 MetadataHeaders: TypeAlias = dict[str, list[str]]
 MetadataIdentity: TypeAlias = tuple[str, int, int]
@@ -18,61 +18,15 @@ _MAX_ENTRIES = 8_192
 _CACHE_INSTANCES: dict[str, WheelMetadataCache] = {}
 
 
-class WheelMetadataCache:
+class WheelMetadataCache(SqliteBackedCache):
     """Process-local metadata cache backed by an incremental SQLite database."""
 
-    __slots__ = (
-        "_db_exists",
-        "_pending_puts",
-        "conn",
-        "dirty",
-        "entries",
-        "lock",
-        "path",
-    )
+    __slots__ = ("_pending_puts", "entries")
 
     def __init__(self, cache_dir: str | os.PathLike[str]) -> None:
-        self.path = os.path.join(os.fspath(cache_dir), _CACHE_NAME)
-        self.lock = threading.RLock()
-        self.conn: sqlite3.Connection | None = None
-        self._db_exists = os.path.isfile(self.path)
-
+        super().__init__(os.path.join(os.fspath(cache_dir), _CACHE_NAME))
         self.entries: dict[MetadataIdentity, MetadataHeaders] = {}
         self._pending_puts: dict[MetadataIdentity, MetadataHeaders] = {}
-        self.dirty = False
-        atexit.register(self.flush)
-
-    def _reader(self) -> sqlite3.Connection | None:
-        """Return the connection, or ``None`` while no database exists yet.
-
-        Creating the file costs a WAL journal plus the schema statements,
-        which a run that only ever misses should not pay.  An absent database
-        reads as empty instead of being brought into existence.
-        """
-        if self.conn is None and not self._db_exists:
-            return None
-        return self._writer()
-
-    def _writer(self) -> sqlite3.Connection:
-        """Return the connection, opening the database on first real use."""
-        if self.conn is not None:
-            return self.conn
-
-        os.makedirs(os.path.dirname(self.path), exist_ok=True)
-        try:
-            conn = self._open()
-        except sqlite3.Error:
-            # A corrupt file is worth one retry from scratch; a second
-            # failure is the caller's to handle.
-            try:
-                os.remove(self.path)
-            except OSError:
-                pass
-            conn = self._open()
-
-        self.conn = conn
-        self._db_exists = True
-        return conn
 
     def _open(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.path, check_same_thread=False)
@@ -84,10 +38,6 @@ class WheelMetadataCache:
             "PRIMARY KEY (path, size, mtime))"
         )
         return conn
-
-    def load(self) -> None:
-        # No-op in SQLite because we load rows on-demand during get()
-        pass
 
     @staticmethod
     def valid_identity(value: object) -> bool:
@@ -175,40 +125,19 @@ class WheelMetadataCache:
         self._pending_puts[identity] = headers
         self.dirty = True
 
-    def flush(self) -> None:
-        if not self.dirty:
-            return
+    def _flush_pending(self, conn: sqlite3.Connection) -> None:
+        # Batch insert/replace dirty entries
+        items = [
+            (identity[0], identity[1], identity[2], marshal.dumps(headers))
+            for identity, headers in self._pending_puts.items()
+        ]
+        conn.executemany(
+            "INSERT OR REPLACE INTO metadata (path, size, mtime, headers) VALUES (?, ?, ?, ?)",
+            items,
+        )
 
-        with self.lock:
-            try:
-                # Batch insert/replace dirty entries
-                items = [
-                    (identity[0], identity[1], identity[2], marshal.dumps(headers))
-                    for identity, headers in self._pending_puts.items()
-                ]
-                conn = self._writer()
-                conn.executemany(
-                    "INSERT OR REPLACE INTO metadata (path, size, mtime, headers) VALUES (?, ?, ?, ?)",
-                    items,
-                )
-                conn.commit()
-                self._pending_puts.clear()
-                self.dirty = False
-            except (sqlite3.Error, ValueError, TypeError, OSError):
-                if self.conn is not None:
-                    try:
-                        self.conn.rollback()
-                    except sqlite3.Error:
-                        pass
-
-    def __del__(self) -> None:
-        try:
-            self.flush()
-            with self.lock:
-                if self.conn is not None:
-                    self.conn.close()
-        except Exception:
-            pass
+    def _clear_pending(self) -> None:
+        self._pending_puts.clear()
 
 
 def metadata_identity(path: str | os.PathLike[str]) -> MetadataIdentity | None:
