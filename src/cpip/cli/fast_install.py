@@ -29,6 +29,7 @@ from cpip.core.utils import load_snapshot, save_snapshot
 from cpip.core.wheel import PureWheelCandidate, WheelCandidate
 from cpip.core.wheel import parse_wheel_filename as parse_wheel_filename_core
 from cpip.install.target import InstallTarget
+from cpip.install.wheel_archive import mode_from_external_attr
 from cpip.install.wheel_archive_cache import (
     exact_install_plan_key_from_strings,
     install_wheels_from_archive_cache,
@@ -1052,7 +1053,9 @@ def install_resolved_pure_wheels(
     if not target_is_empty(target):
         return False
 
-    prepared: list[tuple[str, bool, bool, list[tuple[str, str, bytes]]]] = []
+    prepared: list[
+        tuple[str, bool, bool, list[tuple[str, str, bytes, int | None]]]
+    ] = []
 
     destinations: set[str] = set()
 
@@ -1119,16 +1122,28 @@ def install_resolved_pure_wheels(
 
                 dist_info = wheel_members[0].rsplit("/", 1)[0]
 
+                # archive.modes is a plain dict, safe to read after the
+                # archive's file handle closes -- unlike zipfile, this
+                # low-level reader never restores permission bits itself,
+                # so an executable regular file bundled directly in the
+                # package tree (outside .data/entry_points, which are
+                # rejected above) needs its mode carried through explicitly.
+                modes_for_wheel = [
+                    mode_from_external_attr(archive.modes[name]) for name in names
+                ]
+
                 members = [
                     (
                         destination,
                         directory,
                         contents,
+                        mode,
                     )
-                    for destination, directory, contents in zip(
+                    for destination, directory, contents, mode in zip(
                         destinations_for_wheel,
                         directories_for_wheel,
                         contents,
+                        modes_for_wheel,
                     )
                 ]
 
@@ -1142,7 +1157,7 @@ def install_resolved_pure_wheels(
                 any(
                     destination == os.path.join(target, dist_info, "RECORD")
                     and bool(contents.strip())
-                    for destination, _, contents in members
+                    for destination, _, contents, _ in members
                 ),
                 members,
             ),
@@ -1171,7 +1186,7 @@ def install_resolved_pure_wheels(
                 import csv
                 import hashlib
 
-            for destination, directory, contents in members:
+            for destination, directory, contents, mode in members:
                 if directory not in created_directories:
                     os.makedirs(directory, exist_ok=True)
 
@@ -1179,6 +1194,9 @@ def install_resolved_pure_wheels(
 
                 with open(destination, "wb", buffering=0) as output:
                     output.write(contents)
+
+                if mode is not None:
+                    os.chmod(destination, mode)
 
                 created_files.append(destination)
 
