@@ -14,6 +14,9 @@ from benchmark_support import (
     make_dependency_graph,
     make_failing_source_tree,
     make_isolated_source_tree,
+    make_nab_deep_backjump_family,
+    make_nab_pip_backtracking_family,
+    make_nab_smoke_fixture,
     make_source_tree,
     make_stress_graph,
     make_wheel,
@@ -121,6 +124,21 @@ def isolated_source_tree(tmp_path_factory: pytest.TempPathFactory) -> Path:
 @pytest.fixture(scope="session")
 def failing_source_tree(tmp_path_factory: pytest.TempPathFactory) -> Path:
     return make_failing_source_tree(tmp_path_factory.mktemp("failing-build"))
+
+
+@pytest.fixture(scope="session")
+def nab_smoke_wheelhouse(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    wheelhouse = tmp_path_factory.mktemp("nab-smoke-wheelhouse")
+    make_nab_smoke_fixture(wheelhouse)
+    make_nab_pip_backtracking_family(wheelhouse, "nab-smoke-pip", 24)
+    make_nab_pip_backtracking_family(
+        wheelhouse,
+        "nab-smoke-pip-unsat",
+        24,
+        unsatisfiable=True,
+    )
+    make_nab_deep_backjump_family(wheelhouse, "nab-smoke-backjump", 6)
+    return wheelhouse
 
 
 @pytest.fixture(scope="session")
