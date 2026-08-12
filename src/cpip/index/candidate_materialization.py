@@ -153,6 +153,21 @@ def vcs_scheme(url: str) -> str | None:
 class LazyWheelCandidate(WheelCandidate):
     """Resolver candidate whose metadata is cheap and whose wheel is deferred."""
 
+    # WheelCandidate's own slots (name, version, path, ...) go unused here --
+    # every one of them is overridden below as a property instead, backed by
+    # these six attributes.  A subclass that doesn't declare its own
+    # __slots__ gets a plain __dict__ regardless of what the parent
+    # declared, silently paying for both: one per candidate streamed during
+    # resolution, which is the hot path this class exists for.
+    __slots__ = (
+        "_record_internal",
+        "_version_internal",
+        "materialized_internal",
+        "materializer_internal",
+        "record_loader_internal",
+        "requirement_internal",
+    )
+
     def __init__(
         self,
         record: CandidateRecord | None,
