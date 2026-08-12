@@ -18,10 +18,11 @@ import configparser
 import os
 import sys
 import sysconfig
-from typing import TYPE_CHECKING
 
 from cpip.core.errors import ConfigurationError
 from cpip.index.config import DEFAULT_INDEX_URL
+
+TYPE_CHECKING = False
 
 if TYPE_CHECKING:
     # Annotation only: argparse is a measurable import on the fast path.

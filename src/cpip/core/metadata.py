@@ -5,7 +5,6 @@ import os
 import site
 import sysconfig
 from collections.abc import Collection, Iterable
-from typing import TYPE_CHECKING, Any, cast
 
 from .packaging import (
     Requirement,
@@ -13,6 +12,8 @@ from .packaging import (
     marker_applies,
     parse_requirement,
 )
+
+TYPE_CHECKING = False
 
 if TYPE_CHECKING:
     from email.message import Message
@@ -109,7 +110,7 @@ def _iter_installed_distributions(
         distributions = importlib.metadata.distributions(path=distribution_paths)
 
     for dist in distributions:
-        metadata = cast("Any", dist.metadata)
+        metadata = dist.metadata
 
         name = metadata.get("Name")
 

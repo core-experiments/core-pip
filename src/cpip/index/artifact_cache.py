@@ -8,9 +8,10 @@ import os
 import shutil
 import tempfile
 from collections.abc import Iterable, Mapping
-from typing import TYPE_CHECKING
 
 from cpip.core.errors import HashMismatch
+
+TYPE_CHECKING = False
 
 if TYPE_CHECKING:
     from typing import Protocol

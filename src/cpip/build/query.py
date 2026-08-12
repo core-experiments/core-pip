@@ -5,10 +5,10 @@ from __future__ import annotations
 import json
 import string
 from collections.abc import Collection, Iterable, Iterator, Mapping
-from email.parser import Parser
-from typing import Any, NamedTuple
+from typing import Any, NamedTuple, Protocol
 
 from cpip.core.cpip_version import CPIP_DISTRIBUTION_NAMES
+from cpip.core.light_metadata import LightDistributionStore
 from cpip.core.packaging import (
     Requirement,
     Version,
@@ -16,12 +16,63 @@ from cpip.core.packaging import (
     marker_applies,
     parse_requirement,
 )
-from cpip.core.wheel import WheelTag, wheel_tag_rank
 
-from .metadata import InstalledDistributionStore, InstalledMetadataDistribution
+TYPE_CHECKING = False
+
+if TYPE_CHECKING:
+    from cpip.core.wheel import WheelTag
 
 LatestInfo = Mapping[str, tuple[Any, str]]
 PackageSet = dict[str, "PackageDetails"]
+
+
+class DistributionLike(Protocol):
+    """The subset of InstalledMetadataDistribution/LightDistribution this module uses.
+
+    A structural type rather than a shared base class: check/show/inspect/
+    freeze read installed metadata through the lightweight, importlib.metadata
+    -free LightDistribution, while list's slower path still uses the richer
+    InstalledMetadataDistribution. The functions below don't care which one
+    they get, only that it has this shape.
+    """
+
+    @property
+    def canonical_name(self) -> str: ...
+
+    @property
+    def raw_name(self) -> str: ...
+
+    @property
+    def raw_version(self) -> str: ...
+
+    @property
+    def location(self) -> str: ...
+
+    @property
+    def metadata(self) -> Any: ...
+
+    @property
+    def version(self) -> Version: ...
+
+    @property
+    def metadata_version(self) -> str | None: ...
+
+    @property
+    def editable(self) -> bool: ...
+
+    @property
+    def editable_project_location(self) -> str | None: ...
+
+    @property
+    def installer(self) -> str: ...
+
+    def iter_dependencies(self, extras: tuple[str, ...] = ()) -> list[Requirement]: ...
+
+    def iter_raw_dependencies(self) -> list[str]: ...
+
+    def read_text(self, path: str) -> str: ...
+
+    def iter_declared_entries(self) -> list[str]: ...
 
 
 def normalize_project_url_label(label: str) -> str:
@@ -31,7 +82,7 @@ def normalize_project_url_label(label: str) -> str:
 
 
 class InstalledPackageInfo(NamedTuple):
-    distribution: InstalledMetadataDistribution
+    distribution: DistributionLike
     requires: list[str]
     required_by: list[str]
     entry_points: list[str]
@@ -40,7 +91,7 @@ class InstalledPackageInfo(NamedTuple):
 
 
 def _dependent_index(
-    candidates: Iterable[InstalledMetadataDistribution],
+    candidates: Iterable[DistributionLike],
 ) -> tuple[dict[str, list[str]], bool]:
     """Map each canonical name to the raw names of the distributions needing it.
 
@@ -66,9 +117,7 @@ def iter_installed_package_info(
     include_files: bool = False,
 ) -> Iterator[InstalledPackageInfo]:
     """Collect presentation-neutral information for named distributions."""
-    installed = {
-        dist.canonical_name: dist for dist in InstalledDistributionStore().iter()
-    }
+    installed = {dist.canonical_name: dist for dist in LightDistributionStore().iter()}
     query_names = [canonicalize_name(name) for name in query]
     dependents, dependents_unavailable = (
         _dependent_index(installed.values())
@@ -99,7 +148,7 @@ def iter_installed_package_info(
 
         files = sorted(dist.iter_declared_entries()) if include_files else None
         project_urls = dist.metadata.get_all("Project-URL", [])
-        homepage = dist.metadata.get("Home-page", "")
+        homepage = dist.metadata.get("Home-page") or ""
         if not homepage:
             for project_url in project_urls:
                 # A third-party wheel can ship a Project-URL with no comma;
@@ -132,8 +181,10 @@ def select_installed_distributions(
     not_required: bool = False,
     skip: Collection[str] = (),
     user_site: str | None = None,
-) -> list[InstalledMetadataDistribution]:
+) -> list[DistributionLike]:
     """Return installed distributions after applying listing filters."""
+    from .metadata import InstalledDistributionStore
+
     excluded = {canonicalize_name(name) for name in excludes}
 
     if "pip" in excluded:
@@ -166,13 +217,15 @@ def select_installed_distributions(
 
 
 def format_list_columns(
-    distributions: list[InstalledMetadataDistribution],
+    distributions: list[DistributionLike],
     *,
     outdated: bool = False,
     verbose: bool = False,
     latest: LatestInfo | None = None,
 ) -> tuple[list[list[str]], list[str]]:
     """Build rows and headers for the columns list format."""
+    from email.parser import Parser
+
     header = ["Package", "Version"]
 
     if outdated:
@@ -223,7 +276,7 @@ def format_list_columns(
 
 
 def format_list_json(
-    distributions: list[InstalledMetadataDistribution],
+    distributions: list[DistributionLike],
     *,
     outdated: bool = False,
     verbose: bool = False,
@@ -258,7 +311,7 @@ def format_list_json(
 
 
 def format_list_freeze(
-    distributions: list[InstalledMetadataDistribution],
+    distributions: list[DistributionLike],
     *,
     verbose: bool = False,
 ) -> list[str]:
@@ -343,7 +396,7 @@ def check_package_set(
 
 
 def parse_installed_dependencies(
-    dist: InstalledMetadataDistribution,
+    dist: DistributionLike,
 ) -> list[Requirement]:
     """Parse the active dependency declarations of an installed distribution."""
     result = []
@@ -355,7 +408,7 @@ def parse_installed_dependencies(
 
 
 def installed_dependencies_by_name(
-    distributions: Iterable[InstalledMetadataDistribution],
+    distributions: Iterable[DistributionLike],
 ) -> dict[str, list[Requirement]]:
     """Map each installed distribution's canonical name to its dependencies."""
     return {
@@ -365,7 +418,7 @@ def installed_dependencies_by_name(
 
 
 def package_set_from_dependencies(
-    distributions: Iterable[InstalledMetadataDistribution],
+    distributions: Iterable[DistributionLike],
     dependencies_by_name: dict[str, list[Requirement]],
 ) -> PackageSet:
     """Build the :func:`check_package_set` input from an installed environment.
@@ -392,7 +445,7 @@ def package_set_from_dependencies(
 
 
 def metadata_errors(
-    distributions: Iterable[InstalledMetadataDistribution],
+    distributions: Iterable[DistributionLike],
 ) -> list[str]:
     """Return human-readable errors for malformed dependency metadata."""
     errors = []
@@ -410,10 +463,12 @@ def metadata_errors(
 
 
 def unsupported_distributions(
-    distributions: Iterable[InstalledMetadataDistribution],
+    distributions: Iterable[DistributionLike],
     supported_tags: Iterable[WheelTag],
-) -> list[InstalledMetadataDistribution]:
+) -> list[DistributionLike]:
     """Return distributions whose wheel tags are unsupported."""
+    from cpip.core.wheel import WheelTag, wheel_tag_rank
+
     supported = tuple(supported_tags)
     result = []
     for dist in distributions:

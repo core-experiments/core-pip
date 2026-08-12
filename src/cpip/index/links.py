@@ -7,9 +7,7 @@ import posixpath
 import re
 import stat
 import urllib.parse
-from collections.abc import Mapping
 from enum import Enum
-from typing import Any, cast
 
 from cpip.core.errors import DiagnosticCpipError
 from cpip.core.hashes import Hashes
@@ -24,6 +22,12 @@ from cpip.index.hashes import SUPPORTED_HASHES, supported_hashes
 from cpip.index.paths import PathComponent
 from cpip.index.source_models import ArtifactKind, MetadataFile
 
+TYPE_CHECKING = False
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+    from typing import Any
+
 VCS_SCHEMES_internal = tuple(f"{scheme}+" for scheme in ("git", "hg", "svn", "bzr"))
 VCS_SCHEMES = frozenset(("git", "hg", "svn", "bzr"))
 SOURCE_ARCHIVE_SUFFIXES = (
@@ -37,6 +41,7 @@ SOURCE_ARCHIVE_SUFFIXES = (
 WHEEL_EXTENSION = ".whl"
 SUPPORTED_EXTENSIONS = (WHEEL_EXTENSION, *SOURCE_ARCHIVE_SUFFIXES)
 REQ_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+EGG_FRAGMENT_RE = re.compile(r"[#&]egg=([^&]*)")
 HASH_URL_FRAGMENT_RE = re.compile(
     r"[#&]({choices})=([^&]*)".format(
         choices="|".join(re.escape(name) for name in SUPPORTED_HASHES),
@@ -47,7 +52,7 @@ HASH_URL_FRAGMENT_RE = re.compile(
 @functools.cache
 def hash_from_url_fragment(url: str) -> tuple[str, str] | None:
     match = HASH_URL_FRAGMENT_RE.search(url)
-    return cast("tuple[str, str] | None", match.groups() if match is not None else None)
+    return match.groups() if match is not None else None  # ty:ignore[invalid-return-type]
 
 
 class InvalidEggFragment(DiagnosticCpipError):
@@ -532,7 +537,15 @@ class Link:
         return Hashes({name: [value] for name, value in self.hashes_internal.items()})
 
     def egg_fragment_internal(self) -> str | None:
-        match = re.search(r"[#&]egg=([^&]*)", self.url_internal)
+        url = self.url_internal
+
+        # ``egg=`` fragments are a legacy VCS-URL feature and rare in
+        # practice; skipping the regex for the common case where the
+        # substring is absent avoids firing the engine on every link.
+        if "egg=" not in url:
+            return None
+
+        match = EGG_FRAGMENT_RE.search(url)
         if not match:
             return None
         name = match.group(1)

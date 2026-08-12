@@ -5,7 +5,6 @@ import sys
 import sysconfig
 from collections.abc import Iterable
 from types import TracebackType
-from typing import TYPE_CHECKING, Any
 
 from cpip.core.errors import DiagnosticCpipError
 from cpip.core.temp_dir import TempDirectory, tempdir_kinds
@@ -15,7 +14,11 @@ from cpip.install.build_env.base import (
     Prefix,
 )
 
+TYPE_CHECKING = False
+
 if TYPE_CHECKING:
+    from typing import Any
+
     from cpip.resolution.req_install import InstallRequirement
 
 

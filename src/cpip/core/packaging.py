@@ -5,12 +5,14 @@ import re
 import sys
 import urllib.parse
 from functools import lru_cache
-from typing import TYPE_CHECKING, Any, cast
 
 from cpip.core.names import NORMALIZE_RE, canonicalize_name
 
+TYPE_CHECKING = False
+
 if TYPE_CHECKING:
     from collections.abc import Iterable
+    from typing import Any
 
 
 VERSION_RE = re.compile(
@@ -108,13 +110,13 @@ class InvalidVersion(ValueError):
 class Version:
     __slots__ = (
         "_hash",
+        "_public",
         "comparison_key",
         "dev",
         "epoch",
         "local",
         "post",
         "pre",
-        "public",
         "release",
     )
 
@@ -136,7 +138,7 @@ class Version:
 
             self.local = None
 
-            self.public = self.format_public()
+            self._public = None
 
             self.comparison_key = self.build_comparison_key()
 
@@ -192,7 +194,7 @@ class Version:
             else None
         )
 
-        self.public = self.format_public()
+        self._public = None
 
         self.comparison_key = self.build_comparison_key()
 
@@ -217,7 +219,7 @@ class Version:
 
         value.local = state[5]
 
-        value.public = state[6]
+        value._public = state[6]
 
         value.comparison_key = state[7]
 
@@ -236,6 +238,17 @@ class Version:
             self.public,
             self.comparison_key,
         )
+
+    @property
+    def public(self) -> str:
+        public = self._public
+
+        if public is None:
+            public = self.format_public()
+
+            self._public = public
+
+        return public
 
     @property
     def is_prerelease(self) -> bool:
@@ -544,10 +557,7 @@ class SpecifierSet:
 
         value.specifiers = tuple(
             Specifier.from_cache_state(specifier_state)
-            for specifier_state in cast(
-                "tuple[tuple[object, ...], ...]",
-                state[1],
-            )
+            for specifier_state in state[1]  # ty:ignore[not-iterable]
         )
 
         value.text_internal = state[2]
@@ -723,14 +733,12 @@ class Requirement:
         """Restore a previously validated requirement without reparsing it."""
 
         return cls(
-            name=cast("str", state[0]),
-            specifier=SpecifierSet.from_cache_state(
-                cast("tuple[object, ...]", state[1]),
-            ),
-            extras=frozenset(cast("tuple[str, ...]", state[2])),
-            url=cast("str | None", state[3]),
-            marker=cast("str | None", state[4]),
-            raw=cast("str", state[5]),
+            name=state[0],  # ty:ignore[invalid-argument-type]
+            specifier=SpecifierSet.from_cache_state(state[1]),  # ty:ignore[invalid-argument-type]
+            extras=frozenset(state[2]),  # ty:ignore[invalid-argument-type]
+            url=state[3],  # ty:ignore[invalid-argument-type]
+            marker=state[4],  # ty:ignore[invalid-argument-type]
+            raw=state[5],  # ty:ignore[invalid-argument-type]
         )
 
     def cache_state_internal(self) -> tuple[object, ...]:

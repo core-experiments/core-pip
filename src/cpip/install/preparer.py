@@ -8,7 +8,6 @@ import logging
 import os
 import shutil
 from collections.abc import Iterable
-from typing import TYPE_CHECKING, cast
 
 from cpip.build.metadata import (
     MetadataDistribution,
@@ -53,6 +52,8 @@ from cpip.network.lazy_wheel import (
 )
 from cpip.vcs.support import hide_url
 from cpip.vcs.versioncontrol import vcs
+
+TYPE_CHECKING = False
 
 if TYPE_CHECKING:
     from cpip.network.progress import BarType
@@ -552,7 +553,7 @@ class RequirementPreparer:
         ):
             check_sidecar_matches_wheel(
                 req,
-                cast("MetadataView", req.distribution_internal),
+                req.distribution_internal,  # ty:ignore[invalid-argument-type]
                 dist,
             )
 
@@ -648,4 +649,4 @@ class RequirementPreparer:
                 "completely repeatable environment, install into an "
                 "empty virtualenv.",
             )
-        return cast("MetadataView", req.satisfied_by)
+        return req.satisfied_by  # ty:ignore[invalid-return-type]

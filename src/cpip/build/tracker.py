@@ -4,11 +4,15 @@ import contextlib
 import hashlib
 import logging
 import os
-from collections.abc import Generator
 from types import TracebackType
-from typing import Any
 
 from cpip.core.temp_dir import TempDirectory
+
+TYPE_CHECKING = False
+
+if TYPE_CHECKING:
+    from collections.abc import Generator
+    from typing import Any
 
 logger = logging.getLogger(__name__)
 

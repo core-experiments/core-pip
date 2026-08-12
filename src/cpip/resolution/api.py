@@ -7,7 +7,6 @@ import os
 import re
 import sys
 from collections.abc import Iterable
-from typing import TYPE_CHECKING, Any
 
 from cpip.core.errors import ResolutionError as CpipResolutionError
 from cpip.index.provider import CandidateProvider
@@ -21,7 +20,11 @@ from cpip.resolution.inputs import (
     coerce_requirements,
 )
 
+TYPE_CHECKING = False
+
 if TYPE_CHECKING:
+    from typing import Any
+
     from cpip.install.requirement_set import RequirementSet
     from cpip.resolution.req_install import InstallRequirement
 

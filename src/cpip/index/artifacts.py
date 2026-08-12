@@ -10,13 +10,17 @@ import posixpath
 import shutil
 import tempfile
 import urllib.parse
-from typing import Any
 
 from cpip.core.errors import InstallationError
 from cpip.core.urls import url_to_path
 from cpip.index.artifact_cache import ArtifactCache, materialize_cached_artifact
 from cpip.index.vcs import materialize_vcs
 from cpip.index.vcs import vcs_scheme as parse_vcs_scheme
+
+TYPE_CHECKING = False
+
+if TYPE_CHECKING:
+    from typing import Any
 
 logger = logging.getLogger(__name__)
 

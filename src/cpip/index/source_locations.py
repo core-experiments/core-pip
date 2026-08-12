@@ -6,7 +6,6 @@ import ntpath
 import os
 import urllib.parse
 from functools import lru_cache
-from typing import TYPE_CHECKING, Any
 
 from cpip.core.packaging import Requirement, canonicalize_name
 from cpip.core.urls import path_to_url, url_to_path
@@ -19,7 +18,11 @@ from cpip.index.links import SUPPORTED_EXTENSIONS, Link
 from cpip.index.page_parsing import IndexPageParser
 from cpip.index.source_models import ArtifactKind
 
+TYPE_CHECKING = False
+
 if TYPE_CHECKING:
+    from typing import Any
+
     from cpip.index.catalog_cache import CatalogData, CatalogSummary
 
 

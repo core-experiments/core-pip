@@ -11,20 +11,15 @@ import sys
 from collections.abc import Generator, Iterable
 from typing import NamedTuple
 
-from cpip.build.metadata import (
-    InstalledDistributionStore,
-    InstalledMetadataDistribution,
-)
 from cpip.cli.parsers.freeze import create_parser
 from cpip.core.cpip_version import CPIP_DISTRIBUTION_NAMES
 from cpip.core.errors import InstallationError
-from cpip.core.metadata import stdlib_pkgs
 from cpip.core.packaging import InvalidVersion, canonicalize_name
-from cpip.resolution.files.parser import COMMENT_RE
-from cpip.resolution.input_requirements import (
-    install_req_from_editable,
-    install_req_from_line,
-)
+
+TYPE_CHECKING = False
+
+if TYPE_CHECKING:
+    from cpip.core.light_metadata import LightDistribution
 
 logger = logging.getLogger(__name__)
 
@@ -47,11 +42,13 @@ def freeze(
     exclude: Iterable[str] = (),
     skip: Iterable[str] = (),
 ) -> Generator[str, None, None]:
+    from cpip.core.light_metadata import LightDistributionStore
+
     installations: dict[str, FrozenRequirement] = {}
 
     excluded = {canonicalize_name(name) for name in exclude}
 
-    dists = InstalledDistributionStore(
+    dists = LightDistributionStore(
         paths=paths,
         user_site=site.getusersitepackages(),
     ).iter(local_only=local_only, user_only=user_only)
@@ -74,6 +71,14 @@ def freeze(
         installations[req.canonical_name] = req
 
     if requirement:
+        # Only `-r`/`--requirement` needs requirement-file parsing, so a plain
+        # `cpip freeze` never pays for the resolution package.
+        from cpip.resolution.files.parser import COMMENT_RE
+        from cpip.resolution.input_requirements import (
+            install_req_from_editable,
+            install_req_from_line,
+        )
+
         # the options that don't get turned into an InstallRequirement
 
         # should only be emitted once, even if the same option is in multiple
@@ -213,7 +218,7 @@ def freeze(
             yield str(installation).rstrip() + "\n"
 
 
-def format_as_name_version(dist: InstalledMetadataDistribution) -> str:
+def format_as_name_version(dist: LightDistribution) -> str:
     try:
         dist_version = dist.version
 
@@ -226,7 +231,7 @@ def format_as_name_version(dist: InstalledMetadataDistribution) -> str:
         return f"{dist.raw_name}=={dist_version}"
 
 
-def get_editable_info(dist: InstalledMetadataDistribution) -> EditableInfo:
+def get_editable_info(dist: LightDistribution) -> EditableInfo:
     """Compute and return values (req, comments) for use in
 
     FrozenRequirement.from_dist().
@@ -342,7 +347,7 @@ class FrozenRequirement:
         return canonicalize_name(self.name)
 
     @classmethod
-    def from_dist(cls, dist: InstalledMetadataDistribution) -> FrozenRequirement:
+    def from_dist(cls, dist: LightDistribution) -> FrozenRequirement:
         editable = dist.editable
 
         if editable:
@@ -376,6 +381,8 @@ class FrozenRequirement:
 
 def run_freeze(args: list[str]) -> int:
     options = create_parser().parse_args(args)
+
+    from cpip.core.light_metadata import stdlib_pkgs
 
     excluded = {canonicalize_name(name) for name in options.exclude}
 

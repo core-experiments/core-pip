@@ -5,7 +5,6 @@ from __future__ import annotations
 import io
 import os
 import zipfile
-from typing import TYPE_CHECKING, Any
 
 from cpip.install.wheel_archive_cache import CachedWheelArchive
 from cpip.resolution.archive import (
@@ -13,7 +12,11 @@ from cpip.resolution.archive import (
     WheelhouseUnavailable,
 )
 
+TYPE_CHECKING = False
+
 if TYPE_CHECKING:
+    from typing import Any
+
     from cpip.core.wheel import WheelCandidate
 
 

@@ -1,7 +1,13 @@
 from __future__ import annotations
 
 from types import ModuleType
-from typing import TYPE_CHECKING
+
+# ``from typing import TYPE_CHECKING`` would work identically for a type
+# checker, but the real ``typing`` module costs ~1.8ms to import (it pulls in
+# ``re``, ``collections.abc``, and ``enum``) and this module is in
+# ``COLD_CORE`` -- every ``cpip`` invocation pays for it.  A local ``False``
+# is exactly what ``typing.TYPE_CHECKING`` evaluates to at runtime anyway.
+TYPE_CHECKING = False
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -114,7 +120,7 @@ COMMAND_SPECS = (
     ),
     CommandSpec(
         "show",
-        "cpip.cli.inspect",
+        "cpip.cli.inspect_show",
         "run_show",
         parser_factory="create_show_parser",
         parser_module_path="cpip.cli.parsers.inspect",
@@ -132,7 +138,7 @@ COMMAND_SPECS = (
     ),
     CommandSpec(
         "hash",
-        "cpip.cli.inspect",
+        "cpip.cli.inspect_hash",
         "run_hash",
         parser_factory="create_hash_parser",
         parser_module_path="cpip.cli.parsers.inspect",
@@ -141,14 +147,22 @@ COMMAND_SPECS = (
     ),
     CommandSpec(
         "check",
-        "cpip.cli.inspect",
+        "cpip.cli.inspect_check",
         "run_check",
         parser_factory="create_check_parser",
         parser_module_path="cpip.cli.parsers.inspect",
         needs_logging=False,
         needs_tempdir=False,
     ),
-    CommandSpec("cache", "cpip.cli.cache", "run_cache"),
+    # ``cache`` only ever lists/removes files under the cache directory --
+    # cli/cache.py never touches logging or a temp directory.
+    CommandSpec(
+        "cache",
+        "cpip.cli.cache",
+        "run_cache",
+        needs_logging=False,
+        needs_tempdir=False,
+    ),
     # ``lock`` writes a lock file rather than running an installed
     # environment, so it never needs the runner/version execution context.
     CommandSpec(

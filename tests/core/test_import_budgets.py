@@ -175,16 +175,167 @@ WORK_ROUTES = (
         forbidden=tuple(name for name in EXPENSIVE if name != "cpip.cli.fast"),
         needs_empty_dir=True,
     ),
-    # ``hash`` digests files. It has no business loading the metadata stack.
+    # ``hash`` digests files and needs only hashlib to do it. It now lives in
+    # its own module (cli/inspect_hash.py) instead of sharing cli/inspect.py
+    # with check/inspect/show, so it no longer pays for their metadata stack.
     Route(
         id="hash-file",
         argv=("hash", "pyproject.toml"),
-        max_new_modules=49,
+        max_new_modules=46,
+        allowed_first_party=COLD_CORE
+        | {
+            "cpip.cli.fast",
+            "cpip.cli.inspect_hash",
+            "cpip.cli.lock_format",
+            "cpip.cli.parser",
+            "cpip.cli.parsers",
+            "cpip.cli.parsers.inspect",
+            "cpip.core",
+            "cpip.core.appdirs",
+            "cpip.core.names",
+        },
+        forbidden=tuple(
+            name for name in EXPENSIVE if name not in {"cpip.cli.fast", "hashlib"}
+        ),
+    ),
+    # check/show/inspect/freeze all read installed metadata through
+    # core.light_metadata instead of core.metadata now, so none of them
+    # should reach importlib.metadata, email, or cpip.core.wheel (except
+    # check, which genuinely needs cpip.core.wheel for WheelTag compatibility
+    # checking). Points at an empty directory so the result does not depend
+    # on what happens to be installed (an editable install would otherwise
+    # pull in cpip.vcs).
+    Route(
+        id="freeze-plain",
+        argv=("freeze", "--path", "{tmp}"),
+        max_new_modules=76,
+        allowed_first_party=COLD_CORE
+        | {
+            "cpip.cli.fast",
+            "cpip.cli.freeze",
+            "cpip.cli.lock_format",
+            "cpip.cli.logging_config",
+            "cpip.cli.parser",
+            "cpip.cli.parsers",
+            "cpip.cli.parsers.freeze",
+            "cpip.core",
+            "cpip.core.appdirs",
+            "cpip.core.cpip_version",
+            "cpip.core.direct_url",
+            "cpip.core.errors",
+            "cpip.core.light_metadata",
+            "cpip.core.names",
+            "cpip.core.packaging",
+            "cpip.core.urls",
+            "cpip.core.utils",
+        },
         forbidden=tuple(
             name
             for name in EXPENSIVE
-            if name not in {"cpip.cli.fast", "hashlib", "cpip.core.names"}
+            if name not in {"cpip.cli.fast", "cpip.core.packaging", "json"}
         ),
+        needs_empty_dir=True,
+    ),
+    # ``show``/``check`` have no ``--path`` option, so these run against the
+    # ambient environment rather than an isolated empty directory. That's
+    # safe here (unlike freeze/list): neither code path imports anything
+    # conditional on *what* is installed, only on the CLI flags given, so the
+    # module set doesn't depend on which packages happen to be present.
+    Route(
+        id="show-nonexistent",
+        argv=("show", "definitely-not-a-real-package-xyz"),
+        max_new_modules=71,
+        allowed_first_party=COLD_CORE
+        | {
+            "cpip.build",
+            "cpip.build.query",
+            "cpip.cli.fast",
+            "cpip.cli.inspect_show",
+            "cpip.cli.lock_format",
+            "cpip.cli.parser",
+            "cpip.cli.parsers",
+            "cpip.cli.parsers.inspect",
+            "cpip.core",
+            "cpip.core.appdirs",
+            "cpip.core.cpip_version",
+            "cpip.core.direct_url",
+            "cpip.core.light_metadata",
+            "cpip.core.names",
+            "cpip.core.packaging",
+            "cpip.core.urls",
+            "cpip.core.utils",
+        },
+        forbidden=tuple(
+            name
+            for name in EXPENSIVE
+            if name
+            not in {"cpip.cli.fast", "cpip.build", "cpip.core.packaging", "json"}
+        ),
+    ),
+    Route(
+        id="inspect-empty",
+        argv=("inspect", "--path", "{tmp}"),
+        max_new_modules=71,
+        allowed_first_party=COLD_CORE
+        | {
+            "cpip.cli.fast",
+            "cpip.cli.inspect",
+            "cpip.cli.lock_format",
+            "cpip.cli.parser",
+            "cpip.cli.parsers",
+            "cpip.cli.parsers.inspect",
+            "cpip.core",
+            "cpip.core.appdirs",
+            "cpip.core.cpip_version",
+            "cpip.core.direct_url",
+            "cpip.core.light_metadata",
+            "cpip.core.names",
+            "cpip.core.packaging",
+            "cpip.core.urls",
+            "cpip.core.utils",
+        },
+        forbidden=tuple(
+            name
+            for name in EXPENSIVE
+            if name
+            not in {
+                "cpip.cli.fast",
+                "cpip.core.packaging",
+                "json",
+                "platform",
+                "subprocess",
+            }
+        ),
+        needs_empty_dir=True,
+    ),
+    Route(
+        id="check-ambient",
+        argv=("check",),
+        max_new_modules=127,
+        forbidden=tuple(
+            name
+            for name in EXPENSIVE
+            if name
+            not in {
+                "cpip.cli.fast",
+                "cpip.build",
+                "cpip.core.packaging",
+                "cpip.core.wheel",
+                "email",
+                "json",
+                "platform",
+                "subprocess",
+                "zipfile",
+            }
+        ),
+    ),
+    # ``cache`` only lists/removes files under the cache directory -- it
+    # never logs or needs a temp directory, so its CommandSpec now says so.
+    Route(
+        id="cache-dir",
+        argv=("cache", "dir"),
+        max_new_modules=54,
+        forbidden=tuple(name for name in EXPENSIVE if name != "cpip.cli.fast"),
     ),
 )
 

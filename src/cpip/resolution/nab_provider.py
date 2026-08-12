@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import sys
 from collections.abc import Mapping
 from contextlib import nullcontext
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
 from cpip._vendor.nab_resolver.ranges import Range
@@ -22,6 +22,8 @@ from cpip.core.packaging import (
 from cpip.index.candidate_evaluators import CandidateEvaluator
 from cpip.index.provider import CandidateProvider
 from cpip.resolution.models import ResolutionConfig, canonical_url, url_name
+
+TYPE_CHECKING = False
 
 if TYPE_CHECKING:
     from contextlib import AbstractContextManager
@@ -465,8 +467,48 @@ class NabProvider:
             return None
         candidate = candidates[0]
 
+        if self._invalid_metadata_rejects(candidate):
+            print(
+                f"WARNING: Ignoring version {candidate.version} of "
+                f"{candidate.name} since it has invalid metadata",
+                file=sys.stderr,
+            )
+
+            alternative = self._alternative_for_invalid_metadata(
+                candidate_requirement,
+                selected,
+                matching=matching,
+            )
+            if alternative is None:
+                return None
+            selected, candidate = alternative
+
         if self._requires_python_rejects(candidate):
             alternative = self._alternative_for_requires_python(
+                candidate_requirement,
+                selected,
+                matching=matching,
+            )
+            if alternative is None:
+                return None
+            selected, candidate = alternative
+
+        if self._inconsistent_metadata_rejects(candidate):
+            metadata_version = getattr(candidate, "metadata_version", None)
+
+            print(
+                f"WARNING: {candidate.name} has an inconsistent version: "
+                f"expected '{candidate.version}', but metadata has "
+                f"'{metadata_version}'",
+            )
+
+            if requirement.extras:
+                print(
+                    f"Requested {requirement.raw or requirement.name}, "
+                    f"but installing version {metadata_version}",
+                )
+
+            alternative = self._alternative_for_inconsistent_metadata(
                 candidate_requirement,
                 selected,
                 matching=matching,
@@ -681,13 +723,56 @@ class NabProvider:
                 ),
             )
 
+    def _invalid_metadata_rejects(self, candidate: WheelCandidate) -> bool:
+        """Whether the candidate's metadata fails to load at all.
+
+        A malformed artifact -- e.g. one of its own dependencies declaring an
+        unparseable version -- surfaces as an exception the first time
+        metadata is read (accessing any of ``dependencies``,
+        ``requires_python``, or ``provided_extras`` triggers the same lazy
+        load). Treat that the same way materialization already does: skip
+        the candidate and let the resolver fall back to the next release.
+        """
+        try:
+            getattr(candidate, "dependencies", None)
+        except (OSError, ValueError):
+            return True
+        return False
+
+    def _alternative_for_invalid_metadata(
+        self,
+        candidate_requirement: Requirement,
+        selected: Version,
+        *,
+        matching: list[Version],
+    ) -> tuple[Version, WheelCandidate] | None:
+        """Walk back to the newest release whose metadata actually loads."""
+        for fallback in sorted(matching, reverse=True):
+            if fallback == selected:
+                continue
+            alternatives = tuple(
+                self.provider.find_candidates(
+                    candidate_requirement,
+                    allowed_versions=frozenset({fallback}),
+                )
+            )
+            if alternatives and not self._invalid_metadata_rejects(alternatives[0]):
+                return fallback, alternatives[0]
+        return None
+
     def _requires_python_rejects(self, candidate: WheelCandidate) -> bool:
         """Whether this interpreter falls outside the candidate's Requires-Python.
 
         Skipped when the caller targets another interpreter, since the
         declaration then says nothing about the target.
         """
-        requires_python = getattr(candidate, "requires_python", None)
+        try:
+            requires_python = getattr(candidate, "requires_python", None)
+        except (OSError, ValueError):
+            # Unreadable metadata is a rejection here too -- callers that
+            # need the real reason check _invalid_metadata_rejects first.
+            return True
+
         if (
             self.ignore_requires_python
             or self.python_version is not None
@@ -720,6 +805,48 @@ class NabProvider:
                 )
             )
             if alternatives and not self._requires_python_rejects(alternatives[0]):
+                return fallback, alternatives[0]
+        return None
+
+    def _inconsistent_metadata_rejects(self, candidate: WheelCandidate) -> bool:
+        """Whether the candidate's own metadata contradicts its declared version.
+
+        A filename can claim one release while the wheel's METADATA declares
+        another (a malformed or mislabeled artifact). Installing it would
+        silently give the user something other than what they asked for, so
+        treat it the same as an incompatible interpreter: reject it and let
+        the resolver fall back to the next candidate.
+        """
+        declared_version = getattr(candidate, "version", None)
+        if declared_version is None or declared_version == Version("0"):
+            return False
+
+        metadata_version = getattr(candidate, "metadata_version", None)
+        if metadata_version is None:
+            return False
+
+        return metadata_version != declared_version
+
+    def _alternative_for_inconsistent_metadata(
+        self,
+        candidate_requirement: Requirement,
+        selected: Version,
+        *,
+        matching: list[Version],
+    ) -> tuple[Version, WheelCandidate] | None:
+        """Walk back to the newest release whose metadata matches its filename."""
+        for fallback in sorted(matching, reverse=True):
+            if fallback == selected:
+                continue
+            alternatives = tuple(
+                self.provider.find_candidates(
+                    candidate_requirement,
+                    allowed_versions=frozenset({fallback}),
+                )
+            )
+            if alternatives and not self._inconsistent_metadata_rejects(
+                alternatives[0],
+            ):
                 return fallback, alternatives[0]
         return None
 
@@ -1043,7 +1170,13 @@ class NabProvider:
             )
             if candidate is None:
                 continue
-            for dependency in getattr(candidate, "dependencies", ()):
+            try:
+                dependencies = getattr(candidate, "dependencies", ())
+            except (OSError, ValueError):
+                # Malformed metadata belongs to real resolution to diagnose;
+                # this pre-scan is a best-effort extras merge and skips it.
+                continue
+            for dependency in dependencies:
                 if dependency.canonical_name not in root_names or not dependency.extras:
                     continue
                 for index, root in enumerate(merged):

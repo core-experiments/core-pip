@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Iterable
-from typing import TYPE_CHECKING
 
 from cpip.install.build_env.base import BuildEnvironment
+
+TYPE_CHECKING = False
 
 if TYPE_CHECKING:
     from cpip.resolution.req_install import InstallRequirement

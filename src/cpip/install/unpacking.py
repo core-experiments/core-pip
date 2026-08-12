@@ -9,12 +9,15 @@ import stat
 import sys
 import tarfile
 import zipfile
-from collections.abc import Iterable
-from typing import Any, cast
 from zipfile import ZipInfo
 
 from cpip.core.errors import InstallationError
 from cpip.core.utils import ensure_dir
+
+TYPE_CHECKING = False
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 BZ2_EXTENSIONS: tuple[str, ...] = (".tar.bz2", ".tbz")
 XZ_EXTENSIONS: tuple[str, ...] = (
@@ -258,7 +261,7 @@ def untar_file(filename: str, location: str) -> None:
                     # The PEP changed this from `int` to `Optional[int]`,
                     # where None means "use the default". Mypy doesn't
                     # know this yet.
-                    cast("Any", member).mode = None
+                    member.mode = None  # ty:ignore[invalid-assignment]
                 return member
 
             tar.extractall(location, filter=cpip_filter)

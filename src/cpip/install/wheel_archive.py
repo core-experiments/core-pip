@@ -6,9 +6,10 @@ import base64
 import hashlib
 import os
 import stat
-from typing import TYPE_CHECKING
 
 from cpip.core.errors import InstallationError
+
+TYPE_CHECKING = False
 
 if TYPE_CHECKING:
     import zipfile

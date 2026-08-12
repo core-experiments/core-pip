@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import tempfile
-from typing import TYPE_CHECKING, cast
 
 from cpip.build.build import unpack_source
 from cpip.cli.fast import read_requirements
@@ -23,6 +22,8 @@ from cpip.network.http import NetworkSession
 from cpip.resolution.api import ResolutionEngine
 from cpip.resolution.files import parse_requirements
 from cpip.resolution.input_requirements import install_req_from_line
+
+TYPE_CHECKING = False
 
 if TYPE_CHECKING:
     from cpip.resolution.req_install import InstallRequirement
@@ -54,40 +55,34 @@ def render_lock(packages: list[dict[str, object]]) -> str:
 
             assert isinstance(vcs, dict)
 
-            vcs = cast("dict[str, object]", vcs)
-
             lines.append("[packages.vcs]")
 
-            lines.append(f"type = {toml_string(str(vcs['type']))}")
+            lines.append(f"type = {toml_string(str(vcs['type']))}")  # ty:ignore[invalid-argument-type]
 
-            lines.append(f"url = {toml_string(str(vcs['url']))}")
+            lines.append(f"url = {toml_string(str(vcs['url']))}")  # ty:ignore[invalid-argument-type]
 
             lines.append(
-                f"requested-revision = {toml_string(str(vcs['requested-revision']))}",
+                f"requested-revision = {toml_string(str(vcs['requested-revision']))}",  # ty:ignore[invalid-argument-type]
             )
 
-            lines.append(f"commit-id = {toml_string(str(vcs['commit-id']))}")
+            lines.append(f"commit-id = {toml_string(str(vcs['commit-id']))}")  # ty:ignore[invalid-argument-type]
 
         if "archive" in package:
             archive = package["archive"]
 
             assert isinstance(archive, dict)
 
-            archive = cast("dict[str, object]", archive)
-
-            hashes = archive["hashes"]
+            hashes = archive["hashes"]  # ty:ignore[invalid-argument-type]
 
             assert isinstance(hashes, dict)
 
-            hashes = cast("dict[str, object]", hashes)
-
             lines.append("[packages.archive]")
 
-            lines.append(f"url = {toml_string(str(archive['url']))}")
+            lines.append(f"url = {toml_string(str(archive['url']))}")  # ty:ignore[invalid-argument-type]
 
             lines.append("[packages.archive.hashes]")
 
-            lines.append(f"sha256 = {toml_string(str(hashes['sha256']))}")
+            lines.append(f"sha256 = {toml_string(str(hashes['sha256']))}")  # ty:ignore[invalid-argument-type]
 
         if "directory" in package:
             directory = package["directory"]
@@ -110,8 +105,6 @@ def render_lock(packages: list[dict[str, object]]) -> str:
             for entry in artifacts:
                 assert isinstance(entry, dict)
 
-                entry = cast("dict[str, object]", entry)
-
                 header = (
                     f"[[packages.{artifact_key}]]"
                     if artifact_key == "wheels"
@@ -120,19 +113,17 @@ def render_lock(packages: list[dict[str, object]]) -> str:
 
                 lines.append(header)
 
-                lines.append(f"name = {toml_string(str(entry['name']))}")
+                lines.append(f"name = {toml_string(str(entry['name']))}")  # ty:ignore[invalid-argument-type]
 
-                lines.append(f"url = {toml_string(str(entry['url']))}")
+                lines.append(f"url = {toml_string(str(entry['url']))}")  # ty:ignore[invalid-argument-type]
 
-                hashes = entry["hashes"]
+                hashes = entry["hashes"]  # ty:ignore[invalid-argument-type]
 
                 assert isinstance(hashes, dict)
 
-                hashes = cast("dict[str, object]", hashes)
-
                 lines.append(f"[packages.{artifact_key}.hashes]")
 
-                lines.append(f"sha256 = {toml_string(str(hashes['sha256']))}")
+                lines.append(f"sha256 = {toml_string(str(hashes['sha256']))}")  # ty:ignore[invalid-argument-type]
 
         lines.append("")
 

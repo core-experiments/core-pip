@@ -14,8 +14,6 @@ import platform
 import threading
 import time
 import urllib.parse
-from collections.abc import Iterator, Mapping, Sequence
-from typing import Any
 
 from cpip.core.utils import current_version
 from cpip.core.cpip_version import get_cpip_version
@@ -29,6 +27,12 @@ from cpip.network.exceptions import (
     ProxyConnectionError,
     SSLVerificationError,
 )
+
+TYPE_CHECKING = False
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator, Mapping, Sequence
+    from typing import Any
 
 logger = logging.getLogger(__name__)
 

@@ -5,9 +5,13 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-from typing import Any
 
 from cpip.core.errors import InstallationError
+
+TYPE_CHECKING = False
+
+if TYPE_CHECKING:
+    from typing import Any
 
 
 class ConfiguredBuildBackend:
