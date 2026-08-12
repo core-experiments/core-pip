@@ -122,6 +122,7 @@ class LinkType(Enum):
 @functools.total_ordering
 class Link:
     __slots__ = [
+        "_hash",
         "cache_link_parsing",
         "comes_from",
         "egg_fragment",
@@ -137,7 +138,7 @@ class Link:
         "requires_python",
         "text",
         "upload_time",
-        "url_internal",
+        "url",
         "yanked_reason",
     ]
 
@@ -160,7 +161,8 @@ class Link:
         if url.startswith("\\\\"):
             url = path_to_url(url)
         self.parsed_url_internal = urllib.parse.urlsplit(url)
-        self.url_internal = url
+        self.url = url
+        self._hash = hash(url)
         self.path_internal = urllib.parse.unquote(self.parsed_url_internal.path)
         self.filename_internal: PathComponent | None = None
         if local_path_internal is not None:
@@ -242,7 +244,8 @@ class Link:
         """Restore a link from the trusted on-disk catalog representation."""
         link = cls.__new__(cls)
         link.parsed_url_internal = parsed_url
-        link.url_internal = url
+        link.url = url
+        link._hash = hash(url)
         link.path_internal = urllib.parse.unquote(parsed_url.path)
         link.filename_internal = None
         link.file_path_internal = None
@@ -510,10 +513,6 @@ class Link:
         )
 
     @property
-    def url(self) -> str:
-        return self.url_internal
-
-    @property
     def redacted_url(self) -> str:
         return redact_auth_from_url(self.url)
 
@@ -537,7 +536,7 @@ class Link:
         return Hashes({name: [value] for name, value in self.hashes_internal.items()})
 
     def egg_fragment_internal(self) -> str | None:
-        url = self.url_internal
+        url = self.url
 
         # ``egg=`` fragments are a legacy VCS-URL feature and rare in
         # practice; skipping the regex for the common case where the
@@ -571,7 +570,7 @@ class Link:
         )
 
     def __hash__(self) -> int:
-        return hash(self.url)
+        return self._hash
 
     def __eq__(self, other: object) -> bool:
         return self.url == other.url if isinstance(other, Link) else NotImplemented

@@ -516,9 +516,9 @@ class SpecifierSet:
         "_bounds_cache",
         "_contains_cache",
         "_explicitly_allows_prereleases",
+        "_text",
         "raw",
         "specifiers",
-        "text_internal",
     )
 
     def __init__(self, value: str = ""):
@@ -531,9 +531,7 @@ class SpecifierSet:
         if self.raw and not self.specifiers:
             raise ValueError(f"invalid version specifier: {value!r}")
 
-        self.text_internal = ",".join(
-            f"{specifier.operator}{specifier.version}" for specifier in self.specifiers
-        )
+        self._text: str | None = None
 
         self._explicitly_allows_prereleases: bool | None = None
 
@@ -560,7 +558,7 @@ class SpecifierSet:
             for specifier_state in state[1]  # ty:ignore[not-iterable]
         )
 
-        value.text_internal = state[2]
+        value._text = state[2]
 
         value._explicitly_allows_prereleases = None
 
@@ -574,8 +572,22 @@ class SpecifierSet:
         return (
             self.raw,
             tuple(specifier.cache_state_internal() for specifier in self.specifiers),
-            self.text_internal,
+            self.text,
         )
+
+    @property
+    def text(self) -> str:
+        text = self._text
+
+        if text is None:
+            text = ",".join(
+                f"{specifier.operator}{specifier.version}"
+                for specifier in self.specifiers
+            )
+
+            self._text = text
+
+        return text
 
     def contains(
         self,
@@ -684,7 +696,7 @@ class SpecifierSet:
         return bool(self.specifiers)
 
     def __str__(self) -> str:
-        return self.text_internal
+        return self.text
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, SpecifierSet):
