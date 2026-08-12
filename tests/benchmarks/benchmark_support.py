@@ -494,6 +494,7 @@ def reset_caches() -> None:
     wheel_module.parsed_wheel_version.cache_clear()
     wheel_module.parsed_wheel_tags.cache_clear()
     wheel_module.wheel_tag_rank.cache_clear()
+    wheel_module._dist_info_match_key.cache_clear()
     wheel_module.wheel_metadata_cache.clear()
     wheel_module.wheel_dependency_cache.clear()
     # Persistent wheel metadata caches are one instance per directory per

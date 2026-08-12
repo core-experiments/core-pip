@@ -878,6 +878,18 @@ def read_wheel_metadata_internal(
         return Parser().parsestr(contents)
 
 
+@lru_cache(maxsize=4096)
+def _dist_info_match_key(name: str) -> str:
+    """Normalized project name for matching against a dist-info directory.
+
+    Every release of a package examined during a resolve calls
+    ``wheel_dist_info_dir`` with the same project name, so this is the same
+    regex substitution repeated once per candidate wheel with an identical
+    result each time.
+    """
+    return re.sub(r"[-_.]+", "", canonicalize_name(name)).casefold()
+
+
 def wheel_dist_info_dir(source: zipfile.ZipFile, name: str) -> str:
     # ZipFile already builds this filename index while reading the central
 
@@ -901,7 +913,7 @@ def wheel_dist_info_dir(source: zipfile.ZipFile, name: str) -> str:
     if dist_info_dir is None:
         raise UnsupportedWheel(".dist-info directory not found")
 
-    expected = re.sub(r"[-_.]+", "", canonicalize_name(name)).casefold()
+    expected = _dist_info_match_key(name)
 
     actual = re.sub(r"[-_.]+", "", dist_info_dir.removesuffix(".dist-info")).casefold()
 
