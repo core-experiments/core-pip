@@ -509,9 +509,11 @@ class ProjectBuilder:
         config_settings: dict[str, Any] | None = None,
     ) -> str:
         if self.backend_spec is not None:
-            self.prepare_metadata()
-
-            return self.build_external(wheel_directory, config_settings=config_settings)
+            return self.build_external(
+                wheel_directory,
+                config_settings=config_settings,
+                validate_metadata_first=True,
+            )
 
         backend = self.load_backend_hook("build_wheel")
 
@@ -586,6 +588,7 @@ class ProjectBuilder:
         *,
         config_settings: dict[str, Any] | None,
         editable: bool = False,
+        validate_metadata_first: bool = False,
     ) -> str:
         assert self.backend_spec is not None
 
@@ -600,9 +603,32 @@ class ProjectBuilder:
                     self.backend_spec,
                     build_constraints=self.build_constraints,
                     build_isolation=self.build_isolation,
-                ).caller() as (caller, _),
+                ).caller() as (caller, env_path),
                 caller.subprocess_runner(call_subprocess),
             ):
+                if (
+                    validate_metadata_first
+                    and not editable
+                    and read_legacy_metadata(self.source_dir) is None
+                ):
+                    # build_wheel() wants to fail fast on bad metadata
+                    # before paying for the full build below, the same as
+                    # calling prepare_metadata() first used to -- but
+                    # through this same environment instead of a second
+                    # one, since its result here is validation-only and
+                    # discarded either way. A backend that skips this
+                    # optional hook is not a failure: the real build_wheel
+                    # call below is authoritative regardless.
+                    preflight_path = os.path.join(env_path, "metadata-preflight")
+
+                    os.mkdir(preflight_path)
+
+                    try:
+                        caller.prepare_metadata_for_build_wheel(preflight_path)
+
+                    except HookMissing:
+                        pass
+
                 if editable:
                     wheel_name = caller.build_editable(
                         os.fspath(wheel_directory),
