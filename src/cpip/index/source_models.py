@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Mapping
 from enum import Enum
 from typing import TYPE_CHECKING, Callable, Protocol
 
@@ -8,7 +8,6 @@ from cpip.core.packaging import Requirement, Version, canonicalize_name
 
 if TYPE_CHECKING:
     from cpip.core.wheel import WheelFile
-    from cpip.index.candidates import InstallationCandidate
     from cpip.index.links import Link
 
 
@@ -302,12 +301,3 @@ class PackageCatalog:
 
 class PackageSource(Protocol):
     def collect_links(self, requirement: Requirement) -> list[Link]: ...
-
-
-class LinkSource(Protocol):
-    @property
-    def link(self) -> Link | None: ...
-
-    def page_candidates(self) -> Iterable[InstallationCandidate]: ...
-
-    def file_links(self) -> Iterable[Link]: ...

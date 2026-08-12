@@ -36,11 +36,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class NamedRequirement(Protocol):
-    @property
-    def name(self) -> str | None: ...
-
-
 class BuildOptions(Protocol):
     format_control: FormatControl
 

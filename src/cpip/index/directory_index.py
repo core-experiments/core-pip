@@ -2,15 +2,11 @@
 
 from __future__ import annotations
 
-import mimetypes
 import os
 import stat
-from collections import defaultdict
 from typing import NamedTuple
 
 from cpip.core.packaging import Version, canonicalize_name
-from cpip.core.urls import path_to_url
-from cpip.core.wheel import parse_wheel_filename
 from cpip.index.links import SOURCE_ARCHIVE_SUFFIXES
 
 
@@ -87,94 +83,6 @@ def local_source_snapshot(
 def local_source_files(path: str) -> tuple[str, ...]:
     snapshot = local_source_snapshot(path)
     return () if snapshot is None else tuple(entry.path for entry in snapshot.entries)
-
-
-class DirectoryIndex:
-    """Cached page and artifact URLs discovered in a local source directory."""
-
-    def __init__(self, path: str) -> None:
-        self.path_internal = path
-        self.page_candidates_internal: list[str] = []
-        self.project_name_to_urls_internal: dict[str, list[str]] = defaultdict(list)
-        self.scanned = False
-
-    def scan(self) -> None:
-        snapshot = local_source_snapshot(
-            self.path_internal,
-            suffixes=(
-                ".html",
-                ".htm",
-                ".html.gz",
-                ".htm.gz",
-                ".whl",
-                *SOURCE_ARCHIVE_SUFFIXES,
-            ),
-        )
-        if snapshot is None:
-            self.scanned = True
-            return
-        for item in snapshot.entries:
-            url = path_to_url(item.path)
-            filename = os.path.basename(item.path)
-            # The common simple-index page suffixes can be recognized
-            # without invoking mimetypes for every wheel and archive.
-            if filename.lower().endswith(
-                (".html", ".htm", ".html.gz", ".htm.gz"),
-            ) and is_html_file(url):
-                self.page_candidates_internal.append(url)
-                continue
-            wheel = parse_wheel_filename_fast(filename)
-            if wheel is None and filename.endswith(".whl"):
-                wheel = parse_wheel_filename(filename)
-            if wheel is not None:
-                project_name = wheel[0]
-            else:
-                parsed = project_version_from_filename(filename)
-                if parsed is None:
-                    continue
-                project_name = canonicalize_name(parsed[0])
-            self.project_name_to_urls_internal[project_name].append(url)
-        self.scanned = True
-
-    @property
-    def page_candidates(self) -> list[str]:
-        if not self.scanned:
-            self.scan()
-        return self.page_candidates_internal
-
-    @property
-    def project_name_to_urls(self) -> dict[str, list[str]]:
-        if not self.scanned:
-            self.scan()
-        return self.project_name_to_urls_internal
-
-
-def is_html_file(file_url: str) -> bool:
-    return mimetypes.guess_type(file_url, strict=False)[0] == "text/html"
-
-
-def parse_wheel_filename_fast(filename: str) -> tuple[str, str] | None:
-    if not filename.endswith(".whl"):
-        return None
-    parts = filename[:-4].split("-")
-    if len(parts) not in (5, 6):
-        return None
-    distribution, version = parts[:2]
-    python_tags, abi_tags, platform_tags = parts[-3:]
-    if (
-        not distribution
-        or not version
-        or not python_tags
-        or abi_tags != "none"
-        or platform_tags != "any"
-        or not any(tag.startswith("py") for tag in python_tags.split("."))
-    ):
-        return None
-    try:
-        parsed_version = Version(version)
-    except ValueError:
-        return None
-    return canonicalize_name(distribution), str(parsed_version)
 
 
 def project_version_from_filename(filename: str) -> tuple[str, Version] | None:

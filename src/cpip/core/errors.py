@@ -133,10 +133,6 @@ class DistributionNotFound(CpipError):
     """No matching distribution could be found."""
 
 
-class BestVersionAlreadyInstalled(CpipError):
-    """The best available version is already installed."""
-
-
 class ResolutionError(CpipError):
     """Requirements could not be resolved together."""
 

@@ -7,7 +7,6 @@ import posixpath
 import re
 import stat
 import urllib.parse
-from enum import Enum
 
 from cpip.core.errors import DiagnosticCpipError
 from cpip.core.hashes import Hashes
@@ -113,18 +112,6 @@ def absolute_link_url(base_url: str, url: str) -> str:
         if url.startswith(("https://", "http://"))
         else urllib.parse.urljoin(base_url, url)
     )
-
-
-class LinkType(Enum):
-    candidate = "candidate"
-    format_unsupported = "format-unsupported"
-    format_invalid = "format-invalid"
-    different_project = "different-project"
-    requires_python_mismatch = "requires-python-mismatch"
-    yanked = "yanked"
-    platform_mismatch = "platform-mismatch"
-    upload_too_late = "upload-too-late"
-    upload_time_missing = "upload-time-missing"
 
 
 @functools.total_ordering
