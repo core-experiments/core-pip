@@ -1036,7 +1036,10 @@ def validate_wheel(source: zipfile.ZipFile, name: str) -> str:
     return validate_wheel_with_metadata(source, name)[0]
 
 
-def wheel_candidate_from_path(path: str) -> WheelCandidate:
+def wheel_candidate_from_path(
+    path: str,
+    extras: Collection[str] | None = None,
+) -> WheelCandidate:
     """Build a WheelCandidate for a wheel not already backed by an open archive.
 
     ``wheel_candidate(path)`` alone reopens the archive with no dist-info
@@ -1059,6 +1062,7 @@ def wheel_candidate_from_path(path: str) -> WheelCandidate:
         )
         return wheel_candidate(
             path,
+            extras,
             archive=archive,
             dist_info_dir=dist_info_dir,
             wheel_metadata_text=wheel_metadata_text,

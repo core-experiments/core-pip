@@ -28,6 +28,7 @@ from cpip.core.wheel import (
     WheelCandidate,
     validate_wheel_with_metadata,
     wheel_candidate,
+    wheel_candidate_from_path,
     wheel_dist_info_dir,
 )
 from cpip.core.wheel_metadata import parse_metadata_headers
@@ -1286,7 +1287,7 @@ class CandidateMaterializer:
                         self.wheel_candidates[cache_key] = built
 
                 else:
-                    built = wheel_candidate(path, requested_extras)
+                    built = wheel_candidate_from_path(path, requested_extras)
 
             except UnsupportedWheel as exc:
                 if ".dist-info directory" not in str(exc):
