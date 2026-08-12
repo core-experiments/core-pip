@@ -402,6 +402,10 @@ class TargetContext:
 
     abis: tuple[str, ...]
 
+    # Declared because __init__ writes it through object.__setattr__, which
+    # no checker can follow back to an attribute.
+    _hash: int
+
 
 VERSION_COMPATIBLE = (1, 0)
 
