@@ -36,6 +36,7 @@ from cpip.core.packaging import (
     parse_requirement,
 )
 from cpip.core.subprocess import call_subprocess
+from cpip.install.build_env.venv import create_isolated_venv
 
 
 class BuildWheelHook(Protocol):
@@ -204,55 +205,7 @@ class BackendRunner:
         with tempfile.TemporaryDirectory(prefix="pip-build-env-") as env_dir:
             env_path = env_dir
 
-            # ``virtualenv`` handles relocated Python distributions (such as
-
-            # uv-managed interpreters) whose stdlib ``venv`` launcher cannot
-
-            # locate its installation prefix.  Keep the stdlib fallback for
-
-            # installations that do not provide virtualenv.
-
-            try:
-                import virtualenv
-
-            except ImportError:
-                import venv
-
-                builder = venv.EnvBuilder(symlinks=(os.name != "nt"), with_pip=False)
-
-                builder.create(env_path)
-
-                bootstrap_environment = {
-                    key: value
-                    for key, value in os.environ.items()
-                    if not key.startswith("CPIP_") and key != "PYTHONPATH"
-                }
-
-                subprocess.run(
-                    [
-                        os.path.join(
-                            env_path,
-                            "bin/python" if os.name != "nt" else "Scripts/python.exe",
-                        ),
-                        "-m",
-                        "ensurepip",
-                        "--upgrade",
-                        "--default-pip",
-                    ],
-                    check=True,
-                    cwd=env_path,
-                    env=bootstrap_environment,
-                    capture_output=True,
-                    text=True,
-                )
-
-            else:
-                virtualenv.cli_run([env_path, "--no-download", "--clear"])
-
-            python = os.path.join(
-                env_path,
-                "Scripts/python.exe" if os.name == "nt" else "bin/python",
-            )
+            python = create_isolated_venv(env_path).python_executable
 
             if self.spec.requirements:
                 constraint_args = [
