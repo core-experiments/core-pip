@@ -933,7 +933,11 @@ def resolve_simple_wheelhouse(
 
         candidate = FastCandidate(name, version, path)
 
-        candidates_by_name.setdefault(candidate.canonical_name, []).append(candidate)
+        bucket = candidates_by_name.get(candidate.canonical_name)
+        if bucket is None:
+            bucket = []
+            candidates_by_name[candidate.canonical_name] = bucket
+        bucket.append(candidate)
 
     for candidates in candidates_by_name.values():
         candidates.sort(

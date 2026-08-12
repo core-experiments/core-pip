@@ -2533,7 +2533,11 @@ class CandidateProvider:
             ):
                 continue
 
-            links_by_version.setdefault(parsed.version, []).append(link)
+            version_links = links_by_version.get(parsed.version)
+            if version_links is None:
+                version_links = []
+                links_by_version[parsed.version] = version_links
+            version_links.append(link)
 
             candidate = self.candidate_record_cache.get(link)
 
@@ -2542,7 +2546,11 @@ class CandidateProvider:
 
                 self.candidate_record_cache[link] = candidate
 
-            candidates_by_version.setdefault(parsed.version, []).append(candidate)
+            version_candidates = candidates_by_version.get(parsed.version)
+            if version_candidates is None:
+                version_candidates = []
+                candidates_by_version[parsed.version] = version_candidates
+            version_candidates.append(candidate)
 
             key = (parsed.version.public, link.is_yanked)
 
