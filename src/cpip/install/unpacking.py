@@ -127,6 +127,12 @@ def unzip_file(filename: str, location: str, flatten: bool = True) -> None:
     """
     ensure_dir(location)
     absolute_location = os.path.abspath(location)
+    # Members of a wheel/sdist overwhelmingly share a handful of parent
+    # directories (a package's whole tree, one .dist-info), so calling
+    # ensure_dir -> os.makedirs for every single member means every file
+    # after the first in a directory pays a real syscall just to be told
+    # EEXIST. Tracking what this extraction has already created skips that.
+    ensured_dirs: set[str] = {absolute_location}
     zipfp = open(filename, "rb")
     try:
         zip = zipfile.ZipFile(zipfp, allowZip64=True)
@@ -151,9 +157,14 @@ def unzip_file(filename: str, location: str, flatten: bool = True) -> None:
                 raise InstallationError(message.format(filename, fn, location))
             if fn.endswith(("/", "\\")):
                 # A directory
-                ensure_dir(fn)
+                if absolute_fn not in ensured_dirs:
+                    ensure_dir(fn)
+                    ensured_dirs.add(absolute_fn)
             else:
-                ensure_dir(dir)
+                absolute_dir = os.path.dirname(absolute_fn)
+                if absolute_dir not in ensured_dirs:
+                    ensure_dir(dir)
+                    ensured_dirs.add(absolute_dir)
                 # Don't use read() to avoid allocating an arbitrarily large
                 # chunk of memory for the file's content
                 fp = zip.open(info)
