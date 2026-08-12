@@ -12,6 +12,7 @@ from .packaging import (
     marker_applies,
     parse_requirement,
 )
+from .wheel_metadata import parse_metadata_headers
 
 TYPE_CHECKING = False
 
@@ -21,8 +22,27 @@ if TYPE_CHECKING:
 stdlib_pkgs = {"python", "wsgiref", "argparse"}
 
 
+def _read_raw_metadata_text(
+    raw: importlib.metadata.Distribution,
+) -> str | None:
+    """Read the metadata file text through the same fallback chain as
+    ``importlib.metadata.Distribution.metadata``: ``METADATA``, then
+    ``PKG-INFO`` for sdist-built distributions, then the bare dist-info path
+    for old egg-info installs that have neither.
+    """
+
+    return raw.read_text("METADATA") or raw.read_text("PKG-INFO") or raw.read_text("")
+
+
 class InstalledDistribution:
-    __slots__ = ("location", "metadata_location", "name", "raw", "version")
+    __slots__ = (
+        "_fast_headers",
+        "location",
+        "metadata_location",
+        "name",
+        "raw",
+        "version",
+    )
 
     def __init__(
         self,
@@ -42,6 +62,8 @@ class InstalledDistribution:
 
         self.raw = raw
 
+        self._fast_headers: dict[str, list[str]] | None = None
+
     name: str
 
     version: str
@@ -60,10 +82,30 @@ class InstalledDistribution:
     def metadata(self) -> Message | importlib.metadata.PackageMetadata:
         return self.raw.metadata
 
+    def _fast_metadata_headers(self) -> dict[str, list[str]]:
+        """Read Requires-Dist/Name/Version through the wheel-metadata fast path.
+
+        ``self.raw.metadata`` parses the file through the full RFC822 email
+        machinery the first time it's touched -- expensive, and paid by every
+        already-installed distribution ``dependencies()`` inspects during
+        resolution. ``parse_metadata_headers`` already does this reliably for
+        candidate wheels pulled from PyPI; installed distributions use the
+        identical METADATA format, so it's just as trustworthy here.
+        """
+
+        headers = self._fast_headers
+
+        if headers is None:
+            headers = parse_metadata_headers(_read_raw_metadata_text(self.raw) or "")
+
+            self._fast_headers = headers
+
+        return headers
+
     def dependencies(self, extras: Iterable[str] = ()) -> list[Requirement]:
         result: list[Requirement] = []
 
-        for value in self.raw.metadata.get_all("Requires-Dist", []):
+        for value in self._fast_metadata_headers().get("requires-dist", []):
             req = parse_requirement(value)
 
             if marker_applies(req.marker, extras=extras):
@@ -110,11 +152,21 @@ def _iter_installed_distributions(
         distributions = importlib.metadata.distributions(path=distribution_paths)
 
     for dist in distributions:
-        metadata = dist.metadata
+        text = _read_raw_metadata_text(dist)
 
-        name = metadata.get("Name")
+        if text is None:
+            continue
 
-        version = dist.version
+        # Reading through parse_metadata_headers instead of dist.metadata
+        # avoids the full RFC822 email-parser cost for every installed
+        # distribution -- paid on every default (no --ignore-installed)
+        # resolve, for every package already in the environment, just to
+        # learn its name.
+        headers = parse_metadata_headers(text)
+
+        name = headers.get("name", [None])[0]
+
+        version = headers.get("version", [None])[0]
 
         if not name or not version:
             continue
@@ -132,7 +184,7 @@ def _iter_installed_distributions(
         if metadata_location is None or str(location) == "<memory>":
             continue
 
-        yield InstalledDistribution(
+        distribution = InstalledDistribution(
             name=name,
             # Keep the metadata spelling intact.  Installed distributions
             # may contain legacy versions that are not PEP 440 versions;
@@ -143,6 +195,12 @@ def _iter_installed_distributions(
             metadata_location=(str(metadata_location) if metadata_location else None),
             raw=dist,
         )
+
+        # Already parsed above; seed the cache so dependencies() doesn't
+        # read and parse the same file a second time.
+        distribution._fast_headers = headers
+
+        yield distribution
 
 
 def iter_installed_distributions(
