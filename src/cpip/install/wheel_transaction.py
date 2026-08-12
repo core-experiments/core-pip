@@ -30,7 +30,6 @@ from cpip.install.wheel_archive import (
     DestinationCache,
     ResolvedRoots,
     copy_member_with_metadata,
-    destination_internal_parts,
     destination_internal_parts_text,
     record_metadata_internal,
     validate_member_parts,
@@ -687,7 +686,7 @@ def validate_wheel_batch(
                 if member.is_dir():
                     continue
                 relative_parts = validate_member_parts(member.filename)
-                destination = destination_internal_parts(
+                destination = destination_internal_parts_text(
                     target,
                     relative_parts,
                     member.filename,

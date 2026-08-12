@@ -39,23 +39,6 @@ def validate_member_parts(name: str) -> tuple[str, ...]:
     return parts
 
 
-def destination_internal_parts(
-    target: InstallTarget,
-    parts: tuple[str, ...],
-    display_relative: tuple[str, ...] | str,
-    *,
-    resolved_directories: DestinationCache | None = None,
-    resolved_roots: ResolvedRoots | None = None,
-) -> str:
-    return destination_internal_parts_text(
-        target,
-        parts,
-        display_relative,
-        resolved_directories=resolved_directories,
-        resolved_roots=resolved_roots,
-    )
-
-
 def destination_internal_parts_text(
     target: InstallTarget,
     parts: tuple[str, ...],
