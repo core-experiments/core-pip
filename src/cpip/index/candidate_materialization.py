@@ -891,11 +891,37 @@ class CandidateMaterializer:
 
                         validate_build_requirements(path)
 
+                        def remember_wheel_if_reusable(wheel_path: str) -> None:
+                            # A backend without the optional
+                            # prepare_metadata_for_build_wheel hook makes
+                            # this metadata read build a full wheel and
+                            # throw it away. If this candidate later wins
+                            # the resolve, materialize() would otherwise
+                            # build the exact same wheel again from
+                            # scratch -- cache it here under the same key
+                            # materialize()'s own cached_wheel_for_link()
+                            # check already looks for, so a later build is
+                            # skipped for free. Only for the same
+                            # deterministic sources materialize() itself
+                            # caches (a plain sdist, or an immutable VCS
+                            # pin) -- a mutable ref could change by the
+                            # time it's actually installed.
+                            if candidate.link.kind is ArtifactKind.SDIST or (
+                                candidate.link.kind is ArtifactKind.SOURCE_TREE
+                                and is_immutable_vcs_link(candidate.link.url)
+                            ):
+                                store_cached_wheel(
+                                    self.wheel_cache_dir,
+                                    candidate,
+                                    wheel_path,
+                                )
+
                         try:
                             project = prepare_project_metadata(
                                 path,
                                 build_constraints=self.build_constraints,
                                 build_isolation=self.build_isolation,
+                                on_wheel_built=remember_wheel_if_reusable,
                             )
 
                         except BuildError as exc:

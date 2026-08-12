@@ -23,7 +23,7 @@ except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility
     from cpip._vendor import tomli as tomllib
 
 import zipfile
-from collections.abc import Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from typing import Any, Protocol, cast
 
@@ -703,8 +703,24 @@ class ProjectBuilder:
 
         return wheel_name
 
-    def prepare_metadata(self, *, editable: bool = False) -> ProjectMetadata:
-        """Read metadata through the project's declared build backend."""
+    def prepare_metadata(
+        self,
+        *,
+        editable: bool = False,
+        on_wheel_built: Callable[[str], None] | None = None,
+    ) -> ProjectMetadata:
+        """Read metadata through the project's declared build backend.
+
+        A backend without the optional ``prepare_metadata_for_build_wheel``/
+        ``prepare_metadata_for_build_editable`` hook forces the fallback
+        below to build a full wheel just to read its METADATA file back out
+        -- real, complete build output that would otherwise be thrown away
+        the moment its temporary directory closes. ``on_wheel_built``, when
+        given, is called with that wheel's path while it still exists, so a
+        caller that already knows this candidate might get built for real
+        later (resolution, not a one-off metadata read) can persist it
+        somewhere a later build can find.
+        """
 
         # Source distributions commonly carry the exact metadata generated at
 
@@ -757,6 +773,9 @@ class ProjectBuilder:
 
                                 wheel_path = os.path.join(wheel_directory, wheel_name)
 
+                                if on_wheel_built is not None:
+                                    on_wheel_built(wheel_path)
+
                                 with zipfile.ZipFile(wheel_path) as wheel:
                                     metadata_name = next(
                                         name
@@ -786,6 +805,9 @@ class ProjectBuilder:
 
                                 wheel_path = os.path.join(wheel_directory, wheel_name)
 
+                                if on_wheel_built is not None:
+                                    on_wheel_built(wheel_path)
+
                                 with zipfile.ZipFile(wheel_path) as wheel:
                                     metadata_name = next(
                                         name
@@ -808,6 +830,9 @@ class ProjectBuilder:
                         assert wheel_name is not None
 
                         wheel_path = os.path.join(wheel_directory, wheel_name)
+
+                        if on_wheel_built is not None:
+                            on_wheel_built(wheel_path)
 
                         with zipfile.ZipFile(wheel_path) as wheel:
                             metadata_name = next(
@@ -861,15 +886,19 @@ def prepare_project_metadata(
     editable: bool = False,
     build_constraints: list[str] | None = None,
     build_isolation: bool = True,
+    on_wheel_built: Callable[[str], None] | None = None,
 ) -> ProjectMetadata:
-    """Read metadata through the project's declared PEP 517 backend."""
+    """Read metadata through the project's declared PEP 517 backend.
+
+    See ``ProjectBuilder.prepare_metadata`` for ``on_wheel_built``.
+    """
 
     try:
         return ProjectBuilder(
             source_dir,
             build_constraints=build_constraints,
             build_isolation=build_isolation,
-        ).prepare_metadata(editable=editable)
+        ).prepare_metadata(editable=editable, on_wheel_built=on_wheel_built)
 
     except BuildError as exc:
         if build_isolation and "Cannot import 'setuptools.build_meta'" in str(exc):
@@ -877,7 +906,7 @@ def prepare_project_metadata(
                 source_dir,
                 build_constraints=build_constraints,
                 build_isolation=False,
-            ).prepare_metadata(editable=editable)
+            ).prepare_metadata(editable=editable, on_wheel_built=on_wheel_built)
 
         raise
 
