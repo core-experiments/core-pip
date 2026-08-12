@@ -24,7 +24,6 @@ from cpip.network.exceptions import (
     SSLVerificationError,
 )
 from cpip.network.http import HttpResponse, NetworkSession
-from cpip.network.progress import BarType, get_download_progress_renderer
 from cpip.network.utils import HEADERS, raise_for_status, response_chunks
 from cpip.platform.filesystem import format_size
 
@@ -74,7 +73,6 @@ def get_http_response_etag_or_last_modified(resp: HttpResponse) -> str | None:
 def log_download(
     resp: HttpResponse,
     link: Link,
-    progress_bar: BarType,
     total_length: int | None,
     range_start: int | None = 0,
 ) -> Iterable[bytes]:
@@ -106,27 +104,7 @@ def log_download(
     else:
         logger.info("Downloading %s", logged_url)
 
-    if logger.getEffectiveLevel() > logging.INFO or from_cache:
-        show_progress = False
-
-    elif not total_length or total_length > (512 * 1024):
-        show_progress = True
-
-    else:
-        show_progress = False
-
-    chunks = response_chunks(resp)
-
-    if not show_progress:
-        return chunks
-
-    renderer = get_download_progress_renderer(
-        bar_type=progress_bar,
-        size=total_length,
-        initial_progress=range_start,
-    )
-
-    return renderer(chunks)
+    return response_chunks(resp)
 
 
 def sanitize_content_filename(filename: str) -> str:
@@ -242,11 +220,8 @@ class Downloader:
     def __init__(
         self,
         session: NetworkSession,
-        progress_bar: BarType,
     ) -> None:
         self.session_internal = session
-
-        self.progress_bar_internal = progress_bar
 
         self.resume_retries_internal = session.resume_retries
 
@@ -293,7 +268,6 @@ class Downloader:
         chunks = log_download(
             resp,
             download.link,
-            self.progress_bar_internal,
             download.size,
             range_start=download.bytes_received,
         )

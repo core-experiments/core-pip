@@ -56,7 +56,6 @@ from cpip.vcs.versioncontrol import vcs
 TYPE_CHECKING = False
 
 if TYPE_CHECKING:
-    from cpip.network.progress import BarType
     from cpip.resolution.req_install import InstallRequirement
 
 logger = logging.getLogger(__name__)
@@ -88,7 +87,6 @@ class RequirementPreparer:
         check_build_deps: bool,
         build_tracker: BuildTracker,
         session: NetworkSession,
-        progress_bar: BarType,
         require_hashes: bool,
         lazy_wheel: bool,
         verbosity: int,
@@ -99,7 +97,7 @@ class RequirementPreparer:
         self.build_dir = build_dir
         self.build_tracker = build_tracker
         self.session_internal = session
-        self.download_internal = Downloader(session, progress_bar)
+        self.download_internal = Downloader(session)
         self.downloads_internal = DownloadManager(
             self.download_internal,
             download_dir=download_dir,

@@ -104,7 +104,6 @@ def test_log_download(
     log_download(
         resp,
         link,
-        progress_bar="on",
         total_length=total_length,
         range_start=range_start,
     )
@@ -344,7 +343,7 @@ def test_downloader(
 ) -> None:
     session = NetworkSession(resume_retries=resume_retries)
     link = Link("http://example.com/foo.tgz")
-    downloader = Downloader(session, "on")
+    downloader = Downloader(session)
 
     responses = []
     for headers, status_code, body in mock_responses:
@@ -383,7 +382,7 @@ def test_downloader_resumes_on_protocol_error(tmp_path: Path) -> None:
     """A ProtocolError mid-stream should trigger resume logic, not crash."""
     session = NetworkSession(resume_retries=3)
     link = Link("http://example.com/foo.tgz")
-    downloader = Downloader(session, "on")
+    downloader = Downloader(session)
 
     # First response: raises ProtocolError after partial read
     broken_resp = MockResponse(b"0cfa7e9d-1868-4dd7-9fb3-")
@@ -419,7 +418,7 @@ def test_downloader_retries_low_level_errors_during_resume(
     """Low-level errors raised while fetching a resume response are retried."""
     session = NetworkSession(resume_retries=5)
     link = Link("http://example.com/foo.tgz")
-    downloader = Downloader(session, "on")
+    downloader = Downloader(session)
 
     # Initial response: raises ProtocolError after a partial read
     broken_resp = MockResponse(b"0cfa7e9d-1868-4dd7-9fb3-")
@@ -470,7 +469,7 @@ def test_downloader_retries_diagnostic_connection_errors_during_resume(
     """Diagnostic connection errors during resume should consume a resume retry."""
     session = NetworkSession(resume_retries=5)
     link = Link("http://example.com/foo.tgz")
-    downloader = Downloader(session, "on")
+    downloader = Downloader(session)
 
     broken_resp = MockResponse(b"0cfa7e9d-1868-4dd7-9fb3-")
     broken_resp.headers.update({"content-length": "36"})
@@ -494,7 +493,7 @@ def test_downloader_does_not_retry_on_ssl_missing_error(tmp_path: Path) -> None:
     """SSL errors during resume should fail immediately because retries can't help."""
     session = NetworkSession(resume_retries=5)
     link = Link("http://example.com/foo.tgz")
-    downloader = Downloader(session, "on")
+    downloader = Downloader(session)
 
     broken_resp = MockResponse(b"0cfa7e9d-1868-4dd7-9fb3-")
     broken_resp.headers.update({"content-length": "36"})
@@ -538,7 +537,7 @@ def test_downloader_resumes_on_truncated_http_stream(
     url = f"http://{mock_server.host}:{mock_server.port}/foo.tgz"
 
     session = NetworkSession(resume_retries=3)
-    downloader = Downloader(session, "on")
+    downloader = Downloader(session)
     filepath, _ = downloader(Link(url), str(tmp_path))
 
     with open(filepath, "rb") as f:
@@ -552,7 +551,7 @@ def test_downloader_crashes_on_mismatched_resume_offset(tmp_path: Path) -> None:
     body = b"0cfa7e9d-1868-4dd7-9fb3-f2561d5dfd89"
     session = NetworkSession(resume_retries=5)
     link = Link("http://example.com/foo.tgz")
-    downloader = Downloader(session, "on")
+    downloader = Downloader(session)
 
     # Incomplete first response (24 of 36 bytes).
     first = MockResponse(body[:24])
@@ -587,7 +586,7 @@ def test_downloader_without_content_length(tmp_path: Path) -> None:
     assert get_http_response_size(resp) is None
 
     session = NetworkSession(resume_retries=0)
-    downloader = Downloader(session, "on")
+    downloader = Downloader(session)
     link = Link("http://example.com/foo.tgz")
     with patch.object(Downloader, "http_get", MagicMock(return_value=resp)):
         filepath, _ = downloader(link, str(tmp_path))
@@ -601,7 +600,7 @@ def test_resumed_download_caching(tmp_path: Path) -> None:
     cache_dir = tmp_path / "cache"
     session = NetworkSession(cache=str(cache_dir), resume_retries=5)
     link = Link("https://example.com/foo.tgz")
-    downloader = Downloader(session, "on")
+    downloader = Downloader(session)
 
     # Mock an incomplete download followed by a successful resume
     incomplete_resp = MockResponse(b"0cfa7e9d-1868-4dd7-9fb3-")

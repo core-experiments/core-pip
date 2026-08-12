@@ -35,7 +35,7 @@ def test_unpack_url_with_urllib_response_without_content_type(data: TestData) ->
     session = Mock()
     session.resume_retries = 0
     session.get = fake_session_get
-    download = Downloader(session, progress_bar="on")
+    download = Downloader(session)
 
     uri = data.packages.joinpath("simple-1.0.tar.gz").as_uri()
     link = Link(uri)
@@ -78,7 +78,7 @@ def test_download_http_url__no_directory_traversal(
         },
     )
     session.get.return_value = resp
-    download = Downloader(session, progress_bar="on")
+    download = Downloader(session)
 
     download_dir = os.fspath(tmp_path.joinpath("download"))
     os.mkdir(download_dir)
