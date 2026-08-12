@@ -59,6 +59,34 @@ class ArgumentParser(argparse.ArgumentParser):
         kwargs.setdefault("formatter_class", HelpFormatter)
         super().__init__(*args, **kwargs)
 
+    @property
+    def _get_validation_formatter(self) -> NoReturn:
+        """Skip 3.14's eager metavar/help-string validation on every ``add_argument``.
+
+        ``_ActionsContainer.add_argument`` gates two validation-only
+        ``HelpFormatter`` builds on ``hasattr(self, "_get_validation_formatter")``:
+        one checks a tuple ``metavar`` against ``nargs``, the other expands
+        the help string. The auto-added ``-h``/``--help`` action always has
+        help text, so stock ``argparse`` pays for both on every parser
+        construction -- building that formatter's ``_set_color`` step
+        unconditionally does ``from _colorize import ...``, which drags in
+        ``dataclasses`` and, with it,
+        ``inspect``/``dis``/``tokenize``/``ast``/``annotationlib``. That's a
+        few milliseconds on every cpip invocation to validate strings that
+        get the same validation for real the moment help is actually
+        formatted. Shadowing the attribute with a property that raises
+        ``AttributeError`` makes ``hasattr`` false, so both checks defer to
+        that real formatting -- a malformed metavar or ``%`` in a help
+        string still raises, just from ``format_help``/``print_help``
+        instead of from ``add_argument``.
+
+        A property rather than deleting the base method: this attribute may
+        not exist on older Python versions cpip supports, in which case
+        nothing consults ``hasattr`` here and this override is simply
+        unused.
+        """
+        raise AttributeError("_get_validation_formatter")
+
     def error(self, message: str) -> NoReturn:
         if message.startswith("unrecognized arguments: "):
             message = message.removeprefix("unrecognized arguments: ")
