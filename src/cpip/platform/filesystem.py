@@ -40,22 +40,6 @@ def retry(
     return decorate
 
 
-def get_path_uid(path: str) -> int:
-    """Return the uid for a path without following symlinks."""
-    if hasattr(os, "O_NOFOLLOW"):
-        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
-        try:
-            return os.fstat(fd).st_uid
-        finally:
-            os.close(fd)
-
-    # AIX and Jython do not provide O_NOFOLLOW. Older Jython versions also
-    # lack os.fstat, so use the best available symlink-safe check.
-    if not os.path.islink(path):
-        return os.stat(path).st_uid
-    raise OSError(f"{path} is a symlink; Will not return uid for symlinks")
-
-
 def format_size(size: float) -> str:
     if size > 1000 * 1000:
         return f"{size / (1000 * 1000):.1f} MB"
