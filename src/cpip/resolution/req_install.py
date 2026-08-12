@@ -321,7 +321,11 @@ class InstallRequirement:
         link = self.link if trust_internet else None
 
         if link is not None and link.hash and link.hash_name:
-            values.setdefault(link.hash_name, []).append(link.hash)
+            existing = values.get(link.hash_name)
+            if existing is None:
+                values[link.hash_name] = [link.hash]
+            else:
+                existing.append(link.hash)
 
         return Hashes(values)
 

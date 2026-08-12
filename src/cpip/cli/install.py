@@ -193,7 +193,11 @@ def requirement_state(requirements: list[Any], bundle: Any) -> InstallRequiremen
             continue
         name = canonicalize_name(requirement.req.name)
         source_requirements_by_name[name] = requirement
-        requested_extras_by_name.setdefault(name, set()).update(requirement.req.extras)
+        extras_for_name = requested_extras_by_name.get(name)
+        if extras_for_name is None:
+            extras_for_name = set()
+            requested_extras_by_name[name] = extras_for_name
+        extras_for_name.update(requirement.req.extras)
         if requirement.link is not None:
             source_requirements_by_url[requirement.link.url] = requirement
         if requirement.req.url is not None:

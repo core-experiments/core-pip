@@ -626,7 +626,11 @@ class CandidateProvider:
                 if loaded is not None:
                     for name, version_text, artifacts, _facts in loaded[0]:
                         if name == catalog_key[0]:
-                            groups.setdefault(version_text, []).extend(artifacts)
+                            existing = groups.get(version_text)
+                            if existing is None:
+                                groups[version_text] = list(artifacts)
+                            else:
+                                existing.extend(artifacts)
 
                 self.catalog_artifact_group_cache[key] = groups
 
