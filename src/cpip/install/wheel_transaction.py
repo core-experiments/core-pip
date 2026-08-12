@@ -17,7 +17,12 @@ from contextlib import nullcontext
 
 from cpip.core.errors import InstallationError
 from cpip.core.names import canonicalize_name
-from cpip.core.wheel import WheelCandidate, parse_wheel, wheel_candidate
+from cpip.core.wheel import (
+    WheelCandidate,
+    validate_wheel,
+    validate_wheel_with_metadata,
+    wheel_candidate,
+)
 from cpip.install.target import InstallTarget
 from cpip.install.transaction import InstallTransaction, normalized_internal
 from cpip.install.wheel_archive import (
@@ -180,7 +185,25 @@ def install_wheel_internal(
     target_inventory: InstalledTargetInventory | None = None,
 ) -> WheelCandidate:
     if candidate is None:
-        candidate = wheel_candidate(path)
+        # wheel_candidate(path) alone reopens the archive with no dist-info
+        # directory in hand, which sends it through the slow, email-based
+        # metadata fallback -- the exact cost candidate_materialization.py
+        # avoids by validating first and handing the already-open archive
+        # and dist-info directory in. Do the same here.
+        with (
+            open(path, "rb", buffering=32768) as stream,
+            zipfile.ZipFile(stream) as archive,
+        ):
+            dist_info_dir, wheel_metadata_text = validate_wheel_with_metadata(
+                archive,
+                os.path.basename(path)[:-4].split("-", 1)[0],
+            )
+            candidate = wheel_candidate(
+                path,
+                archive=archive,
+                dist_info_dir=dist_info_dir,
+                wheel_metadata_text=wheel_metadata_text,
+            )
     if lookup_existing:
         if target_inventory is not None:
             existing = target_inventory.find(candidate.canonical_name)
@@ -260,7 +283,7 @@ def install_wheel_internal(
                 elif layout is not None:
                     validated_dist_info = layout[0]
                 else:
-                    validated_dist_info, _ = parse_wheel(
+                    validated_dist_info = validate_wheel(
                         archive,  # ty:ignore[invalid-argument-type]
                         os.path.basename(path)[:-4].split("-", 1)[0],
                     )
@@ -657,7 +680,7 @@ def validate_wheel_batch(
     for candidate in candidates:
         path = candidate.path
         with zipfile.ZipFile(path) as archive:
-            dist_info, _ = parse_wheel(
+            dist_info = validate_wheel(
                 archive,
                 os.path.basename(path)[:-4].split("-", 1)[0],
             )
