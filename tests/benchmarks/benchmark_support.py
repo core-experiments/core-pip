@@ -211,6 +211,126 @@ def make_wrong_package_graph(
         )
 
 
+def make_nab_smoke_fixture(wheelhouse: Path) -> None:
+    """Build the explicit packages from nab's offline deterministic smoke suite.
+
+    Ported from ``nab-python/benchmarks/smoke/fixture.toml`` in
+    https://github.com/notatallshaw/nab -- the upstream project
+    ``cpip._vendor.nab_resolver`` is vendored from. Only the packages reached
+    by the scenarios cpip can actually run are included (see
+    ``test_benchmark_nab_smoke.py`` for which of nab's scenarios have no cpip
+    equivalent and were dropped).
+    """
+    make_wheel(
+        wheelhouse, "nab-smoke-basic", "1.0.0", requires=["nab-smoke-basic-leaf>=1.0.0"]
+    )
+    make_wheel(wheelhouse, "nab-smoke-basic-leaf", "1.0.0")
+    make_wheel(wheelhouse, "nab-smoke-basic-leaf", "2.0.0")
+
+    make_wheel(wheelhouse, "nab-smoke-constrained", "1.0.0")
+    make_wheel(wheelhouse, "nab-smoke-constrained", "2.0.0")
+    make_wheel(wheelhouse, "nab-smoke-constrained", "3.0.0")
+
+    make_wheel(
+        wheelhouse,
+        "nab-smoke-extra-app",
+        "1.0.0",
+        requires=[
+            "nab-smoke-extra-base==1.0.0",
+            'nab-smoke-extra-speed==1.0.0; extra == "speed"',
+            'nab-smoke-marker-leaf==1.0.0; python_version < "3.12"',
+            'nab-smoke-marker-leaf==2.0.0; python_version >= "3.12"',
+        ],
+    )
+    make_wheel(wheelhouse, "nab-smoke-extra-base", "1.0.0")
+    make_wheel(wheelhouse, "nab-smoke-extra-speed", "1.0.0")
+    make_wheel(wheelhouse, "nab-smoke-marker-leaf", "1.0.0")
+    make_wheel(wheelhouse, "nab-smoke-marker-leaf", "2.0.0")
+
+    make_wheel(
+        wheelhouse,
+        "nab-smoke-strategy-app",
+        "1.0.0",
+        requires=["nab-smoke-strategy-transitive>=1.0.0"],
+    )
+    make_wheel(wheelhouse, "nab-smoke-strategy-direct", "1.0.0")
+    make_wheel(wheelhouse, "nab-smoke-strategy-direct", "2.0.0")
+    make_wheel(wheelhouse, "nab-smoke-strategy-transitive", "1.0.0")
+    make_wheel(wheelhouse, "nab-smoke-strategy-transitive", "2.0.0")
+
+
+def make_nab_pip_backtracking_family(
+    wheelhouse: Path,
+    prefix: str,
+    size: int,
+    *,
+    unsatisfiable: bool = False,
+) -> None:
+    """Build pip's deep-backtracking graph, ported from nab's ``_pip_backtracking_family``.
+
+    For each version N of ``<prefix>-a``, ``a`` wants ``b==N`` and ``c==N-1``
+    while ``b==N`` wants ``c==N``, so every candidate above the first pins
+    ``c`` to two versions at once. The resolver has to reject all of them
+    before reaching ``a==1.0.0``. The unsatisfiable variant points that last
+    candidate at a version of ``c`` the fixture does not publish, so no
+    candidate survives.
+
+    Every conflict here names the decision one level up, so the resolver's
+    backjumps all travel a single level --
+    :func:`make_nab_deep_backjump_family` is what exercises the
+    non-chronological case.
+
+    Source: ``nab-python/benchmarks/deterministic_smoke.py`` in
+    https://github.com/notatallshaw/nab.
+    """
+    for number in range(1, size + 1):
+        version = f"{number}.0.0"
+        dependencies = [f"{prefix}-b=={version}"]
+        if number > 1:
+            dependencies.append(f"{prefix}-c=={number - 1}.0.0")
+        elif unsatisfiable:
+            dependencies.append(f"{prefix}-c==0.0.0")
+        make_wheel(wheelhouse, f"{prefix}-a", version, requires=dependencies)
+        make_wheel(
+            wheelhouse, f"{prefix}-b", version, requires=[f"{prefix}-c=={version}"]
+        )
+        make_wheel(wheelhouse, f"{prefix}-c", version)
+
+
+def make_nab_deep_backjump_family(wheelhouse: Path, prefix: str, size: int) -> None:
+    """Build a graph whose conflicts sit many decision levels below the culprit.
+
+    ``pivot`` is decided early, then a chain of ``link`` packages is walked
+    one level at a time, each discovering the next. Only the last link
+    reveals ``zgate``, which demands the pivot's oldest version. The conflict
+    therefore names a decision made ``size`` levels earlier, and a resolver
+    that backjumps chronologically has to re-derive every level in between.
+
+    Source: ``nab-python/benchmarks/deterministic_smoke.py`` in
+    https://github.com/notatallshaw/nab (``_deep_backjump_family``).
+    """
+    for number in (1, 2, 3):
+        make_wheel(wheelhouse, f"{prefix}-pivot", f"{number}.0.0")
+    for index in range(1, size + 1):
+        successor = f"{prefix}-zgate" if index == size else f"{prefix}-link-{index + 1}"
+        dependencies = [successor, f"{prefix}-alt-{index}"]
+        for number in (1, 2, 3, 4):
+            make_wheel(
+                wheelhouse,
+                f"{prefix}-link-{index}",
+                f"{number}.0.0",
+                requires=dependencies,
+            )
+        for number in (1, 2, 3, 4, 5):
+            make_wheel(wheelhouse, f"{prefix}-alt-{index}", f"{number}.0.0")
+    make_wheel(
+        wheelhouse,
+        f"{prefix}-zgate",
+        "1.0.0",
+        requires=[f"{prefix}-pivot==1.0.0"],
+    )
+
+
 def make_stress_graph(wheelhouse: Path, *, roots: int = 88) -> None:
     """Build many independently resolvable roots, like a large requirements file."""
     for index in range(roots):
