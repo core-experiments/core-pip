@@ -56,9 +56,12 @@ class SafeFileCache:
         self.directory = directory
 
     def get_cache_path(self, name: str) -> str:
+        # Called on every cache lookup/store. Unpacking the digest's first 5
+        # characters directly (a str is iterable) gets the same one-char-per
+        # path-segment fan-out as list(hashed[:5]) + [hashed] without
+        # building either intermediate list.
         hashed = hashlib.sha224(name.encode()).hexdigest()
-        parts = list(hashed[:5]) + [hashed]
-        return os.path.join(self.directory, *parts)
+        return os.path.join(self.directory, *hashed[:5], hashed)
 
     def get(self, key: str) -> bytes | None:
         # The cache entry is only valid if both metadata and body exist.
