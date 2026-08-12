@@ -1365,7 +1365,11 @@ def read_legacy_metadata(
 
             current_key, value = line.split(":", 1)
 
-            fields.setdefault(current_key, []).append(value.strip())
+            values = fields.get(current_key)
+            if values is None:
+                values = []
+                fields[current_key] = values
+            values.append(value.strip())
 
         name = fields.get("Name", [None])[0]
 

@@ -421,7 +421,12 @@ class CandidateProvider:
                     self.parsed_link_cache[link] = parsed
 
                 if isinstance(parsed, InstallationCandidate):
-                    grouped.setdefault(parsed.canonical_name, []).append(link)
+                    name = parsed.canonical_name
+                    bucket = grouped.get(name)
+                    if bucket is None:
+                        bucket = []
+                        grouped[name] = bucket
+                    bucket.append(link)
 
             self.find_links_by_name_cache = {
                 name: tuple(links) for name, links in grouped.items()
