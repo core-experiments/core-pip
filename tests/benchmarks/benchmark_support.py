@@ -488,6 +488,7 @@ def reset_caches() -> None:
     canonicalize_name.cache_clear()
     parse_requirement.cache_clear()
     packaging_module._marker_applies_cached.cache_clear()
+    packaging_module.default_environment.cache_clear()
     packaging_module.Version.from_cache_state.cache_clear()
     packaging_module.Requirement.from_cache_state.cache_clear()
     wheel_module._parse_wheel_filename.cache_clear()

@@ -82,10 +82,15 @@ def safe_extra(extra: str) -> str:
     return canonicalize_name(extra)
 
 
+@lru_cache(maxsize=8)
 def default_environment(extra: str | None = None) -> dict[str, str]:
     # Only reached when a requirement actually carries an environment
     # marker (see marker_applies' early exit), so keep it off the far more
-    # common marker-free parse's import cost.
+    # common marker-free parse's import cost. Every field but "extra" is
+    # fixed for the life of the process, so a cache miss only ever pays
+    # the platform-module cost once per distinct `extra` value seen
+    # (currently always None -- _marker_applies_cached reads "extra" from
+    # its own extras set, not this dict's field).
     import platform
 
     impl = platform.python_implementation()
