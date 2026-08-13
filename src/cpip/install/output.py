@@ -5,70 +5,10 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 
-from cpip.core.hashes import file_hashes
 from cpip.core.wheel import WheelCandidate
 from cpip.index.candidate_materialization import LazyWheelCandidate
 
-SOURCE_TREE_OR_VCS_KINDS = frozenset(("source-tree", "vcs"))
-
-
-default_file_hashes = file_hashes
-
-
 _MATERIALIZATION_WORKERS = 32
-
-
-def actual_hashes_for_candidate(candidate: WheelCandidate) -> dict[str, str]:
-    if (
-        candidate.source_kind in {"sdist", "source-tree", "vcs"}
-        and candidate.source_hashes
-    ):
-        return dict(candidate.source_hashes)
-    source_url = candidate.source_url
-    if source_url is not None and source_url.startswith("file:"):
-        from cpip.core.urls import url_to_path
-
-        try:
-            return file_hashes(url_to_path(source_url))
-        except OSError:
-            return {}
-    try:
-        return file_hashes(candidate.path)
-    except OSError:
-        return {}
-
-
-def finalize_source_hashes(candidate: WheelCandidate) -> WheelCandidate:
-    if isinstance(candidate, LazyWheelCandidate):
-        if (
-            candidate.materializer_internal.dry_run
-            and not candidate.record_internal.link.is_file
-        ):
-            # Keep index-provided hashes, but never download a remote artifact
-
-            # solely to fill an optional dry-run report field.
-
-            return candidate
-
-        if candidate.materializer_internal.dry_run and candidate.source_kind in {
-            "sdist",
-            "source-tree",
-            "vcs",
-        }:
-            return candidate
-
-        candidate = candidate.materialize()
-
-    if (
-        candidate.source_hashes
-        or candidate.source_kind in SOURCE_TREE_OR_VCS_KINDS
-        or (candidate.from_cache)
-    ):
-        return candidate
-
-    hashes = actual_hashes_for_candidate(candidate)
-
-    return candidate.copy_with(source_hashes=hashes or None)
 
 
 def _run_candidate_operation(
@@ -251,12 +191,3 @@ def prepare_install_candidates(
         raise RuntimeError("candidate preparation did not produce every wheel")
 
     return [candidate for candidate in prepared if candidate is not None]
-
-
-def finalize_candidates(
-    candidates: Sequence[WheelCandidate],
-    finalize: Callable[[WheelCandidate], WheelCandidate] = finalize_source_hashes,
-) -> list[WheelCandidate]:
-    """Finalize remote wheel winners concurrently while preserving plan order."""
-
-    return _run_candidate_operation(candidates, finalize)

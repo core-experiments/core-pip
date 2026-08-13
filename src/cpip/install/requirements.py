@@ -4,10 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from cpip.build.metadata import (
-    InstalledDistributionStore,
-    InstalledMetadataDistribution,
-)
+from cpip.build.metadata import InstalledMetadataDistribution
 from cpip.core.names import canonicalize_name
 from cpip.install.target import InstallTarget
 from cpip.install.uninstall import DistributionUninstaller
@@ -39,21 +36,6 @@ class RequirementInstaller:
         self.pycompile = pycompile
         self.script_executable = script_executable
         self.uninstaller_internal = DistributionUninstaller()
-
-    def check_if_exists(self, requirement: InstallRequirement) -> None:
-        """Attach installed-distribution state before installing."""
-        req = requirement.req
-        if req is None:
-            return
-        existing = InstalledDistributionStore().find(req.name)
-        if existing is None:
-            return
-        compatible = req.specifier.contains(existing.version, allow_prereleases=True)
-        if not compatible or requirement.editable:
-            requirement.satisfied_by = None
-            requirement.should_reinstall = True
-        else:
-            requirement.satisfied_by = existing
 
     def uninstall(self, name: str, *, paths: list[str] | None = None) -> bool:
         """Uninstall an installed distribution using its recorded files."""

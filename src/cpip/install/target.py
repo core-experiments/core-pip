@@ -120,10 +120,6 @@ class InstallTarget:
     def library_roots(self) -> tuple[str, str]:
         return self.purelib, self.platlib
 
-    @property
-    def roots(self) -> tuple[str, ...]:
-        return self.library_roots + (self.headers, self.scripts, self.data)
-
     def destination(self, relative: str, *, base: str = "purelib") -> str:
         """Return a validated destination for a wheel-relative path."""
 
