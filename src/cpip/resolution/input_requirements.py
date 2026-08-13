@@ -254,18 +254,9 @@ def parse_editable(value: str) -> tuple[str | None, str, set[str]]:
             requirement_text += f" ; {parsed.marker}"
         return requirement_text, parsed.url or "", set(parsed.extras)
     if "#egg=" in stripped:
-        base, fragment = stripped.split("#", 1)
+        _, fragment = stripped.split("#", 1)
         fragment_values = urllib.parse.parse_qs(fragment, keep_blank_values=True)
         egg = fragment_values.get("egg", [""])[0]
-        remaining_fragment = urllib.parse.urlencode(
-            [
-                (key, value)
-                for key, values in fragment_values.items()
-                if key != "egg"
-                for value in values
-            ],
-        )
-        url = base + (f"#{remaining_fragment}" if remaining_fragment else "")
         url = normalize_file_url_reference(stripped) or stripped
         if "[" in egg and egg.endswith("]"):
             name, extras_text = egg[:-1].split("[", 1)

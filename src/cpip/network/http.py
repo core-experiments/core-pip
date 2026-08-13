@@ -350,20 +350,6 @@ class NetworkSession:
 
         return f"cpip/{version} Python/{platform.python_version()}"
 
-    def add_trusted_host(
-        self,
-        host: str,
-        source: str | None = None,
-        suppress_logging: bool = False,
-    ) -> None:
-        del source, suppress_logging
-
-        self.trusted_hosts.add(host.lower().split(":", 1)[0])
-
-    def update_index_urls(self, new_index_urls: list[str]) -> None:
-        if self.auth is not None:
-            self.auth.index_urls = new_index_urls
-
     def get(self, url: str, **kwargs: Any) -> HttpResponse:
         return self.request("GET", url, **kwargs)
 

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 import os
 import sys
 import sysconfig
@@ -11,8 +10,6 @@ from cpip.platform.scheme import SCHEME_KEYS, Scheme
 from cpip.platform.virtualenv import running_under_virtualenv
 
 from .base import change_root, get_major_minor_version, is_osx_framework
-
-logger = logging.getLogger(__name__)
 
 
 class InvalidSchemeCombination(InstallationError):

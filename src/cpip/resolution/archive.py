@@ -17,16 +17,16 @@ class WheelhouseUnavailable(Exception):
 class WheelArchive:
     __slots__ = ("file", "members", "modes")
 
-    def __init__(self, file, members=None, target: str | None = None) -> None:
+    def __init__(self, file, members=None) -> None:
         self.file = file
         self.members: dict[str, tuple[int, int, int, int, int]] = (
             {} if members is None else members
         )
         self.modes: dict[str, int] = {}
         if members is None:
-            self.read_central_directory(target)
+            self.read_central_directory()
 
-    def read_central_directory(self, target: str | None = None) -> None:
+    def read_central_directory(self) -> None:
         self.file.seek(0, 2)
         size = self.file.tell()
         tail_size = min(size, 22 + 65535)
@@ -45,7 +45,6 @@ class WheelArchive:
         ):
             raise WheelhouseUnavailable
         self.file.seek(directory_offset)
-        target_bytes = target.encode("utf-8") if target is not None else None
         for _ in range(entries):
             header = self.file.read(46)
             if len(header) != 46 or header[:4] != b"PK\x01\x02":
@@ -85,13 +84,6 @@ class WheelArchive:
                 uncompressed_size,
                 local_offset,
             )
-            if target_bytes is not None and name_bytes == target_bytes:
-                assert target is not None
-                self.members[target] = member
-                self.modes[target] = external_attr
-                return
-            if target_bytes is not None:
-                continue
             try:
                 name = name_bytes.decode("utf-8" if flags & 0x800 else "cp437")
             except UnicodeDecodeError as exc:

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from .errors import CommandError
 from .packaging import canonicalize_name
 
 FORMAT_CONTROL_KINDS = frozenset(
@@ -52,30 +51,6 @@ class FormatControl:
             opposite.discard(normalized)
             target.add(normalized)
 
-    @staticmethod
-    def handle_mutual_excludes(value: str, target: set[str], other: set[str]) -> None:
-        if value.startswith("-"):
-            raise CommandError(
-                "--no-binary / --only-binary option requires 1 argument.",
-            )
-        entries = [item.strip() for item in value.split(",") if item.strip()]
-        for entry in entries:
-            normalized = (
-                canonicalize_name(entry)
-                if entry not in FORMAT_CONTROL_SENTINELS
-                else entry
-            )
-            if normalized == ":none:":
-                target.clear()
-                continue
-            if normalized == ":all:":
-                other.clear()
-                target.clear()
-                target.add(":all:")
-                continue
-            other.discard(normalized)
-            target.add(normalized)
-
     def allowed_formats(self, project_name: str) -> tuple[bool, bool]:
         canonical = canonicalize_name(project_name)
         allow_binary = True
@@ -100,9 +75,3 @@ class FormatControl:
         if allow_source:
             result.add("source")
         return frozenset(result)
-
-    def has_no_binary(self) -> bool:
-        return bool(self.no_binary)
-
-    def only_binary_all(self) -> bool:
-        return ":all:" in self.only_binary

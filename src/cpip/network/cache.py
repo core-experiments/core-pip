@@ -6,7 +6,6 @@ import hashlib
 import os
 import shutil
 from contextlib import contextmanager
-from datetime import datetime
 
 from cpip.core.utils import ensure_dir
 from cpip.platform.filesystem import (
@@ -115,12 +114,7 @@ class SafeFileCache:
     def write_from_io(self, path: str, source_file: BinaryIO) -> None:
         self.write_to_file(path, lambda f: shutil.copyfileobj(source_file, f))
 
-    def set(
-        self,
-        key: str,
-        value: bytes,
-        expires: int | datetime | None = None,
-    ) -> None:
+    def set(self, key: str, value: bytes) -> None:
         path = self.get_cache_path(key)
         self.write_internal(path, value)
 
