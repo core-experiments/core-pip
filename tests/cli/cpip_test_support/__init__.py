@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import datetime
 import json
 import os
 import pathlib
@@ -25,9 +24,6 @@ from zipfile import ZipFile
 import pytest
 from cpip.cli.main import main as cpip_entry_point
 from cpip.core.direct_url import DIRECT_URL_METADATA_NAME, DirectUrl
-from cpip.core.release_control import ReleaseControl
-from cpip.install.build_env.installer import BuildConfiguration
-from cpip.network.http import NetworkSession
 from cpip.platform.locations.base import get_major_minor_version
 from cpip_test_support.filesystem import create_file
 from cpip_test_support.venv import VirtualEnvironment
@@ -45,31 +41,6 @@ CURRENT_PY_VERSION_INFO = sys.version_info[:3]
 
 Test = Callable[..., None]
 FilesState = dict[str, FoundDir | FoundFile]
-
-
-def make_test_build_options(
-    find_links: list[str] | None = None,
-    index_urls: list[str] | None = None,
-    allow_all_prereleases: bool = False,
-    session: NetworkSession | None = None,
-    uploaded_prior_to: datetime.datetime | None = None,
-) -> BuildConfiguration:
-    """Create build-installation settings for testing purposes."""
-    if session is None:
-        session = NetworkSession()
-    release_control = ReleaseControl()
-    if allow_all_prereleases:
-        release_control.all_releases.add(":all:")
-
-    return BuildConfiguration(
-        session=session,
-        find_links=list(find_links or []),
-        index_urls=list(index_urls or []),
-        release_control=release_control,
-        proxy=session.cpip_proxy,
-        no_proxy_env=session.cpip_no_proxy_env,
-        uploaded_prior_to=uploaded_prior_to,
-    )
 
 
 class TestData:

@@ -3,24 +3,14 @@ from __future__ import annotations
 import os
 import sys
 import sysconfig
-from collections.abc import Iterable
 from dataclasses import dataclass
-from types import TracebackType
 
 from cpip.core.errors import DiagnosticCpipError
-from cpip.core.temp_dir import TempDirectory, tempdir_kinds
-from cpip.install.build_env.base import (
-    BuildEnvironment,
-    BuildEnvironmentInstaller,
-    Prefix,
-)
 
 TYPE_CHECKING = False
 
 if TYPE_CHECKING:
     from typing import Any
-
-    from cpip.resolution.req_install import InstallRequirement
 
 
 class VenvImportError(DiagnosticCpipError):
@@ -78,13 +68,9 @@ class CreatedVenv:
 def create_isolated_venv(env_path: str) -> CreatedVenv:
     """Create a fresh virtualenv (or stdlib ``venv`` fallback) at ``env_path``.
 
-    Shared by ``VenvBuildEnvironment`` (the install flow's build
-    environment) and ``BackendRunner.caller()`` in ``build.build_backend``
-    (the standalone project builder used by ``cpip build``/``cpip wheel``
-    and metadata-only resolution reads) -- both need "a working isolated
-    venv at this path", differing only in what happens before it (temp
-    directory lifecycle) and after it (how build-system requirements get
-    installed into it).
+    Used by ``BackendRunner.caller()`` in ``build.build_backend`` (the
+    project builder used by ``cpip build``/``cpip wheel`` and metadata-only
+    resolution reads) to get "a working isolated venv at this path".
     """
     # We defer these imports because certain distributions of Python do not
     # include a functional venv out of the box.
@@ -192,75 +178,3 @@ def create_isolated_venv(env_path: str) -> CreatedVenv:
         bin_path=bin_path,
         python_executable=python_executable,
     )
-
-
-class VenvBuildEnvironment(BuildEnvironment):
-    """A venv-based build environment."""
-
-    def __init__(self, installer: BuildEnvironmentInstaller) -> None:
-        self.temp_dir_internal = TempDirectory(
-            kind=tempdir_kinds.BUILD_ENV,
-            globally_managed=True,
-        )
-        self.env_path_internal = self.temp_dir_internal.path
-
-        created = create_isolated_venv(self.env_path_internal)
-        self.lib_dirs = created.lib_dirs
-        self.bin_path_internal = created.bin_path
-        self.python_executable = created.python_executable
-
-        self.save_env: dict[str, str | None] = {}
-        self.installer_internal = installer
-
-        if not os.path.exists(self.python_executable):
-            # This error is only likely on Windows due to interference from AV software.
-            raise VenvCreationError(
-                f"Python executable failed to copy to {self.python_executable}",
-            )
-
-    def __enter__(self) -> None:
-        # We want backend calls to be able to use binaries installed as if this
-        # virtual environment was "activated".
-        self.save_env = {
-            name: os.environ.get(name, None) for name in ("PATH", "PYTHONPATH")
-        }
-
-        new_path = [self.bin_path_internal]
-        if old_path := self.save_env["PATH"]:
-            new_path.extend(old_path.split(os.pathsep))
-        # However, we don't want a pre-existing PYTHONPATH to influence the
-        # backend calls.
-        os.environ.update({"PATH": os.pathsep.join(new_path), "PYTHONPATH": ""})
-
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc_val: BaseException | None,
-        exc_tb: TracebackType | None,
-    ) -> None:
-        super().__exit__(exc_type, exc_val, exc_tb)
-        self.temp_dir_internal.cleanup()
-
-    def install_requirements(
-        self,
-        requirements: Iterable[str],
-        prefix_as_string: str,
-        *,
-        kind: str,
-        for_req: InstallRequirement | None = None,
-    ) -> None:
-        if not requirements:
-            return
-
-        # TODO: when better support for installing to arbitrary Python environments
-        # is added, replace this prefix hack with that.
-        prefix = Prefix(
-            self.env_path_internal,
-            python_executable=self.python_executable,
-        )
-        self.installer_internal.install(
-            requirements,
-            prefix,
-            kind=kind,
-            for_req=for_req,
-        )
