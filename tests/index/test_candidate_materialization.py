@@ -19,7 +19,7 @@ from cpip.index.provider import CandidateProvider
 from cpip.index.source_models import CandidateRecord
 from cpip.resolution.api import ResolutionEngine
 
-from .wheel_helpers import make_wheel
+from ..wheel_helpers import make_wheel
 
 
 def make_candidate(version: str) -> WheelCandidate:

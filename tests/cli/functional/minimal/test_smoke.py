@@ -6,7 +6,7 @@ from cpip_test_support import (
     create_test_package_with_setup,
 )
 
-from ..wheel_helpers import make_sdist
+from ....wheel_helpers import make_sdist
 
 
 def test_cli_version_and_help(script: CpipTestEnvironment) -> None:

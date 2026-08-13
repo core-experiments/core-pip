@@ -30,7 +30,7 @@ from cpip.index.vcs import is_immutable_vcs_link, vcs_reference
 from cpip.network.http import HttpResponse
 from cpip.network.cache import SafeFileCache
 
-from .wheel_helpers import make_sdist, make_wheel
+from ..wheel_helpers import make_sdist, make_wheel
 
 
 @pytest.mark.parametrize(
@@ -1257,7 +1257,7 @@ def test_candidate_provider_runs_project_build_backend(tmp_path: Path) -> None:
         "backend-pkg",
         "backend_pkg",
         "1.0",
-        backend=True,
+        standalone_backend=True,
     )
     write_simple_project_archive_index(index, "backend-pkg", [sdist])
 
