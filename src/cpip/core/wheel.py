@@ -290,14 +290,6 @@ class WheelFile:
 
     tags: tuple[WheelTag, ...]
 
-    @property
-    def canonical_name(self) -> str:
-        return canonicalize_name(self.name)
-
-    @classmethod
-    def open(cls, path: str) -> zipfile.ZipFile:
-        return zipfile.ZipFile(path)
-
 
 class Wheel:
     __slots__ = ("build_tag", "file_tags", "filename", "name", "version")
@@ -317,22 +309,6 @@ class Wheel:
         self.build_tag = legacy_build_tag(wheel.build_tag)
 
         self.file_tags = frozenset(wheel.tags)
-
-    def get_formatted_file_tags(self) -> list[str]:
-        """Return the wheel's tags as sorted strings."""
-
-        return sorted(str(tag) for tag in self.file_tags)
-
-    def supported(self, tags: list[WheelTag] | tuple[WheelTag, ...]) -> bool:
-        return wheel_tag_rank(tuple(self.file_tags), tuple(tags)) is not None
-
-    def support_index_min(self, tags: list[WheelTag] | tuple[WheelTag, ...]) -> int:
-        rank = wheel_tag_rank(tuple(self.file_tags), tuple(tags))
-
-        if rank is None:
-            raise ValueError("Wheel is not supported")
-
-        return rank
 
 
 class TargetContext:
@@ -1127,8 +1103,8 @@ def tag_matches(supported: WheelTag, candidate: WheelTag) -> bool:
         and platform_matches(
             supported._platform_lower,
             candidate._platform_lower,
-            runtime_parts=supported._platform_parts,
-            wheel_parts=candidate._platform_parts,
+            supported._platform_parts,
+            candidate._platform_parts,
         )
     )
 
@@ -1153,9 +1129,8 @@ def interpreter_matches(runtime: str, wheel: str, abi: str) -> bool:
 def platform_matches(
     runtime: str,
     wheel: str,
-    *,
-    runtime_parts: tuple[str, ...] | None = None,
-    wheel_parts: tuple[str, ...] | None = None,
+    runtime_parts: tuple[str, ...] | None,
+    wheel_parts: tuple[str, ...] | None,
 ) -> bool:
     if runtime == wheel:
         return True
@@ -1164,31 +1139,24 @@ def platform_matches(
         return runtime == wheel
 
     if runtime.startswith("macosx_") and wheel.startswith("macosx_"):
-        if runtime_parts is not None and wheel_parts is not None:
-            return _macos_platform_matches_parts(runtime_parts, wheel_parts)
+        assert runtime_parts is not None
+        assert wheel_parts is not None
 
-        return macos_platform_matches(runtime, wheel)
+        return _macos_platform_matches_parts(runtime_parts, wheel_parts)
 
     if runtime.startswith("ios_") and wheel.startswith("ios_"):
-        if runtime_parts is not None and wheel_parts is not None:
-            return _ios_platform_matches_parts(runtime_parts, wheel_parts)
+        assert runtime_parts is not None
+        assert wheel_parts is not None
 
-        return ios_platform_matches(runtime, wheel)
+        return _ios_platform_matches_parts(runtime_parts, wheel_parts)
 
     if runtime.startswith("android_") and wheel.startswith("android_"):
-        if runtime_parts is not None and wheel_parts is not None:
-            return _android_platform_matches_parts(runtime_parts, wheel_parts)
+        assert runtime_parts is not None
+        assert wheel_parts is not None
 
-        return android_platform_matches(runtime, wheel)
+        return _android_platform_matches_parts(runtime_parts, wheel_parts)
 
     return False
-
-
-def macos_platform_matches(runtime: str, wheel: str) -> bool:
-    return _macos_platform_matches_parts(
-        tuple(runtime.split("_", 3)),
-        tuple(wheel.split("_", 3)),
-    )
 
 
 def _macos_platform_matches_parts(
@@ -1214,13 +1182,6 @@ def _macos_platform_matches_parts(
     )
 
 
-def ios_platform_matches(runtime: str, wheel: str) -> bool:
-    return _ios_platform_matches_parts(
-        tuple(runtime.split("_", 4)),
-        tuple(wheel.split("_", 4)),
-    )
-
-
 def _ios_platform_matches_parts(
     runtime_parts: tuple[str, ...],
     wheel_parts: tuple[str, ...],
@@ -1238,13 +1199,6 @@ def _ios_platform_matches_parts(
     return (int(wheel_major), int(wheel_minor)) <= (
         int(runtime_major),
         int(runtime_minor),
-    )
-
-
-def android_platform_matches(runtime: str, wheel: str) -> bool:
-    return _android_platform_matches_parts(
-        tuple(runtime.split("_", 3)),
-        tuple(wheel.split("_", 3)),
     )
 
 
