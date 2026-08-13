@@ -28,8 +28,6 @@ if TYPE_CHECKING:
     # Annotation only: argparse is a measurable import on the fast path.
     import argparse
 
-INTERNAL_CONFIG_KEYS = frozenset(("CPIP_VERSION", "CPIP_HELP", "CPIP_CONFIG_FILE"))
-
 NO_INDEX_VALUES = frozenset(("1", "true", "yes", "on"))
 
 CONFIG_BASENAME = "cpip.conf" if os.name != "nt" else "cpip.ini"
@@ -51,17 +49,9 @@ class ConfigLocation:
 class ConfigurationStore:
     def __init__(self) -> None:
         self.parser_internal = new_parser()
-        self.env_internal: dict[str, str] = {}
 
     def load(self) -> None:
         self.parser_internal = new_parser()
-        self.env_internal = {}
-        for key, value in os.environ.items():
-            if not key.startswith("CPIP_"):
-                continue
-            if key in INTERNAL_CONFIG_KEYS:
-                continue
-            self.env_internal[key[4:].lower().replace("_", "-")] = value
         for location in config_locations():
             if os.path.isfile(os.fspath(location.path)):
                 try:
@@ -73,11 +63,6 @@ class ConfigurationStore:
                     raise ConfigurationError(str(exc)) from exc
 
     def get(self, key: str) -> str:
-        if key.startswith(":env:."):
-            option = key[len(":env:.") :]
-            if option in self.env_internal:
-                return self.env_internal[option]
-            raise ConfigurationError(f"No such key - {key}")
         section, option = split_key(key)
         for candidate in option_spellings(option):
             if self.parser_internal.has_option(section, candidate):
