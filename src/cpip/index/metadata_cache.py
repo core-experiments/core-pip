@@ -40,16 +40,6 @@ class WheelMetadataCache(SqliteBackedCache):
         return conn
 
     @staticmethod
-    def valid_identity(value: object) -> bool:
-        return (
-            isinstance(value, tuple)
-            and len(value) == 3
-            and isinstance(value[0], str)
-            and isinstance(value[1], int)
-            and isinstance(value[2], int)
-        )
-
-    @staticmethod
     def valid_headers(value: object) -> bool:
         return isinstance(value, dict) and all(
             isinstance(name, str)
@@ -111,18 +101,6 @@ class WheelMetadataCache(SqliteBackedCache):
         copied = {name: list(values) for name, values in headers.items()}
         self.entries[identity] = copied
         self._pending_puts[identity] = copied
-        self.dirty = True
-
-    def put_reference(
-        self,
-        identity: MetadataIdentity,
-        headers: MetadataHeaders,
-    ) -> None:
-        """Store already-owned immutable headers without copying them."""
-        if identity not in self.entries and len(self.entries) >= _MAX_ENTRIES:
-            self.entries.pop(next(iter(self.entries)))
-        self.entries[identity] = headers
-        self._pending_puts[identity] = headers
         self.dirty = True
 
     def _flush_pending(self, conn: sqlite3.Connection) -> None:

@@ -697,7 +697,7 @@ def test_reads_detached_wheel_metadata_without_download(
     materializer = CandidateMaterializer(dry_run=dry_run, session=Session())
     monkeypatch.setattr(
         materializer,
-        "ensure_local",
+        "ensure_local_text",
         lambda *args, **kwargs: pytest.fail("wheel should not be downloaded"),
     )
 

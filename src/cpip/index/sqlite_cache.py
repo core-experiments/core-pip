@@ -81,10 +81,6 @@ class SqliteBackedCache:
         """Open a connection and ensure this cache's schema exists."""
         raise NotImplementedError
 
-    def load(self) -> None:
-        # No-op: rows are loaded on demand during get().
-        pass
-
     def flush(self) -> None:
         if not self.dirty:
             return

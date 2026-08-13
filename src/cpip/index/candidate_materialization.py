@@ -410,11 +410,6 @@ class CandidateMaterializer:
             | None,
         ] = {}
 
-        self.prepared_record_cache: dict[
-            tuple[str, tuple[str, ...], tuple[tuple[str, str], ...]],
-            tuple[CandidateRecord, ...],
-        ] = {}
-
         self.artifact_fingerprint_cache: dict[str, str] = {}
 
         self.source_hash_cache: dict[str, dict[str, str] | None] = {}
@@ -426,14 +421,6 @@ class CandidateMaterializer:
         self.metadata_prefetcher: Prefetcher[Any, str] | None = None
 
         self.metadata_prefetch_lock = RLock()
-
-        self.metadata_loads = 0
-
-        self.metadata_cache_hits = 0
-
-        self.metadata_prefetches = 0
-
-        self.artifact_materializations = 0
 
     def local_path_for(self, candidate: CandidateRecord) -> str | None:
         if not candidate.link.is_file:
@@ -449,14 +436,6 @@ class CandidateMaterializer:
             self.local_artifacts[url] = cached
 
         return cached
-
-    def ensure_local(
-        self,
-        candidate: CandidateRecord,
-        *,
-        local_path: str | None = None,
-    ) -> str:
-        return self.ensure_local_text(candidate, local_path=local_path)
 
     def ensure_local_text(
         self,
@@ -569,35 +548,6 @@ class CandidateMaterializer:
 
         return dict(result)
 
-    def prepare_records(
-        self,
-        requirement: Requirement,
-        accepted: tuple[CandidateRecord, ...],
-    ) -> tuple[CandidateRecord, ...]:
-        """Attach lazy metadata loaders without loading candidate metadata."""
-
-        record_key = (
-            requirement.canonical_name,
-            tuple(sorted(requirement.extras)),
-            tuple(
-                (candidate.link.url, candidate.version.public) for candidate in accepted
-            ),
-        )
-
-        records = self.prepared_record_cache.get(record_key)
-
-        if records is None:
-            if len(self.prepared_record_cache) >= 4096:
-                self.prepared_record_cache.pop(next(iter(self.prepared_record_cache)))
-
-            records = tuple(
-                self.prepare_record(requirement, candidate) for candidate in accepted
-            )
-
-            self.prepared_record_cache[record_key] = records
-
-        return records
-
     def prepare_record(
         self,
         requirement: Requirement,
@@ -687,10 +637,6 @@ class CandidateMaterializer:
             self.artifact_fingerprint(candidate),
         )
 
-    def remember_negative_fact(self, key: tuple[str, str, str], reason: str) -> None:
-        if self.persistent_release_facts_cache is not None:
-            self.persistent_release_facts_cache.put(key, reason)
-
     def metadata_cache_keys(
         self,
         candidate: CandidateRecord,
@@ -769,8 +715,7 @@ class CandidateMaterializer:
                 )
 
             for key, url in pending:
-                if self.metadata_prefetcher.submit(key, url):
-                    self.metadata_prefetches += 1
+                self.metadata_prefetcher.submit(key, url)
 
     def take_prefetched_metadata(self, url: str) -> Any:
         with self.metadata_prefetch_lock:
@@ -802,21 +747,15 @@ class CandidateMaterializer:
         )
 
         def load() -> CandidateMetadata:
-            self.metadata_loads += 1
-
             cached = self.metadata_cache.get(key)
 
             if cached is not None:
-                self.metadata_cache_hits += 1
-
                 return cached
 
             if self.persistent_candidate_metadata_cache is not None:
                 cached = self.persistent_candidate_metadata_cache.get(persistent_key)
 
                 if cached is not None:
-                    self.metadata_cache_hits += 1
-
                     self.metadata_cache[key] = cached
 
                     return cached
@@ -1158,8 +1097,6 @@ class CandidateMaterializer:
         requested_extras = frozenset(requirement.extras)
 
         for candidate in accepted:
-            self.artifact_materializations += 1
-
             from_cache = False
 
             cache_hashes: dict[str, str] | None = None

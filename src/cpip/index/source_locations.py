@@ -9,7 +9,7 @@ from functools import lru_cache
 
 from cpip.core.packaging import Requirement, canonicalize_name
 from cpip.core.urls import path_to_url, url_to_path
-from cpip.index.catalog_cache import load_catalog, load_records, load_summary
+from cpip.index.catalog_cache import load_summary
 from cpip.index.directory_index import (
     LocalSourceSnapshot,
     local_source_snapshot,
@@ -23,7 +23,7 @@ TYPE_CHECKING = False
 if TYPE_CHECKING:
     from typing import Any
 
-    from cpip.index.catalog_cache import CatalogData, CatalogSummary
+    from cpip.index.catalog_cache import CatalogSummary
 
 
 SUPPORTED_SCHEMES = frozenset(("http", "https", "file", "ftp"))
@@ -220,37 +220,6 @@ class SimpleIndexSource:
             trusted_hosts=self.trusted_hosts,
             session=self.session,
         ).links_from_url(project_url)
-
-    def collect_cached_records(
-        self, requirement: Requirement
-    ) -> list[tuple[object, ...]] | None:
-        """Return raw cached records when the HTTP page is still fresh."""
-
-        if self.session is None:
-            return None
-
-        project_url = self.project_page_url(self.index_url, requirement.canonical_name)
-
-        if not self.has_fresh_cached_page(requirement):
-            return None
-
-        return load_records(getattr(self.session, "cache", None), project_url)
-
-    def collect_cached_catalog(
-        self,
-        requirement: Requirement,
-    ) -> CatalogData | None:
-        """Return compiled cached records when the HTTP page is still fresh."""
-
-        if self.session is None:
-            return None
-
-        project_url = self.project_page_url(self.index_url, requirement.canonical_name)
-
-        if not self.has_fresh_cached_page(requirement):
-            return None
-
-        return load_catalog(getattr(self.session, "cache", None), project_url)
 
     def collect_cached_catalog_summary(
         self,
