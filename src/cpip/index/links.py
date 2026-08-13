@@ -38,14 +38,6 @@ SOURCE_ARCHIVE_SUFFIXES = (
 WHEEL_EXTENSION = ".whl"
 SUPPORTED_EXTENSIONS = (WHEEL_EXTENSION, *SOURCE_ARCHIVE_SUFFIXES)
 
-# Python 3.11+ wraps urlsplit in an lru_cache, which is pure overhead here:
-# every Link is built from a distinct URL, so the cache almost never hits and
-# every call still pays to hash the url and probe the cache dict. functools
-# always exposes the pre-decoration function as __wrapped__ regardless of
-# Python version, so this skips the cache without depending on any
-# version-specific internal -- on 3.9/3.10, where urlsplit isn't cached at
-# all, __wrapped__ doesn't exist and this is exactly urlsplit itself.
-_urlsplit = getattr(urllib.parse.urlsplit, "__wrapped__", urllib.parse.urlsplit)
 REQ_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 EGG_FRAGMENT_RE = re.compile(r"[#&]egg=([^&]*)")
 HASH_URL_FRAGMENT_RE = re.compile(
@@ -110,7 +102,7 @@ class Link:
     ) -> None:
         if url.startswith("\\\\"):
             url = path_to_url(url)
-        self.parsed_url_internal = _urlsplit(url)
+        self.parsed_url_internal = urllib.parse.urlsplit(url)
         self.url = url
         self._hash = hash(url)
         self.path_internal = urllib.parse.unquote(self.parsed_url_internal.path)

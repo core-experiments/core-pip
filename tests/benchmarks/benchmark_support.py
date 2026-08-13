@@ -540,6 +540,7 @@ def reset_caches() -> None:
     wheel_module._dist_info_match_key.cache_clear()
     wheel_module.wheel_metadata_cache.clear()
     wheel_module.wheel_dependency_cache.clear()
+    wheel_module.no_layout_candidate_cache.clear()
     # Persistent wheel metadata caches are one instance per directory per
     # process, so they outlive the provider that opened them.
     metadata_cache_module._CACHE_INSTANCES.clear()

@@ -436,6 +436,15 @@ wheel_dependency_cache: dict[
     tuple[Requirement, ...],
 ] = {}
 
+# Keyed by (stat-based identity, requested extras) rather than
+# wheel_metadata_cache's own (possibly archive/CRC-based) identity, so
+# wheel_candidate_from_path can check it via a cheap os.stat() *before*
+# opening the archive at all -- see wheel_candidate_from_path.
+no_layout_candidate_cache: dict[
+    tuple[tuple[str, int, int], frozenset[str]],
+    tuple[str, Version, tuple[Requirement, ...], frozenset[str], str | None],
+] = {}
+
 
 def parse_wheel_file(path: str) -> WheelFile | None:
     return _parse_wheel_filename(os.path.basename(os.fspath(path)))
@@ -1037,7 +1046,40 @@ def wheel_candidate_from_path(
     layout -- should pass ``include_layout=False``: a non-None layout on a
     freshly (re)opened archive makes ``open_wheel_archive`` fall back to the
     slower ``zipfile.ZipFile`` reader instead of the fast raw one.
+
+    When ``include_layout=False``, this also checks/populates
+    ``no_layout_candidate_cache`` keyed by a cheap ``os.stat()``-based
+    identity *before* opening the archive at all. wheel_candidate()'s own
+    metadata cache can't help here on its own: it's checked only after this
+    function has already paid for opening and fully parsing the archive
+    (zipfile.ZipFile eagerly parses every member into a ZipInfo on
+    construction) just to hand it in. That parsing is real work independent
+    of validate_wheel_with_metadata's own dist-info checks, which the
+    caller's later archive open (via open_wheel_archive + validate_wheel,
+    once wheel_layout stays None) redundantly repeats anyway -- so a stat
+    identity match here means we can skip both without losing any structural
+    validation that wasn't already going to happen again downstream.
     """
+    requested_extras = frozenset(extras or ())
+
+    if not include_layout:
+        identity = wheel_archive_identity(path, None, None)
+
+        if identity is not None:
+            cached = no_layout_candidate_cache.get((identity, requested_extras))
+
+            if cached is not None:
+                name, version, dependencies, provided_extras, requires_python = cached
+
+                return WheelCandidate(
+                    name=name,
+                    version=version,
+                    path=os.fspath(path),
+                    dependencies=dependencies,
+                    provided_extras=provided_extras,
+                    requires_python=requires_python,
+                )
+
     with (
         open(path, "rb", buffering=32768) as stream,
         zipfile.ZipFile(stream) as archive,
@@ -1046,7 +1088,7 @@ def wheel_candidate_from_path(
             archive,
             os.path.basename(path)[:-4].split("-", 1)[0],
         )
-        return wheel_candidate(
+        candidate = wheel_candidate(
             path,
             extras,
             archive=archive,
@@ -1054,6 +1096,24 @@ def wheel_candidate_from_path(
             wheel_metadata_text=wheel_metadata_text,
             include_layout=include_layout,
         )
+
+    if not include_layout:
+        identity = wheel_archive_identity(path, None, None)
+
+        if identity is not None:
+            bounded_cache_put(
+                no_layout_candidate_cache,
+                (identity, requested_extras),
+                (
+                    candidate.name,
+                    candidate.version,
+                    candidate.dependencies,
+                    candidate.provided_extras,
+                    candidate.requires_python,
+                ),
+            )
+
+    return candidate
 
 
 def parse_wheel(wheel_zip: zipfile.ZipFile, name: str) -> tuple[str, Message]:
