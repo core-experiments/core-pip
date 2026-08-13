@@ -7,6 +7,7 @@ import stat
 import urllib.parse
 
 from cpip.core.errors import InstallationError, InvalidWheelFilename
+from cpip.core.packaging import EMPTY_FROZENSET
 from cpip.core.packaging import Requirement as ParsedRequirement
 from cpip.core.packaging import parse_requirement
 from cpip.core.urls import path_to_url
@@ -31,7 +32,7 @@ def install_req_from_line(
     permit_editable_wheels: bool = False,
 ) -> InstallRequirement:
     text = line.strip()
-    path_extras: frozenset[str] = frozenset()
+    path_extras: frozenset[str] = EMPTY_FROZENSET
     path_text = text
     if "[" in text and text.endswith("]") and " @ " not in text:
         maybe_path, extras_text = text[:-1].split("[", 1)
@@ -253,18 +254,9 @@ def parse_editable(value: str) -> tuple[str | None, str, set[str]]:
             requirement_text += f" ; {parsed.marker}"
         return requirement_text, parsed.url or "", set(parsed.extras)
     if "#egg=" in stripped:
-        base, fragment = stripped.split("#", 1)
+        _, fragment = stripped.split("#", 1)
         fragment_values = urllib.parse.parse_qs(fragment, keep_blank_values=True)
         egg = fragment_values.get("egg", [""])[0]
-        remaining_fragment = urllib.parse.urlencode(
-            [
-                (key, value)
-                for key, values in fragment_values.items()
-                if key != "egg"
-                for value in values
-            ],
-        )
-        url = base + (f"#{remaining_fragment}" if remaining_fragment else "")
         url = normalize_file_url_reference(stripped) or stripped
         if "[" in egg and egg.endswith("]"):
             name, extras_text = egg[:-1].split("[", 1)

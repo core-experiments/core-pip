@@ -2,11 +2,6 @@ from __future__ import annotations
 
 from types import ModuleType
 
-# ``from typing import TYPE_CHECKING`` would work identically for a type
-# checker, but the real ``typing`` module costs ~1.8ms to import (it pulls in
-# ``re``, ``collections.abc``, and ``enum``) and this module is in
-# ``COLD_CORE`` -- every ``cpip`` invocation pays for it.  A local ``False``
-# is exactly what ``typing.TYPE_CHECKING`` evaluates to at runtime anyway.
 TYPE_CHECKING = False
 
 if TYPE_CHECKING:
@@ -185,23 +180,6 @@ COMMAND_SPECS = (
 
 COMMANDS_internal = {spec.name: spec for spec in COMMAND_SPECS}
 
-COMMANDS = tuple(COMMANDS_internal)
-
 
 def get_command(command: str) -> CommandSpec | None:
     return COMMANDS_internal.get(command)
-
-
-def get_command_runner(command: str) -> CommandRunner | None:
-    spec = get_command(command)
-
-    return spec.load_runner() if spec is not None else None
-
-
-def parser_for_command(command: str) -> ArgumentParser:
-    spec = get_command(command)
-
-    if spec is None:
-        raise KeyError(command)
-
-    return spec.create_parser()

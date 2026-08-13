@@ -9,7 +9,12 @@ from urllib.parse import unquote, urlsplit
 
 from cpip.core.direct_url import ArchiveInfo, DirInfo
 from cpip.core.hashes import file_hashes
-from cpip.core.packaging import Requirement, SpecifierSet, parse_requirement
+from cpip.core.packaging import (
+    EMPTY_FROZENSET,
+    Requirement,
+    SpecifierSet,
+    parse_requirement,
+)
 from cpip.core.urls import path_to_url, url_to_path
 from cpip.index.links import Link
 from cpip.install.requirement_set import RequirementSet
@@ -62,7 +67,6 @@ def resolve_requirement_set(
     plan = resolver.resolve(requirements_input)
 
     source_requirements, source_requirements_by_url = source_requirement_map(
-        resolver,
         requirements_input,
     )
 
@@ -77,7 +81,7 @@ def resolve_requirement_set(
             req=Requirement(
                 name=candidate.name,
                 specifier=SpecifierSet(f"=={candidate.version}"),
-                extras=frozenset(),
+                extras=EMPTY_FROZENSET,
                 url=None,
                 marker=None,
                 raw=f"{candidate.name}=={candidate.version}",
@@ -136,7 +140,6 @@ def resolve_requirement_set(
 
 
 def coerce_requirements(
-    resolver,
     requirements_input: RequirementSet[InstallRequirement]
     | Iterable[InstallRequirement]
     | list[str],
@@ -203,7 +206,6 @@ def coerce_requirements(
 
 
 def source_requirement_map(
-    resolver,
     requirements_input: RequirementSet | Iterable[InstallRequirement] | list[str],
 ) -> tuple[dict[str, InstallRequirement], dict[str, InstallRequirement]]:
     if as_requirement_strings(requirements_input) is not None:

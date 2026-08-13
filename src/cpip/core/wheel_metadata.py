@@ -54,7 +54,11 @@ def parse_metadata_headers(contents: str) -> MetadataHeaders:
                 fast_headers = None
                 break
             continue
-        fast_headers.setdefault(normalized_name, []).append(value.lstrip())
+        values = fast_headers.get(normalized_name)
+        if values is None:
+            values = []
+            fast_headers[normalized_name] = values
+        values.append(value.lstrip())
     if fast_headers is not None:
         return fast_headers
     separators = (
@@ -80,7 +84,10 @@ def parse_metadata_headers(contents: str) -> MetadataHeaders:
         saw_header = True
         normalized_name = name.casefold()
         if normalized_name in RESOLUTION_METADATA_HEADERS:
-            current_values = headers.setdefault(normalized_name, [])
+            current_values = headers.get(normalized_name)
+            if current_values is None:
+                current_values = []
+                headers[normalized_name] = current_values
             current_values.append(value.lstrip())
         else:
             current_values = None

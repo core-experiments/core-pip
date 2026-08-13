@@ -161,8 +161,6 @@ def parse_requirements_internal(
                     provider=provider,
                     options=options,
                     constraint=task.constraint,
-                    stack=task.stack,
-                    prefetcher=prefetcher,
                     includes=includes,
                 ),
             )
@@ -326,8 +324,6 @@ def parse_line(
     provider: RequirementSource | None,
     options: Any,
     constraint: bool,
-    stack: list[str],
-    prefetcher: RequirementFilePrefetcher,
     includes: list[tuple[str, bool]],
 ) -> list[ParsedRequirement]:
     if line.lstrip().startswith("-"):

@@ -23,9 +23,9 @@ except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility
     from cpip._vendor import tomli as tomllib
 
 import zipfile
-from collections.abc import Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
-from typing import Any, Protocol, cast
+from typing import Any
 
 from cpip.build.pep517_hooks import BuildBackendHookCaller, HookMissing
 from cpip.core.errors import BuildError
@@ -36,16 +36,7 @@ from cpip.core.packaging import (
     parse_requirement,
 )
 from cpip.core.subprocess import call_subprocess
-
-
-class BuildWheelHook(Protocol):
-    def __call__(
-        self,
-        wheel_directory: str,
-        *,
-        config_settings: dict[str, Any] | None,
-        metadata_directory: str | None,
-    ) -> str: ...
+from cpip.install.build_env.venv import create_isolated_venv
 
 
 # ``pkg_resources`` was removed from setuptools 82.  Projects that only have a
@@ -204,55 +195,7 @@ class BackendRunner:
         with tempfile.TemporaryDirectory(prefix="pip-build-env-") as env_dir:
             env_path = env_dir
 
-            # ``virtualenv`` handles relocated Python distributions (such as
-
-            # uv-managed interpreters) whose stdlib ``venv`` launcher cannot
-
-            # locate its installation prefix.  Keep the stdlib fallback for
-
-            # installations that do not provide virtualenv.
-
-            try:
-                import virtualenv
-
-            except ImportError:
-                import venv
-
-                builder = venv.EnvBuilder(symlinks=(os.name != "nt"), with_pip=False)
-
-                builder.create(env_path)
-
-                bootstrap_environment = {
-                    key: value
-                    for key, value in os.environ.items()
-                    if not key.startswith("CPIP_") and key != "PYTHONPATH"
-                }
-
-                subprocess.run(
-                    [
-                        os.path.join(
-                            env_path,
-                            "bin/python" if os.name != "nt" else "Scripts/python.exe",
-                        ),
-                        "-m",
-                        "ensurepip",
-                        "--upgrade",
-                        "--default-pip",
-                    ],
-                    check=True,
-                    cwd=env_path,
-                    env=bootstrap_environment,
-                    capture_output=True,
-                    text=True,
-                )
-
-            else:
-                virtualenv.cli_run([env_path, "--no-download", "--clear"])
-
-            python = os.path.join(
-                env_path,
-                "Scripts/python.exe" if os.name == "nt" else "bin/python",
-            )
+            python = create_isolated_venv(env_path).python_executable
 
             if self.spec.requirements:
                 constraint_args = [
@@ -509,24 +452,11 @@ class ProjectBuilder:
         config_settings: dict[str, Any] | None = None,
     ) -> str:
         if self.backend_spec is not None:
-            self.prepare_metadata()
-
-            return self.build_external(wheel_directory, config_settings=config_settings)
-
-        backend = self.load_backend_hook("build_wheel")
-
-        if callable(backend) and backend is not build_wheel:
-            with backend_environment(self.source_dir):
-                wheel_name = backend(
-                    os.fspath(wheel_directory),
-                    config_settings=config_settings,
-                    metadata_directory=None,
-                )
-
-            if not isinstance(wheel_name, str):
-                raise BuildError("Build backend did not return a wheel filename")
-
-            return wheel_name
+            return self.build_external(
+                wheel_directory,
+                config_settings=config_settings,
+                validate_metadata_first=True,
+            )
 
         return self.build_fallback_wheel(wheel_directory, editable=False)
 
@@ -554,31 +484,7 @@ class ProjectBuilder:
                 editable=True,
             )
 
-        backend = self.load_backend_hook("build_editable")
-
-        if callable(backend) and backend is not build_editable:
-            with backend_environment(self.source_dir):
-                wheel_name = backend(
-                    os.fspath(wheel_directory),
-                    config_settings=config_settings,
-                    metadata_directory=None,
-                )
-
-            if not isinstance(wheel_name, str):
-                raise BuildError(
-                    "Build backend did not return an editable wheel filename",
-                )
-
-            return wheel_name
-
         return self.build_fallback_wheel(wheel_directory, editable=True)
-
-    def load_backend_hook(self, name: str) -> BuildWheelHook | None:
-        backend = load_project_backend(self.source_dir)
-
-        hook = getattr(backend, name, None) if backend is not None else None
-
-        return cast("BuildWheelHook", hook) if callable(hook) else None
 
     def build_external(
         self,
@@ -586,6 +492,7 @@ class ProjectBuilder:
         *,
         config_settings: dict[str, Any] | None,
         editable: bool = False,
+        validate_metadata_first: bool = False,
     ) -> str:
         assert self.backend_spec is not None
 
@@ -600,9 +507,32 @@ class ProjectBuilder:
                     self.backend_spec,
                     build_constraints=self.build_constraints,
                     build_isolation=self.build_isolation,
-                ).caller() as (caller, _),
+                ).caller() as (caller, env_path),
                 caller.subprocess_runner(call_subprocess),
             ):
+                if (
+                    validate_metadata_first
+                    and not editable
+                    and read_legacy_metadata(self.source_dir) is None
+                ):
+                    # build_wheel() wants to fail fast on bad metadata
+                    # before paying for the full build below, the same as
+                    # calling prepare_metadata() first used to -- but
+                    # through this same environment instead of a second
+                    # one, since its result here is validation-only and
+                    # discarded either way. A backend that skips this
+                    # optional hook is not a failure: the real build_wheel
+                    # call below is authoritative regardless.
+                    preflight_path = os.path.join(env_path, "metadata-preflight")
+
+                    os.mkdir(preflight_path)
+
+                    try:
+                        caller.prepare_metadata_for_build_wheel(preflight_path)
+
+                    except HookMissing:
+                        pass
+
                 if editable:
                     wheel_name = caller.build_editable(
                         os.fspath(wheel_directory),
@@ -724,8 +654,24 @@ class ProjectBuilder:
 
         return wheel_name
 
-    def prepare_metadata(self, *, editable: bool = False) -> ProjectMetadata:
-        """Read metadata through the project's declared build backend."""
+    def prepare_metadata(
+        self,
+        *,
+        editable: bool = False,
+        on_wheel_built: Callable[[str], None] | None = None,
+    ) -> ProjectMetadata:
+        """Read metadata through the project's declared build backend.
+
+        A backend without the optional ``prepare_metadata_for_build_wheel``/
+        ``prepare_metadata_for_build_editable`` hook forces the fallback
+        below to build a full wheel just to read its METADATA file back out
+        -- real, complete build output that would otherwise be thrown away
+        the moment its temporary directory closes. ``on_wheel_built``, when
+        given, is called with that wheel's path while it still exists, so a
+        caller that already knows this candidate might get built for real
+        later (resolution, not a one-off metadata read) can persist it
+        somewhere a later build can find.
+        """
 
         # Source distributions commonly carry the exact metadata generated at
 
@@ -778,6 +724,9 @@ class ProjectBuilder:
 
                                 wheel_path = os.path.join(wheel_directory, wheel_name)
 
+                                if on_wheel_built is not None:
+                                    on_wheel_built(wheel_path)
+
                                 with zipfile.ZipFile(wheel_path) as wheel:
                                     metadata_name = next(
                                         name
@@ -807,6 +756,9 @@ class ProjectBuilder:
 
                                 wheel_path = os.path.join(wheel_directory, wheel_name)
 
+                                if on_wheel_built is not None:
+                                    on_wheel_built(wheel_path)
+
                                 with zipfile.ZipFile(wheel_path) as wheel:
                                     metadata_name = next(
                                         name
@@ -829,6 +781,9 @@ class ProjectBuilder:
                         assert wheel_name is not None
 
                         wheel_path = os.path.join(wheel_directory, wheel_name)
+
+                        if on_wheel_built is not None:
+                            on_wheel_built(wheel_path)
 
                         with zipfile.ZipFile(wheel_path) as wheel:
                             metadata_name = next(
@@ -882,15 +837,19 @@ def prepare_project_metadata(
     editable: bool = False,
     build_constraints: list[str] | None = None,
     build_isolation: bool = True,
+    on_wheel_built: Callable[[str], None] | None = None,
 ) -> ProjectMetadata:
-    """Read metadata through the project's declared PEP 517 backend."""
+    """Read metadata through the project's declared PEP 517 backend.
+
+    See ``ProjectBuilder.prepare_metadata`` for ``on_wheel_built``.
+    """
 
     try:
         return ProjectBuilder(
             source_dir,
             build_constraints=build_constraints,
             build_isolation=build_isolation,
-        ).prepare_metadata(editable=editable)
+        ).prepare_metadata(editable=editable, on_wheel_built=on_wheel_built)
 
     except BuildError as exc:
         if build_isolation and "Cannot import 'setuptools.build_meta'" in str(exc):
@@ -898,74 +857,9 @@ def prepare_project_metadata(
                 source_dir,
                 build_constraints=build_constraints,
                 build_isolation=False,
-            ).prepare_metadata(editable=editable)
+            ).prepare_metadata(editable=editable, on_wheel_built=on_wheel_built)
 
         raise
-
-
-def load_project_backend(source_dir: str | os.PathLike[str]) -> object | None:
-    pyproject_path = os.path.join(os.fspath(source_dir), "pyproject.toml")
-
-    try:
-        with open(pyproject_path, encoding="utf-8") as file:
-            data = tomllib.loads(file.read())
-
-    except OSError:
-        return None
-
-    build_system = data.get("build-system")
-
-    if not isinstance(build_system, dict):
-        return None
-
-    backend_name = build_system.get("build-backend")
-
-    if not isinstance(backend_name, str) or backend_name.startswith(
-        "setuptools.build_meta",
-    ):
-        return None
-
-    if backend_name in {"cpip.build.build_backend", "uv_build"}:
-        return None
-
-    backend_path = build_system.get("backend-path", [])
-
-    import_paths = backend_paths(source_dir, backend_path)
-
-    module_name, _, object_path = backend_name.partition(":")
-
-    with backend_import_path(import_paths):
-        importlib.invalidate_caches()
-
-        sys.modules.pop(module_name, None)
-
-        backend: object = importlib.import_module(module_name)
-
-    for attribute in object_path.split("."):
-        if attribute:
-            backend = getattr(backend, attribute)
-
-    return backend
-
-
-def backend_paths(
-    source_dir: str | os.PathLike[str],
-    paths: tuple[str, ...],
-) -> tuple[str, ...]:
-    source_text = os.fspath(source_dir)
-
-    return tuple(os.path.realpath(os.path.join(source_text, path)) for path in paths)
-
-
-@contextlib.contextmanager
-def backend_import_path(paths: tuple[str, ...]) -> Iterator[None]:
-    sys.path[:0] = list(paths)
-
-    try:
-        yield
-
-    finally:
-        del sys.path[: len(paths)]
 
 
 @contextlib.contextmanager
@@ -1365,7 +1259,11 @@ def read_legacy_metadata(
 
             current_key, value = line.split(":", 1)
 
-            fields.setdefault(current_key, []).append(value.strip())
+            values = fields.get(current_key)
+            if values is None:
+                values = []
+                fields[current_key] = values
+            values.append(value.strip())
 
         name = fields.get("Name", [None])[0]
 

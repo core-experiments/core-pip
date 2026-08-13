@@ -66,6 +66,11 @@ REQ_NAME_RE = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)")
 
 SPEC_RE = re.compile(r"(===|==|!=|~=|<=|>=|<|>)\s*([^,]+)")
 
+# frozenset(), unlike (), is not a singleton -- every call allocates. Most
+# requirements have no extras, so this constant is reused instead of paying
+# for a fresh empty frozenset on every one of them.
+EMPTY_FROZENSET: frozenset[str] = frozenset()
+
 
 def canonicalize_version(version: str) -> str:
     """Return the normalized public form of a PEP 440 version."""
@@ -77,10 +82,15 @@ def safe_extra(extra: str) -> str:
     return canonicalize_name(extra)
 
 
+@lru_cache(maxsize=8)
 def default_environment(extra: str | None = None) -> dict[str, str]:
     # Only reached when a requirement actually carries an environment
     # marker (see marker_applies' early exit), so keep it off the far more
-    # common marker-free parse's import cost.
+    # common marker-free parse's import cost. Every field but "extra" is
+    # fixed for the life of the process, so a cache miss only ever pays
+    # the platform-module cost once per distinct `extra` value seen
+    # (currently always None -- _marker_applies_cached reads "extra" from
+    # its own extras set, not this dict's field).
     import platform
 
     impl = platform.python_implementation()
@@ -905,7 +915,7 @@ def parse_requirement(value: str) -> Requirement:
 
             return Requirement(
                 name=name,
-                extras=frozenset(),
+                extras=EMPTY_FROZENSET,
                 specifier=specifier,
                 url=raw if looks_like_url(raw) else None,
                 marker=None,
@@ -925,7 +935,7 @@ def parse_requirement(value: str) -> Requirement:
 
         return Requirement(
             name=name,
-            extras=frozenset(),
+            extras=EMPTY_FROZENSET,
             specifier=SpecifierSet(),
             url=raw if looks_like_url(raw) else None,
             marker=None,
@@ -943,7 +953,7 @@ def parse_requirement(value: str) -> Requirement:
 
     rest = req_part[name_match.end() :].strip()
 
-    extras: frozenset[str] = frozenset()
+    extras: frozenset[str] = EMPTY_FROZENSET
 
     if rest.startswith("["):
         end = rest.find("]")
@@ -1072,7 +1082,7 @@ def egg_fragment_internal(value: str) -> tuple[str | None, frozenset[str]]:
     fragment = urllib.parse.urlparse(value).fragment
 
     if not fragment:
-        return None, frozenset()
+        return None, EMPTY_FROZENSET
 
     for key, raw_name in urllib.parse.parse_qsl(fragment, keep_blank_values=True):
         if key != "egg" or not raw_name:
@@ -1080,7 +1090,7 @@ def egg_fragment_internal(value: str) -> tuple[str | None, frozenset[str]]:
 
         name = urllib.parse.unquote(raw_name)
 
-        extras: frozenset[str] = frozenset()
+        extras: frozenset[str] = EMPTY_FROZENSET
 
         if "[" in name and name.endswith("]"):
             name, extras_text = name[:-1].split("[", 1)
@@ -1094,7 +1104,7 @@ def egg_fragment_internal(value: str) -> tuple[str | None, frozenset[str]]:
         if REQ_NAME_RE.fullmatch(name):
             return name, extras
 
-    return None, frozenset()
+    return None, EMPTY_FROZENSET
 
 
 def split_marker(value: str) -> tuple[str, str | None]:

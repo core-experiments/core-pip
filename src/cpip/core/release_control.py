@@ -8,17 +8,15 @@ RELEASE_CONTROL_SENTINELS = frozenset((":all:", ":none:"))
 
 
 class ReleaseControl:
-    __slots__ = ("all_releases", "only_final", "ordered_args")
+    __slots__ = ("all_releases", "only_final")
 
     def __init__(
         self,
         all_releases: set[str] | None = None,
         only_final: set[str] | None = None,
-        ordered_args: list[tuple[str, str]] | None = None,
     ) -> None:
         self.all_releases = all_releases if all_releases is not None else set()
         self.only_final = only_final if only_final is not None else set()
-        self.ordered_args = ordered_args if ordered_args is not None else []
 
     def apply(self, kind: str, value: str) -> None:
         if kind not in RELEASE_CONTROL_KINDS:
@@ -30,8 +28,6 @@ class ReleaseControl:
         entries = [item.strip() for item in value.split(",") if item.strip()]
         if not entries:
             return
-        if kind not in RELEASE_CONTROL_KINDS:
-            raise ValueError(f"unknown release control kind: {kind}")
         target = self.all_releases if kind == "all_releases" else self.only_final
         opposite = self.only_final if kind == "all_releases" else self.all_releases
         for entry in entries:
@@ -40,7 +36,6 @@ class ReleaseControl:
                 if entry not in RELEASE_CONTROL_SENTINELS
                 else entry
             )
-            self.ordered_args.append((kind, normalized))
             if normalized == ":none:":
                 target.clear()
                 continue
@@ -63,15 +58,3 @@ class ReleaseControl:
         if ":all:" in self.all_releases:
             return True
         return None
-
-    def get_ordered_args(self) -> list[tuple[str, str]]:
-        return list(self.ordered_args)
-
-    def handle_mutual_excludes(
-        self,
-        value: str,
-        target: set[str],
-        other: set[str],
-        attr_name: str,
-    ) -> None:
-        self.apply(attr_name, value)

@@ -12,7 +12,7 @@ from cpip.index.candidate_materialization import (
 from cpip.index.links import Link
 from cpip.index.source_models import CandidateRecord
 from cpip.install.output import (
-    finalize_candidates,
+    _run_candidate_operation,
     prepare_install_candidates,
 )
 
@@ -31,7 +31,7 @@ def remote_candidate(name: str, version: str = "1.0") -> LazyWheelCandidate:
     return LazyWheelCandidate(record, requirement, CandidateMaterializer())
 
 
-def test_finalize_candidates_runs_remote_wheels_concurrently_in_order() -> None:
+def test_run_candidate_operation_runs_remote_wheels_concurrently_in_order() -> None:
     candidates = [remote_candidate(f"demo-{index}") for index in range(3)]
     lock = threading.Lock()
     all_started = threading.Event()
@@ -54,13 +54,13 @@ def test_finalize_candidates_runs_remote_wheels_concurrently_in_order() -> None:
             active -= 1
         return candidate
 
-    result = finalize_candidates(candidates, finalize)
+    result = _run_candidate_operation(candidates, finalize)
 
     assert all(result is candidate for result, candidate in zip(result, candidates))
     assert peak == len(candidates)
 
 
-def test_finalize_candidates_keeps_source_artifacts_on_calling_thread() -> None:
+def test_run_candidate_operation_keeps_source_artifacts_on_calling_thread() -> None:
     requirement = parse_requirement("demo==1.0")
     assert requirement is not None
     source = LazyWheelCandidate(
@@ -83,7 +83,7 @@ def test_finalize_candidates_keeps_source_artifacts_on_calling_thread() -> None:
         worker = threading.current_thread()
         return candidate
 
-    result = finalize_candidates([source], finalize)
+    result = _run_candidate_operation([source], finalize)
 
     assert len(result) == 1
     assert result[0] is source

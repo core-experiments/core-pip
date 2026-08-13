@@ -171,18 +171,10 @@ def open_wheel_archive(
 
         return zipfile.ZipFile(path)
 
-    members = None
-
-    if members is not None and any(
-        member[0] not in {0, 8} or member[2] > 1024 * 1024
-        for member in members.values()
-    ):
-        return zipfile.ZipFile(path)
-
     try:
         file = open(path, "rb")
 
-        archive = WheelArchive(file, members=members)
+        archive = WheelArchive(file)
 
     except (OSError, ValueError, WheelhouseUnavailable):
         try:

@@ -7,7 +7,6 @@ import posixpath
 import re
 import stat
 import urllib.parse
-from enum import Enum
 
 from cpip.core.errors import DiagnosticCpipError
 from cpip.core.hashes import Hashes
@@ -17,8 +16,7 @@ from cpip.core.urls import (
     split_auth_from_netloc,
     url_to_path,
 )
-from cpip.index.datetime import parse_iso_datetime
-from cpip.index.hashes import SUPPORTED_HASHES, supported_hashes
+from cpip.index.hashes import SUPPORTED_HASHES
 from cpip.index.paths import PathComponent
 from cpip.index.source_models import ArtifactKind, MetadataFile
 
@@ -26,7 +24,6 @@ TYPE_CHECKING = False
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
-    from typing import Any
 
 VCS_SCHEMES_internal = tuple(f"{scheme}+" for scheme in ("git", "hg", "svn", "bzr"))
 VCS_SCHEMES = frozenset(("git", "hg", "svn", "bzr"))
@@ -40,6 +37,7 @@ SOURCE_ARCHIVE_SUFFIXES = (
 )
 WHEEL_EXTENSION = ".whl"
 SUPPORTED_EXTENSIONS = (WHEEL_EXTENSION, *SOURCE_ARCHIVE_SUFFIXES)
+
 REQ_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 EGG_FRAGMENT_RE = re.compile(r"[#&]egg=([^&]*)")
 HASH_URL_FRAGMENT_RE = re.compile(
@@ -49,7 +47,7 @@ HASH_URL_FRAGMENT_RE = re.compile(
 )
 
 
-@functools.cache
+@functools.lru_cache(maxsize=4096)
 def hash_from_url_fragment(url: str) -> tuple[str, str] | None:
     match = HASH_URL_FRAGMENT_RE.search(url)
     return match.groups() if match is not None else None  # ty:ignore[invalid-return-type]
@@ -62,61 +60,6 @@ class InvalidEggFragment(DiagnosticCpipError):
 
     def __init__(self, message: str, *, hint_stmt: str = "") -> None:
         super().__init__(message=message, hint_stmt=hint_stmt)
-
-
-def clean_url_path_part(part: str) -> str:
-    return urllib.parse.quote(urllib.parse.unquote(part))
-
-
-def clean_file_url_path(part: str) -> str:
-    if os.name == "nt":
-        from urllib import request
-
-        ret = request.pathname2url(request.url2pathname(part))
-    else:
-        ret = urllib.parse.quote(urllib.parse.unquote(part), safe="/:")
-    if ret.startswith("///"):
-        ret = ret.removeprefix("//")
-    return ret
-
-
-reserved_chars_re = re.compile(r"(@|%2F)", re.IGNORECASE)
-
-
-def clean_url_path(path: str, is_local_path: bool) -> str:
-    clean_func = clean_file_url_path if is_local_path else clean_url_path_part
-    parts = reserved_chars_re.split(path)
-    cleaned: list[str] = []
-    for to_clean, reserved in zip(parts[::2], parts[1::2] + [""]):
-        cleaned.extend((clean_func(to_clean), reserved.upper()))
-    return "".join(cleaned)
-
-
-def ensure_quoted_url(url: str) -> str:
-    result = urllib.parse.urlsplit(url)
-    path = clean_url_path(result.path, is_local_path=not result.netloc)
-    ret = urllib.parse.urlunsplit(result._replace(scheme="file", path=path))
-    return result.scheme + ret[4:]
-
-
-def absolute_link_url(base_url: str, url: str) -> str:
-    return (
-        url
-        if url.startswith(("https://", "http://"))
-        else urllib.parse.urljoin(base_url, url)
-    )
-
-
-class LinkType(Enum):
-    candidate = "candidate"
-    format_unsupported = "format-unsupported"
-    format_invalid = "format-invalid"
-    different_project = "different-project"
-    requires_python_mismatch = "requires-python-mismatch"
-    yanked = "yanked"
-    platform_mismatch = "platform-mismatch"
-    upload_too_late = "upload-too-late"
-    upload_time_missing = "upload-time-missing"
 
 
 @functools.total_ordering
@@ -306,83 +249,6 @@ class Link:
             local_is_dir_internal=is_dir,
         )
 
-    @classmethod
-    def from_element(
-        cls,
-        attrs: dict[str, str | None],
-        page_url: str,
-        base_url: str,
-    ) -> Link | None:
-        href = attrs.get("href")
-        if not href:
-            return None
-        url = ensure_quoted_url(absolute_link_url(base_url, href))
-        metadata_info = attrs.get("data-core-metadata")
-        if metadata_info is None:
-            metadata_info = attrs.get("data-dist-info-metadata")
-        if metadata_info == "true":
-            metadata = MetadataFile(None)
-        elif metadata_info is None:
-            metadata = None
-        else:
-            name, sep, value = metadata_info.partition("=")
-            metadata = (
-                MetadataFile(supported_hashes({name: value}))
-                if sep
-                else MetadataFile(None)
-            )
-        upload_time_value = attrs.get("data-upload-time")
-        upload_time = (
-            parse_iso_datetime(upload_time_value) if upload_time_value else None
-        )
-        return cls(
-            url,
-            comes_from=page_url,
-            requires_python=attrs.get("data-requires-python"),
-            yanked_reason=attrs.get("data-yanked"),
-            metadata_file_data=metadata,
-            upload_time=upload_time,
-            text=attrs.get("text") or "",
-        )
-
-    @classmethod
-    def from_json(cls, file_data: dict[str, Any], page_url: str) -> Link | None:
-        file_url = file_data.get("url")
-        if file_url is None:
-            return None
-        absolute = ensure_quoted_url(absolute_link_url(page_url, file_url))
-        requires_python = file_data.get("requires-python")
-        yanked = file_data.get("yanked")
-        hashes = file_data.get("hashes", {})
-        metadata_info = file_data.get("core-metadata")
-        if metadata_info is None:
-            metadata_info = file_data.get("dist-info-metadata")
-        if isinstance(metadata_info, dict):
-            metadata = MetadataFile(supported_hashes(metadata_info))
-        elif metadata_info:
-            metadata = MetadataFile(None)
-        else:
-            metadata = None
-        upload_time = (
-            parse_iso_datetime(file_data["upload-time"])
-            if file_data.get("upload-time")
-            else None
-        )
-        return cls(
-            absolute,
-            comes_from=page_url,
-            requires_python=requires_python
-            if isinstance(requires_python, str)
-            else None,
-            yanked_reason=""
-            if yanked and not isinstance(yanked, str)
-            else (yanked or None),
-            metadata_file_data=metadata,
-            upload_time=upload_time,
-            hashes=hashes if isinstance(hashes, dict) else None,
-            text=str(file_data.get("filename") or ""),
-        )
-
     @property
     def metadata_file(self) -> MetadataFile | None:
         return self.metadata_file_data
@@ -531,9 +397,6 @@ class Link:
     @property
     def has_hash(self) -> bool:
         return bool(self.hashes_internal)
-
-    def as_hashes(self) -> Hashes:
-        return Hashes({name: [value] for name, value in self.hashes_internal.items()})
 
     def egg_fragment_internal(self) -> str | None:
         url = self.url

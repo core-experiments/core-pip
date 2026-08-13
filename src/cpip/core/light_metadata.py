@@ -90,7 +90,11 @@ def _parse_metadata_text(text: str) -> LightMetadata:
             key, separator, value = line.partition(":")
             current_key = key.strip().lower() if separator else None
             if current_key is not None:
-                fields.setdefault(current_key, []).append(value.strip())
+                values = fields.get(current_key)
+                if values is None:
+                    values = []
+                    fields[current_key] = values
+                values.append(value.strip())
         position = line_end + 1
     return LightMetadata(fields, text[position:])
 

@@ -94,7 +94,7 @@ class ResolutionEngine:
     ) -> ResolutionResult:
         from cpip._vendor.nab_resolver.resolver import Resolver
 
-        requirements = coerce_requirements(self, requirements_input)
+        requirements = coerce_requirements(requirements_input)
         adapter = NabProvider(self.provider, context=self.config)
         roots = adapter.add_roots(requirements)
         resolver = Resolver(adapter, root_version="0")
@@ -176,7 +176,6 @@ class ResolutionEngine:
         find_links: list[str],
         requirements: list[str],
         *,
-        cache_dir: str | None = None,
         constraints: list[str] | None = None,
     ) -> ResolutionResult | None:
         """Resolve a local wheel directory through the normal nab path."""

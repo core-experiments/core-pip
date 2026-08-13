@@ -1,3 +1,16 @@
+"""Shared sdist/wheel construction helpers for tests.
+
+Consolidated from what were three near-identical copies
+(tests/cli/functional/wheel_helpers.py, tests/index/wheel_helpers.py,
+tests/resolution/wheel_helpers.py) that had drifted via independent small
+feature additions: wheel_version and a standalone (non-cpip) fake PEP 517
+backend, both needed by tests/index/'s tests; an unused provides_extra
+parameter and an entirely unused copy in tests/resolution/ -- nothing
+imported it, tests/resolution/test_forward_check.py gets make_wheel from
+tests/benchmarks/benchmark_support.py instead via a sys.path insert.
+provides_extra wasn't carried forward here since nothing calls it.
+"""
+
 from __future__ import annotations
 
 import base64
@@ -61,7 +74,17 @@ def make_sdist(
     *,
     requires: list[str] | None = None,
     backend: bool = False,
+    standalone_backend: bool = False,
 ) -> Path:
+    """Write a source distribution.
+
+    ``backend=True`` declares a build backend that imports cpip's own
+    ``build_wheel`` entry point (exercising cpip's PEP 517 entry point as
+    an external backend). ``standalone_backend=True`` instead writes a
+    fully self-contained fake backend with no cpip dependency at all
+    (exercising cpip's *client* side against an arbitrary third-party
+    backend). The two are mutually exclusive.
+    """
     dist_name = project.replace("-", "_")
     root = dist_dir / f"{dist_name}-{version}"
     package = root / import_name
@@ -72,37 +95,43 @@ def make_sdist(
     )
     dependencies = "\n".join(f'    "{requirement}",' for requirement in requires or [])
     pyproject_lines = []
-    if backend:
+    if backend or standalone_backend:
         backend_dir = root / "backend"
         backend_dir.mkdir()
-        backend_dir.joinpath("local_backend.py").write_text(
-            "\n".join(
-                [
-                    "from pathlib import Path",
-                    "import zipfile",
-                    "",
-                    "def build_wheel(\n"
-                    "    wheel_directory, config_settings=None, "
-                    "metadata_directory=None\n"
-                    "): ",
-                    f'    name = "{dist_name}-{version}-py3-none-any.whl"',
-                    "    dist_info = name.removesuffix('.whl') + '.dist-info'",
-                    "    target = Path(wheel_directory) / name",
-                    "    with zipfile.ZipFile(target, 'w') as archive:",
-                    f'        archive.writestr("{import_name}/__init__.py", '
-                    f'"NAME = {project!r}\\n")',
-                    '        archive.writestr(dist_info + "/METADATA", '
-                    f'"Metadata-Version: 2.1\\nName: {project}\\n"'
-                    f'"Version: {version}\\n")',
-                    '        archive.writestr(dist_info + "/WHEEL", '
-                    '"Wheel-Version: 1.0\\nTag: py3-none-any\\n")',
-                    '        archive.writestr(dist_info + "/RECORD", "")',
-                    "    return name",
-                    "",
-                ],
-            ),
-            encoding="utf-8",
-        )
+        if standalone_backend:
+            backend_dir.joinpath("local_backend.py").write_text(
+                "\n".join(
+                    [
+                        "from pathlib import Path",
+                        "import zipfile",
+                        "",
+                        "def build_wheel(\n"
+                        "    wheel_directory, config_settings=None, "
+                        "metadata_directory=None\n"
+                        "): ",
+                        f'    name = "{dist_name}-{version}-py3-none-any.whl"',
+                        "    dist_info = name.removesuffix('.whl') + '.dist-info'",
+                        "    target = Path(wheel_directory) / name",
+                        "    with zipfile.ZipFile(target, 'w') as archive:",
+                        f'        archive.writestr("{import_name}/__init__.py", '
+                        f'"NAME = {project!r}\\n")',
+                        '        archive.writestr(dist_info + "/METADATA", '
+                        f'"Metadata-Version: 2.1\\nName: {project}\\n"'
+                        f'"Version: {version}\\n")',
+                        '        archive.writestr(dist_info + "/WHEEL", '
+                        '"Wheel-Version: 1.0\\nTag: py3-none-any\\n")',
+                        '        archive.writestr(dist_info + "/RECORD", "")',
+                        "    return name",
+                        "",
+                    ],
+                ),
+                encoding="utf-8",
+            )
+        else:
+            backend_dir.joinpath("local_backend.py").write_text(
+                "from cpip.build.build_backend import build_wheel\n",
+                encoding="utf-8",
+            )
         pyproject_lines.extend(
             [
                 "[build-system]",

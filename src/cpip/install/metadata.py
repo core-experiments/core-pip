@@ -22,16 +22,12 @@ from cpip.core.urls import path_to_url, url_to_path
 from cpip.core.utils import CURRENT_PYTHON_VERSION_FULL
 from cpip.index.artifacts import ArtifactLocator
 from cpip.index.links import Link
-from cpip.install.build_env.base import BuildEnvironmentInstaller, BuildIsolationMode
-from cpip.install.source import SourceMetadataPreparation
 from cpip.resolution.input_requirements import install_req_from_editable
 from cpip.vcs.versioncontrol import vcs
 
 TYPE_CHECKING = False
 
 if TYPE_CHECKING:
-    from typing import Any
-
     from cpip.build.build_backend import ProjectMetadata
     from cpip.resolution.req_install import InstallRequirement
 
@@ -70,54 +66,6 @@ class MetadataInvalid(InstallationError):
 
     def __str__(self) -> str:
         return f"Requested {self.ireq} has invalid metadata: {self.error}"
-
-
-class DistributionPreparer:
-    """Build or read metadata for requirements using one build policy."""
-
-    def __init__(
-        self,
-        build_tracker: Any,
-        build_env_installer: BuildEnvironmentInstaller,
-        build_isolation: BuildIsolationMode,
-        check_build_deps: bool,
-    ) -> None:
-        self.build_tracker = build_tracker
-        self.build_env_installer = build_env_installer
-        self.build_isolation = build_isolation
-        self.check_build_deps = check_build_deps
-
-    def prepare(self, req: InstallRequirement) -> MetadataView:
-        """Build or read distribution metadata for an install requirement."""
-        if req.editable or not req.is_wheel:
-            link = req.link
-            if link is None:
-                raise AssertionError("source requirement is missing its link")
-
-            with self.build_tracker.track(req, link.url_without_fragment):
-                req.load_pyproject_toml()
-                SourceMetadataPreparation(req).prepare(
-                    self.build_env_installer,
-                    self.build_isolation,
-                    self.check_build_deps,
-                )
-
-            distribution = req.distribution_internal
-            if distribution is None:
-                directory = req.metadata_directory
-                if directory is None:
-                    raise AssertionError("source requirement has no prepared metadata")
-                distribution = MetadataDistribution.from_directory(directory)
-                req.set_dist(distribution)
-
-            return distribution  # ty:ignore[invalid-return-type]
-
-        path = req.local_file_path
-        name = req.name
-        if not path or not name:
-            raise AssertionError("wheel requirement is missing its local path or name")
-
-        return MetadataDistribution.from_wheel(path, name)
 
 
 def canonical_requires(

@@ -24,7 +24,7 @@ from cpip.core.packaging import (
     parse_requirement,
 )
 from cpip.index.links import Link
-from cpip.build.backend import ConfiguredBuildBackend
+from cpip.build.pep517_hooks import BuildBackendHookCaller, HookMissing
 from cpip.resolution.input_paths import looks_like_path
 
 if TYPE_CHECKING:
@@ -176,7 +176,7 @@ class InstallRequirement:
         requirements_to_check: list[str] | None = None,
         metadata_directory: str | None = None,
         pyproject_data: dict[str, object] | None = None,
-        pep517_backend: ConfiguredBuildBackend | None = None,
+        pep517_backend: BuildBackendHookCaller | None = None,
         should_reinstall: bool = False,
         install_succeeded: bool | None = None,
     ) -> None:
@@ -321,7 +321,11 @@ class InstallRequirement:
         link = self.link if trust_internet else None
 
         if link is not None and link.hash and link.hash_name:
-            values.setdefault(link.hash_name, []).append(link.hash)
+            existing = values.get(link.hash_name)
+            if existing is None:
+                values[link.hash_name] = [link.hash]
+            else:
+                existing.append(link.hash)
 
         return Hashes(values)
 
@@ -339,33 +343,16 @@ class InstallRequirement:
     def match_markers(self, extras_requested: Iterable[str] = ()) -> bool:
         return marker_applies(self.markers, extras=extras_requested)
 
-    def ensure_build_location(
-        self,
-        parent_dir: str,
-        *,
-        autodelete: bool,
-        parallel_builds: bool,
-    ) -> str:
-        del autodelete, parallel_builds
-
+    def ensure_build_location(self, parent_dir: str) -> str:
         root = os.path.realpath(os.path.dirname(parent_dir))
 
         return tempfile.mkdtemp("-build", "cpip-", dir=root)
 
-    def ensure_has_source_dir(
-        self,
-        parent_dir: str,
-        autodelete: bool = False,
-        parallel_builds: bool = False,
-    ) -> None:
+    def ensure_has_source_dir(self, parent_dir: str) -> None:
         """Allocate the source directory used while preparing this requirement."""
 
         if self.source_dir is None:
-            self.source_dir = self.ensure_build_location(
-                parent_dir,
-                autodelete=autodelete,
-                parallel_builds=parallel_builds,
-            )
+            self.source_dir = self.ensure_build_location(parent_dir)
 
     def needs_unpacked_archive(self, archive_source: str | os.PathLike[str]) -> None:
         if self.archive_source_internal is not None:
@@ -636,10 +623,10 @@ class InstallRequirement:
         if backend is None:
             backend = "setuptools.build_meta:__legacy__"
 
-        self.pep517_backend = ConfiguredBuildBackend(
-            source_dir=self.source_dir,
-            backend=backend,
-            backend_path=backend_path,
+        self.pep517_backend = BuildBackendHookCaller(
+            self.source_dir,
+            backend,
+            backend_path=list(backend_path),
             python_executable=os.fspath(python_executable),
         )
 
@@ -659,17 +646,28 @@ class InstallRequirement:
 
         metadata_root = tempfile.mkdtemp(prefix="cpip-modern-metadata-")
 
-        hook = (
-            "prepare_metadata_for_build_editable"
-            if self.editable and self.permit_editable_wheels
-            else "prepare_metadata_for_build_wheel"
-        )
+        editable = self.editable and self.permit_editable_wheels
 
-        metadata_name = self.pep517_backend.call_hook(
-            hook,
-            metadata_root,
-            self.config_settings,
-        )
+        try:
+            if editable:
+                metadata_name = self.pep517_backend.prepare_metadata_for_build_editable(
+                    metadata_root,
+                    config_settings=self.config_settings,
+                )
+            else:
+                metadata_name = self.pep517_backend.prepare_metadata_for_build_wheel(
+                    metadata_root,
+                    config_settings=self.config_settings,
+                )
+        except HookMissing as exc:
+            hook_name = (
+                "prepare_metadata_for_build_editable"
+                if editable
+                else "prepare_metadata_for_build_wheel"
+            )
+            raise InstallationError(
+                f"Build backend for {self} is missing the required '{hook_name}' hook",
+            ) from exc
 
         self.metadata_directory = os.path.join(metadata_root, str(metadata_name))
 

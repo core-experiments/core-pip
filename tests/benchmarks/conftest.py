@@ -17,6 +17,7 @@ from benchmark_support import (
     make_nab_deep_backjump_family,
     make_nab_pip_backtracking_family,
     make_nab_smoke_fixture,
+    make_sdist,
     make_source_tree,
     make_stress_graph,
     make_wheel,
@@ -65,6 +66,36 @@ def wrong_package_wheelhouses(
     ):
         wheelhouse = tmp_path_factory.mktemp(f"{name}-wheelhouse")
         make_wrong_package_graph(wheelhouse, name, versions=64)
+        cases[name] = wheelhouse
+    return cases
+
+
+@pytest.fixture(scope="session")
+def catastrophic_wheelhouses(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> dict[str, Path]:
+    """The same wrong-package families, sized to their real PyPI release counts.
+
+    ``wrong_package_wheelhouses`` models these at a fixed 64 versions for a
+    fast regression signal. This models the same reported incidents
+    (https://github.com/astral-sh/uv/issues/8157) at the scale that actually
+    made them notable, from live PyPI release counts recorded 2026-08-12:
+    boto3 2093 / botocore 2491, numpy 150 / numba 136 / llvmlite 73,
+    python-rapidjson 66 / sentry-kafka-schemas 246, starlette 202 /
+    fastapi 317, apache-beam 108 / dill 30. ``make_wrong_package_graph``
+    takes one version count for the whole family, so each case uses the
+    larger of its two real package's counts, rounded for a clean number.
+    """
+    cases = {}
+    for name, versions in (
+        ("boto3-urllib3", 2048),
+        ("numpy-numba", 150),
+        ("sentry-rapidjson", 256),
+        ("starlette-fastapi", 320),
+        ("apache-beam-dill", 108),
+    ):
+        wheelhouse = tmp_path_factory.mktemp(f"catastrophic-{name}-wheelhouse")
+        make_wrong_package_graph(wheelhouse, name, versions=versions)
         cases[name] = wheelhouse
     return cases
 
@@ -200,6 +231,25 @@ def extras_marker_wheelhouse(tmp_path_factory: pytest.TempPathFactory) -> Path:
 def payload_wheel(tmp_path_factory: pytest.TempPathFactory) -> Path:
     wheelhouse = tmp_path_factory.mktemp("payload-wheelhouse")
     return make_wheel(wheelhouse, "payload-pkg", "1.0.0", payload_files=300)
+
+
+@pytest.fixture(scope="session")
+def many_files_wheel(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """A 10,000-file wheel, matching uv's ``MANY_FILES_WHEEL_FILE_COUNT``
+    (crates/uv-bench/benches/uv.rs) -- an order of magnitude past
+    ``payload_wheel``'s 300 files, large enough that per-member archive
+    overhead (open/read/write syscalls, archive-reader selection) dominates
+    instead of being swamped by fixed per-call cost.
+    """
+    wheelhouse = tmp_path_factory.mktemp("many-files-wheelhouse")
+    return make_wheel(wheelhouse, "many-files-pkg", "1.0.0", payload_files=10_000)
+
+
+@pytest.fixture(scope="session")
+def many_files_sdist(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """A 10,000-file sdist, matching uv's ``MANY_FILES_SDIST_FILE_COUNT``."""
+    wheelhouse = tmp_path_factory.mktemp("many-files-sdisthouse")
+    return make_sdist(wheelhouse, "many-files-pkg", "1.0.0", payload_files=10_000)
 
 
 @pytest.fixture(scope="session")

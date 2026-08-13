@@ -22,11 +22,6 @@ def looks_like_path(value: str) -> bool:
     )
 
 
-def get_url_from_path(path: str, name: str) -> str | None:
-    url, _ = get_url_from_path_with_mode(path, name)
-    return url
-
-
 def get_url_from_path_with_mode(
     path: str,
     name: str,

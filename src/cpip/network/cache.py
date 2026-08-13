@@ -6,7 +6,6 @@ import hashlib
 import os
 import shutil
 from contextlib import contextmanager
-from datetime import datetime
 
 from cpip.core.utils import ensure_dir
 from cpip.platform.filesystem import (
@@ -56,9 +55,12 @@ class SafeFileCache:
         self.directory = directory
 
     def get_cache_path(self, name: str) -> str:
+        # Called on every cache lookup/store. Unpacking the digest's first 5
+        # characters directly (a str is iterable) gets the same one-char-per
+        # path-segment fan-out as list(hashed[:5]) + [hashed] without
+        # building either intermediate list.
         hashed = hashlib.sha224(name.encode()).hexdigest()
-        parts = list(hashed[:5]) + [hashed]
-        return os.path.join(self.directory, *parts)
+        return os.path.join(self.directory, *hashed[:5], hashed)
 
     def get(self, key: str) -> bytes | None:
         # The cache entry is only valid if both metadata and body exist.
@@ -112,12 +114,7 @@ class SafeFileCache:
     def write_from_io(self, path: str, source_file: BinaryIO) -> None:
         self.write_to_file(path, lambda f: shutil.copyfileobj(source_file, f))
 
-    def set(
-        self,
-        key: str,
-        value: bytes,
-        expires: int | datetime | None = None,
-    ) -> None:
+    def set(self, key: str, value: bytes) -> None:
         path = self.get_cache_path(key)
         self.write_internal(path, value)
 

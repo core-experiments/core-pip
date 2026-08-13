@@ -54,14 +54,7 @@ def cached_wheel_for_link(
     if wheel_cache_dir is None:
         return None
 
-    digest = hashlib.sha256(cache_identity(url).encode("utf-8")).hexdigest()
-
-    entry_dir_text = os.path.join(
-        os.fspath(wheel_cache_dir),
-        digest[:2],
-        digest[2:4],
-        digest,
-    )
+    entry_dir_text = wheel_cache_path(os.fspath(wheel_cache_dir), cache_identity(url))
 
     try:
         with os.scandir(entry_dir_text) as entries:

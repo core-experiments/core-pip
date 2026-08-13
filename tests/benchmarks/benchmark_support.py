@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import io
 import itertools
 import json
+import tarfile
 import tempfile
 import zipfile
 from pathlib import Path
@@ -69,6 +71,46 @@ def make_wheel(
             f"{dist_info}/RECORD",
             "\n".join(",".join(row) for row in rows) + "\n",
         )
+    return path
+
+
+def make_sdist(
+    wheelhouse: Path,
+    project: str,
+    version: str,
+    *,
+    payload_files: int = 0,
+) -> Path:
+    """Write a synthetic sdist tar.gz with an optional many-file payload.
+
+    Mirrors uv's ``create_many_files_sdist`` (crates/uv-bench/benches/uv.rs):
+    a single leading directory holding ``payload_files`` tiny files plus a
+    minimal PKG-INFO/pyproject.toml, built directly rather than through
+    cpip's own sdist-build path -- this exists purely as archive input for
+    ``untar_file`` benchmarks, not to exercise the build backend.
+    """
+    distribution = project.replace("-", "_")
+    top_level = f"{distribution}-{version}"
+    path = wheelhouse / f"{top_level}.tar.gz"
+
+    def add(archive: tarfile.TarFile, name: str, data: bytes) -> None:
+        info = tarfile.TarInfo(name=f"{top_level}/{name}")
+        info.size = len(data)
+        archive.addfile(info, io.BytesIO(data))
+
+    with tarfile.open(path, "w:gz") as archive:
+        add(
+            archive,
+            "PKG-INFO",
+            f"Metadata-Version: 2.1\nName: {project}\nVersion: {version}\n".encode(),
+        )
+        add(
+            archive,
+            "pyproject.toml",
+            f'[project]\nname = "{project}"\nversion = "{version}"\n'.encode(),
+        )
+        for index in range(payload_files):
+            add(archive, f"{distribution}/{index}.txt", b"")
     return path
 
 
@@ -488,14 +530,17 @@ def reset_caches() -> None:
     canonicalize_name.cache_clear()
     parse_requirement.cache_clear()
     packaging_module._marker_applies_cached.cache_clear()
+    packaging_module.default_environment.cache_clear()
     packaging_module.Version.from_cache_state.cache_clear()
     packaging_module.Requirement.from_cache_state.cache_clear()
     wheel_module._parse_wheel_filename.cache_clear()
     wheel_module.parsed_wheel_version.cache_clear()
     wheel_module.parsed_wheel_tags.cache_clear()
     wheel_module.wheel_tag_rank.cache_clear()
+    wheel_module._dist_info_match_key.cache_clear()
     wheel_module.wheel_metadata_cache.clear()
     wheel_module.wheel_dependency_cache.clear()
+    wheel_module.no_layout_candidate_cache.clear()
     # Persistent wheel metadata caches are one instance per directory per
     # process, so they outlive the provider that opened them.
     metadata_cache_module._CACHE_INSTANCES.clear()

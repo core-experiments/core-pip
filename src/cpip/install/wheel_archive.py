@@ -39,23 +39,6 @@ def validate_member_parts(name: str) -> tuple[str, ...]:
     return parts
 
 
-def destination_internal_parts(
-    target: InstallTarget,
-    parts: tuple[str, ...],
-    display_relative: tuple[str, ...] | str,
-    *,
-    resolved_directories: DestinationCache | None = None,
-    resolved_roots: ResolvedRoots | None = None,
-) -> str:
-    return destination_internal_parts_text(
-        target,
-        parts,
-        display_relative,
-        resolved_directories=resolved_directories,
-        resolved_roots=resolved_roots,
-    )
-
-
 def destination_internal_parts_text(
     target: InstallTarget,
     parts: tuple[str, ...],
@@ -138,9 +121,13 @@ def _safe_destination_parts_with_text(
     return destination_text
 
 
-def zip_mode(info: zipfile.ZipInfo) -> int | None:
-    mode = info.external_attr >> 16
+def mode_from_external_attr(external_attr: int) -> int | None:
+    mode = external_attr >> 16
     return mode if mode and stat.S_ISREG(mode) else None
+
+
+def zip_mode(info: zipfile.ZipInfo) -> int | None:
+    return mode_from_external_attr(info.external_attr)
 
 
 def record_metadata_internal(contents: bytes) -> tuple[str, str]:

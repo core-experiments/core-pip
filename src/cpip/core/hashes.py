@@ -44,9 +44,6 @@ def hash_file(path: str, blocksize: int = 1 << 20) -> tuple[Hash, int]:
 # The recommended hash algorithm of the moment.
 FAVORITE_HASH = "sha256"
 
-# Algorithms allowed by the --hash option and ``cpip hash``.
-STRONG_HASHES = ["sha256", "sha384", "sha512"]
-
 
 class Hashes:
     """Build multiple hashes at once and check them against known values."""

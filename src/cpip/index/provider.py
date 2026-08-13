@@ -421,7 +421,12 @@ class CandidateProvider:
                     self.parsed_link_cache[link] = parsed
 
                 if isinstance(parsed, InstallationCandidate):
-                    grouped.setdefault(parsed.canonical_name, []).append(link)
+                    name = parsed.canonical_name
+                    bucket = grouped.get(name)
+                    if bucket is None:
+                        bucket = []
+                        grouped[name] = bucket
+                    bucket.append(link)
 
             self.find_links_by_name_cache = {
                 name: tuple(links) for name, links in grouped.items()
@@ -621,7 +626,11 @@ class CandidateProvider:
                 if loaded is not None:
                     for name, version_text, artifacts, _facts in loaded[0]:
                         if name == catalog_key[0]:
-                            groups.setdefault(version_text, []).extend(artifacts)
+                            existing = groups.get(version_text)
+                            if existing is None:
+                                groups[version_text] = list(artifacts)
+                            else:
+                                existing.extend(artifacts)
 
                 self.catalog_artifact_group_cache[key] = groups
 
@@ -1511,101 +1520,6 @@ class CandidateProvider:
         )
 
         return ordered
-
-    def find_candidate_records(
-        self,
-        requirement: Requirement,
-        *,
-        allowed_versions: frozenset[Version] | None = None,
-    ) -> tuple[CandidateRecord, ...]:
-        """Return ordered records carrying one-shot lazy metadata loaders."""
-
-        records = self.applicable_candidate_records(
-            requirement,
-            allowed_versions=allowed_versions,
-        )
-
-        return self.get_materializer_internal().prepare_records(requirement, records)
-
-    def kernel_candidate_versions(
-        self,
-        requirement: Requirement,
-    ) -> tuple[Version, ...] | None:
-        """Return release versions without materializing catalog artifacts.
-
-
-
-        The finite-domain resolver can keep these versions as integer-mask
-
-        domains and restore one candidate record only after selecting a
-
-        release.  Workloads with policies that require inspecting every
-
-        artifact remain on the existing candidate path.
-
-        """
-
-        if self.uploaded_prior_to is not None:
-            return None
-
-        hashes = self.hashes_by_name.get(requirement.canonical_name)
-
-        if hashes is not None and hashes.allowed_internal:
-            return None
-
-        if requirement.url is not None:
-            return None
-
-        self.available_versions(requirement)
-
-        allow_binary, allow_source = self.allowed_formats_internal(requirement)
-
-        catalog = self.package_catalog_cache.get(
-            (requirement.canonical_name, allow_binary, allow_source),
-        )
-
-        if catalog is None or catalog.records_by_version is None:
-            return None
-
-        yanked_by_version: dict[Version, bool] = {}
-
-        for summary in catalog.summaries:
-            yanked_by_version[summary.version] = (
-                yanked_by_version.get(summary.version, True) and summary.is_yanked
-            )
-
-        return tuple(
-            sorted(
-                yanked_by_version,
-                key=lambda version: (not yanked_by_version[version], version),
-                reverse=True,
-            ),
-        )
-
-    def kernel_candidate_record(
-        self,
-        requirement: Requirement,
-        version: Version,
-    ) -> CandidateRecord | None:
-        """Restore the preferred artifact for one selected release."""
-
-        allow_binary, allow_source = self.allowed_formats_internal(requirement)
-
-        catalog_key = (requirement.canonical_name, allow_binary, allow_source)
-
-        catalog = self.package_catalog_cache.get(catalog_key)
-
-        if catalog is None or catalog.records_by_version is None:
-            return None
-
-        records = self.candidate_records_from_catalog(
-            catalog_key,
-            catalog,
-            (version,),
-            primary_only=True,
-        )
-
-        return records[0] if records else None
 
     @staticmethod
     def catalog_summary_bounds(
@@ -2528,7 +2442,11 @@ class CandidateProvider:
             ):
                 continue
 
-            links_by_version.setdefault(parsed.version, []).append(link)
+            version_links = links_by_version.get(parsed.version)
+            if version_links is None:
+                version_links = []
+                links_by_version[parsed.version] = version_links
+            version_links.append(link)
 
             candidate = self.candidate_record_cache.get(link)
 
@@ -2537,7 +2455,11 @@ class CandidateProvider:
 
                 self.candidate_record_cache[link] = candidate
 
-            candidates_by_version.setdefault(parsed.version, []).append(candidate)
+            version_candidates = candidates_by_version.get(parsed.version)
+            if version_candidates is None:
+                version_candidates = []
+                candidates_by_version[parsed.version] = version_candidates
+            version_candidates.append(candidate)
 
             key = (parsed.version.public, link.is_yanked)
 

@@ -290,14 +290,6 @@ class WheelFile:
 
     tags: tuple[WheelTag, ...]
 
-    @property
-    def canonical_name(self) -> str:
-        return canonicalize_name(self.name)
-
-    @classmethod
-    def open(cls, path: str) -> zipfile.ZipFile:
-        return zipfile.ZipFile(path)
-
 
 class Wheel:
     __slots__ = ("build_tag", "file_tags", "filename", "name", "version")
@@ -317,22 +309,6 @@ class Wheel:
         self.build_tag = legacy_build_tag(wheel.build_tag)
 
         self.file_tags = frozenset(wheel.tags)
-
-    def get_formatted_file_tags(self) -> list[str]:
-        """Return the wheel's tags as sorted strings."""
-
-        return sorted(str(tag) for tag in self.file_tags)
-
-    def supported(self, tags: list[WheelTag] | tuple[WheelTag, ...]) -> bool:
-        return wheel_tag_rank(tuple(self.file_tags), tuple(tags)) is not None
-
-    def support_index_min(self, tags: list[WheelTag] | tuple[WheelTag, ...]) -> int:
-        rank = wheel_tag_rank(tuple(self.file_tags), tuple(tags))
-
-        if rank is None:
-            raise ValueError("Wheel is not supported")
-
-        return rank
 
 
 class TargetContext:
@@ -458,6 +434,15 @@ wheel_metadata_cache: dict[tuple[str, int, int], WheelResolutionMetadata] = {}
 wheel_dependency_cache: dict[
     tuple[tuple[str, int, int], frozenset[str]],
     tuple[Requirement, ...],
+] = {}
+
+# Keyed by (stat-based identity, requested extras) rather than
+# wheel_metadata_cache's own (possibly archive/CRC-based) identity, so
+# wheel_candidate_from_path can check it via a cheap os.stat() *before*
+# opening the archive at all -- see wheel_candidate_from_path.
+no_layout_candidate_cache: dict[
+    tuple[tuple[str, int, int], frozenset[str]],
+    tuple[str, Version, tuple[Requirement, ...], frozenset[str], str | None],
 ] = {}
 
 
@@ -878,6 +863,18 @@ def read_wheel_metadata_internal(
         return Parser().parsestr(contents)
 
 
+@lru_cache(maxsize=4096)
+def _dist_info_match_key(name: str) -> str:
+    """Normalized project name for matching against a dist-info directory.
+
+    Every release of a package examined during a resolve calls
+    ``wheel_dist_info_dir`` with the same project name, so this is the same
+    regex substitution repeated once per candidate wheel with an identical
+    result each time.
+    """
+    return re.sub(r"[-_.]+", "", canonicalize_name(name)).casefold()
+
+
 def wheel_dist_info_dir(source: zipfile.ZipFile, name: str) -> str:
     # ZipFile already builds this filename index while reading the central
 
@@ -901,7 +898,7 @@ def wheel_dist_info_dir(source: zipfile.ZipFile, name: str) -> str:
     if dist_info_dir is None:
         raise UnsupportedWheel(".dist-info directory not found")
 
-    expected = re.sub(r"[-_.]+", "", canonicalize_name(name)).casefold()
+    expected = _dist_info_match_key(name)
 
     actual = re.sub(r"[-_.]+", "", dist_info_dir.removesuffix(".dist-info")).casefold()
 
@@ -1024,6 +1021,101 @@ def validate_wheel(source: zipfile.ZipFile, name: str) -> str:
     return validate_wheel_with_metadata(source, name)[0]
 
 
+def wheel_candidate_from_path(
+    path: str,
+    extras: Collection[str] | None = None,
+    *,
+    include_layout: bool = True,
+) -> WheelCandidate:
+    """Build a WheelCandidate for a wheel not already backed by an open archive.
+
+    ``wheel_candidate(path)`` alone reopens the archive with no dist-info
+    directory in hand, which sends it through the slow, email-based metadata
+    fallback. Validating first and handing the freshly opened archive and
+    dist-info directory into ``wheel_candidate`` directly -- the same thing
+    candidate materialization does during resolution -- takes the fast path
+    instead. Use this instead of a bare ``wheel_candidate(path)`` call
+    whenever there's no already-open archive to reuse (a freshly built
+    wheel, a batch of paths to validate, an install with no pre-resolved
+    candidate).
+
+    ``include_layout`` defaults to True to preserve the resolver-cache
+    benefit (a later real install can reuse the captured zip layout instead
+    of re-reading the central directory). Callers that build a candidate and
+    then immediately extract it themselves -- and so never reuse that cached
+    layout -- should pass ``include_layout=False``: a non-None layout on a
+    freshly (re)opened archive makes ``open_wheel_archive`` fall back to the
+    slower ``zipfile.ZipFile`` reader instead of the fast raw one.
+
+    When ``include_layout=False``, this also checks/populates
+    ``no_layout_candidate_cache`` keyed by a cheap ``os.stat()``-based
+    identity *before* opening the archive at all. wheel_candidate()'s own
+    metadata cache can't help here on its own: it's checked only after this
+    function has already paid for opening and fully parsing the archive
+    (zipfile.ZipFile eagerly parses every member into a ZipInfo on
+    construction) just to hand it in. That parsing is real work independent
+    of validate_wheel_with_metadata's own dist-info checks, which the
+    caller's later archive open (via open_wheel_archive + validate_wheel,
+    once wheel_layout stays None) redundantly repeats anyway -- so a stat
+    identity match here means we can skip both without losing any structural
+    validation that wasn't already going to happen again downstream.
+    """
+    requested_extras = frozenset(extras or ())
+
+    if not include_layout:
+        identity = wheel_archive_identity(path, None, None)
+
+        if identity is not None:
+            cached = no_layout_candidate_cache.get((identity, requested_extras))
+
+            if cached is not None:
+                name, version, dependencies, provided_extras, requires_python = cached
+
+                return WheelCandidate(
+                    name=name,
+                    version=version,
+                    path=os.fspath(path),
+                    dependencies=dependencies,
+                    provided_extras=provided_extras,
+                    requires_python=requires_python,
+                )
+
+    with (
+        open(path, "rb", buffering=32768) as stream,
+        zipfile.ZipFile(stream) as archive,
+    ):
+        dist_info_dir, wheel_metadata_text = validate_wheel_with_metadata(
+            archive,
+            os.path.basename(path)[:-4].split("-", 1)[0],
+        )
+        candidate = wheel_candidate(
+            path,
+            extras,
+            archive=archive,
+            dist_info_dir=dist_info_dir,
+            wheel_metadata_text=wheel_metadata_text,
+            include_layout=include_layout,
+        )
+
+    if not include_layout:
+        identity = wheel_archive_identity(path, None, None)
+
+        if identity is not None:
+            bounded_cache_put(
+                no_layout_candidate_cache,
+                (identity, requested_extras),
+                (
+                    candidate.name,
+                    candidate.version,
+                    candidate.dependencies,
+                    candidate.provided_extras,
+                    candidate.requires_python,
+                ),
+            )
+
+    return candidate
+
+
 def parse_wheel(wheel_zip: zipfile.ZipFile, name: str) -> tuple[str, Message]:
     """Validate a wheel archive and return its metadata directory and WHEEL data."""
 
@@ -1082,8 +1174,8 @@ def tag_matches(supported: WheelTag, candidate: WheelTag) -> bool:
         and platform_matches(
             supported._platform_lower,
             candidate._platform_lower,
-            runtime_parts=supported._platform_parts,
-            wheel_parts=candidate._platform_parts,
+            supported._platform_parts,
+            candidate._platform_parts,
         )
     )
 
@@ -1108,9 +1200,8 @@ def interpreter_matches(runtime: str, wheel: str, abi: str) -> bool:
 def platform_matches(
     runtime: str,
     wheel: str,
-    *,
-    runtime_parts: tuple[str, ...] | None = None,
-    wheel_parts: tuple[str, ...] | None = None,
+    runtime_parts: tuple[str, ...] | None,
+    wheel_parts: tuple[str, ...] | None,
 ) -> bool:
     if runtime == wheel:
         return True
@@ -1119,31 +1210,24 @@ def platform_matches(
         return runtime == wheel
 
     if runtime.startswith("macosx_") and wheel.startswith("macosx_"):
-        if runtime_parts is not None and wheel_parts is not None:
-            return _macos_platform_matches_parts(runtime_parts, wheel_parts)
+        assert runtime_parts is not None
+        assert wheel_parts is not None
 
-        return macos_platform_matches(runtime, wheel)
+        return _macos_platform_matches_parts(runtime_parts, wheel_parts)
 
     if runtime.startswith("ios_") and wheel.startswith("ios_"):
-        if runtime_parts is not None and wheel_parts is not None:
-            return _ios_platform_matches_parts(runtime_parts, wheel_parts)
+        assert runtime_parts is not None
+        assert wheel_parts is not None
 
-        return ios_platform_matches(runtime, wheel)
+        return _ios_platform_matches_parts(runtime_parts, wheel_parts)
 
     if runtime.startswith("android_") and wheel.startswith("android_"):
-        if runtime_parts is not None and wheel_parts is not None:
-            return _android_platform_matches_parts(runtime_parts, wheel_parts)
+        assert runtime_parts is not None
+        assert wheel_parts is not None
 
-        return android_platform_matches(runtime, wheel)
+        return _android_platform_matches_parts(runtime_parts, wheel_parts)
 
     return False
-
-
-def macos_platform_matches(runtime: str, wheel: str) -> bool:
-    return _macos_platform_matches_parts(
-        tuple(runtime.split("_", 3)),
-        tuple(wheel.split("_", 3)),
-    )
 
 
 def _macos_platform_matches_parts(
@@ -1169,13 +1253,6 @@ def _macos_platform_matches_parts(
     )
 
 
-def ios_platform_matches(runtime: str, wheel: str) -> bool:
-    return _ios_platform_matches_parts(
-        tuple(runtime.split("_", 4)),
-        tuple(wheel.split("_", 4)),
-    )
-
-
 def _ios_platform_matches_parts(
     runtime_parts: tuple[str, ...],
     wheel_parts: tuple[str, ...],
@@ -1193,13 +1270,6 @@ def _ios_platform_matches_parts(
     return (int(wheel_major), int(wheel_minor)) <= (
         int(runtime_major),
         int(runtime_minor),
-    )
-
-
-def android_platform_matches(runtime: str, wheel: str) -> bool:
-    return _android_platform_matches_parts(
-        tuple(runtime.split("_", 3)),
-        tuple(wheel.split("_", 3)),
     )
 
 

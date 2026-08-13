@@ -107,7 +107,11 @@ def _dependent_index(
         except ValueError:
             return {}, True
         for name in {canonicalize_name(name) for name in names}:
-            dependents.setdefault(name, []).append(candidate.raw_name)
+            existing = dependents.get(name)
+            if existing is None:
+                dependents[name] = [candidate.raw_name]
+            else:
+                existing.append(candidate.raw_name)
     return dependents, False
 
 
@@ -382,16 +386,23 @@ def check_package_set(
             canonical = canonicalize_name(requirement.name)
             dependency = package_set.get(canonical)
             if dependency is None:
-                missing.setdefault(name, []).append((canonical, requirement))
+                missing_entry = missing.get(name)
+                if missing_entry is None:
+                    missing[name] = [(canonical, requirement)]
+                else:
+                    missing_entry.append((canonical, requirement))
                 continue
             if dependency.version is None:
                 # Installed, but with a version no specifier can be compared
                 # against. Reporting a conflict would be a guess.
                 continue
             if not requirement.is_satisfied_by(dependency.version):
-                conflicting.setdefault(name, []).append(
-                    (canonical, str(dependency.version), requirement),
-                )
+                conflicting_entry = conflicting.get(name)
+                conflict = (canonical, str(dependency.version), requirement)
+                if conflicting_entry is None:
+                    conflicting[name] = [conflict]
+                else:
+                    conflicting_entry.append(conflict)
     return missing, conflicting
 
 

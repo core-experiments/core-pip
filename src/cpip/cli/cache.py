@@ -206,9 +206,6 @@ def run_cache(args: list[str]) -> int:
         return 0
 
     if options.command == "list":
-        if options.pattern and options.pattern == "":
-            parser.error("Too many arguments")
-
         lines = manager.list(options.pattern, absolute=options.format == "abspath")
 
         if not lines and options.format == "human":

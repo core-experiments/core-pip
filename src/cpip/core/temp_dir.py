@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import errno
-import itertools
 import logging
 import os.path
 import stat
@@ -62,7 +60,6 @@ def remove_temp_directory(path: str | os.PathLike[str]) -> None:
 
 tempdir_kinds = enum(
     BUILD_ENV="build-env",
-    EPHEM_WHEEL_CACHE="ephem-wheel-cache",
     REQ_BUILD="req-build",
 )
 tempdir_manager: ExitStack | None = None
@@ -169,47 +166,3 @@ class TempDirectory:
                 )
         else:
             rmtree(self.path_internal)
-
-
-class AdjacentTempDirectory(TempDirectory):
-    LEADING_CHARS = "-~.=%0123456789"
-
-    def __init__(self, original: str, delete: bool | None = None) -> None:
-        self.original = original.rstrip("/\\")
-        super().__init__(delete=delete)
-
-    @classmethod
-    def generate_names(cls, name: str) -> Generator[str, None, None]:
-        for i in range(1, len(name)):
-            for candidate in itertools.combinations_with_replacement(
-                cls.LEADING_CHARS,
-                i - 1,
-            ):
-                new_name = "~" + "".join(candidate) + name[i:]
-                if new_name != name:
-                    yield new_name
-        for i in range(len(cls.LEADING_CHARS)):
-            for candidate in itertools.combinations_with_replacement(
-                cls.LEADING_CHARS,
-                i,
-            ):
-                new_name = "~" + "".join(candidate) + name
-                if new_name != name:
-                    yield new_name
-
-    def create_internal(self, kind: str) -> str:
-        root, name = os.path.split(self.original)
-        for candidate in self.generate_names(name):
-            path = os.path.join(root, candidate)
-            try:
-                os.mkdir(path)
-            except OSError as exc:
-                if exc.errno != errno.EEXIST:
-                    raise
-            else:
-                path = os.path.realpath(path)
-                break
-        else:
-            path = os.path.realpath(tempfile.mkdtemp(prefix=f"cpip-{kind}-"))
-        logger.debug("Created temporary directory: %s", path)
-        return path

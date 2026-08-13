@@ -10,14 +10,6 @@ class DirectUrlValidationError(ValueError):
     pass
 
 
-def expect_type(value: object, expected: type, field: str) -> object:
-    if not isinstance(value, expected):
-        raise DirectUrlValidationError(
-            f"Unexpected type {type(value).__name__} (expected {expected.__name__}) in '{field}'",
-        )
-    return value
-
-
 def expect_string(data: dict[str, object], key: str, field: str | None = None) -> str:
     value = data.get(key)
     label = field or key
@@ -44,8 +36,10 @@ class ArchiveInfo:
         normalized_hashes: dict[str, str] | None = None
         if hash_value is not None:
             if not isinstance(hash_value, str):
-                expect_type(hash_value, str, "archive_info.hash")
-                raise AssertionError("unreachable")
+                raise DirectUrlValidationError(
+                    f"Unexpected type {type(hash_value).__name__} "
+                    "(expected str) in 'archive_info.hash'",
+                )
             hash_text = hash_value
             if "=" not in hash_text:
                 raise DirectUrlValidationError(
@@ -55,8 +49,10 @@ class ArchiveInfo:
             normalized_hashes = {algorithm: digest}
         if hashes is not None:
             if not isinstance(hashes, dict):
-                expect_type(hashes, dict, "archive_info.hashes")
-                raise AssertionError("unreachable")
+                raise DirectUrlValidationError(
+                    f"Unexpected type {type(hashes).__name__} "
+                    "(expected dict) in 'archive_info.hashes'",
+                )
             normalized_hashes = {
                 str(name): str(value) for name, value in hashes.items()
             }
@@ -114,8 +110,10 @@ class VcsInfo:
         commit_id = expect_string(data, "commit_id", "vcs_info.commit_id")
         requested_revision = data.get("requested_revision")
         if requested_revision is not None and not isinstance(requested_revision, str):
-            expect_type(requested_revision, str, "vcs_info.requested_revision")
-            raise AssertionError("unreachable")
+            raise DirectUrlValidationError(
+                f"Unexpected type {type(requested_revision).__name__} "
+                "(expected str) in 'vcs_info.requested_revision'",
+            )
         return cls(
             vcs=vcs,
             commit_id=commit_id,
@@ -173,20 +171,23 @@ class DirectUrl:
         if "archive_info" in data:
             raw = data["archive_info"]
             if not isinstance(raw, dict):
-                expect_type(raw, dict, "archive_info")
-                raise AssertionError("unreachable")
+                raise DirectUrlValidationError(
+                    f"Unexpected type {type(raw).__name__} (expected dict) in 'archive_info'",
+                )
             archive_info = ArchiveInfo.from_dict(raw)  # ty:ignore[invalid-argument-type]
         if "dir_info" in data:
             raw = data["dir_info"]
             if not isinstance(raw, dict):
-                expect_type(raw, dict, "dir_info")
-                raise AssertionError("unreachable")
+                raise DirectUrlValidationError(
+                    f"Unexpected type {type(raw).__name__} (expected dict) in 'dir_info'",
+                )
             dir_info = DirInfo.from_dict(raw)  # ty:ignore[invalid-argument-type]
         if "vcs_info" in data:
             raw = data["vcs_info"]
             if not isinstance(raw, dict):
-                expect_type(raw, dict, "vcs_info")
-                raise AssertionError("unreachable")
+                raise DirectUrlValidationError(
+                    f"Unexpected type {type(raw).__name__} (expected dict) in 'vcs_info'",
+                )
             vcs_info = VcsInfo.from_dict(raw)  # ty:ignore[invalid-argument-type]
         direct_url = cls(
             url=url,

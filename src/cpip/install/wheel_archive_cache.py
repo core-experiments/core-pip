@@ -30,7 +30,7 @@ from typing import TYPE_CHECKING, Generator
 
 from cpip.core.errors import InstallationError
 from cpip.core.packaging import Version, parse_requirement
-from cpip.core.wheel import WheelCandidate, parse_wheel
+from cpip.core.wheel import WheelCandidate, validate_wheel
 from cpip.install.wheel_archive import (
     copy_member_with_metadata,
     record_metadata_internal,
@@ -340,7 +340,7 @@ def _extract_archive(
                 dist_info = layout[0]
 
             else:
-                dist_info, _ = parse_wheel(
+                dist_info = validate_wheel(
                     archive,
                     os.path.basename(candidate.path)[:-4].split("-", 1)[0],
                 )

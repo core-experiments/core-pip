@@ -27,7 +27,11 @@ def add_hash_option(
     name, sep, digest = raw.partition(":")
     if not sep or not digest:
         raise RequirementsFileParseError(original_line)
-    target.setdefault(name, []).append(digest)
+    existing = target.get(name)
+    if existing is None:
+        target[name] = [digest]
+    else:
+        existing.append(digest)
 
 
 def merge_config_setting(target: dict[str, object], raw: str) -> None:
