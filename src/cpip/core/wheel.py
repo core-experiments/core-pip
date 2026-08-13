@@ -1015,6 +1015,8 @@ def validate_wheel(source: zipfile.ZipFile, name: str) -> str:
 def wheel_candidate_from_path(
     path: str,
     extras: Collection[str] | None = None,
+    *,
+    include_layout: bool = True,
 ) -> WheelCandidate:
     """Build a WheelCandidate for a wheel not already backed by an open archive.
 
@@ -1027,6 +1029,14 @@ def wheel_candidate_from_path(
     whenever there's no already-open archive to reuse (a freshly built
     wheel, a batch of paths to validate, an install with no pre-resolved
     candidate).
+
+    ``include_layout`` defaults to True to preserve the resolver-cache
+    benefit (a later real install can reuse the captured zip layout instead
+    of re-reading the central directory). Callers that build a candidate and
+    then immediately extract it themselves -- and so never reuse that cached
+    layout -- should pass ``include_layout=False``: a non-None layout on a
+    freshly (re)opened archive makes ``open_wheel_archive`` fall back to the
+    slower ``zipfile.ZipFile`` reader instead of the fast raw one.
     """
     with (
         open(path, "rb", buffering=32768) as stream,
@@ -1042,6 +1052,7 @@ def wheel_candidate_from_path(
             archive=archive,
             dist_info_dir=dist_info_dir,
             wheel_metadata_text=wheel_metadata_text,
+            include_layout=include_layout,
         )
 
 

@@ -185,7 +185,11 @@ def install_wheel_internal(
     target_inventory: InstalledTargetInventory | None = None,
 ) -> WheelCandidate:
     if candidate is None:
-        candidate = wheel_candidate_from_path(path)
+        # No pre-resolved candidate to reuse a cached layout from -- the
+        # archive opened here is closed before extraction runs, so keeping
+        # its layout would only misdirect open_wheel_archive() into the
+        # slower zipfile.ZipFile fallback for no benefit.
+        candidate = wheel_candidate_from_path(path, include_layout=False)
     if lookup_existing:
         if target_inventory is not None:
             existing = target_inventory.find(candidate.canonical_name)
@@ -678,6 +682,7 @@ def validate_wheel_batch(
                 archive=archive,
                 dist_info_dir=dist_info,
                 wheel_metadata_text=wheel_metadata_text,
+                include_layout=False,
             )
             candidates.append(candidate)
             if validation_cache is not None:
@@ -729,7 +734,10 @@ def install_wheels_transactionally(
     planned_candidates = (
         tuple(candidates)
         if candidates is not None
-        else tuple(wheel_candidate_from_path(path) for path, _, _ in requests)
+        else tuple(
+            wheel_candidate_from_path(path, include_layout=False)
+            for path, _, _ in requests
+        )
     )
     if len(planned_candidates) != len(requests):
         raise ValueError("candidate count does not match wheel request count")
