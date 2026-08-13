@@ -60,7 +60,6 @@ def remove_temp_directory(path: str | os.PathLike[str]) -> None:
 
 tempdir_kinds = enum(
     BUILD_ENV="build-env",
-    EPHEM_WHEEL_CACHE="ephem-wheel-cache",
     REQ_BUILD="req-build",
 )
 tempdir_manager: ExitStack | None = None

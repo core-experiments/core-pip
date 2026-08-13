@@ -94,45 +94,6 @@ class MetadataDistribution:
         return self.metadata.get("Metadata-Version")
 
     @classmethod
-    def from_directory(
-        cls,
-        directory: str,
-    ) -> MetadataDistribution:
-        import email.parser
-
-        metadata_path = os.path.join(directory, "METADATA")
-
-        with open(metadata_path, encoding="utf-8") as file:
-            metadata = email.parser.Parser().parsestr(file.read())
-
-        entry_points_path = os.path.join(directory, "entry_points.txt")
-
-        try:
-            with open(entry_points_path, encoding="utf-8") as file:
-                entry_points_text = file.read()
-
-        except OSError:
-            entry_points_text = None
-
-        return cls(
-            metadata,
-            location=os.path.dirname(directory),
-            info_location=directory,
-            entry_points_text=entry_points_text,
-        )
-
-    @classmethod
-    def from_wheel(
-        cls,
-        path: str,
-        name: str,
-    ) -> MetadataDistribution:
-        import zipfile
-
-        with zipfile.ZipFile(path, allowZip64=True) as archive:
-            return cls.from_wheel_archive(archive, name, path)
-
-    @classmethod
     def from_wheel_archive(
         cls,
         archive: zipfile.ZipFile,
@@ -260,10 +221,6 @@ class InstalledMetadataDistribution:
         return str(self.distribution_internal.location)
 
     @property
-    def installed_location(self) -> str:
-        return self.location
-
-    @property
     def info_location(self) -> str | None:
         location = self.distribution_internal.metadata_location
 
@@ -367,26 +324,6 @@ class InstalledMetadataDistribution:
         return bool(self.info_location and self.info_location.endswith(".dist-info"))
 
     @property
-    def metadata_location(self) -> str | None:
-        return self.info_location
-
-    @property
-    def installed_with_setuptools_egg_info(self) -> bool:
-        return bool(self.info_location and self.info_location.endswith(".egg-info"))
-
-    @property
-    def setuptools_filename(self) -> str:
-        return self.raw_name
-
-    @property
-    def installed_by_distutils(self) -> bool:
-        return False
-
-    @property
-    def installed_as_egg(self) -> bool:
-        return False
-
-    @property
     def direct_url(self) -> DirectUrl | None:
         try:
             return DirectUrl.from_json(self.read_text("direct_url.json"))
@@ -486,9 +423,6 @@ class InstalledMetadataDistribution:
 
         return self.distribution_internal.files()
 
-    def iter_distutils_script_names(self) -> list[str]:
-        return []
-
     def iter_entry_points(self) -> list[SimpleNamespace]:
         try:
             entry_points = self.read_text("entry_points.txt")
@@ -497,15 +431,6 @@ class InstalledMetadataDistribution:
             return []
 
         return parse_entry_points(entry_points)
-
-    def is_file(self, path: str) -> bool:
-        try:
-            self.read_text(path)
-
-        except FileNotFoundError:
-            return False
-
-        return True
 
 
 class InstalledDistributionStore:

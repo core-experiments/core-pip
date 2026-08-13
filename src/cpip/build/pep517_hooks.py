@@ -119,39 +119,6 @@ class BuildBackendHookCaller:
             raise RuntimeError(result["error"])
         return result.get("return_val")
 
-    def get_requires_for_build_wheel(
-        self,
-        *,
-        config_settings: dict[str, Any] | None = None,
-    ) -> list[str]:
-        """Extra build requirements the backend declares beyond
-        ``[build-system] requires`` -- optional per PEP 517, so a backend
-        that doesn't implement it just means no extras, not a failure.
-        """
-        try:
-            result = self._call(
-                "get_requires_for_build_wheel",
-                config_settings=config_settings,
-            )
-        except HookMissing:
-            return []
-        return list(result) if result else []
-
-    def get_requires_for_build_editable(
-        self,
-        *,
-        config_settings: dict[str, Any] | None = None,
-    ) -> list[str]:
-        """As :meth:`get_requires_for_build_wheel`, for PEP 660 editable builds."""
-        try:
-            result = self._call(
-                "get_requires_for_build_editable",
-                config_settings=config_settings,
-            )
-        except HookMissing:
-            return []
-        return list(result) if result else []
-
     def build_wheel(
         self,
         wheel_directory: str,

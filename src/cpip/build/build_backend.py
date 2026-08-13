@@ -25,7 +25,7 @@ except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility
 import zipfile
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
-from typing import Any, Protocol, cast
+from typing import Any
 
 from cpip.build.pep517_hooks import BuildBackendHookCaller, HookMissing
 from cpip.core.errors import BuildError
@@ -37,16 +37,6 @@ from cpip.core.packaging import (
 )
 from cpip.core.subprocess import call_subprocess
 from cpip.install.build_env.venv import create_isolated_venv
-
-
-class BuildWheelHook(Protocol):
-    def __call__(
-        self,
-        wheel_directory: str,
-        *,
-        config_settings: dict[str, Any] | None,
-        metadata_directory: str | None,
-    ) -> str: ...
 
 
 # ``pkg_resources`` was removed from setuptools 82.  Projects that only have a
@@ -468,21 +458,6 @@ class ProjectBuilder:
                 validate_metadata_first=True,
             )
 
-        backend = self.load_backend_hook("build_wheel")
-
-        if callable(backend) and backend is not build_wheel:
-            with backend_environment(self.source_dir):
-                wheel_name = backend(
-                    os.fspath(wheel_directory),
-                    config_settings=config_settings,
-                    metadata_directory=None,
-                )
-
-            if not isinstance(wheel_name, str):
-                raise BuildError("Build backend did not return a wheel filename")
-
-            return wheel_name
-
         return self.build_fallback_wheel(wheel_directory, editable=False)
 
     def build_editable(
@@ -509,31 +484,7 @@ class ProjectBuilder:
                 editable=True,
             )
 
-        backend = self.load_backend_hook("build_editable")
-
-        if callable(backend) and backend is not build_editable:
-            with backend_environment(self.source_dir):
-                wheel_name = backend(
-                    os.fspath(wheel_directory),
-                    config_settings=config_settings,
-                    metadata_directory=None,
-                )
-
-            if not isinstance(wheel_name, str):
-                raise BuildError(
-                    "Build backend did not return an editable wheel filename",
-                )
-
-            return wheel_name
-
         return self.build_fallback_wheel(wheel_directory, editable=True)
-
-    def load_backend_hook(self, name: str) -> BuildWheelHook | None:
-        backend = load_project_backend(self.source_dir)
-
-        hook = getattr(backend, name, None) if backend is not None else None
-
-        return cast("BuildWheelHook", hook) if callable(hook) else None
 
     def build_external(
         self,
@@ -909,71 +860,6 @@ def prepare_project_metadata(
             ).prepare_metadata(editable=editable, on_wheel_built=on_wheel_built)
 
         raise
-
-
-def load_project_backend(source_dir: str | os.PathLike[str]) -> object | None:
-    pyproject_path = os.path.join(os.fspath(source_dir), "pyproject.toml")
-
-    try:
-        with open(pyproject_path, encoding="utf-8") as file:
-            data = tomllib.loads(file.read())
-
-    except OSError:
-        return None
-
-    build_system = data.get("build-system")
-
-    if not isinstance(build_system, dict):
-        return None
-
-    backend_name = build_system.get("build-backend")
-
-    if not isinstance(backend_name, str) or backend_name.startswith(
-        "setuptools.build_meta",
-    ):
-        return None
-
-    if backend_name in {"cpip.build.build_backend", "uv_build"}:
-        return None
-
-    backend_path = build_system.get("backend-path", [])
-
-    import_paths = backend_paths(source_dir, backend_path)
-
-    module_name, _, object_path = backend_name.partition(":")
-
-    with backend_import_path(import_paths):
-        importlib.invalidate_caches()
-
-        sys.modules.pop(module_name, None)
-
-        backend: object = importlib.import_module(module_name)
-
-    for attribute in object_path.split("."):
-        if attribute:
-            backend = getattr(backend, attribute)
-
-    return backend
-
-
-def backend_paths(
-    source_dir: str | os.PathLike[str],
-    paths: tuple[str, ...],
-) -> tuple[str, ...]:
-    source_text = os.fspath(source_dir)
-
-    return tuple(os.path.realpath(os.path.join(source_text, path)) for path in paths)
-
-
-@contextlib.contextmanager
-def backend_import_path(paths: tuple[str, ...]) -> Iterator[None]:
-    sys.path[:0] = list(paths)
-
-    try:
-        yield
-
-    finally:
-        del sys.path[: len(paths)]
 
 
 @contextlib.contextmanager
