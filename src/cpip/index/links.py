@@ -47,6 +47,7 @@ HASH_URL_FRAGMENT_RE = re.compile(
 )
 
 
+@functools.lru_cache(maxsize=4096)
 def hash_from_url_fragment(url: str) -> tuple[str, str] | None:
     match = HASH_URL_FRAGMENT_RE.search(url)
     return match.groups() if match is not None else None  # ty:ignore[invalid-return-type]
