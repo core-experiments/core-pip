@@ -135,8 +135,6 @@ def test_install_remote_pylock_preserves_network_diagnostic(
     """Remote pylock network failures should render the diagnostic error."""
     result = script.cpip(
         "install",
-        "--retries",
-        "0",
         "--dry-run",
         "-r",
         "http://127.0.0.1:1/pylock.toml",

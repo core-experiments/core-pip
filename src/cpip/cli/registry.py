@@ -180,8 +180,6 @@ COMMAND_SPECS = (
 
 COMMANDS_internal = {spec.name: spec for spec in COMMAND_SPECS}
 
-COMMANDS = tuple(COMMANDS_internal)
-
 
 def get_command(command: str) -> CommandSpec | None:
     return COMMANDS_internal.get(command)

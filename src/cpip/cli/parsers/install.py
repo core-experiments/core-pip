@@ -107,7 +107,6 @@ def create_parser() -> ArgumentParser:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--report")
     parser.add_argument("--uploaded-prior-to")
-    parser.add_argument("--retries", type=int, default=5)
     parser.add_argument("-v", "--verbose", action="count", default=0)
     parser.add_argument("-q", "--quiet", action="count", default=0)
     parser.add_argument("--no-warn-script-location", action="store_true")
