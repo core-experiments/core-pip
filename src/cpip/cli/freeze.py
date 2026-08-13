@@ -37,7 +37,6 @@ def freeze(
     local_only: bool = False,
     user_only: bool = False,
     paths: list[str] | None = None,
-    isolated: bool = False,
     exclude_editable: bool = False,
     exclude: Iterable[str] = (),
     skip: Iterable[str] = (),
