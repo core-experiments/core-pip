@@ -67,7 +67,6 @@ def resolve_requirement_set(
     plan = resolver.resolve(requirements_input)
 
     source_requirements, source_requirements_by_url = source_requirement_map(
-        resolver,
         requirements_input,
     )
 
@@ -141,7 +140,6 @@ def resolve_requirement_set(
 
 
 def coerce_requirements(
-    resolver,
     requirements_input: RequirementSet[InstallRequirement]
     | Iterable[InstallRequirement]
     | list[str],
@@ -208,7 +206,6 @@ def coerce_requirements(
 
 
 def source_requirement_map(
-    resolver,
     requirements_input: RequirementSet | Iterable[InstallRequirement] | list[str],
 ) -> tuple[dict[str, InstallRequirement], dict[str, InstallRequirement]]:
     if as_requirement_strings(requirements_input) is not None:
