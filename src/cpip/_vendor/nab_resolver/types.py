@@ -90,10 +90,6 @@ class RangeProtocol(Protocol[VersionType_contra]):
         """Return whether every version in self is also in other."""
         ...
 
-    def is_superset(self, other: Self) -> bool:
-        """Return whether every version in other is also in self."""
-        ...
-
     def is_disjoint(self, other: Self) -> bool:
         """Return whether self and other share no version."""
         ...

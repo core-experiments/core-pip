@@ -74,9 +74,6 @@ class Assignment(Generic[PackageType, VersionType]):
     cum_decision: VersionType | None = None
     """The package's decided version as of this entry, if it had one."""
 
-    package_index: int = 0
-    """Position in the package's own assignment trail."""
-
     _effective: RangeProtocol[VersionType] | None = field(
         default=None, init=False, repr=False, compare=False
     )
@@ -194,7 +191,6 @@ class PartialSolution(Generic[PackageType, VersionType]):
             cum_positive=exact_range,
             cum_negative=self._negative_ranges.get(package),
             cum_decision=version,
-            package_index=len(package_entries),
         )
         self._assignments.append(assignment)
         package_entries.append(assignment)
@@ -243,7 +239,6 @@ class PartialSolution(Generic[PackageType, VersionType]):
             cum_positive=self._positive_ranges.get(package),
             cum_negative=self._negative_ranges.get(package),
             cum_decision=self._decided_versions.get(package),
-            package_index=len(package_entries),
         )
         self._assignments.append(assignment)
         package_entries.append(assignment)

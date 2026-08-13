@@ -503,10 +503,6 @@ class Range(Generic[VersionType]):
 
         return True
 
-    def is_superset(self, other: Range[VersionType]) -> bool:
-        """Return whether every version in other is also in self."""
-        return other.is_subset(self)
-
     def is_disjoint(self, other: Range[VersionType]) -> bool:
         """Return whether self and other share no version.
 
