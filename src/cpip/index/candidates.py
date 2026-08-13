@@ -219,18 +219,6 @@ class InstallationCandidate(CandidateRecord):
 
         return cls(name=metadata.name, version=version, link=link)
 
-    def sort_key(self, *, prefer_binary: bool) -> tuple[object, object, object, int]:
-        wheel_rank = 1 if self.link.kind is ArtifactKind.WHEEL else 0
-
-        tag_rank = -(self.tag_rank if self.tag_rank is not None else 1_000_000)
-
-        yanked_rank = 0 if self.link.is_yanked else 1
-
-        if prefer_binary:
-            return (yanked_rank, wheel_rank, self.version, tag_rank)
-
-        return (yanked_rank, self.version, wheel_rank, tag_rank)
-
     def __str__(self) -> str:
         return f"{self.name!r} candidate (version {self.version} at {self.link})"
 

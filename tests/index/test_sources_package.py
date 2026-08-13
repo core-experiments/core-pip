@@ -14,7 +14,10 @@ from cpip.index.catalog_cache import save_links
 from cpip.index.candidate_evaluators import CandidateEvaluator
 from cpip.index.candidate_materialization import CandidateMaterializer
 from cpip.index.candidates import InstallationCandidate
-from cpip.index.directory_index import local_source_files, project_version_from_filename
+from cpip.index.directory_index import (
+    local_source_snapshot,
+    project_version_from_filename,
+)
 from cpip.index.links import Link
 from cpip.index.provider import CandidateProvider
 from cpip.index.source_locations import FindLinksSource, SimpleIndexSource
@@ -53,7 +56,7 @@ def test_link_filename_oracle(url: str, expected: str) -> None:
     assert [link.filename for link in links] == [expected]
 
 
-def test_local_source_files_uses_directory_entry_types(
+def test_local_source_snapshot_uses_directory_entry_types(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -66,7 +69,9 @@ def test_local_source_files_uses_directory_entry_types(
 
     monkeypatch.setattr(Path, "iterdir", fail_iterdir)
 
-    assert local_source_files(os.fspath(tmp_path)) == (os.fspath(artifact),)
+    snapshot = local_source_snapshot(os.fspath(tmp_path))
+    assert snapshot is not None
+    assert tuple(entry.path for entry in snapshot.entries) == (os.fspath(artifact),)
 
 
 def test_source_archive_filename_normalizes_project_name() -> None:

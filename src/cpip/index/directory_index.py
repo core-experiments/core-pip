@@ -80,11 +80,6 @@ def local_source_snapshot(
     return LocalSourceSnapshot(path_text, tuple(discovered))
 
 
-def local_source_files(path: str) -> tuple[str, ...]:
-    snapshot = local_source_snapshot(path)
-    return () if snapshot is None else tuple(entry.path for entry in snapshot.entries)
-
-
 def project_version_from_filename(filename: str) -> tuple[str, Version] | None:
     stem = filename
     for suffix in SOURCE_ARCHIVE_SUFFIXES:
