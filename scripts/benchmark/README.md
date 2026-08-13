@@ -87,6 +87,18 @@ network latency, current PyPI state, VCS availability, target Python, platform
 wheels, and cache behavior outside this repository. `--list-workloads` reports
 cases with an upstream recommended Python version.
 
+Two benchmark modes from uv's own harness
+(`astral-sh/uv/scripts/benchmark/src/benchmark/resolver.py`'s `Benchmark`
+enum) are deliberately not in `BENCHMARKS` above: `resolve-incremental` (add
+one new dependency to an existing lockfile, re-lock) and `resolve-noop`
+(re-lock against a lockfile that already satisfies the input, expecting a
+cheap confirmation). Both measure whether a tool reuses an existing lockfile
+instead of fully re-resolving. `cpip lock` has no such reuse path -- it
+always resolves from scratch regardless of what's already on disk at
+`--output` -- so running either case against cpip would just be `lock-warm`
+again under a different name, not a distinct measurement. Revisit if `cpip
+lock` ever grows preferred-versions-from-an-existing-lockfile support.
+
 ## Comparing two runs
 
 `--json` also writes a `meta.json` recording the interpreter/uv versions and

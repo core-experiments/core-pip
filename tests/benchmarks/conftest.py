@@ -17,6 +17,7 @@ from benchmark_support import (
     make_nab_deep_backjump_family,
     make_nab_pip_backtracking_family,
     make_nab_smoke_fixture,
+    make_sdist,
     make_source_tree,
     make_stress_graph,
     make_wheel,
@@ -230,6 +231,25 @@ def extras_marker_wheelhouse(tmp_path_factory: pytest.TempPathFactory) -> Path:
 def payload_wheel(tmp_path_factory: pytest.TempPathFactory) -> Path:
     wheelhouse = tmp_path_factory.mktemp("payload-wheelhouse")
     return make_wheel(wheelhouse, "payload-pkg", "1.0.0", payload_files=300)
+
+
+@pytest.fixture(scope="session")
+def many_files_wheel(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """A 10,000-file wheel, matching uv's ``MANY_FILES_WHEEL_FILE_COUNT``
+    (crates/uv-bench/benches/uv.rs) -- an order of magnitude past
+    ``payload_wheel``'s 300 files, large enough that per-member archive
+    overhead (open/read/write syscalls, archive-reader selection) dominates
+    instead of being swamped by fixed per-call cost.
+    """
+    wheelhouse = tmp_path_factory.mktemp("many-files-wheelhouse")
+    return make_wheel(wheelhouse, "many-files-pkg", "1.0.0", payload_files=10_000)
+
+
+@pytest.fixture(scope="session")
+def many_files_sdist(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """A 10,000-file sdist, matching uv's ``MANY_FILES_SDIST_FILE_COUNT``."""
+    wheelhouse = tmp_path_factory.mktemp("many-files-sdisthouse")
+    return make_sdist(wheelhouse, "many-files-pkg", "1.0.0", payload_files=10_000)
 
 
 @pytest.fixture(scope="session")
