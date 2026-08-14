@@ -184,7 +184,7 @@ def test_wheel_candidate_reuses_metadata_across_extras(
         )
     base = wheel_candidate(wheel)
     monkeypatch.setattr(
-        "cpip.core.wheel.read_wheel_metadata_internal",
+        "cpip.core.wheel.read_metadata_message_internal",
         lambda *args_internal, **kwargs_internal: pytest.fail("metadata was reparsed"),
     )
 

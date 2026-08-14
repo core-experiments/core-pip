@@ -18,7 +18,8 @@ from cpip.resolution.models import (
     ResolutionResult,
     ResolvedRequirement,
 )
-from cpip.resolution.nab_provider import InstalledCandidate, NabProvider
+from cpip.resolution.nab_provider import NabProvider
+from cpip.resolution.nab_types import InstalledCandidate
 
 TYPE_CHECKING = False
 

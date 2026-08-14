@@ -502,7 +502,7 @@ def test_invalid_unpacked_wheel_cache_is_rebuilt(tmp_path: Path) -> None:
 
 
 def test_exact_install_plan_receipt_reuses_cached_archives(tmp_path: Path) -> None:
-    from cpip.install.wheel_archive_cache import (
+    from cpip.install.wheel_install_plan_cache import (
         exact_install_plan_key,
         exact_install_plan_key_from_strings,
         load_cached_install_plan,

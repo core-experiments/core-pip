@@ -143,11 +143,6 @@ class Mercurial(VersionControl):
         return current_rev_hash
 
     @classmethod
-    def is_commit_id_equal(cls, dest: str, name: str | None) -> bool:
-        """Always assume the versions don't match"""
-        return False
-
-    @classmethod
     def get_subdirectory(cls, location: str) -> str | None:
         """Return the path to Python project root, relative to the repo root.
         Return None if the project root is in the repo root.

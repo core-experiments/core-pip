@@ -30,11 +30,11 @@ from cpip.core.wheel import PureWheelCandidate, WheelCandidate
 from cpip.core.wheel import parse_wheel_filename as parse_wheel_filename_core
 from cpip.install.target import InstallTarget
 from cpip.install.wheel_archive import mode_from_external_attr
-from cpip.install.wheel_archive_cache import (
+from cpip.install.wheel_archive_cache import prepare_cached_wheel
+from cpip.install.wheel_archive_installer import install_wheels_from_archive_cache
+from cpip.install.wheel_install_plan_cache import (
     exact_install_plan_key_from_strings,
-    install_wheels_from_archive_cache,
     load_cached_install_plan,
-    prepare_cached_wheel,
 )
 from cpip.platform.clone import clone_path
 from cpip.resolution.archive import (

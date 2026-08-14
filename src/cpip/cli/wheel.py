@@ -11,6 +11,7 @@ from cpip.cli.dependency_groups import group_items, parse_dependency_groups
 from cpip.cli.parsers.wheel import create_parser
 from cpip.cli.requirements import (
     apply_proxy_environment,
+    build_options_from_requirements,
     bundle_install_requirements,
     collect_requirements,
     config_settings,
@@ -68,21 +69,7 @@ def run_wheel(args: list[str]) -> int:
         item.config_settings = bundle.editable_config_settings.get(editable, {})
         requirements.append(item)
 
-    build_options: dict[str, dict[str, object]] = {}
-
-    for requirement in requirements:
-        if not requirement.config_settings or requirement.req is None:
-            continue
-
-        settings = dict(requirement.config_settings)
-
-        build_options[requirement.req.raw] = settings
-
-        if requirement.req.url is not None:
-            build_options[requirement.req.url] = settings
-
-        if requirement.link is not None:
-            build_options[requirement.link.url] = settings
+    build_options = build_options_from_requirements(requirements)
 
     provider = CandidateProvider.from_options(
         find_links=bundle.find_links,

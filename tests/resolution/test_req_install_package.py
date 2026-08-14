@@ -491,14 +491,14 @@ def test_get_url_from_path(
             return_value=mock_returns[1],
         ),
     ):
-        assert get_url_from_path_with_mode(*args)[0] is expected
+        assert get_url_from_path_with_mode(args[0])[0] is expected
 
 
 def test_get_url_from_path_archive_file(tmp_path: Path) -> None:
     name = "simple-0.1-py2.py3-none-any.whl"
     path = tmp_path / name
     path.touch()
-    assert get_url_from_path_with_mode(str(path), name)[0] == path.resolve().as_uri()
+    assert get_url_from_path_with_mode(str(path))[0] == path.resolve().as_uri()
 
 
 def test_get_url_from_path_installable_dir(tmp_path: Path) -> None:
@@ -506,7 +506,7 @@ def test_get_url_from_path_installable_dir(tmp_path: Path) -> None:
     path = tmp_path / name
     path.mkdir(parents=True)
     (path / "setup.py").touch()
-    assert get_url_from_path_with_mode(str(path), name)[0] == path.resolve().as_uri()
+    assert get_url_from_path_with_mode(str(path))[0] == path.resolve().as_uri()
 
 
 def test_get_url_from_path_installable_error(tmp_path: Path) -> None:
@@ -514,7 +514,7 @@ def test_get_url_from_path_installable_error(tmp_path: Path) -> None:
     path = tmp_path / name
     path.mkdir(parents=True)
     with pytest.raises(InstallationError) as exc:
-        get_url_from_path_with_mode(str(path), name)
+        get_url_from_path_with_mode(str(path))
     assert "Neither 'setup.py' nor 'pyproject.toml' found" in str(exc.value)
 
 

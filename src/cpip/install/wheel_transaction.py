@@ -14,6 +14,7 @@ import tempfile
 import zipfile
 from collections.abc import Iterable
 from contextlib import nullcontext
+from threading import Lock
 
 from cpip.core.errors import InstallationError
 from cpip.core.names import canonicalize_name
@@ -35,10 +36,8 @@ from cpip.install.wheel_archive import (
     validate_member_parts,
     zip_mode,
 )
-from cpip.install.wheel_archive_cache import (
-    CachedWheelArchive,
-    install_wheels_from_archive_cache,
-)
+from cpip.install.wheel_archive_cache import CachedWheelArchive
+from cpip.install.wheel_archive_installer import install_wheels_from_archive_cache
 from cpip.install.wheel_archive_runtime import CachedWheelInfo, open_wheel_archive
 from cpip.install.wheel_scripts import (
     entry_point_scripts,
@@ -70,6 +69,22 @@ if TYPE_CHECKING:
 
 DIRECT_CONTENT_LIMIT = 64 * 1024
 StagedEntry = tuple[str, str, str, int | None]
+
+
+class ThreadSafePathCache:
+    """Lock-guarded destination-path cache shared by parallel install workers."""
+
+    def __init__(self) -> None:
+        self.values: DestinationCache = {}
+        self.lock = Lock()
+
+    def get(self, key: tuple[str, str]) -> str | None:
+        with self.lock:
+            return self.values.get(key)
+
+    def __setitem__(self, key: tuple[str, str], value: str) -> None:
+        with self.lock:
+            self.values[key] = value
 
 
 def _target_has_distribution_metadata(target: InstallTarget) -> bool:
@@ -797,25 +812,6 @@ def install_wheels_transactionally(
             )
             cache_for_workers = destination_cache
             if parallel:
-                from threading import Lock
-
-                class ThreadSafePathCache:
-                    def __init__(self) -> None:
-                        self.values: DestinationCache = {}
-                        self.lock = Lock()
-
-                    def get(self, key: tuple[str, str]) -> str | None:
-                        with self.lock:
-                            return self.values.get(key)
-
-                    def __setitem__(
-                        self,
-                        key: tuple[str, str],
-                        value: str,
-                    ) -> None:
-                        with self.lock:
-                            self.values[key] = value
-
                 cache_for_workers = ThreadSafePathCache()
 
             def install_one(

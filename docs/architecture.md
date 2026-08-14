@@ -197,7 +197,7 @@ ResolutionEngine.resolve                       (resolution/api.py)
   -> nab_resolver.resolver.Resolver.resolve    (_vendor/nab_resolver/)
        +--> Resolver asks the adapter for versions and dependencies
        `--> on failure: nab_resolver.report.format_error
-  -> ResolutionResult / ResolvedRequirement    (resolution/model.py)
+  -> ResolutionResult / ResolvedRequirement    (resolution/models.py)
 ```
 
 `NabProvider` is the whole contract between cpip and the search. It answers
@@ -218,10 +218,11 @@ print `<empty>` instead of the requirement the user typed.
   rendering, and conversion to `ResolutionResult`. It does not own the search.
 - `nab_provider.py` owns the adapter: candidate lookup, version choice,
   dependency exposure, prioritization, and display narrowing.
-- `config.py` owns `ResolutionConfig`, the resolution policy value object.
-- `model.py` owns source-independent public result values.
-- `inputs.py`, `input_models.py`, `input_paths.py`, and `input_requirements.py`
-  own requirement coercion, input contracts, and path/URL requirement forms.
+- `models.py` owns `ResolutionConfig`, the resolution policy value object, and
+  the source-independent public result values (`ResolutionResult`,
+  `ResolvedRequirement`).
+- `inputs.py`, `input_paths.py`, and `input_requirements.py` own requirement
+  coercion, input contracts, and path/URL requirement forms.
 - `files/` owns requirements-file and pylock parsing (`parser.py`,
   `pylock.py`, `options.py`, `models.py`, `contracts.py`).
 - `archive.py` owns wheelhouse availability signalling
@@ -390,7 +391,7 @@ use cloneable directory trees.
 | `index/release_facts_cache.py` | `release-facts-v1.marshal` | deterministic release-level rejection reasons |
 | `cli/fast_install.py` (`FastInstallMetadataCache`) | `fast-install-v3.marshal` and `fast-install-trees-v1/` | narrow local plans, wheel metadata, and cloneable completed targets |
 | `install/wheel_archive_cache.py` | `archive-v1/` | validated, unpacked immutable wheel trees keyed by wheel digest |
-| `install/wheel_archive_cache.py` | `resolution-v2/` | short-lived exact-pin plan receipts referencing validated archives |
+| `install/wheel_install_plan_cache.py` | `resolution-v2/` | short-lived exact-pin plan receipts referencing validated archives |
 
 `core/utils.py:load_snapshot`/`save_snapshot` provide best-effort snapshot
 loading and atomic replacement for the small persistent maps. Each cache owns

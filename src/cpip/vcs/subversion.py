@@ -175,11 +175,6 @@ class Subversion(VersionControl):
 
         return url, rev
 
-    @classmethod
-    def is_commit_id_equal(cls, dest: str, name: str | None) -> bool:
-        """Always assume the versions don't match"""
-        return False
-
     def __init__(self, use_interactive: bool | None = None) -> None:
         if use_interactive is None:
             use_interactive = sys.stdin is not None and sys.stdin.isatty()

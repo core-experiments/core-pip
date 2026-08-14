@@ -11,7 +11,7 @@ from cpip.build.build_backend import ProjectBuilder, prepare_project_metadata
 from cpip.build.metadata import InstalledDistributionStore
 from cpip.core.errors import BuildError
 from cpip.core.packaging import SpecifierSet, parse_requirement
-from cpip.core.wheel import read_wheel_metadata
+from cpip.core.wheel import read_metadata_message
 from cpip.index.candidate_materialization import (
     CandidateMaterializer,
     validate_build_requirements,
@@ -74,7 +74,7 @@ def test_metadata_variation(
     def read_all_metadata() -> int:
         reset_caches()
         return sum(
-            len(read_wheel_metadata(wheel).get_all("Requires-Dist", ()))
+            len(read_metadata_message(wheel).get_all("Requires-Dist", ()))
             for wheel in metadata_variation_wheels
         )
 

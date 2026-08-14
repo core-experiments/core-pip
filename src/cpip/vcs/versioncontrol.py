@@ -494,12 +494,15 @@ class VersionControl:
     def is_commit_id_equal(cls, dest: str, name: str | None) -> bool:
         """Return whether the id of the current commit equals the given name.
 
+        The default assumes the versions don't match; only backends that can
+        cheaply resolve a commit id (currently Git) override this.
+
         Args:
           dest: the repository directory.
           name: a string name.
 
         """
-        raise NotImplementedError
+        return False
 
     def obtain(self, dest: str, url: HiddenText, verbosity: int) -> None:
         """Install or update in editable mode the package represented by this

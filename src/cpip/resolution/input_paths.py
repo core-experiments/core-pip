@@ -22,37 +22,29 @@ def looks_like_path(value: str) -> bool:
     )
 
 
-def get_url_from_path_with_mode(
-    path: str,
-    name: str,
-) -> tuple[str | None, int | None]:
+def get_url_from_path_with_mode(path: str) -> tuple[str | None, int | None]:
     """Return a normalized path URL and the mode observed while resolving it."""
     parsed = urllib.parse.urlparse(path)
     if parsed.scheme == "file":
-        local_path = path_from_file_url(parsed)
-        mode = _stat_mode(local_path)
-        if mode is None:
-            return None, None
-        if stat.S_ISREG(mode):
-            return file_url_with_fragment(local_path, parsed.fragment), mode
-        if stat.S_ISDIR(mode):
-            if not _has_project_file(local_path):
-                raise InstallationError(
-                    "Neither 'setup.py' nor 'pyproject.toml' found.",
-                )
-            return file_url_with_fragment(local_path, parsed.fragment), mode
-        return None, mode
+        return _path_url_with_mode(path_from_file_url(parsed), parsed.fragment)
     if " @ " in path or "@git+" in path:
         return None, None
+    return _path_url_with_mode(path, "")
+
+
+def _path_url_with_mode(
+    path: str,
+    fragment: str,
+) -> tuple[str | None, int | None]:
     mode = _stat_mode(path)
     if mode is None:
         return None, None
     if stat.S_ISREG(mode):
-        return path_to_url(os.path.realpath(path)), mode
+        return file_url_with_fragment(path, fragment), mode
     if stat.S_ISDIR(mode):
         if not _has_project_file(path):
             raise InstallationError("Neither 'setup.py' nor 'pyproject.toml' found.")
-        return path_to_url(os.path.realpath(path)), mode
+        return file_url_with_fragment(path, fragment), mode
     return None, mode
 
 
