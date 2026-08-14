@@ -23,8 +23,8 @@ from functools import cache
 from os.path import commonpath
 from typing import Any, NamedTuple
 
-from cpip.core.utils import AuthInfo
 from cpip.core.urls import remove_auth_from_url, split_auth_netloc_from_url
+from cpip.core.utils import AuthInfo
 
 logger = logging.getLogger(__name__)
 

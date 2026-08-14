@@ -9,7 +9,6 @@ from urllib.parse import urlsplit
 from cpip._vendor.nab_resolver.ranges import Range
 from cpip._vendor.nab_resolver.types import Incompatibility, RangeProtocol
 from cpip.core.metadata import InstalledDistribution, find_installed
-from cpip.core.wheel import WheelCandidate
 from cpip.core.packaging import (
     InvalidVersion,
     Requirement,
@@ -19,6 +18,7 @@ from cpip.core.packaging import (
     marker_applies,
     parse_requirement,
 )
+from cpip.core.wheel import WheelCandidate
 from cpip.index.candidate_evaluators import CandidateEvaluator
 from cpip.index.provider import CandidateProvider
 from cpip.resolution.models import ResolutionConfig, canonical_url, url_name

@@ -19,12 +19,12 @@ from cpip_test_support.wheel import (
 
 def test_message_from_dict_one_value() -> None:
     message = message_from_dict({"a": "1"})
-    assert set(message.get_all("a")) == {"1"}  # type: ignore
+    assert set(message.get_all("a")) == {"1"}
 
 
 def test_message_from_dict_multiple_values() -> None:
     message = message_from_dict({"a": ["1", "2"]})
-    assert set(message.get_all("a")) == {"1", "2"}  # type: ignore
+    assert set(message.get_all("a")) == {"1", "2"}
 
 
 def message_from_bytes(contents: bytes) -> Message:

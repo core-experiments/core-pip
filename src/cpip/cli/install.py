@@ -7,18 +7,17 @@ import os
 import sys
 from dataclasses import dataclass, field, replace
 
+import cpip.cli.fast_install as fast_install
 from cpip.build.build import build_editable_from_source
+from cpip.build.metadata import InstalledDistributionStore
 from cpip.build.query import (
     check_package_set,
     installed_dependencies_by_name,
     package_set_from_dependencies,
 )
-from cpip.build.metadata import InstalledDistributionStore
 from cpip.cli.config import SourceConfig, load_source_config
-from cpip.cli.parsers.install import create_parser
-from cpip.cli.target import target_prefix
 from cpip.cli.dependency_groups import group_items, parse_dependency_groups
-import cpip.cli.fast_install as fast_install
+from cpip.cli.parsers.install import create_parser
 from cpip.cli.requirements import (
     bundle_install_requirements,
     collect_requirements,
@@ -26,6 +25,7 @@ from cpip.cli.requirements import (
     requirements_from_script,
 )
 from cpip.cli.resolution_errors import resolution_error_message
+from cpip.cli.target import target_prefix
 from cpip.core.appdirs import resolve_cache_dir
 from cpip.core.cpip_version import CPIP_DISTRIBUTION_NAMES
 from cpip.core.errors import (
@@ -42,15 +42,15 @@ from cpip.core.packaging import (
     marker_applies,
     parse_requirement,
 )
-from cpip.core.utils import CURRENT_PYTHON_VERSION_DIGITS, CURRENT_PYTHON_VERSION_FULL
 from cpip.core.urls import url_to_path
+from cpip.core.utils import CURRENT_PYTHON_VERSION_DIGITS, CURRENT_PYTHON_VERSION_FULL
 from cpip.core.wheel import TargetContext, wheel_candidate_from_path
 from cpip.index.links import Link
 from cpip.index.provider import CandidateProvider
 from cpip.install.metadata import (
+    ReportItem,
     direct_url_from_link,
     prepare_editable_source,
-    ReportItem,
     write_install_report,
 )
 from cpip.install.output import prepare_install_candidates
@@ -75,6 +75,7 @@ TYPE_CHECKING = False
 if TYPE_CHECKING:
     import argparse
     from typing import Any
+
     from cpip.resolution.models import ResolutionResult
     from cpip.resolution.req_install import InstallRequirement
 

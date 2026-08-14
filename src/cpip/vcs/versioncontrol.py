@@ -14,9 +14,9 @@ from typing import (
     cast,
 )
 
-from cpip.core.utils import AuthInfo, display_path
 from cpip.core.errors import InstallationError
 from cpip.core.subprocess import CommandArgs, format_command_args
+from cpip.core.utils import AuthInfo, display_path
 
 from .errors import BadCommand
 from .subprocess import (

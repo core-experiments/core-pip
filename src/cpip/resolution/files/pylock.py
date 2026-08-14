@@ -17,8 +17,8 @@ except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility
 from cpip.core.errors import InstallationError
 from cpip.core.format_control import FormatControl
 from cpip.core.packaging import SpecifierSet, Version
-from cpip.core.utils import CURRENT_PYTHON_VERSION_FULL
 from cpip.core.urls import path_to_url
+from cpip.core.utils import CURRENT_PYTHON_VERSION_FULL
 from cpip.core.wheel import parse_wheel_filename
 from cpip.resolution.files.models import ParsedRequirement
 

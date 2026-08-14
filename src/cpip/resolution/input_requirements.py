@@ -7,9 +7,8 @@ import stat
 import urllib.parse
 
 from cpip.core.errors import InstallationError, InvalidWheelFilename
-from cpip.core.packaging import EMPTY_FROZENSET
+from cpip.core.packaging import EMPTY_FROZENSET, parse_requirement
 from cpip.core.packaging import Requirement as ParsedRequirement
-from cpip.core.packaging import parse_requirement
 from cpip.core.urls import path_to_url
 from cpip.index.links import Link
 from cpip.resolution.input_paths import (

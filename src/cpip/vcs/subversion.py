@@ -5,10 +5,10 @@ import os
 import re
 import sys
 
-from cpip.core.utils import AuthInfo, display_path
 from cpip.core.errors import InstallationError
 from cpip.core.subprocess import CommandArgs
 from cpip.core.urls import split_auth_from_netloc
+from cpip.core.utils import AuthInfo, display_path
 
 from .subprocess import make_command
 from .support import (

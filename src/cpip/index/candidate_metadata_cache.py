@@ -8,8 +8,8 @@ import os
 import sqlite3
 from typing import cast
 
-from cpip.core.utils import load_snapshot
 from cpip.core.packaging import Requirement, Version, parse_requirement
+from cpip.core.utils import load_snapshot
 from cpip.index.source_models import CandidateMetadata
 from cpip.index.sqlite_cache import SqliteBackedCache
 
@@ -64,7 +64,7 @@ class CandidateMetadataCache(SqliteBackedCache):
                     and payload[0] == "cpip-candidate-metadata"
                 ):
                     legacy_payload = payload
-            except Exception:
+            except Exception:  # noqa: BLE001, S110
                 pass
 
         if legacy_payload is not None:
@@ -124,7 +124,7 @@ class CandidateMetadataCache(SqliteBackedCache):
                     self._pending_ver_states[raw] = state
                 self.dirty = True
                 self.flush()
-        except Exception:
+        except Exception:  # noqa: BLE001, S110
             pass
 
     def load_other_legacy(self) -> None:
@@ -211,7 +211,7 @@ class CandidateMetadataCache(SqliteBackedCache):
                             self.decoded.pop(evicted, None)
                             self.validated.discard(evicted)
                         self.entries[key] = value
-                except Exception:
+                except Exception:  # noqa: BLE001, S110
                     pass
 
         if value is None or (key not in self.validated and not self.valid_value(value)):
@@ -273,7 +273,7 @@ class CandidateMetadataCache(SqliteBackedCache):
                 try:
                     state = marshal.loads(row[0])
                     self.requirement_states[raw] = state
-                except Exception:
+                except Exception:  # noqa: BLE001, S110
                     pass
 
         if state is not None:
@@ -318,7 +318,7 @@ class CandidateMetadataCache(SqliteBackedCache):
                 try:
                     state = marshal.loads(row[0])
                     self.version_states[raw] = state
-                except Exception:
+                except Exception:  # noqa: BLE001, S110
                     pass
 
         if state is not None:
@@ -368,7 +368,7 @@ class CandidateMetadataCache(SqliteBackedCache):
                             self.decoded.pop(evicted, None)
                             self.validated.discard(evicted)
                         self.entries[key] = value
-                except Exception:
+                except Exception:  # noqa: BLE001, S110
                     pass
 
         if value is None:

@@ -7,16 +7,16 @@ from pathlib import Path
 
 from cpip.core.packaging import Version
 from cpip.index.catalog_cache import (
-    CatalogChoices,
     LEGACY_PREFIX,
     LEGACY_SUMMARY_HEADER,
     LEGACY_SUMMARY_PREFIX,
     RECORD_WHEEL_IDENTITY,
     V6_PREFIX,
     WHEEL_RECORD,
+    CatalogChoices,
     cache_key,
-    load_choices,
     load_catalog,
+    load_choices,
     load_links,
     load_summary,
     save_choices,
