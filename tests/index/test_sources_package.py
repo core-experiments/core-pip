@@ -10,10 +10,10 @@ from cpip.cli.main import main
 from cpip.core.packaging import Requirement, Version, parse_requirement
 from cpip.core.wheel import TargetContext
 from cpip.index.cache import origin_hashes
-from cpip.index.catalog_cache import save_links
 from cpip.index.candidate_evaluators import CandidateEvaluator
 from cpip.index.candidate_materialization import CandidateMaterializer
 from cpip.index.candidates import InstallationCandidate
+from cpip.index.catalog_cache import save_links
 from cpip.index.directory_index import (
     local_source_snapshot,
     project_version_from_filename,
@@ -30,8 +30,8 @@ from cpip.index.source_models import (
     RejectionReason,
 )
 from cpip.index.vcs import is_immutable_vcs_link, vcs_reference
-from cpip.network.http import HttpResponse
 from cpip.network.cache import SafeFileCache
+from cpip.network.http import HttpResponse
 
 from ..wheel_helpers import make_sdist, make_wheel
 

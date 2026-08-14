@@ -7,6 +7,7 @@ import tempfile
 from collections.abc import Iterable
 from typing import TYPE_CHECKING, Any, Protocol
 
+from cpip.build.pep517_hooks import BuildBackendHookCaller, HookMissing
 from cpip.core.direct_url import ArchiveInfo, DirInfo
 from cpip.core.errors import (
     DiagnosticCpipError,
@@ -24,7 +25,6 @@ from cpip.core.packaging import (
     parse_requirement,
 )
 from cpip.index.links import Link
-from cpip.build.pep517_hooks import BuildBackendHookCaller, HookMissing
 from cpip.resolution.input_paths import looks_like_path
 
 if TYPE_CHECKING:

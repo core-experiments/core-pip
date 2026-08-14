@@ -7,9 +7,9 @@ import shutil
 import sys
 
 from cpip.build.build import build_wheel_from_source
-from cpip.cli.parsers.download import create_parser
 from cpip.cli.config import load_source_config, resolve_sources
 from cpip.cli.dependency_groups import group_items, parse_dependency_groups
+from cpip.cli.parsers.download import create_parser
 from cpip.cli.requirements import (
     apply_proxy_environment,
     bundle_install_requirements,

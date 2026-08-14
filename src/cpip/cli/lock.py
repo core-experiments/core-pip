@@ -8,8 +8,8 @@ import tempfile
 from cpip.build.build import unpack_source
 from cpip.cli.fast import read_requirements
 from cpip.cli.lock_format import LOCK_HEADER, toml_string, write_lock_output
-from cpip.core.appdirs import configured_cache_dir
 from cpip.cli.parsers.lock import create_parser
+from cpip.core.appdirs import configured_cache_dir
 from cpip.core.errors import CommandError
 from cpip.core.format_control import FormatControl
 from cpip.core.packaging import parse_requirement

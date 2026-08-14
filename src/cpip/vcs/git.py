@@ -5,9 +5,9 @@ import os.path
 import re
 import urllib.parse
 
-from cpip.core.utils import AuthInfo, display_path
 from cpip.core.errors import InstallationError
 from cpip.core.urls import path_to_url
+from cpip.core.utils import AuthInfo, display_path
 
 from .errors import BadCommand
 from .subprocess import make_command

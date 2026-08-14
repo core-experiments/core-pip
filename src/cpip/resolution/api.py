@@ -10,15 +10,15 @@ from collections.abc import Iterable
 
 from cpip.core.errors import ResolutionError as CpipResolutionError
 from cpip.index.provider import CandidateProvider
-from cpip.resolution.models import (
-    ResolvedRequirement,
-    ResolutionResult,
-    ResolutionConfig,
-)
-from cpip.resolution.nab_provider import InstalledCandidate, NabProvider
 from cpip.resolution.inputs import (
     coerce_requirements,
 )
+from cpip.resolution.models import (
+    ResolutionConfig,
+    ResolutionResult,
+    ResolvedRequirement,
+)
+from cpip.resolution.nab_provider import InstalledCandidate, NabProvider
 
 TYPE_CHECKING = False
 

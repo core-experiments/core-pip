@@ -15,9 +15,9 @@ import threading
 import time
 import urllib.parse
 
-from cpip.core.utils import current_version
 from cpip.core.cpip_version import get_cpip_version
 from cpip.core.urls import redact_auth_from_url, url_to_path
+from cpip.core.utils import current_version
 from cpip.network.auth import MultiDomainBasicAuth
 from cpip.network.cache import SafeFileCache
 from cpip.network.exceptions import (

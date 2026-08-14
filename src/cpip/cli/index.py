@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import json
 
-from cpip.cli.parsers.index import create_parser
 from cpip.cli.config import load_source_config, resolve_sources
+from cpip.cli.parsers.index import create_parser
 from cpip.core.format_control import FormatControl
 from cpip.core.packaging import parse_requirement
 from cpip.index.provider import CandidateProvider

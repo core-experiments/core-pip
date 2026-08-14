@@ -64,7 +64,6 @@ TYPE_CHECKING = False
 if TYPE_CHECKING:
     from cpip.build.metadata import InstalledMetadataDistribution
     from cpip.core.direct_url import DirectUrl
-
     from cpip.install.wheel_state import InstalledWheelDistribution
 
     ExistingDistribution = InstalledMetadataDistribution | InstalledWheelDistribution

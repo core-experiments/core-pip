@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import pytest
+from cpip.install.requirement_set import RequirementSet
 from cpip.resolution.input_requirements import (
     install_req_from_editable,
     install_req_from_line,
 )
-from cpip.install.requirement_set import RequirementSet
 from cpip.resolution.req_install import InstallRequirement
 
 

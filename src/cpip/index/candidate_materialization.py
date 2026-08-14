@@ -14,6 +14,7 @@ import zipfile
 from itertools import chain, islice
 from threading import RLock
 
+from cpip.build.build import build_wheel_from_source, unpack_source_internal
 from cpip.core.errors import BuildError, InstallationError, UnsupportedWheel
 from cpip.core.packaging import (
     Requirement,
@@ -32,7 +33,6 @@ from cpip.core.wheel import (
     wheel_dist_info_dir,
 )
 from cpip.core.wheel_metadata import parse_metadata_headers
-from cpip.build.build import build_wheel_from_source, unpack_source_internal
 from cpip.index.artifacts import ArtifactLocator
 from cpip.index.candidate_cache import (
     cache_built_wheel as store_cached_wheel,

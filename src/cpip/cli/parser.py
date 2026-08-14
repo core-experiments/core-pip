@@ -15,10 +15,6 @@ import argparse
 import re
 import sys
 
-# A local sentinel instead of ``from typing import TYPE_CHECKING``: the real
-# ``typing`` module costs the better part of a millisecond to import (it
-# pulls in ``re``'s heavier internals, ``collections.abc``, ``enum``), and
-# every command's parser is built from this module's base classes.
 TYPE_CHECKING = False
 
 if TYPE_CHECKING:

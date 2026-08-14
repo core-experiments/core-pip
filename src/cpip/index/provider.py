@@ -16,8 +16,8 @@ from types import MappingProxyType
 from cpip.core.errors import InstallationError
 from cpip.core.hashes import Hashes
 from cpip.core.packaging import Requirement, Version
-from cpip.core.urls import path_to_url, url_to_path
 from cpip.core.release_control import ReleaseControl
+from cpip.core.urls import path_to_url, url_to_path
 from cpip.core.wheel import supported_wheel_tags, wheel_tag_rank
 from cpip.index.candidate_evaluators import CandidateEvaluator
 from cpip.index.candidate_materialization import CandidateMaterializer

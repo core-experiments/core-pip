@@ -5,8 +5,8 @@ import logging
 import os
 
 from cpip.core.errors import InstallationError
-from cpip.core.utils import display_path
 from cpip.core.urls import path_to_url
+from cpip.core.utils import display_path
 
 from .errors import BadCommand
 from .subprocess import make_command

@@ -38,7 +38,6 @@ from cpip.core.packaging import (
 from cpip.core.subprocess import call_subprocess
 from cpip.install.build_env.venv import create_isolated_venv
 
-
 # ``pkg_resources`` was removed from setuptools 82.  Projects that only have a
 # setup.py are still built through setuptools' legacy backend, and a number of
 # otherwise installable projects import pkg_resources from setup.py.  Keep the

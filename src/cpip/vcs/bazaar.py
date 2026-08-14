@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import logging
 
-from cpip.core.utils import AuthInfo, display_path
 from cpip.core.urls import path_to_url
+from cpip.core.utils import AuthInfo, display_path
 
 from .subprocess import make_command
 from .support import HiddenText

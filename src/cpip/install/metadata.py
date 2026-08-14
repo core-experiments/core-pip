@@ -7,8 +7,8 @@ import os
 import shutil
 import sys
 
-from cpip.build.metadata import InstalledMetadataDistribution, MetadataDistribution
 from cpip.build.build_backend import BackendSpec, prepare_project_metadata
+from cpip.build.metadata import InstalledMetadataDistribution, MetadataDistribution
 from cpip.core.direct_url import ArchiveInfo, DirectUrl, DirInfo, VcsInfo
 from cpip.core.errors import BuildError, CommandError, InstallationError
 from cpip.core.hashes import file_hashes
