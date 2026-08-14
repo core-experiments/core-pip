@@ -23,7 +23,7 @@ import, and say so in review when one is added.
 | How does an artifact become local? | `src/cpip/index/artifacts.py:ArtifactLocator` | artifact cache, HTTP cache, network session |
 | How are selected candidates prepared? | `src/cpip/install/output.py:prepare_install_candidates` | candidate materialization and wheel archive preparation |
 | How are wheels installed? | `src/cpip/install/wheel_transaction.py:install_wheels_transactionally` | archive cache, direct transaction, staged transaction |
-| Where are persistent caches defined? | the cache owner listed below | `core/marshal_cache.py` for small snapshots and `cli/cache.py` for command-facing management |
+| Where are persistent caches defined? | the cache owner listed below | `core/utils.py` for small snapshots (`load_snapshot`/`save_snapshot`) and `cli/cache.py` for command-facing management |
 | How are build backends invoked? | `src/cpip/build/build_backend.py:ProjectBuilder` | backend hooks and `build/build.py:build_wheel_from_source` |
 
 ## Process entry and command dispatch
@@ -43,11 +43,11 @@ console script / cpip.__init__:main / python -m cpip
               +--> the --require-virtualenv gate
               `--> unknown command names
        +--> cli.fast:run_before_startup
-              +--> cli.fast.lock:run
-              +--> cli.fast.install:run_cached_remote
-              +--> cli.fast.install:run_local_fallback
-              +--> cli.fast.install:run
-              `--> cli.fast.list:run
+              +--> cli.fast:run_lock
+              +--> cli.fast_install:run_cached_remote
+              +--> cli.fast_install:run_local_fallback
+              +--> cli.fast_install:run
+              `--> cli.fast:run_list
        +--> configure execution context and logging when required
        +--> cli.fast:run_install_after_startup, when no install fast path ran
        +--> create a global temporary-directory context when required
@@ -73,14 +73,15 @@ path.
 Within a command module, imports are top level: the resolver, installer, index,
 and build subtrees load when their owning module loads, and no command hoists
 `from X import Y` into a function to hide that cost. The exceptions are
-deliberate and confined to the startup path -- `cli.entrypoint` and
-`cli.fast.__init__` defer their imports so a declined command pays only for the
-token tests, and VCS backends and PEP 517 build backends are resolved by name
-at runtime. `CommandSpec.needs_logging`, `needs_tempdir`, and
-`needs_execution_context` keep unnecessary startup work out of lightweight
-commands; prefer adding a spec field over testing a command name in
-`cli.entrypoint`. New process-level behavior belongs in `cli.entrypoint`; new
-command behavior belongs in its command module and `CommandSpec`.
+deliberate and confined to the startup path -- `cli.entrypoint` defers its
+import of `cli.fast`, and `cli.fast` defers its import of `cli.fast_install`,
+so a declined command pays only for the token tests. VCS backends and PEP 517
+build backends are resolved by name at runtime. `CommandSpec.needs_logging`,
+`needs_tempdir`, and `needs_execution_context` keep unnecessary startup work
+out of lightweight commands; prefer adding a spec field over testing a
+command name in `cli.entrypoint`. New process-level behavior belongs in
+`cli.entrypoint`; new command behavior belongs in its command module and
+`CommandSpec`.
 
 The install startup routes cover three different target states:
 
@@ -95,18 +96,18 @@ The install startup routes cover three different target states:
   the minimal resolver but delegates replacement to the archive or normal
   transactional installer.
 
-`cli.fast.list` and `cli.fast.lock` follow the same recognition rule: handle
-only the declared subset and return control to normal command dispatch
-otherwise.
+`run_list` and `run_lock` (both in `cli/fast.py`) follow the same recognition
+rule: handle only the declared subset and return control to normal command
+dispatch otherwise.
 
-The `cli.fast` package owns both halves of a fast path: the cheap argv gates in
-its `__init__.py` and the parsers behind them. `cli.entrypoint` calls
+`cli.fast` and `cli.fast_install` together own both halves of a fast path: the
+cheap argv gates and the parsers behind them. `cli.entrypoint` calls
 `run_before_startup` once, asks `suppresses_logging` whether a quiet fast shape
 means logging should be skipped, and retries `run_install_after_startup` /
 `run_lock_after_startup` once startup has completed. Keep new recognition rules
-in `cli.fast`; `cli.entrypoint` should not name a command. The package stays
+in these two modules; `cli.entrypoint` should not name a command. They stay
 import-light so a declined command pays for nothing but the token tests, and
-each fast path module is imported only once its shape matches.
+`cli.fast_install` is imported only once its shape matches.
 
 ### Shared ownership inside `cli`
 
@@ -129,11 +130,12 @@ was passed explicitly. The lock commands deliberately use
 `configured_cache_dir`, not `resolve_cache_dir`: their caching is opt-in.
 Divergences like these are documented at the call site rather than merged away.
 
-`cli/fast/*` re-implements name normalization, requirement parsing, METADATA
-scanning, JSON escaping, and a minimal wheelhouse resolver. That duplication is
-deliberate -- it buys startup time by never importing `core.wheel`,
-`build.metadata`, `index`, `resolution`, `json`, or `email.parser` -- and
-should not be consolidated into the shared implementations.
+`cli/fast.py` and `cli/fast_install.py` re-implement name normalization,
+requirement parsing, METADATA scanning, JSON escaping, and a minimal
+wheelhouse resolver. That duplication is deliberate -- it buys startup time
+by never importing `core.wheel`, `build.metadata`, `index`, `resolution`,
+`json`, or `email.parser` -- and should not be consolidated into the shared
+implementations.
 
 ## Installation planning
 
@@ -174,9 +176,9 @@ they need. A new planning lane must either return the public `ResolutionResult`
 or be normalized at this boundary.
 
 Editable requirements are built and installed through their dedicated path
-before the ordinary batch. Source candidates selected by the normal resolver
-are converted to wheels during candidate materialization, not by
-`install/preparer.py`.
+(`build.build:build_editable_from_source`) before the ordinary batch. Source
+candidates selected by the normal resolver are converted to wheels during
+candidate materialization, not at install time.
 
 ## Resolution engine
 
@@ -238,13 +240,13 @@ an implementation arrow between them.
 The process-level fast installer uses a minimal resolver:
 
 ```text
-cli.fast.install:run
-  -> cli.fast.install:resolve_simple_wheelhouse
+cli.fast_install:run
+  -> cli.fast_install:resolve_simple_wheelhouse
        +--> scan wheel filenames
        +--> read selected wheel metadata through WheelArchive
        +--> recursively satisfy the supported requirement subset
        `--> reuse FastInstallMetadataCache plans and metadata
-  -> cli.fast.install:install_resolved_pure_wheels
+  -> cli.fast_install:install_resolved_pure_wheels
   -> cache a cloneable install tree after success
 ```
 
@@ -263,7 +265,7 @@ ResolutionEngine.resolve_wheelhouse            (resolution/api.py)
 There is no separate wheelhouse search. `resolve_wheelhouse` is a thin
 convenience constructor: it pins the engine to local `find_links` with the
 index disabled and then runs the same resolution as everything else. The
-process-level resolver in `cli/fast/install.py` exists to keep startup and
+process-level resolver in `cli/fast_install.py` exists to keep startup and
 object construction out of a deliberately narrow command shape, which is why
 the two implementations stay separate.
 
@@ -366,13 +368,9 @@ rule. Member-name validation exists in two strengths: the staged routes use
 `install/wheel_archive.py:validate_member_parts` together with a resolved-parent
 containment check, because they write into populated targets where a path
 component may already be a symlink. The hybrid uses the cheaper lexical
-`cli/fast/install.py:is_safe_member`, which is sound only because the target is
+`cli/fast_install.py:is_safe_member`, which is sound only because the target is
 known empty and every member is written as a regular file. Relaxing the
 emptiness requirement means adopting the resolving check.
-
-`install/preparer.py` and `install/wheel_builder.py` support build-environment
-and compatibility/bootstrap flows. They are not the starting point for an
-ordinary resolved install.
 
 ## Cache architecture
 
@@ -390,13 +388,13 @@ use cloneable directory trees.
 | `index/metadata_cache.py` | `metadata-v2.sqlite` | parsed local wheel headers keyed by absolute path, size, and modification time |
 | `index/candidate_metadata_cache.py` | `candidate-metadata-v2.marshal` | dependency metadata safe to reuse during resolution |
 | `index/release_facts_cache.py` | `release-facts-v1.marshal` | deterministic release-level rejection reasons |
-| `cli/fast/install_cache.py` | `fast-install-v3.marshal` and `fast-install-trees-v1/` | narrow local plans, wheel metadata, and cloneable completed targets |
+| `cli/fast_install.py` (`FastInstallMetadataCache`) | `fast-install-v3.marshal` and `fast-install-trees-v1/` | narrow local plans, wheel metadata, and cloneable completed targets |
 | `install/wheel_archive_cache.py` | `archive-v1/` | validated, unpacked immutable wheel trees keyed by wheel digest |
 | `install/wheel_archive_cache.py` | `resolution-v2/` | short-lived exact-pin plan receipts referencing validated archives |
 
-`core/marshal_cache.py` provides best-effort snapshot loading and atomic
-replacement for the small persistent maps. Each cache owns its schema,
-version, key validation, size limits, and value validation.
+`core/utils.py:load_snapshot`/`save_snapshot` provide best-effort snapshot
+loading and atomic replacement for the small persistent maps. Each cache owns
+its schema, version, key validation, size limits, and value validation.
 
 Cache invariants are:
 
@@ -451,6 +449,16 @@ The allowed runtime imports are:
 
 This table is enforced by review, not by a test. Vendored code is outside these
 first-party domains.
+
+Three runtime edges currently cross the table and are documented here rather
+than fixed, per the convention above: `build/build_backend.py` imports
+`install.build_env.venv:create_isolated_venv` to build the isolated
+environment a PEP 517 hook runs in; `resolution/inputs.py` imports
+`install.requirement_set:RequirementSet` as the generic container type
+requirement coercion accepts; and `resolution/req_install.py` imports
+`build.pep517_hooks:BuildBackendHookCaller` to build source distributions
+during resolution. Treat these as known debt, not precedent for new
+cross-domain imports.
 
 Type-only imports deserve the same scrutiny as runtime ones. A `TYPE_CHECKING`
 guard hides a boundary crossing from import-time behavior but not from the
