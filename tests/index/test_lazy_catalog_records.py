@@ -140,7 +140,7 @@ def test_lazy_catalog_records_choice_prefers_wheel_over_sdist(
 ) -> None:
     """The persisted per-version choice already picked a single winner
 
-    (``select_choice`` ranks WHEEL_RECORD above SDIST_RECORD), so when both
+    (``_select_catalog_choice`` ranks WHEEL_RECORD above SDIST_RECORD), so when both
     artifact kinds exist for the same version, only the wheel is yielded.
     """
     cache = SafeFileCache(str(tmp_path))

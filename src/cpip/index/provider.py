@@ -696,17 +696,16 @@ class CandidateProvider:
             artifacts,
         ):
             if record_kind == WHEEL_RECORD:
-                descriptor = self._parse_catalog_descriptor(
-                    catalog_key,
-                    (record, record_kind, None),
-                    "",
-                    version,
+                parsed_wheel = wheel_file_from_record(
+                    record,
+                    name=catalog_key[0],
+                    version=version,
                 )
 
-                if descriptor is None or descriptor[1] is None:
+                if parsed_wheel is None:
                     continue
 
-                tag_rank = wheel_tag_rank(descriptor[1].tags, supported_tags)
+                tag_rank = wheel_tag_rank(parsed_wheel.tags, supported_tags)
 
                 if tag_rank is None:
                     if unsupported is None:
@@ -1839,39 +1838,9 @@ class CandidateProvider:
             if index not in preferred_set
         )
 
-        def generate() -> Iterator[CandidateRecord]:
-            for version, record, record_kind, tag_rank, descriptor_source in ordered:
-                parsed_wheel: WheelFile | None = None
+        catalog_key = (requirement.canonical_name, allow_binary, allow_source)
 
-                if record_kind == WHEEL_RECORD:
-                    parsed_wheel = wheel_file_from_record(
-                        record,
-                        name=requirement.canonical_name,
-                        version=version,
-                    )
-
-                    if parsed_wheel is None:
-                        continue
-
-                try:
-                    link = self.link_from_catalog_record(record, descriptor_source)
-
-                except ValueError:
-                    continue
-
-                candidate = CandidateRecord(
-                    name=requirement.canonical_name,
-                    version=version,
-                    link=link,
-                    wheel=parsed_wheel,
-                    tag_rank=tag_rank,
-                )
-
-                self.candidate_record_cache.setdefault(link, candidate)
-
-                yield candidate
-
-        return generate()
+        return self._generate_catalog_candidates(catalog_key, ordered)
 
     def _catalog_descriptor_sort_key(
         self,

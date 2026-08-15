@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING
 
 from cpip.core.errors import InstallationError
 from cpip.install.wheel_archive import record_metadata_internal, validate_member_parts
-from cpip.install.wheel_archive_cache import _INSTALL_WORKERS, _prepare_cached_wheels
+from cpip.install.wheel_archive_cache import INSTALL_WORKERS, prepare_cached_wheels
 from cpip.install.wheel_scripts import (
     entry_point_scripts,
     generate_entry_point_files,
@@ -623,7 +623,7 @@ def install_wheels_from_archive_cache(
         return None
 
     try:
-        archives = _prepare_cached_wheels(candidates, cache_dir)
+        archives = prepare_cached_wheels(candidates, cache_dir)
 
     except OSError:
         return None
@@ -766,7 +766,7 @@ def install_wheels_from_archive_cache(
         if len(archives) >= 4 or len(plans) >= 4:
             pool = ThreadPoolExecutor(
                 max_workers=min(
-                    _INSTALL_WORKERS,
+                    INSTALL_WORKERS,
                     max(len(active_archives), len(active_plans)),
                 ),
             )

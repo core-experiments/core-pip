@@ -74,7 +74,7 @@ _LOCK_WAIT_SECONDS = 30.0
 
 _STALE_LOCK_SECONDS = 300.0
 
-_INSTALL_WORKERS = 4
+INSTALL_WORKERS = 4
 
 
 # relative archive path, RECORD hash, RECORD size, source mode
@@ -82,7 +82,7 @@ _INSTALL_WORKERS = 4
 ArchiveEntry = tuple[str, str, str, int]
 
 
-def _valid_sha256(value: object) -> bool:
+def valid_sha256(value: object) -> bool:
     return (
         isinstance(value, str)
         and len(value) == 64
@@ -109,14 +109,14 @@ class CachedWheelArchive:
         self.entries = entries
 
 
-def _wheel_digest(candidate: WheelInstallCandidate) -> str:
+def wheel_digest(candidate: WheelInstallCandidate) -> str:
     supplied = (
         (candidate.source_hashes or {}).get("sha256")
         if candidate.source_kind in {None, "wheel"}
         else None
     )
 
-    if isinstance(supplied, str) and _valid_sha256(supplied):
+    if isinstance(supplied, str) and valid_sha256(supplied):
         return supplied.lower()
 
     digest = hashlib.sha256()
@@ -128,11 +128,11 @@ def _wheel_digest(candidate: WheelInstallCandidate) -> str:
     return digest.hexdigest()
 
 
-def _entry_root(cache_dir: str, digest: str) -> str:
+def archive_entry_root(cache_dir: str, digest: str) -> str:
     return os.path.join(cache_dir, ARCHIVE_CACHE_BUCKET, digest[:2], digest)
 
 
-def _valid_archive_entries(entries: object) -> bool:
+def valid_archive_entries(entries: object) -> bool:
     return isinstance(entries, tuple) and all(
         isinstance(item, tuple)
         and len(item) == 4
@@ -144,7 +144,7 @@ def _valid_archive_entries(entries: object) -> bool:
     )
 
 
-def _load_archive(entry_root: str, digest: str) -> CachedWheelArchive | None:
+def load_archive(entry_root: str, digest: str) -> CachedWheelArchive | None:
     tree = os.path.join(entry_root, "tree")
 
     manifest = os.path.join(entry_root, "manifest.bin")
@@ -171,7 +171,7 @@ def _load_archive(entry_root: str, digest: str) -> CachedWheelArchive | None:
 
     entries = value[3]
 
-    if not _valid_archive_entries(entries):
+    if not valid_archive_entries(entries):
         return None
 
     return CachedWheelArchive(digest, tree, value[2], entries)
@@ -200,7 +200,7 @@ def _entry_lock(path: str, entry_root: str, digest: str) -> Generator[None, None
             descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
 
         except FileExistsError:
-            if _load_archive(entry_root, digest) is not None:
+            if load_archive(entry_root, digest) is not None:
                 # The caller will recheck after entering the no-op lock scope.
 
                 yield
@@ -358,7 +358,7 @@ def _extract_archive(
 
         temporary = ""
 
-        loaded = _load_archive(entry_root, digest)
+        loaded = load_archive(entry_root, digest)
 
         if loaded is None:
             raise OSError(
@@ -381,11 +381,11 @@ def prepare_cached_wheel(
     if isinstance(layout, CachedWheelArchive):
         return layout
 
-    digest = _wheel_digest(candidate)
+    digest = wheel_digest(candidate)
 
-    entry_root = _entry_root(cache_dir, digest)
+    entry_root = archive_entry_root(cache_dir, digest)
 
-    cached = _load_archive(entry_root, digest)
+    cached = load_archive(entry_root, digest)
 
     if cached is not None:
         return cached
@@ -397,7 +397,7 @@ def prepare_cached_wheel(
     lock = f"{entry_root}.lock"
 
     with _entry_lock(lock, entry_root, digest):
-        cached = _load_archive(entry_root, digest)
+        cached = load_archive(entry_root, digest)
 
         if cached is not None:
             return cached
@@ -405,17 +405,17 @@ def prepare_cached_wheel(
         return _extract_archive(candidate, digest, entry_root)
 
 
-def _prepare_cached_wheels(
+def prepare_cached_wheels(
     candidates: tuple[WheelInstallCandidate, ...],
     cache_dir: str,
 ) -> tuple[CachedWheelArchive, ...]:
-    if len(candidates) < _INSTALL_WORKERS:
+    if len(candidates) < INSTALL_WORKERS:
         return tuple(
             prepare_cached_wheel(candidate, cache_dir) for candidate in candidates
         )
 
     with ThreadPoolExecutor(
-        max_workers=min(_INSTALL_WORKERS, len(candidates)),
+        max_workers=min(INSTALL_WORKERS, len(candidates)),
         thread_name_prefix="cpip-archive",
     ) as pool:
         return tuple(
@@ -424,5 +424,3 @@ def _prepare_cached_wheels(
                 candidates,
             ),
         )
-
-

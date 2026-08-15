@@ -360,7 +360,7 @@ def test_records_by_version_none_falls_back_to_candidates_by_version() -> None:
     assert result == (fallback_candidate,)
 
 
-def test_unparseable_metadata_file_does_not_raise(tmp_path: Path) -> None:
+def test_link_with_metadata_file_still_materializes(tmp_path: Path) -> None:
     cache = SafeFileCache(str(tmp_path))
     source_url = "https://example.test/simple/demo/"
     link = Link.from_url(

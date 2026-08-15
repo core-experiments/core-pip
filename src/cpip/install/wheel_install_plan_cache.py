@@ -3,7 +3,9 @@
 An exact-pin command (every root requirement is a plain ``==`` specifier with
 no URL, hash, or config-settings override) can skip resolution entirely on a
 warm cache: the receipt records which archive-cache entries satisfied the
-previous resolve, and loading it re-validates those entries before reuse.
+previous resolve, and loading it revalidates the receipt's shape and confirms
+each referenced archive tree still exists before reuse -- it trusts, rather
+than re-hashes, an existing tree's contents against the recorded entries.
 """
 
 from __future__ import annotations
@@ -20,11 +22,11 @@ from cpip.core.packaging import Version, parse_requirement
 from cpip.core.wheel import WheelCandidate
 from cpip.install.wheel_archive_cache import (
     CachedWheelArchive,
-    _entry_root,
-    _load_archive,
-    _valid_archive_entries,
-    _valid_sha256,
-    _wheel_digest,
+    archive_entry_root,
+    load_archive,
+    valid_archive_entries,
+    valid_sha256,
+    wheel_digest,
 )
 from cpip.resolution.models import ResolutionResult
 
@@ -173,7 +175,7 @@ def save_cached_install_plan(
 ) -> bool:
     """Publish a short-lived plan receipt after a successful installation."""
 
-    if not _valid_sha256(key) or not candidates:
+    if not valid_sha256(key) or not candidates:
         return False
 
     records = []
@@ -183,9 +185,9 @@ def save_cached_install_plan(
             if candidate.source_kind != "wheel":
                 return False
 
-            digest = _wheel_digest(candidate)
+            digest = wheel_digest(candidate)
 
-            archive = _load_archive(_entry_root(cache_dir, digest), digest)
+            archive = load_archive(archive_entry_root(cache_dir, digest), digest)
 
             if archive is None:
                 return False
@@ -262,7 +264,7 @@ def load_cached_install_plan(
 ) -> ResolutionResult | None:
     """Load and validate a fresh plan receipt and all referenced archives."""
 
-    if not _valid_sha256(key):
+    if not valid_sha256(key):
         return None
 
     path = _resolution_path(cache_dir, key)
@@ -303,7 +305,7 @@ def load_cached_install_plan(
                 and isinstance(record[0], str)
                 and isinstance(record[1], str)
                 and isinstance(record[2], str)
-                and _valid_sha256(record[2])
+                and valid_sha256(record[2])
                 and isinstance(record[3], tuple)
                 and all(isinstance(item, str) for item in record[3])
                 and isinstance(record[4], tuple)
@@ -321,12 +323,12 @@ def load_cached_install_plan(
                 and (record[9] is None or isinstance(record[9], str))
                 and (record[10] is None or isinstance(record[10], str))
                 and isinstance(record[11], str)
-                and _valid_archive_entries(record[12])
+                and valid_archive_entries(record[12])
             ):
                 return None
 
             tree = os.path.join(
-                _entry_root(cache_dir, record[2]),
+                archive_entry_root(cache_dir, record[2]),
                 "tree",
             )
 

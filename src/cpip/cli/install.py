@@ -1084,6 +1084,13 @@ def run_install(args: list[str]) -> int:
         else []
     )
 
+    if not reinstall and not options.upgrade:
+        requirements = filter_already_satisfied_requirements(
+            requirements,
+            outcome,
+            allow_prereleases=options.pre,
+        )
+
     execution = InstallExecutionContext(
         options=options,
         bundle=bundle,
@@ -1093,13 +1100,6 @@ def run_install(args: list[str]) -> int:
         quiet=quiet,
         python_version=resolved_python_version,
     )
-
-    if not reinstall and not options.upgrade:
-        requirements = filter_already_satisfied_requirements(
-            requirements,
-            outcome,
-            allow_prereleases=options.pre,
-        )
 
     requirement_metadata = requirement_state(requirements, bundle)
     requested_order = requirement_metadata.requested_order
