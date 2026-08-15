@@ -19,6 +19,7 @@ import time
 from types import MappingProxyType
 
 from cpip.core.packaging import Version, parse_requirement
+from cpip.core.utils import CACHE_INTERPRETER_TAG
 from cpip.core.wheel import WheelCandidate
 from cpip.install.wheel_archive_cache import (
     CachedWheelArchive,
@@ -30,7 +31,18 @@ from cpip.install.wheel_archive_cache import (
 )
 from cpip.resolution.models import ResolutionResult
 
-RESOLUTION_CACHE_BUCKET = "resolution-v2"
+# Every caller today already folds interpreter/platform identity into the
+# key's context tuple (see cli/install.py:cached_remote_plan_key and
+# cli/fast_install.py), but the cache should not depend on every future
+# caller remembering that -- receipts are cheap to regenerate, so scope the
+# bucket itself and make it a guarantee rather than a convention.
+#
+# RESOLUTION_CACHE_BUCKET_FAMILY names the pattern shared by every
+# interpreter's bucket, so a cache-wide purge can find and remove all of
+# them, not only the one the running interpreter would look in.
+RESOLUTION_CACHE_BUCKET_FAMILY = "resolution-v2"
+
+RESOLUTION_CACHE_BUCKET = f"{RESOLUTION_CACHE_BUCKET_FAMILY}-{CACHE_INTERPRETER_TAG}"
 
 RESOLUTION_CACHE_FORMAT = 2
 

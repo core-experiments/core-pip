@@ -324,7 +324,9 @@ def test_fresh_target_reuses_copy_on_write_wheel_archive(tmp_path: Path) -> None
     assert (target / "owner_demo-1.0.dist-info" / "REQUESTED").exists()
     assert (target / "bin" / "owner-demo").read_text().startswith("#!/target/python\n")
     assert (target / "bin" / "raw-tool").read_text().startswith("#!/target/python\n")
-    cache_tree = cache / "archive-v1" / digest[:2] / digest / "tree"
+    from cpip.install.wheel_archive_cache import ARCHIVE_CACHE_BUCKET
+
+    cache_tree = cache / ARCHIVE_CACHE_BUCKET / digest[:2] / digest / "tree"
     assert (
         (cache_tree / "owner_demo.data" / "scripts" / "raw-tool")
         .read_text()
@@ -497,7 +499,11 @@ def test_invalid_unpacked_wheel_cache_is_rebuilt(tmp_path: Path) -> None:
         )
         assert (target / "owner_demo" / "__init__.py").exists()
         if index == 0:
-            manifest = cache / "archive-v1" / digest[:2] / digest / "manifest.bin"
+            from cpip.install.wheel_archive_cache import ARCHIVE_CACHE_BUCKET
+
+            manifest = (
+                cache / ARCHIVE_CACHE_BUCKET / digest[:2] / digest / "manifest.bin"
+            )
             manifest.write_bytes(b"invalid")
 
 

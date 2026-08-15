@@ -405,7 +405,9 @@ def test_cache_purge_removes_fast_install_snapshots(
     script: CpipTestEnvironment,
     cache_dir: str,
 ) -> None:
-    snapshot = os.path.join(cache_dir, "fast-install-v3.marshal")
+    from cpip.cli.fast_install import NAME as FAST_INSTALL_SNAPSHOT_NAME
+
+    snapshot = os.path.join(cache_dir, FAST_INSTALL_SNAPSHOT_NAME)
     tree_file = os.path.join(
         cache_dir,
         "fast-install-trees-v1",

@@ -190,8 +190,6 @@ def _build_plans(
     requests: tuple[WheelRequest, ...],
     candidates: tuple[WheelInstallCandidate, ...],
     archives: tuple[CachedWheelArchive, ...],
-    *,
-    prevalidated: bool = False,
 ) -> tuple[_WheelInstallPlan, ...]:
     trie = _DestinationNode()
 
@@ -200,14 +198,13 @@ def _build_plans(
     for owner, (request, candidate, archive) in enumerate(
         zip(requests, candidates, archives),
     ):
-        if not prevalidated:
-            for entry in archive.entries:
-                _reserve_destination(
-                    trie,
-                    _mapped_parts(entry[0]),
-                    owner,
-                    candidate,
-                )
+        for entry in archive.entries:
+            _reserve_destination(
+                trie,
+                _mapped_parts(entry[0]),
+                owner,
+                candidate,
+            )
 
         scripts = entry_point_scripts(
             os.path.join(archive.tree, archive.dist_info, "entry_points.txt"),
@@ -219,15 +216,14 @@ def _build_plans(
                     f"console script {name!r} is outside the scripts directory",
                 )
 
-            if not prevalidated:
-                for generated in (name, f"{name}-script.py", f"{name}.exe"):
-                    _reserve_destination(
-                        trie,
-                        ("Scripts" if os.name == "nt" else "bin", generated),
-                        owner,
-                        candidate,
-                        allow_same_owner=True,
-                    )
+            for generated in (name, f"{name}-script.py", f"{name}.exe"):
+                _reserve_destination(
+                    trie,
+                    ("Scripts" if os.name == "nt" else "bin", generated),
+                    owner,
+                    candidate,
+                    allow_same_owner=True,
+                )
 
         plans.append(
             _WheelInstallPlan(
@@ -314,9 +310,6 @@ def _write_new_file(path: str, contents: bytes) -> None:
 
 
 def _rewrite_metadata(path: str, candidate: WheelInstallCandidate) -> bool:
-    if not candidate.name.isalpha():
-        return False
-
     with open(path, "rb") as file:
         contents = file.read()
 
@@ -628,15 +621,7 @@ def install_wheels_from_archive_cache(
     except OSError:
         return None
 
-    plans = _build_plans(
-        requests,
-        candidates,
-        archives,
-        prevalidated=all(
-            candidate.wheel_layout is archive
-            for candidate, archive in zip(candidates, archives)
-        ),
-    )
+    plans = _build_plans(requests, candidates, archives)
 
     parent = os.path.dirname(root)
 

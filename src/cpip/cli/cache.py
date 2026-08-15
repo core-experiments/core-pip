@@ -4,12 +4,18 @@ from __future__ import annotations
 
 import builtins
 import fnmatch
+import glob
 import os
 import sys
 
+from cpip.cli.fast_install import NAME_FAMILY as FAST_INSTALL_SNAPSHOT_FAMILY
+from cpip.cli.fast_install import TREE_CACHE_BUCKET
 from cpip.cli.parsers.cache import create_parser
 from cpip.core.appdirs import user_cache_dir
 from cpip.core.errors import CommandError
+from cpip.index.artifact_cache import ARTIFACT_CACHE_BUCKET
+from cpip.install.wheel_archive_cache import ARCHIVE_CACHE_BUCKET_FAMILY
+from cpip.install.wheel_install_plan_cache import RESOLUTION_CACHE_BUCKET_FAMILY
 
 
 class CacheManager:
@@ -19,13 +25,19 @@ class CacheManager:
         self.cache_dir = os.path.normcase(cache_dir or user_cache_dir("cpip"))
         self.http_dir = os.path.join(self.cache_dir, "http-v2")
         self.wheel_dir = os.path.join(self.cache_dir, "wheels")
-        self.archive_dir = os.path.join(self.cache_dir, "archive-v1")
-        self.artifact_dir = os.path.join(self.cache_dir, "artifacts-v1")
-        self.fast_install_tree_dir = os.path.join(
-            self.cache_dir,
-            "fast-install-trees-v1",
+        # archive-v1 and resolution-v2 are interpreter-tagged (one bucket per
+        # interpreter/implementation, since they hold marshal-serialized
+        # data); glob every tagged variant rather than just the running
+        # interpreter's own, so purge clears caches left by other
+        # interpreters too.
+        self.archive_dirs = glob.glob(
+            os.path.join(self.cache_dir, f"{ARCHIVE_CACHE_BUCKET_FAMILY}-*"),
         )
-        self.resolution_dir = os.path.join(self.cache_dir, "resolution-v2")
+        self.artifact_dir = os.path.join(self.cache_dir, ARTIFACT_CACHE_BUCKET)
+        self.fast_install_tree_dir = os.path.join(self.cache_dir, TREE_CACHE_BUCKET)
+        self.resolution_dirs = glob.glob(
+            os.path.join(self.cache_dir, f"{RESOLUTION_CACHE_BUCKET_FAMILY}-*"),
+        )
         self.legacy_resolution_dir = os.path.join(
             self.cache_dir,
             "resolution-v1",
@@ -85,10 +97,10 @@ class CacheManager:
                 for root in (
                     self.http_dir,
                     self.wheel_dir,
-                    self.archive_dir,
+                    *self.archive_dirs,
                     self.artifact_dir,
                     self.fast_install_tree_dir,
-                    self.resolution_dir,
+                    *self.resolution_dirs,
                     self.legacy_resolution_dir,
                     os.path.join(self.cache_dir, "http"),
                 )
@@ -96,13 +108,23 @@ class CacheManager:
             ]
             files.extend(
                 path
-                for version in (1, 2, 3)
+                for version in (1, 2)
                 if os.path.isfile(
                     path := os.path.join(
                         self.cache_dir,
                         f"fast-install-v{version}.marshal",
                     ),
                 )
+            )
+            files.extend(
+                path
+                for path in glob.glob(
+                    os.path.join(
+                        self.cache_dir,
+                        f"{FAST_INSTALL_SNAPSHOT_FAMILY}-*.marshal",
+                    ),
+                )
+                if os.path.isfile(path)
             )
         else:
             files = [

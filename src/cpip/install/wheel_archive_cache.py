@@ -22,6 +22,7 @@ from contextlib import contextmanager
 from typing import TYPE_CHECKING, Generator
 
 from cpip.core.errors import InstallationError
+from cpip.core.utils import CACHE_INTERPRETER_TAG
 from cpip.core.wheel import validate_wheel
 from cpip.install.wheel_archive import (
     copy_member_with_metadata,
@@ -66,7 +67,19 @@ else:
     WheelRequest = tuple[str, bool, object | None]
 
 
-ARCHIVE_CACHE_BUCKET = "archive-v1"
+# _extract_archive replaces an entry_root's tree/ and manifest together as
+# one atomic unit on any miss (see its os.rename below), so scoping the
+# manifest alone to the interpreter -- without also scoping the tree it is
+# published alongside -- would make two interpreters sharing a cache_dir
+# each invalidate and re-extract the other's tree on every run. Scoping the
+# whole bucket keeps each interpreter's cache self-contained instead.
+#
+# ARCHIVE_CACHE_BUCKET_FAMILY names the pattern shared by every interpreter's
+# bucket, so a cache-wide purge can find and remove all of them, not only the
+# one the running interpreter would look in.
+ARCHIVE_CACHE_BUCKET_FAMILY = "archive-v1"
+
+ARCHIVE_CACHE_BUCKET = f"{ARCHIVE_CACHE_BUCKET_FAMILY}-{CACHE_INTERPRETER_TAG}"
 
 ARCHIVE_CACHE_FORMAT = 1
 

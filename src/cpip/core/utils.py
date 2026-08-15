@@ -52,6 +52,14 @@ CURRENT_PYTHON_VERSION_FULL = ".".join(
 CURRENT_PYTHON_MAJOR_TAG = f"py{CURRENT_PYTHON_VERSION_INFO.major}"
 CURRENT_PYTHON_FULL_TAG = f"py{CURRENT_PYTHON_VERSION_DIGITS}"
 
+# marshal's wire format is not guaranteed stable across interpreters or
+# Python versions -- reading data written by a different one is documented
+# as unsafe, not just failure-prone. Fold this into a persisted cache's
+# storage name (bucket, filename, or key prefix) so a mismatched interpreter
+# reads nothing rather than something unsafe. Deterministic across process
+# restarts (unlike hash()), so it is safe to use as part of an on-disk name.
+CACHE_INTERPRETER_TAG = f"{sys.implementation.name}-{CURRENT_PYTHON_VERSION_DIGITS}"
+
 
 def ensure_dir(path: str) -> None:
     try:

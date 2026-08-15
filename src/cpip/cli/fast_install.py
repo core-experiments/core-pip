@@ -25,7 +25,7 @@ from collections.abc import Iterable, Sequence
 from cpip.cli.fast import consume_option, extend_requirements
 from cpip.core.appdirs import resolve_cache_dir
 from cpip.core.packaging import EMPTY_FROZENSET, Version
-from cpip.core.utils import load_snapshot, save_snapshot
+from cpip.core.utils import CACHE_INTERPRETER_TAG, load_snapshot, save_snapshot
 from cpip.core.wheel import PureWheelCandidate, WheelCandidate
 from cpip.core.wheel import parse_wheel_filename as parse_wheel_filename_core
 from cpip.install.target import InstallTarget
@@ -43,7 +43,18 @@ from cpip.resolution.archive import (
 )
 
 VERSION = 3
-NAME = "fast-install-v3.marshal"
+# Scoped to the interpreter: marshal's wire format is not guaranteed
+# compatible across Python versions/implementations. TREE_CACHE_BUCKET does
+# not need the same treatment -- it is only ever reached through a plan
+# entry recorded in this file, so a tagged (and therefore missing, for a
+# different interpreter) snapshot already makes tree lookups miss cleanly.
+#
+# NAME_FAMILY names the pattern shared by every interpreter's snapshot, so a
+# cache-wide purge can find and remove all of them, not only the one the
+# running interpreter would look in.
+NAME_FAMILY = "fast-install-v3"
+
+NAME = f"{NAME_FAMILY}-{CACHE_INTERPRETER_TAG}.marshal"
 MAX_ENTRIES = 8_192
 MAX_PLANS = 256
 TREE_CACHE_BUCKET = "fast-install-trees-v1"

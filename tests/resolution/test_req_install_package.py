@@ -447,14 +447,13 @@ def test_looks_like_path(value: str, expected: bool) -> None:
 
 
 @pytest.mark.parametrize(
-    "args, mock_returns, expected",
+    "args, expected",
     [
         (
             (
                 "/path/to/foo @ git+http://foo.com@ref#egg=foo",
                 "foo @ git+http://foo.com@ref#egg=foo",
             ),
-            (False, False),
             None,
         ),
         (
@@ -462,7 +461,6 @@ def test_looks_like_path(value: str, expected: bool) -> None:
                 "/path/to/foo@git+http://foo.com@ref#egg=foo",
                 "foo @ git+http://foo.com@ref#egg=foo",
             ),
-            (False, False),
             None,
         ),
         (
@@ -470,26 +468,23 @@ def test_looks_like_path(value: str, expected: bool) -> None:
                 "/path/to/test @ https://whatever.com/test-0.4-py2.py3-bogus-any.whl",
                 "test @ https://whatever.com/test-0.4-py2.py3-bogus-any.whl",
             ),
-            (False, False),
             None,
         ),
-        (("/path/to/simple==0.1", "simple==0.1"), (False, False), None),
+        (("/path/to/simple==0.1", "simple==0.1"), None),
     ],
 )
 def test_get_url_from_path(
     args: tuple[str, str],
-    mock_returns: tuple[bool, bool],
     expected: None,
 ) -> None:
-    with (
-        mock.patch(
-            "cpip.resolution.req_install.os.path.isdir",
-            return_value=mock_returns[0],
-        ),
-        mock.patch(
-            "cpip.resolution.req_install.os.path.isfile",
-            return_value=mock_returns[1],
-        ),
+    # Every case here resolves to `expected` because the path does not
+    # exist, not because of what it looks like -- patch the real stat
+    # lookup rather than os.path.isdir/isfile so the mock actually controls
+    # the code path under test (get_url_from_path_with_mode calls
+    # cpip.resolution.input_paths._stat_mode, not os.path.isdir/isfile).
+    with mock.patch(
+        "cpip.resolution.input_paths._stat_mode",
+        return_value=None,
     ):
         assert get_url_from_path_with_mode(args[0])[0] is expected
 
