@@ -612,8 +612,12 @@ class SpecifierSet:
     def __init__(self, value: str = ""):
         self.raw = value.strip()
 
+        # A list comprehension, not a generator expression: this
+        # constructor runs for every Requires-Dist line of every candidate
+        # examined during resolution, and a genexpr pays a generator-frame
+        # resumption per specifier where the comprehension runs in one.
         self.specifiers = tuple(
-            Specifier(op, ver.strip()) for op, ver in SPEC_RE.findall(self.raw)
+            [Specifier(op, ver.strip()) for op, ver in SPEC_RE.findall(self.raw)],
         )
 
         if self.raw and not self.specifiers:

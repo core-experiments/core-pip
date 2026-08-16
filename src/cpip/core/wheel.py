@@ -768,8 +768,15 @@ def wheel_candidate(
         metadata = WheelResolutionMetadata(
             name=metadata_name,
             version=parsed_metadata_version,
+            # List comprehension, not a genexpr: this runs per candidate
+            # wheel examined during resolution, and a genexpr pays a
+            # generator-frame resumption per Requires-Dist line where the
+            # comprehension runs in one frame.
             dependencies=tuple(
-                parse_requirement(value) for value in get_all_headers("Requires-Dist")
+                [
+                    parse_requirement(value)
+                    for value in get_all_headers("Requires-Dist")
+                ],
             ),
             provided_extras=frozenset(
                 stripped
