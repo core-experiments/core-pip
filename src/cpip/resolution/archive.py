@@ -10,6 +10,11 @@ END_OF_CENTRAL_DIRECTORY = struct.Struct("<4s4H2LH")
 CENTRAL_DIRECTORY_HEADER = struct.Struct("<4s6H3L5H2L")
 LOCAL_FILE_HEADER = struct.Struct("<4s5H3L2H")
 
+# Headroom for read_member's combined read: enough for any realistic member
+# name plus local extra field (zipfile-written wheels have no local extra at
+# all). A longer name only costs the fallback read, never correctness.
+_LOCAL_HEADER_HEADROOM = 512
+
 
 class WheelhouseUnavailable(Exception):
     pass
@@ -163,19 +168,44 @@ class WheelArchive:
     def read_member(self, member: tuple[int, int, int, int, int]) -> bytes:
         compression, crc, compressed_size, uncompressed_size, local_offset = member
         if self._tail and local_offset >= self._tail_start:
-            source = io.BytesIO(self._tail)
-            source.seek(local_offset - self._tail_start)
+            # Already in memory: slice the header and data straight out of
+            # the tail buffer, with no stream object or read calls at all.
+            base = local_offset - self._tail_start
+            tail = self._tail
+            header = tail[base : base + 30]
+            if len(header) != 30 or header[:4] != b"PK\x03\x04":
+                raise WheelhouseUnavailable
+            _, _, _, _, _, _, _, _, _, name_size, extra_size = LOCAL_FILE_HEADER.unpack(
+                header,
+            )
+            start = base + 30 + name_size + extra_size
+            data = tail[start : start + compressed_size]
         else:
-            source = self.file
-            source.seek(local_offset)
-        header = source.read(30)
-        if len(header) != 30 or header[:4] != b"PK\x03\x04":
-            raise WheelhouseUnavailable
-        _, _, _, _, _, _, _, _, _, name_size, extra_size = LOCAL_FILE_HEADER.unpack(
-            header,
-        )
-        source.seek(name_size + extra_size, 1)
-        data = source.read(compressed_size)
+            self.file.seek(local_offset)
+            # One combined over-read: header, the (nearly always short)
+            # name and extra field, and the member data together -- sliced
+            # apart afterward. The obvious sequence pays a header read, a
+            # relative seek, and a data read: three syscalls per member on
+            # the unbuffered file this reader is handed, per member
+            # extracted from a many-file wheel.
+            blob = self.file.read(
+                30 + _LOCAL_HEADER_HEADROOM + compressed_size,
+            )
+            header = blob[:30]
+            if len(header) != 30 or header[:4] != b"PK\x03\x04":
+                raise WheelhouseUnavailable
+            _, _, _, _, _, _, _, _, _, name_size, extra_size = LOCAL_FILE_HEADER.unpack(
+                header,
+            )
+            start = 30 + name_size + extra_size
+            end = start + compressed_size
+            if end <= len(blob):
+                data = blob[start:end]
+            else:
+                # The name plus extra field exceeded the headroom (or the
+                # blob was cut short) -- one exact positioned read instead.
+                self.file.seek(local_offset + start)
+                data = self.file.read(compressed_size)
         if len(data) != compressed_size:
             raise WheelhouseUnavailable
         if compression == 0:
