@@ -117,6 +117,18 @@ class InvalidVersion(ValueError):
     pass
 
 
+# String forms that failed comparison coercion -- see the comparison-method
+# comment block in Version. Keyed on the str() result rather than the
+# operand's type so that a type whose instances only sometimes stringify to
+# a version is judged per instance, exactly as uncached parsing would.
+# In practice this holds the resolver sentinels' "-inf"/"+inf"; the cap
+# keeps operands with per-instance str() forms (e.g. bare object()s, whose
+# text embeds their address) from growing it without bound.
+_uncoercible_strings: set[str] = set()
+
+_UNCOERCIBLE_STRINGS_CAP = 64
+
+
 class Version:
     __slots__ = (
         "_hash",
@@ -326,13 +338,51 @@ class Version:
 
         return release
 
+    # Comparisons coerce strings directly and any other operand through
+    # Version(str(other)) -- the latter is what lets this class compare
+    # against another packaging library's Version (whose str() is a valid
+    # version) rather than only its own instances. The wrinkle is the
+    # resolver's range arithmetic, which compares Version bounds against
+    # its infinity sentinels constantly: str(sentinel) is "-inf"/"+inf",
+    # so the coercion used to pay a full VERSION_RE match attempt and a
+    # raised-and-caught InvalidVersion per bound comparison, only to land
+    # on the reflected dispatch anyway. _uncoercible_strings remembers the
+    # string forms that failed so every later comparison against them is a
+    # set lookup straight to NotImplemented -- and because whether a given
+    # string parses is deterministic, caching by string is exactly
+    # equivalent to reparsing it, for every operand type.
+
+    def _coerced(self, other: object) -> Version | None:
+        text = str(other)
+
+        if text in _uncoercible_strings:
+            return None
+
+        try:
+            coerced = Version(text)
+
+        except InvalidVersion:
+            if len(_uncoercible_strings) < _UNCOERCIBLE_STRINGS_CAP:
+                _uncoercible_strings.add(text)
+
+            return None
+
+        return coerced
+
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, Version):
-            try:
-                other = Version(str(other))
+            if isinstance(other, str):
+                try:
+                    other = Version(other)
 
-            except InvalidVersion:
-                return NotImplemented
+                except InvalidVersion:
+                    return NotImplemented
+
+            else:
+                other = self._coerced(other)
+
+                if other is None:
+                    return NotImplemented
 
         return self.comparison_key == other.comparison_key
 
@@ -341,25 +391,53 @@ class Version:
 
     def __lt__(self, other: object) -> bool:
         if not isinstance(other, Version):
-            other = Version(str(other))
+            if isinstance(other, str):
+                other = Version(other)
+
+            else:
+                other = self._coerced(other)
+
+                if other is None:
+                    return NotImplemented
 
         return self.comparison_key < other.comparison_key
 
     def __le__(self, other: object) -> bool:
         if not isinstance(other, Version):
-            other = Version(str(other))
+            if isinstance(other, str):
+                other = Version(other)
+
+            else:
+                other = self._coerced(other)
+
+                if other is None:
+                    return NotImplemented
 
         return self.comparison_key <= other.comparison_key
 
     def __gt__(self, other: object) -> bool:
         if not isinstance(other, Version):
-            other = Version(str(other))
+            if isinstance(other, str):
+                other = Version(other)
+
+            else:
+                other = self._coerced(other)
+
+                if other is None:
+                    return NotImplemented
 
         return self.comparison_key > other.comparison_key
 
     def __ge__(self, other: object) -> bool:
         if not isinstance(other, Version):
-            other = Version(str(other))
+            if isinstance(other, str):
+                other = Version(other)
+
+            else:
+                other = self._coerced(other)
+
+                if other is None:
+                    return NotImplemented
 
         return self.comparison_key >= other.comparison_key
 
@@ -534,8 +612,12 @@ class SpecifierSet:
     def __init__(self, value: str = ""):
         self.raw = value.strip()
 
+        # A list comprehension, not a generator expression: this
+        # constructor runs for every Requires-Dist line of every candidate
+        # examined during resolution, and a genexpr pays a generator-frame
+        # resumption per specifier where the comprehension runs in one.
         self.specifiers = tuple(
-            Specifier(op, ver.strip()) for op, ver in SPEC_RE.findall(self.raw)
+            [Specifier(op, ver.strip()) for op, ver in SPEC_RE.findall(self.raw)],
         )
 
         if self.raw and not self.specifiers:
@@ -1108,6 +1190,23 @@ def egg_fragment_internal(value: str) -> tuple[str | None, frozenset[str]]:
 
 
 def split_marker(value: str) -> tuple[str, str | None]:
+    # The character walk below exists only to skip a ";" inside a quoted
+    # string. The overwhelming majority of requirement lines have no ";" at
+    # all, and nearly all of the rest have no quote character before their
+    # first ";" (quotes in the marker *after* it, e.g.
+    # `pkg ; python_version >= "3.8"`, don't affect the split point) --
+    # both answered by C-level scans instead of a per-character Python
+    # loop.
+    semicolon = value.find(";")
+
+    if semicolon == -1:
+        return value, None
+
+    head = value[:semicolon]
+
+    if "'" not in head and '"' not in head:
+        return head.strip(), value[semicolon + 1 :].strip()
+
     in_quote: str | None = None
 
     for index, char in enumerate(value):

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 from cpip.core.packaging import (
+    InvalidVersion,
     Requirement,
     SpecifierSet,
     Version,
@@ -240,3 +241,143 @@ def test_marker_applies_respects_parenthesized_extra_marker() -> None:
 
     assert marker_applies(requirement.marker, extras=()) is False
     assert marker_applies(requirement.marker, extras=("zstd",)) is True
+
+
+class TestVersionComparisonDispatch:
+    """Version's comparators coerce strings and version-shaped objects
+    (anything whose str() parses -- notably another packaging library's
+    Version), while types whose instances fail coercion are remembered so
+    later comparisons skip straight to reflected dispatch. The resolver's
+    range-arithmetic infinity sentinels previously paid a str() + full
+    regex parse attempt + raised-and-caught InvalidVersion per bound
+    comparison before reaching that same dispatch.
+    """
+
+    def test_sentinel_comparisons_defer_to_the_sentinel(self) -> None:
+        from cpip._vendor.nab_resolver.ranges import (
+            NEGATIVE_INFINITY,
+            POSITIVE_INFINITY,
+        )
+
+        version = Version("1.2.3")
+
+        assert (version == NEGATIVE_INFINITY) is False
+        assert (version != POSITIVE_INFINITY) is True
+        # Ordering against a sentinel on the right previously *raised*
+        # InvalidVersion (the coercion in the ordering methods was
+        # uncaught); reflected dispatch makes it just work.
+        assert (version < POSITIVE_INFINITY) is True
+        assert (version > NEGATIVE_INFINITY) is True
+        assert (version <= POSITIVE_INFINITY) is True
+        assert (version >= NEGATIVE_INFINITY) is True
+        assert (NEGATIVE_INFINITY < version) is True
+        assert (POSITIVE_INFINITY > version) is True
+
+    def test_string_coercion_still_works(self) -> None:
+        version = Version("1.2.3")
+
+        assert version == "1.2.3"
+        assert version == "1.2.3.0"
+        assert version != "1.2.4"
+        assert version < "2.0"
+        assert version > "1.0"
+        assert version <= "1.2.3"
+        assert version >= "1.2.3"
+
+    def test_invalid_string_equality_is_false_not_an_error(self) -> None:
+        assert (Version("1.2.3") == "not a version") is False
+
+    def test_invalid_string_ordering_still_raises(self) -> None:
+        with pytest.raises(InvalidVersion):
+            Version("1.2.3") < "not a version"  # noqa: B015
+
+    def test_unrelated_types_are_unequal(self) -> None:
+        assert (Version("1.2.3") == object()) is False
+
+        assert (Version("1.2.3") == None) is False  # noqa: E711
+
+    def test_cross_library_version_objects_compare_by_value(self) -> None:
+        """Another packaging library's Version (whose str() is a valid
+        version) must keep comparing by value -- the regression CI caught
+        when coercion was briefly restricted to plain strings: the
+        lazy-wheel path compares a real `packaging` Version against ours.
+        """
+        from packaging.version import Version as PackagingVersion
+
+        ours = Version("0.782")
+
+        theirs = PackagingVersion("0.782")
+
+        assert (ours == theirs) is True
+        assert (ours != PackagingVersion("0.783")) is True
+        assert (ours < PackagingVersion("1.0")) is True
+        assert (ours >= PackagingVersion("0.5")) is True
+
+    def test_failed_coercion_cache_does_not_leak(self) -> None:
+        """A cached failed coercion must keep giving the same answers on
+        repeat and must not affect coercible operands."""
+        from cpip._vendor.nab_resolver.ranges import NEGATIVE_INFINITY
+
+        version = Version("1.2.3")
+
+        # Prime the cache with the sentinel's string form, twice.
+        assert (version == NEGATIVE_INFINITY) is False
+        assert (version == NEGATIVE_INFINITY) is False
+
+        # Coercible operands are unaffected.
+        from packaging.version import Version as PackagingVersion
+
+        assert (version == PackagingVersion("1.2.3")) is True
+        assert version == "1.2.3"
+
+    def test_mixed_parseability_type_is_judged_per_instance(self) -> None:
+        """A type whose instances only sometimes stringify to a version
+        must be judged per instance: one unparseable instance must not
+        poison a later parseable one (the failure cache is keyed on the
+        string form, not the operand's type).
+        """
+
+        class Moody:
+            def __init__(self, text: str) -> None:
+                self.text = text
+
+            def __str__(self) -> str:
+                return self.text
+
+        version = Version("1.2.3")
+
+        assert (version == Moody("not a version")) is False
+        assert (version == Moody("1.2.3")) is True
+        assert (version == Moody("not a version")) is False
+        assert (version == Moody("1.2.4")) is False
+        assert (version < Moody("2.0")) is True
+
+
+class TestSplitMarker:
+    """split_marker's fast paths (no semicolon; no quote before the first
+    semicolon) must agree exactly with the quote-aware character walk.
+    """
+
+    @pytest.mark.parametrize(
+        "value, expected",
+        [
+            ("botocore==1.28.50", ("botocore==1.28.50", None)),
+            ("pkg[extra]>=1.0", ("pkg[extra]>=1.0", None)),
+            ("", ("", None)),
+            ("pkg ; python_version >= '3.8'", ("pkg", "python_version >= '3.8'")),
+            ('pkg ; python_version >= "3.8"', ("pkg", 'python_version >= "3.8"')),
+            ("pkg;extra == 'feature'", ("pkg", "extra == 'feature'")),
+            # A quoted ";" before the real separator must not split early --
+            # the quote-aware walk's whole reason to exist.
+            (
+                "pkg @ https://x/y?q=';' ; python_version >= '3.8'",
+                ("pkg @ https://x/y?q=';'", "python_version >= '3.8'"),
+            ),
+            # A ";" inside quotes with no separator after it: no split.
+            ("pkg=='a;b'", ("pkg=='a;b'", None)),
+        ],
+    )
+    def test_split(self, value: str, expected: tuple[str, str | None]) -> None:
+        from cpip.core.packaging import split_marker
+
+        assert split_marker(value) == expected

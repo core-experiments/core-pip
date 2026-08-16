@@ -156,7 +156,12 @@ def _open_resolver_wheel_archive(
     """
 
     try:
-        file = open(path_text, "rb", buffering=32768)
+        # Unbuffered on purpose: WheelArchive's access pattern is one tail
+        # read plus exact-size seek+read pairs, so a BufferedReader's
+        # construction cost and readahead (discarded on every seek) are
+        # pure per-open overhead. Its short-read semantics are already
+        # what this reader treats as truncation.
+        file = open(path_text, "rb", buffering=0)  # noqa: SIM115
 
         archive = WheelArchive(file)
 

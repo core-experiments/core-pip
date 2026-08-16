@@ -172,7 +172,10 @@ def open_wheel_archive(
         return zipfile.ZipFile(path)
 
     try:
-        file = open(path, "rb")
+        # Unbuffered on purpose -- see candidate_materialization's
+        # _open_resolver_wheel_archive: WheelArchive reads with exact sizes
+        # and seeks, so buffering only adds per-open cost.
+        file = open(path, "rb", buffering=0)  # noqa: SIM115
 
         archive = WheelArchive(file)
 
