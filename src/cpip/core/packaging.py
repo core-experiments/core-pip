@@ -117,6 +117,13 @@ class InvalidVersion(ValueError):
     pass
 
 
+# Types whose instances failed comparison coercion (their str() form is not
+# a version) -- see the comparison-method comment block in Version. Grows by
+# at most a handful of entries per process (the resolver's two infinity
+# sentinels, in practice) and is never cleared.
+_uncoercible_types: set[type] = set()
+
+
 class Version:
     __slots__ = (
         "_hash",
@@ -326,27 +333,50 @@ class Version:
 
         return release
 
-    # Comparisons coerce only strings. Anything else returns NotImplemented
-    # immediately so Python dispatches to the other operand's reflected
-    # comparator -- which is where every such comparison already ended up:
-    # the resolver's range arithmetic compares Version bounds against its
-    # infinity sentinels constantly, and the old coerce-everything path
-    # first paid str(sentinel), a full VERSION_RE match attempt against
-    # "-inf"/"+inf", and a raised-and-caught InvalidVersion, per bound
-    # comparison, before landing on the very same reflected dispatch. (The
-    # ordering methods didn't even catch InvalidVersion, so a sentinel on
-    # the right would have crashed outright rather than deferred.)
+    # Comparisons coerce strings directly and any other operand through
+    # Version(str(other)) -- the latter is what lets this class compare
+    # against another packaging library's Version (whose str() is a valid
+    # version) rather than only its own instances. The wrinkle is the
+    # resolver's range arithmetic, which compares Version bounds against
+    # its infinity sentinels constantly: str(sentinel) is "-inf"/"+inf",
+    # so the coercion used to pay a full VERSION_RE match attempt and a
+    # raised-and-caught InvalidVersion per bound comparison, only to land
+    # on the reflected dispatch anyway. _uncoercible_types remembers the
+    # types whose instances failed coercion so every later comparison
+    # against them is a set lookup straight to NotImplemented. str is
+    # exempt: one unparseable string must not poison later valid ones.
+    # (Non-str types whose instances only sometimes parse as versions
+    # would be mis-cached, but no such type exists here -- a type's str()
+    # form either is a version representation or is not.)
+
+    def _coerced(self, other: object) -> Version | None:
+        if type(other) in _uncoercible_types:
+            return None
+
+        try:
+            coerced = Version(str(other))
+
+        except InvalidVersion:
+            _uncoercible_types.add(type(other))
+
+            return None
+
+        return coerced
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, Version):
-            if not isinstance(other, str):
-                return NotImplemented
+            if isinstance(other, str):
+                try:
+                    other = Version(other)
 
-            try:
-                other = Version(other)
+                except InvalidVersion:
+                    return NotImplemented
 
-            except InvalidVersion:
-                return NotImplemented
+            else:
+                other = self._coerced(other)
+
+                if other is None:
+                    return NotImplemented
 
         return self.comparison_key == other.comparison_key
 
@@ -355,37 +385,53 @@ class Version:
 
     def __lt__(self, other: object) -> bool:
         if not isinstance(other, Version):
-            if not isinstance(other, str):
-                return NotImplemented
+            if isinstance(other, str):
+                other = Version(other)
 
-            other = Version(other)
+            else:
+                other = self._coerced(other)
+
+                if other is None:
+                    return NotImplemented
 
         return self.comparison_key < other.comparison_key
 
     def __le__(self, other: object) -> bool:
         if not isinstance(other, Version):
-            if not isinstance(other, str):
-                return NotImplemented
+            if isinstance(other, str):
+                other = Version(other)
 
-            other = Version(other)
+            else:
+                other = self._coerced(other)
+
+                if other is None:
+                    return NotImplemented
 
         return self.comparison_key <= other.comparison_key
 
     def __gt__(self, other: object) -> bool:
         if not isinstance(other, Version):
-            if not isinstance(other, str):
-                return NotImplemented
+            if isinstance(other, str):
+                other = Version(other)
 
-            other = Version(other)
+            else:
+                other = self._coerced(other)
+
+                if other is None:
+                    return NotImplemented
 
         return self.comparison_key > other.comparison_key
 
     def __ge__(self, other: object) -> bool:
         if not isinstance(other, Version):
-            if not isinstance(other, str):
-                return NotImplemented
+            if isinstance(other, str):
+                other = Version(other)
 
-            other = Version(other)
+            else:
+                other = self._coerced(other)
+
+                if other is None:
+                    return NotImplemented
 
         return self.comparison_key >= other.comparison_key
 

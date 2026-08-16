@@ -244,11 +244,13 @@ def test_marker_applies_respects_parenthesized_extra_marker() -> None:
 
 
 class TestVersionComparisonDispatch:
-    """Version's comparators coerce only strings; anything else defers to
-    the other operand's reflected comparator via NotImplemented -- most
-    importantly the resolver's range-arithmetic infinity sentinels, which
-    previously paid a str() + full regex parse attempt + raised-and-caught
-    InvalidVersion per bound comparison before reaching the same dispatch.
+    """Version's comparators coerce strings and version-shaped objects
+    (anything whose str() parses -- notably another packaging library's
+    Version), while types whose instances fail coercion are remembered so
+    later comparisons skip straight to reflected dispatch. The resolver's
+    range-arithmetic infinity sentinels previously paid a str() + full
+    regex parse attempt + raised-and-caught InvalidVersion per bound
+    comparison before reaching that same dispatch.
     """
 
     def test_sentinel_comparisons_defer_to_the_sentinel(self) -> None:
@@ -289,10 +291,44 @@ class TestVersionComparisonDispatch:
         with pytest.raises(InvalidVersion):
             Version("1.2.3") < "not a version"  # noqa: B015
 
-    def test_unrelated_types_are_unequal_without_coercion(self) -> None:
+    def test_unrelated_types_are_unequal(self) -> None:
         assert (Version("1.2.3") == object()) is False
 
         assert (Version("1.2.3") == None) is False  # noqa: E711
+
+    def test_cross_library_version_objects_compare_by_value(self) -> None:
+        """Another packaging library's Version (whose str() is a valid
+        version) must keep comparing by value -- the regression CI caught
+        when coercion was briefly restricted to plain strings: the
+        lazy-wheel path compares a real `packaging` Version against ours.
+        """
+        from packaging.version import Version as PackagingVersion
+
+        ours = Version("0.782")
+
+        theirs = PackagingVersion("0.782")
+
+        assert (ours == theirs) is True
+        assert (ours != PackagingVersion("0.783")) is True
+        assert (ours < PackagingVersion("1.0")) is True
+        assert (ours >= PackagingVersion("0.5")) is True
+
+    def test_failed_coercion_type_cache_does_not_leak_across_types(self) -> None:
+        """One type's failed coercion must not affect another type, and a
+        cached failure must keep giving the same answers on repeat."""
+        from cpip._vendor.nab_resolver.ranges import NEGATIVE_INFINITY
+
+        version = Version("1.2.3")
+
+        # Prime the cache with the sentinel's type, twice.
+        assert (version == NEGATIVE_INFINITY) is False
+        assert (version == NEGATIVE_INFINITY) is False
+
+        # Coercible operands are unaffected.
+        from packaging.version import Version as PackagingVersion
+
+        assert (version == PackagingVersion("1.2.3")) is True
+        assert version == "1.2.3"
 
 
 class TestSplitMarker:
