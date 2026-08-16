@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import os
-import shutil
 import stat
 import sys
 import tarfile
@@ -18,6 +17,7 @@ TYPE_CHECKING = False
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
+    from typing import IO
 
 BZ2_EXTENSIONS: tuple[str, ...] = (".tar.bz2", ".tbz")
 XZ_EXTENSIONS: tuple[str, ...] = (
@@ -29,6 +29,9 @@ XZ_EXTENSIONS: tuple[str, ...] = (
 )
 ZIP_EXTENSIONS: tuple[str, ...] = (".zip", ".whl")
 TAR_EXTENSIONS: tuple[str, ...] = (".tar.gz", ".tgz", ".tar")
+
+# Matches shutil's own default copy buffer size (not exposed in typeshed).
+_COPY_BUFSIZE = 1024 * 1024 if sys.platform == "win32" else 64 * 1024
 
 
 logger = logging.getLogger(__name__)
@@ -117,6 +120,26 @@ def zip_item_is_executable(info: ZipInfo) -> bool:
     return bool(mode and stat.S_ISREG(mode) and mode & 0o111)
 
 
+def _write_stream_to_path(fp: IO[bytes], path: str) -> None:
+    """Copy a readable stream to `path` using raw fd calls.
+
+    Wheels/sdists are typically many small files, so the per-member cost of
+    building an `io.BufferedWriter` (and its buffered flush-then-close on
+    exit) dominates over the actual bytes copied. A bare os.open/write/close
+    sequence skips that object construction for every member.
+    """
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o666)
+    try:
+        read = fp.read
+        while True:
+            chunk = read(_COPY_BUFSIZE)
+            if not chunk:
+                break
+            os.write(fd, chunk)
+    finally:
+        os.close(fd)
+
+
 def unzip_file(filename: str, location: str, flatten: bool = True) -> None:
     """Unzip the file (with path `filename`) to the destination `location`.  All
     files are written based on system defaults and umask (i.e. permissions are
@@ -169,8 +192,7 @@ def unzip_file(filename: str, location: str, flatten: bool = True) -> None:
                 # chunk of memory for the file's content
                 fp = zip.open(info)
                 try:
-                    with open(fn, "wb") as destfp:
-                        shutil.copyfileobj(fp, destfp)
+                    _write_stream_to_path(fp, fn)
                 finally:
                     fp.close()
                     if zip_item_is_executable(info):
@@ -327,8 +349,8 @@ def _untar_regular_members(
             raise InstallationError(
                 f"Unable to extract {member.name!r} from {filename}",
             )
-        with source, open(path, "wb") as destination:
-            shutil.copyfileobj(source, destination)
+        with source:
+            _write_stream_to_path(source, path)
         tar.utime(member, path)
         if member.mode & 0o111:
             os.chmod(path, executable_mode)
@@ -434,9 +456,10 @@ def untar_without_filter(
                 continue
             ensure_dir(os.path.dirname(path))
             assert fp is not None
-            with open(path, "wb") as destfp:
-                shutil.copyfileobj(fp, destfp)
-            fp.close()
+            try:
+                _write_stream_to_path(fp, path)
+            finally:
+                fp.close()
             # Update the timestamp (useful for cython compiled files)
             tar.utime(member, path)
             # member have any execute permissions for user/group/world?
