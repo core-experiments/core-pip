@@ -562,6 +562,32 @@ def parse_wheel_filename(path: str) -> tuple[str, str] | None:
     return wheel.name, str(wheel.version)
 
 
+class _HashCachedTags(tuple):
+    """A tuple of WheelTags that memoizes its own hash.
+
+    supported_wheel_tags() results are used as half of wheel_tag_rank()'s
+    lru_cache key, and a plain tuple recomputes its hash on every lookup --
+    a Python-level WheelTag.__hash__ dispatch per element, times the
+    couple-dozen supported tags, per link evaluated. Since the @cache on
+    supported_wheel_tags hands out one long-lived instance per target,
+    caching the hash on the instance pays those element hashes once per
+    process instead of once per link.
+    """
+
+    _cached_hash: int
+
+    def __hash__(self) -> int:
+        try:
+            return self._cached_hash
+
+        except AttributeError:
+            value = tuple.__hash__(self)
+
+            self._cached_hash = value
+
+            return value
+
+
 @cache
 def supported_wheel_tags(target: TargetContext | None = None) -> tuple[WheelTag, ...]:
     if target is None:
@@ -594,7 +620,7 @@ def supported_wheel_tags(target: TargetContext | None = None) -> tuple[WheelTag,
 
     platforms = tuple(platform_tags) + ("any",)
 
-    return tuple(
+    return _HashCachedTags(
         WheelTag(interpreter, abi, platform)
         for interpreter in interpreters
         for abi in abis
