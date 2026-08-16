@@ -157,11 +157,24 @@ def _parse_header(buf: bytes) -> tuple[str, bytes, int, int, int] | None:
     if typeflag == _DIRTYPE:
         name = name.rstrip("/")
 
+        if size:
+            # A directory shouldn't carry a data payload. The extraction
+            # loop doesn't consume one for _DIRTYPE, so a crafted header
+            # claiming one here would otherwise desync the stream and parse
+            # that payload as the next header.
+            raise _NotFastCompatible("directory member has data")
+
     # Reconstruct a ustar longname.
     if prefix:
         name = f"{prefix}/{name}"
 
-    if not name or size < 0:
+    if not name or size < 0 or "\\" in name:
+        # A backslash in the name is either a literal POSIX filename
+        # character or (per split_leading_dir()) a directory separator on
+        # Windows-authored archives -- ambiguous in a way this reader can't
+        # resolve without unpacking.py's own leading-dir-stripping logic,
+        # so it declines rather than risk writing it as a literal filename
+        # when the caller would have treated it as a path.
         raise _NotFastCompatible("malformed header field")
 
     return name, typeflag, mode, size, mtime
@@ -206,7 +219,15 @@ def _extract_exact(stream: _ReadableStream, path: str, size: int) -> None:
             if not chunk:
                 raise _NotFastCompatible("truncated member data")
 
-            os.write(fd, chunk)
+            view = memoryview(chunk)
+
+            while view:
+                written = os.write(fd, view)
+
+                if written <= 0:
+                    raise OSError("could not write extracted member data")
+
+                view = view[written:]
 
             remaining -= len(chunk)
 
