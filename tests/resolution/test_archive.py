@@ -190,6 +190,31 @@ class TestWheelArchiveMatchesRealZipfile:
 
 
 class TestWheelArchiveFallback:
+    def test_duplicate_member_name_raises(self, tmp_path: Path) -> None:
+        """members is keyed by name, so a second central-directory record
+        for the same name would otherwise silently overwrite the first --
+        including its independent compressed data at a different offset,
+        which would then never get read or CRC-checked at all.
+        """
+        path = tmp_path / "duplicate.zip"
+
+        with zipfile.ZipFile(path, "w") as archive:
+            archive.writestr("only.txt", "first record")
+
+            archive.writestr("only.txt", "second record")
+
+        with zipfile.ZipFile(path) as real:
+            # Confirm the fixture actually has two distinct central
+            # directory records under the same name, matching what a real
+            # (if unusual) zip tool could produce -- not an artifact of
+            # this test's own construction.
+            assert len(real.infolist()) == 2
+
+            assert {info.filename for info in real.infolist()} == {"only.txt"}
+
+        with pytest.raises(WheelhouseUnavailable):
+            _open(path)
+
     def test_not_a_zip_file(self, tmp_path: Path) -> None:
         path = tmp_path / "notazip.txt"
 

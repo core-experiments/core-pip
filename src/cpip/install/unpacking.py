@@ -14,6 +14,7 @@ from zipfile import ZipInfo
 from cpip.core.errors import InstallationError
 from cpip.core.utils import ensure_dir
 from cpip.install.tar_reader import fast_untar
+from cpip.resolution.archive import WheelArchive, WheelhouseUnavailable
 
 TYPE_CHECKING = False
 
@@ -179,6 +180,128 @@ def _write_stream_to_path(fp: IO[bytes], path: str, size_hint: int = -1) -> None
         os.close(fd)
 
 
+def _write_bytes_to_path(data: bytes, path: str) -> None:
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o666)
+
+    try:
+        view = memoryview(data)
+
+        while view:
+            written = os.write(fd, view)
+
+            if written <= 0:
+                raise OSError("could not write extracted file data")
+
+            view = view[written:]
+
+    finally:
+        os.close(fd)
+
+
+# Matches open_wheel_archive()'s own threshold (wheel_archive_runtime.py):
+# WheelArchive.read()/read_many() decompress a member whole into memory,
+# unlike zipfile's ZipExtFile, which streams. Declining archives with a
+# member above this keeps that a non-issue for the wheels/sdists this
+# exists for -- countless small files -- while never risking a large
+# payload's full decompressed size sitting in memory at once.
+_FAST_UNZIP_MAX_MEMBER_SIZE = 1024 * 1024
+
+
+def _fast_unzip(filename: str, location: str, flatten: bool) -> bool:
+    """Try WheelArchive-based extraction; False means "use zipfile instead".
+
+    WheelArchive parses the whole central directory before extraction
+    starts, so any structural reason to decline (zip64, encryption, an
+    unusual compression method, an oversized member) surfaces before a
+    single file is written -- nothing to undo, unlike fast_untar()'s
+    single-pass tar reader. A later per-member data-integrity failure (a
+    CRC mismatch) propagates as an error rather than falling back, exactly
+    as unzip_file() already behaves today: it has no rollback story either.
+    """
+
+    try:
+        file = open(filename, "rb")  # noqa: SIM115
+
+        archive = WheelArchive(file)
+
+    except (OSError, ValueError, WheelhouseUnavailable):
+        try:
+            file.close()
+
+        except UnboundLocalError:
+            pass
+
+        return False
+
+    try:
+        if any(
+            member[0] not in {0, 8} or member[3] > _FAST_UNZIP_MAX_MEMBER_SIZE
+            for member in archive.members.values()
+        ):
+            return False
+
+        names = archive.namelist()
+
+        leading = flatten and has_leading_dir(names)
+
+        absolute_location = os.path.abspath(location)
+
+        ensured_dirs: set[str] = {absolute_location}
+
+        for name in names:
+            fn = split_leading_dir(name)[1] if leading else name
+
+            fn = os.path.join(location, fn)
+
+            absolute_fn = os.path.abspath(fn)
+
+            if not (
+                absolute_fn == absolute_location
+                or absolute_fn.startswith(absolute_location + os.sep)
+            ):
+                message = (
+                    "The zip file ({}) has a file ({}) trying to install "
+                    "outside target directory ({})"
+                )
+
+                raise InstallationError(message.format(filename, fn, location))
+
+            if fn.endswith(("/", "\\")):
+                if absolute_fn not in ensured_dirs:
+                    ensure_dir(fn)
+
+                    ensured_dirs.add(absolute_fn)
+
+                continue
+
+            absolute_dir = os.path.dirname(absolute_fn)
+
+            if absolute_dir not in ensured_dirs:
+                ensure_dir(os.path.dirname(fn))
+
+                ensured_dirs.add(absolute_dir)
+
+            try:
+                data = archive.read(name)
+
+            except WheelhouseUnavailable as exc:
+                raise InstallationError(
+                    f"Bad zip member {name!r} in {filename}: {exc}",
+                ) from exc
+
+            _write_bytes_to_path(data, fn)
+
+            mode = archive.modes.get(name, 0) >> 16
+
+            if mode and stat.S_ISREG(mode) and mode & 0o111:
+                set_extracted_file_to_default_mode_plus_executable(fn)
+
+    finally:
+        archive.file.close()
+
+    return True
+
+
 def unzip_file(filename: str, location: str, flatten: bool = True) -> None:
     """Unzip the file (with path `filename`) to the destination `location`.  All
     files are written based on system defaults and umask (i.e. permissions are
@@ -188,6 +311,10 @@ def unzip_file(filename: str, location: str, flatten: bool = True) -> None:
     no-ops per the python docs.
     """
     ensure_dir(location)
+
+    if _fast_unzip(filename, location, flatten):
+        return
+
     absolute_location = os.path.abspath(location)
     # Members of a wheel/sdist overwhelmingly share a handful of parent
     # directories (a package's whole tree, one .dist-info), so calling
