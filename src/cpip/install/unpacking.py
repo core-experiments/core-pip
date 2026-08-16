@@ -168,7 +168,12 @@ def _write_stream_to_path(fp: IO[bytes], path: str, size_hint: int = -1) -> None
         read = fp.read
         chunk = read(_COPY_BUFSIZE if size_hint < 0 else min(size_hint, _COPY_BUFSIZE))
         while chunk:
-            os.write(fd, chunk)
+            view = memoryview(chunk)
+            while view:
+                written = os.write(fd, view)
+                if written <= 0:
+                    raise OSError("could not write extracted file data")
+                view = view[written:]
             chunk = read(_COPY_BUFSIZE)
     finally:
         os.close(fd)
@@ -263,7 +268,7 @@ def untar_file(filename: str, location: str) -> None:
     extracted_names = fast_untar(filename, location, mode)
 
     if extracted_names is not None:
-        if has_leading_dir(extracted_names):
+        if extracted_names and has_leading_dir(extracted_names):
             _strip_leading_dir_in_place(location, extracted_names[0])
 
         return

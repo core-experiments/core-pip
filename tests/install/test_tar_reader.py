@@ -6,6 +6,7 @@ import random
 import stat
 import tarfile
 from pathlib import Path
+from typing import BinaryIO
 
 import pytest
 from cpip.install import tar_reader
@@ -33,6 +34,49 @@ def _write_tar(
             info.mode = 0o755 if name in executable else 0o644
 
             archive.addfile(info, io.BytesIO(data))
+
+
+def _write_raw_member(
+    fp: BinaryIO,
+    name: str,
+    data: bytes,
+    *,
+    typeflag: bytes = tarfile.REGTYPE,
+    mtime: int = 1_700_000_000,
+) -> None:
+    """Write one member's header (with a correct checksum) plus its padded
+    data, bypassing tarfile's own writer -- for headers real tarfile would
+    never produce (e.g. a directory that also claims a data payload), which
+    still need to be byte-valid enough to reach the code under test.
+    """
+    info = tarfile.TarInfo(name=name)
+
+    info.size = len(data)
+
+    info.mtime = mtime
+
+    info.mode = 0o644
+
+    header = bytearray(info.tobuf(tarfile.GNU_FORMAT))
+
+    header[156:157] = typeflag
+
+    unsigned_chksum, _signed = tarfile.calc_chksums(bytes(header))  # ty:ignore[unresolved-attribute]
+
+    header[148:156] = ("%06o\x00 " % unsigned_chksum).encode()
+
+    fp.write(bytes(header))
+
+    fp.write(data)
+
+    padding = (-len(data)) % tar_reader.BLOCKSIZE
+
+    if padding:
+        fp.write(b"\x00" * padding)
+
+
+def _write_eof_marker(fp: BinaryIO) -> None:
+    fp.write(b"\x00" * tar_reader.BLOCKSIZE * 2)
 
 
 def _sample_members() -> dict[str, bytes]:
@@ -350,6 +394,59 @@ class TestFastUntarDeclines:
 
         assert list(dest.iterdir()) == []
 
+    def test_directory_member_with_data_declines_and_cleans_up(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """A directory header claiming a nonzero size is malformed -- real
+        tar writers never produce one -- but the extraction loop doesn't
+        consume a payload for _DIRTYPE, so trusting it would desync the
+        stream and parse the "directory's data" as the next header.
+        """
+        archive_path = tmp_path / "dirdata.tar"
+
+        with archive_path.open("wb") as fp:
+            _write_raw_member(fp, "pkg/first.txt", b"extracted first")
+
+            _write_raw_member(
+                fp,
+                "pkg/weird",
+                b"not really directory data",
+                typeflag=tarfile.DIRTYPE,
+            )
+
+            _write_eof_marker(fp)
+
+        dest = tmp_path / "dest"
+
+        dest.mkdir()
+
+        assert tar_reader.fast_untar(str(archive_path), str(dest), "r") is None
+
+        assert list(dest.iterdir()) == []
+
+    def test_backslash_in_name_declines(self, tmp_path: Path) -> None:
+        """split_leading_dir() (unpacking.py) treats '\\' as a directory
+        separator, but a POSIX filesystem treats it as a literal filename
+        character. Writing such a member verbatim (as the fast path
+        otherwise would) can leave an archive whose members share a
+        backslash-separated leading directory un-flattened, since the
+        directory unpacking.py looks for after extraction was never
+        actually created -- so the fast path declines instead, leaving
+        this case to the tarfile path's name-based (pre-write) stripping.
+        """
+        archive_path = tmp_path / "backslash.tar.gz"
+
+        _write_tar(archive_path, {"pkg\\file.txt": b"data"})
+
+        dest = tmp_path / "dest"
+
+        dest.mkdir()
+
+        assert tar_reader.fast_untar(str(archive_path), str(dest), "r:gz") is None
+
+        assert list(dest.iterdir()) == []
+
     def test_sparse_member_declines(self, tmp_path: Path) -> None:
         archive_path = tmp_path / "sparse.tar.gz"
 
@@ -389,6 +486,81 @@ class TestFastUntarDeclines:
         assert tar_reader.fast_untar(str(archive_path), str(dest), "r:gz") is None
 
         assert preexisting.read_bytes() == b"do not touch"
+
+
+class TestFastUntarEmptyArchive:
+    def test_empty_archive_returns_empty_list_not_none(self, tmp_path: Path) -> None:
+        archive_path = tmp_path / "empty.tar.gz"
+
+        with tarfile.open(archive_path, "w:gz"):
+            pass  # no members added
+
+        dest = tmp_path / "dest"
+
+        dest.mkdir()
+
+        names = tar_reader.fast_untar(str(archive_path), str(dest), "r:gz")
+
+        assert names == []
+
+        assert list(dest.iterdir()) == []
+
+    def test_untar_file_empty_archive_does_not_raise(self, tmp_path: Path) -> None:
+        """End-to-end regression test for the untar_file()-level bug:
+        has_leading_dir([]) returns True, so naively indexing
+        extracted_names[0] after a successful-but-empty fast_untar() raised
+        IndexError instead of the (correct) no-op.
+        """
+        from cpip.install.unpacking import untar_file
+
+        archive_path = tmp_path / "empty.tar.gz"
+
+        with tarfile.open(archive_path, "w:gz"):
+            pass
+
+        dest = tmp_path / "dest"
+
+        untar_file(str(archive_path), str(dest))
+
+        assert list(Path(dest).iterdir()) == []
+
+
+class TestExtractExactPartialWrites:
+    def test_short_os_write_calls_are_all_retried(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A conforming-but-unhelpful os.write() that only ever accepts 3
+        bytes per call must not silently truncate the extracted file.
+        """
+        original_write = os.write
+
+        def short_write(fd: int, data) -> int:  # noqa: ANN001
+            return original_write(fd, bytes(data)[:3])
+
+        monkeypatch.setattr(tar_reader.os, "write", short_write)
+
+        path = tmp_path / "out.bin"
+
+        payload = bytes(random.Random(2).randbytes(10_000))
+
+        tar_reader._extract_exact(io.BytesIO(payload), str(path), len(payload))
+
+        assert path.read_bytes() == payload
+
+    def test_zero_length_write_raises(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def zero_write(fd: int, data) -> int:  # noqa: ANN001
+            return 0
+
+        monkeypatch.setattr(tar_reader.os, "write", zero_write)
+
+        path = tmp_path / "out.bin"
+
+        with pytest.raises(OSError, match="could not write extracted member data"):
+            tar_reader._extract_exact(io.BytesIO(b"some data"), str(path), 9)
 
 
 class TestChecksumHelpers:
