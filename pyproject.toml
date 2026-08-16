@@ -42,7 +42,7 @@ build-backend = "cpip.build.build_backend"
 backend-path = ["src"]
 
 [dependency-groups]
-benchmark = ["pytest-codspeed>=5.0.3", "tomli>=2", "uv==0.12.1"]
+benchmark = ["pytest-codspeed>=5.0.3", "pytest-benchmark>=5", "tomli>=2", "uv==0.12.1"]
 typing = ["ruff", "ty"]
 test = [
     "cryptography",
