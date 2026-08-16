@@ -58,6 +58,12 @@ class WheelArchive:
             or directory_offset == 0xFFFFFFFF
         ):
             raise WheelhouseUnavailable
+        if directory_offset + directory_size > size:
+            # The declared directory range must fit inside the file --
+            # checked before reading so a lying directory_size (the field
+            # can claim up to 4 GiB) declines instead of attempting the
+            # allocation.
+            raise WheelhouseUnavailable
         if directory_offset >= tail_start:
             # Already sitting in `tail` from the scan above -- slice the
             # central directory out of it instead of paying for a second
@@ -67,6 +73,8 @@ class WheelArchive:
         else:
             self.file.seek(directory_offset)
             directory = self.file.read(directory_size)
+        if len(directory) != directory_size:
+            raise WheelhouseUnavailable
         # Parse the records in place with a running offset. The obvious
         # loop -- two stream read()s and a seek() per record -- costs three
         # method calls and a 46-byte allocation for every member, tens of
@@ -109,10 +117,15 @@ class WheelArchive:
             ):
                 raise WheelhouseUnavailable
             name_end = offset + 46 + name_size
-            if name_end > directory_end:
+            record_end = name_end + extra_size + comment_size
+            if record_end > directory_end:
+                # The whole declared record body -- name, extra field, and
+                # comment -- must fit inside the declared directory, or a
+                # final record with an oversized extra field would be
+                # accepted despite claiming bytes past the boundary.
                 raise WheelhouseUnavailable
             name_bytes = directory[offset + 46 : name_end]
-            offset = name_end + extra_size + comment_size
+            offset = record_end
             member = (
                 compression,
                 crc,
