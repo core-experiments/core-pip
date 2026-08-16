@@ -49,7 +49,15 @@ def _sample_members() -> dict[str, bytes]:
 
 
 def _open(path: Path) -> WheelArchive:
-    return WheelArchive(path.open("rb"))
+    file = path.open("rb")
+
+    try:
+        return WheelArchive(file)
+
+    except Exception:
+        file.close()
+
+        raise
 
 
 def _assert_matches_real_zipfile(path: Path) -> None:
