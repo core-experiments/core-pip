@@ -556,6 +556,213 @@ class CandidateProvider:
 
         return link
 
+    def _catalog_choices_for(
+        self,
+        catalog_key: tuple[str, bool, bool],
+        target_key: str,
+        persistent_cache: Any,
+        source_url: str,
+        generation: str,
+    ) -> dict[str, tuple[tuple[object, ...], int, int | None] | None]:
+        key = (
+            source_url,
+            generation,
+            target_key,
+            catalog_key[1],
+            catalog_key[2],
+        )
+
+        choices = self.catalog_choice_cache.get(key)
+
+        if choices is None:
+            choices = load_choices(
+                persistent_cache,
+                source_url,
+                generation,
+                target_key,
+                catalog_key[1],
+                catalog_key[2],
+            )
+
+            self.catalog_choice_cache[key] = choices
+
+        return choices
+
+    def _catalog_artifacts_for(
+        self,
+        catalog_key: tuple[str, bool, bool],
+        persistent_cache: Any,
+        source_url: str,
+        generation: str,
+        version: Version,
+    ) -> list[tuple[int, tuple[object, ...]]]:
+        key = (source_url, generation)
+
+        groups = self.catalog_artifact_group_cache.get(key)
+
+        if groups is None:
+            groups = {}
+
+            loaded = load_catalog(persistent_cache, source_url)
+
+            if loaded is not None:
+                for name, version_text, artifacts, _facts in loaded[0]:
+                    if name == catalog_key[0]:
+                        existing = groups.get(version_text)
+                        if existing is None:
+                            groups[version_text] = list(artifacts)
+                        else:
+                            existing.extend(artifacts)
+
+            self.catalog_artifact_group_cache[key] = groups
+
+        return groups.get(version.public, [])
+
+    @staticmethod
+    def _eligible_catalog_records(
+        catalog_key: tuple[str, bool, bool],
+        artifacts: list[tuple[int, tuple[object, ...]]],
+    ) -> Iterator[tuple[tuple[object, ...], int]]:
+        for record_kind, record in artifacts:
+            if record_kind == WHEEL_RECORD:
+                if not catalog_key[1]:
+                    continue
+
+            elif record_kind == SDIST_RECORD:
+                if not catalog_key[2]:
+                    continue
+
+            else:
+                continue
+
+            requires_python = record[RECORD_REQUIRES_PYTHON]
+
+            if isinstance(requires_python, str):
+                try:
+                    if not CandidateEvaluator.requires_python_matches(
+                        requires_python,
+                    ):
+                        continue
+
+                except ValueError:
+                    continue
+
+            yield record, record_kind
+
+    @staticmethod
+    def _parse_catalog_descriptor(
+        catalog_key: tuple[str, bool, bool],
+        choice: tuple[tuple[object, ...], int, int | None],
+        source_url: str,
+        version: Version,
+    ) -> tuple[tuple[object, ...], WheelFile | None, int | None, str] | None:
+        record, record_kind, tag_rank = choice
+
+        if record_kind == WHEEL_RECORD:
+            parsed_wheel = wheel_file_from_record(
+                record,
+                name=catalog_key[0],
+                version=version,
+            )
+
+            if parsed_wheel is None:
+                return None
+
+        elif record_kind == SDIST_RECORD:
+            parsed_wheel = None
+
+            tag_rank = None
+
+        else:
+            return None
+
+        return record, parsed_wheel, tag_rank, source_url
+
+    def _select_catalog_choice(
+        self,
+        catalog_key: tuple[str, bool, bool],
+        supported_tags: tuple[Any, ...],
+        artifacts: list[tuple[int, tuple[object, ...]]],
+        version: Version,
+    ) -> tuple[tuple[object, ...], int, int | None] | None:
+        best: tuple[tuple[object, ...], int, int | None] | None = None
+
+        best_rank: tuple[int, int, int] | None = None
+
+        unsupported: tuple[tuple[object, ...], int, int | None] | None = None
+
+        for record, record_kind in self._eligible_catalog_records(
+            catalog_key,
+            artifacts,
+        ):
+            if record_kind == WHEEL_RECORD:
+                parsed_wheel = wheel_file_from_record(
+                    record,
+                    name=catalog_key[0],
+                    version=version,
+                )
+
+                if parsed_wheel is None:
+                    continue
+
+                tag_rank = wheel_tag_rank(parsed_wheel.tags, supported_tags)
+
+                if tag_rank is None:
+                    if unsupported is None:
+                        unsupported = record, record_kind, None
+
+                    continue
+
+            else:
+                tag_rank = None
+
+            yanked = record[RECORD_YANKED]
+
+            rank = (
+                int(yanked is None),
+                int(record_kind == WHEEL_RECORD),
+                -(tag_rank if tag_rank is not None else 1_000_000),
+            )
+
+            if best_rank is None or rank > best_rank:
+                best_rank = rank
+
+                best = record, record_kind, tag_rank
+
+        return best if best is not None else unsupported
+
+    def _materialize_catalog_descriptor(
+        self,
+        catalog_key: tuple[str, bool, bool],
+        descriptor: tuple[
+            tuple[object, ...],
+            WheelFile | None,
+            int | None,
+            str,
+        ],
+        version: Version,
+        destination: list[CandidateRecord],
+    ) -> None:
+        record, parsed_wheel, tag_rank, source_url = descriptor
+
+        try:
+            link = self.link_from_catalog_record(record, source_url)
+
+        except ValueError:
+            return
+
+        candidate = CandidateRecord(
+            name=catalog_key[0],
+            version=version,
+            link=link,
+            wheel=parsed_wheel,
+            tag_rank=tag_rank,
+        )
+
+        self.candidate_record_cache.setdefault(link, candidate)
+
+        destination.append(candidate)
+
     def candidate_records_from_catalog(
         self,
         catalog_key: tuple[str, bool, bool],
@@ -580,194 +787,6 @@ class CandidateProvider:
         persistent_cache = getattr(self.session, "cache", None)
 
         dirty_choices: set[tuple[str, str, str, bool, bool]] = set()
-
-        def choices_for(
-            source_url: str,
-            generation: str,
-        ) -> dict[str, tuple[tuple[object, ...], int, int | None] | None]:
-            key = (
-                source_url,
-                generation,
-                target_key,
-                catalog_key[1],
-                catalog_key[2],
-            )
-
-            choices = self.catalog_choice_cache.get(key)
-
-            if choices is None:
-                choices = load_choices(
-                    persistent_cache,
-                    source_url,
-                    generation,
-                    target_key,
-                    catalog_key[1],
-                    catalog_key[2],
-                )
-
-                self.catalog_choice_cache[key] = choices
-
-            return choices
-
-        def artifacts_for(
-            source_url: str,
-            generation: str,
-            version: Version,
-        ) -> list[tuple[int, tuple[object, ...]]]:
-            key = (source_url, generation)
-
-            groups = self.catalog_artifact_group_cache.get(key)
-
-            if groups is None:
-                groups = {}
-
-                loaded = load_catalog(persistent_cache, source_url)
-
-                if loaded is not None:
-                    for name, version_text, artifacts, _facts in loaded[0]:
-                        if name == catalog_key[0]:
-                            existing = groups.get(version_text)
-                            if existing is None:
-                                groups[version_text] = list(artifacts)
-                            else:
-                                existing.extend(artifacts)
-
-                self.catalog_artifact_group_cache[key] = groups
-
-            return groups.get(version.public, [])
-
-        def eligible_records(
-            artifacts: list[tuple[int, tuple[object, ...]]],
-        ) -> Iterator[tuple[tuple[object, ...], int]]:
-            for record_kind, record in artifacts:
-                if record_kind == WHEEL_RECORD:
-                    if not catalog_key[1]:
-                        continue
-
-                elif record_kind == SDIST_RECORD:
-                    if not catalog_key[2]:
-                        continue
-
-                else:
-                    continue
-
-                requires_python = record[RECORD_REQUIRES_PYTHON]
-
-                if isinstance(requires_python, str):
-                    try:
-                        if not CandidateEvaluator.requires_python_matches(
-                            requires_python,
-                        ):
-                            continue
-
-                    except ValueError:
-                        continue
-
-                yield record, record_kind
-
-        def parse_descriptor(
-            choice: tuple[tuple[object, ...], int, int | None],
-            source_url: str,
-            version: Version,
-        ) -> tuple[tuple[object, ...], WheelFile | None, int | None, str] | None:
-            record, record_kind, tag_rank = choice
-
-            if record_kind == WHEEL_RECORD:
-                parsed_wheel = wheel_file_from_record(
-                    record,
-                    name=catalog_key[0],
-                    version=version,
-                )
-
-                if parsed_wheel is None:
-                    return None
-
-            elif record_kind == SDIST_RECORD:
-                parsed_wheel = None
-
-                tag_rank = None
-
-            else:
-                return None
-
-            return record, parsed_wheel, tag_rank, source_url
-
-        def select_choice(
-            artifacts: list[tuple[int, tuple[object, ...]]],
-            version: Version,
-        ) -> tuple[tuple[object, ...], int, int | None] | None:
-            best: tuple[tuple[object, ...], int, int | None] | None = None
-
-            best_rank: tuple[int, int, int] | None = None
-
-            unsupported: tuple[tuple[object, ...], int, int | None] | None = None
-
-            for record, record_kind in eligible_records(artifacts):
-                if record_kind == WHEEL_RECORD:
-                    descriptor = parse_descriptor(
-                        (record, record_kind, None),
-                        "",
-                        version,
-                    )
-
-                    if descriptor is None or descriptor[1] is None:
-                        continue
-
-                    tag_rank = wheel_tag_rank(descriptor[1].tags, supported_tags)
-
-                    if tag_rank is None:
-                        if unsupported is None:
-                            unsupported = record, record_kind, None
-
-                        continue
-
-                else:
-                    tag_rank = None
-
-                yanked = record[RECORD_YANKED]
-
-                rank = (
-                    int(yanked is None),
-                    int(record_kind == WHEEL_RECORD),
-                    -(tag_rank if tag_rank is not None else 1_000_000),
-                )
-
-                if best_rank is None or rank > best_rank:
-                    best_rank = rank
-
-                    best = record, record_kind, tag_rank
-
-            return best if best is not None else unsupported
-
-        def materialize_descriptor(
-            descriptor: tuple[
-                tuple[object, ...],
-                WheelFile | None,
-                int | None,
-                str,
-            ],
-            version: Version,
-            destination: list[CandidateRecord],
-        ) -> None:
-            record, parsed_wheel, tag_rank, source_url = descriptor
-
-            try:
-                link = self.link_from_catalog_record(record, source_url)
-
-            except ValueError:
-                return
-
-            candidate = CandidateRecord(
-                name=catalog_key[0],
-                version=version,
-                link=link,
-                wheel=parsed_wheel,
-                tag_rank=tag_rank,
-            )
-
-            self.candidate_record_cache.setdefault(link, candidate)
-
-            destination.append(candidate)
 
         result: list[CandidateRecord] = []
 
@@ -806,13 +825,27 @@ class CandidateProvider:
                         continue
 
                     if primary_only:
-                        choices = choices_for(source_url, generation)
+                        choices = self._catalog_choices_for(
+                            catalog_key,
+                            target_key,
+                            persistent_cache,
+                            source_url,
+                            generation,
+                        )
 
                         version_text = version.public
 
                         if version_text not in choices:
-                            choices[version_text] = select_choice(
-                                artifacts_for(source_url, generation, version),
+                            choices[version_text] = self._select_catalog_choice(
+                                catalog_key,
+                                supported_tags,
+                                self._catalog_artifacts_for(
+                                    catalog_key,
+                                    persistent_cache,
+                                    source_url,
+                                    generation,
+                                    version,
+                                ),
                                 version,
                             )
 
@@ -831,7 +864,12 @@ class CandidateProvider:
                         if choice is None:
                             continue
 
-                        descriptor = parse_descriptor(choice, source_url, version)
+                        descriptor = self._parse_catalog_descriptor(
+                            catalog_key,
+                            choice,
+                            source_url,
+                            version,
+                        )
 
                         if descriptor is None:
                             continue
@@ -865,11 +903,19 @@ class CandidateProvider:
 
                         continue
 
-                    for record, record_kind in eligible_records(
-                        artifacts_for(source_url, generation, version),
+                    for record, record_kind in self._eligible_catalog_records(
+                        catalog_key,
+                        self._catalog_artifacts_for(
+                            catalog_key,
+                            persistent_cache,
+                            source_url,
+                            generation,
+                            version,
+                        ),
                     ):
                         if record_kind == WHEEL_RECORD:
-                            descriptor = parse_descriptor(
+                            descriptor = self._parse_catalog_descriptor(
+                                catalog_key,
                                 (record, record_kind, None),
                                 source_url,
                                 version,
@@ -905,15 +951,26 @@ class CandidateProvider:
                         else:
                             descriptor = (record, None, None, source_url)
 
-                        materialize_descriptor(descriptor, version, materialized)
+                        self._materialize_catalog_descriptor(
+                            catalog_key,
+                            descriptor,
+                            version,
+                            materialized,
+                        )
 
                 if primary_only and best_descriptor is not None:
-                    materialize_descriptor(best_descriptor, version, materialized)
+                    self._materialize_catalog_descriptor(
+                        catalog_key,
+                        best_descriptor,
+                        version,
+                        materialized,
+                    )
 
                 elif primary_only and unsupported is not None:
                     record, parsed_wheel, source_url = unsupported
 
-                    materialize_descriptor(
+                    self._materialize_catalog_descriptor(
+                        catalog_key,
                         (record, parsed_wheel, None, source_url),
                         version,
                         materialized,
@@ -922,7 +979,8 @@ class CandidateProvider:
                 elif unsupported is not None and not has_supported_wheel:
                     record, parsed_wheel, source_url = unsupported
 
-                    materialize_descriptor(
+                    self._materialize_catalog_descriptor(
+                        catalog_key,
                         (record, parsed_wheel, None, source_url),
                         version,
                         materialized,
@@ -1780,39 +1838,68 @@ class CandidateProvider:
             if index not in preferred_set
         )
 
-        def generate() -> Iterator[CandidateRecord]:
-            for version, record, record_kind, tag_rank, descriptor_source in ordered:
-                parsed_wheel: WheelFile | None = None
+        catalog_key = (requirement.canonical_name, allow_binary, allow_source)
 
-                if record_kind == WHEEL_RECORD:
-                    parsed_wheel = wheel_file_from_record(
-                        record,
-                        name=requirement.canonical_name,
-                        version=version,
-                    )
+        return self._generate_catalog_candidates(catalog_key, ordered)
 
-                    if parsed_wheel is None:
-                        continue
+    def _catalog_descriptor_sort_key(
+        self,
+        descriptor: tuple[
+            Version,
+            tuple[object, ...],
+            int,
+            int | None,
+            str,
+        ],
+    ) -> tuple[object, ...]:
+        version, record, record_kind, tag_rank, _source_url = descriptor
 
-                try:
-                    link = self.link_from_catalog_record(record, descriptor_source)
+        yanked_rank = int(record[RECORD_YANKED] is None)
 
-                except ValueError:
-                    continue
+        wheel_rank = int(record_kind == WHEEL_RECORD)
 
-                candidate = CandidateRecord(
-                    name=requirement.canonical_name,
+        tag_sort = -(tag_rank if tag_rank is not None else 1_000_000)
+
+        if self.prefer_binary:
+            return yanked_rank, wheel_rank, version, tag_sort
+
+        return yanked_rank, version, wheel_rank, tag_sort
+
+    def _generate_catalog_candidates(
+        self,
+        catalog_key: tuple[str, bool, bool],
+        ordered: list[tuple[Version, tuple[object, ...], int, int | None, str]],
+    ) -> Iterator[CandidateRecord]:
+        for version, record, record_kind, tag_rank, source_url in ordered:
+            parsed_wheel: WheelFile | None = None
+
+            if record_kind == WHEEL_RECORD:
+                parsed_wheel = wheel_file_from_record(
+                    record,
+                    name=catalog_key[0],
                     version=version,
-                    link=link,
-                    wheel=parsed_wheel,
-                    tag_rank=tag_rank,
                 )
 
-                self.candidate_record_cache.setdefault(link, candidate)
+                if parsed_wheel is None:
+                    continue
 
-                yield candidate
+            try:
+                link = self.link_from_catalog_record(record, source_url)
 
-        return generate()
+            except ValueError:
+                continue
+
+            candidate = CandidateRecord(
+                name=catalog_key[0],
+                version=version,
+                link=link,
+                wheel=parsed_wheel,
+                tag_rank=tag_rank,
+            )
+
+            self.candidate_record_cache.setdefault(link, candidate)
+
+            yield candidate
 
     def lazy_catalog_records(
         self,
@@ -1990,29 +2077,7 @@ class CandidateProvider:
             if descriptor[1][RECORD_YANKED] is None or self.allow_yanked or exact_pin
         ]
 
-        def sort_key(
-            descriptor: tuple[
-                Version,
-                tuple[object, ...],
-                int,
-                int | None,
-                str,
-            ],
-        ) -> tuple[object, ...]:
-            version, record, record_kind, tag_rank, _source_url = descriptor
-
-            yanked_rank = int(record[RECORD_YANKED] is None)
-
-            wheel_rank = int(record_kind == WHEEL_RECORD)
-
-            tag_sort = -(tag_rank if tag_rank is not None else 1_000_000)
-
-            if self.prefer_binary:
-                return yanked_rank, wheel_rank, version, tag_sort
-
-            return yanked_rank, version, wheel_rank, tag_sort
-
-        descriptor_list.sort(key=sort_key, reverse=True)
+        descriptor_list.sort(key=self._catalog_descriptor_sort_key, reverse=True)
 
         if any(descriptor[0].is_prerelease for descriptor in descriptor_list):
             allow_prereleases = (
@@ -2085,39 +2150,7 @@ class CandidateProvider:
             if index not in preferred_set
         )
 
-        def generate() -> Iterator[CandidateRecord]:
-            for version, record, record_kind, tag_rank, source_url in ordered:
-                parsed_wheel: WheelFile | None = None
-
-                if record_kind == WHEEL_RECORD:
-                    parsed_wheel = wheel_file_from_record(
-                        record,
-                        name=catalog_key[0],
-                        version=version,
-                    )
-
-                    if parsed_wheel is None:
-                        continue
-
-                try:
-                    link = self.link_from_catalog_record(record, source_url)
-
-                except ValueError:
-                    continue
-
-                candidate = CandidateRecord(
-                    name=catalog_key[0],
-                    version=version,
-                    link=link,
-                    wheel=parsed_wheel,
-                    tag_rank=tag_rank,
-                )
-
-                self.candidate_record_cache.setdefault(link, candidate)
-
-                yield candidate
-
-        return generate()
+        return self._generate_catalog_candidates(catalog_key, ordered)
 
     @contextlib.contextmanager
     def yanked_allowed(self) -> Iterator[None]:

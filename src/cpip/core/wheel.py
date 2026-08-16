@@ -697,14 +697,14 @@ def wheel_candidate(
 
         else:
             message = (
-                read_wheel_metadata_internal(
+                read_metadata_message_internal(
                     archive,
                     wheel_path,
                     expected_name=name,
                     dist_info_dir=dist_info_dir,
                 )
                 if archive is not None
-                else read_wheel_metadata(wheel_path)
+                else read_metadata_message(wheel_path)
             )
 
             def get_header(name: str) -> str | None:
@@ -801,12 +801,12 @@ def read_core_metadata_headers(
         ) from exc
 
 
-def read_wheel_metadata(path: str):
+def read_metadata_message(path: str):
     with zipfile.ZipFile(path) as archive:
-        return read_wheel_metadata_internal(archive, path)
+        return read_metadata_message_internal(archive, path)
 
 
-def read_wheel_metadata_internal(
+def read_metadata_message_internal(
     archive: zipfile.ZipFile,
     path: str,
     *,
@@ -910,7 +910,7 @@ def wheel_dist_info_dir(source: zipfile.ZipFile, name: str) -> str:
     return dist_info_dir
 
 
-def read_wheel_metadata_file(source: zipfile.ZipFile, path: str) -> bytes:
+def read_wheel_archive_member(source: zipfile.ZipFile, path: str) -> bytes:
     try:
         return source.read(path)
 
@@ -918,10 +918,10 @@ def read_wheel_metadata_file(source: zipfile.ZipFile, path: str) -> bytes:
         raise UnsupportedWheel(f"could not read {path!r} file: {exc!r}") from exc
 
 
-def wheel_metadata(source: zipfile.ZipFile, dist_info_dir: str) -> Message:
+def read_wheel_format_metadata(source: zipfile.ZipFile, dist_info_dir: str) -> Message:
     wheel_path = f"{dist_info_dir}/WHEEL"
 
-    raw = read_wheel_metadata_file(source, wheel_path)
+    raw = read_wheel_archive_member(source, wheel_path)
 
     try:
         text = raw.decode()
@@ -997,7 +997,7 @@ def validate_wheel_with_metadata(source: zipfile.ZipFile, name: str) -> tuple[st
 
         wheel_path = f"{info_dir}/WHEEL"
 
-        raw = read_wheel_metadata_file(source, wheel_path)
+        raw = read_wheel_archive_member(source, wheel_path)
 
         try:
             text = raw.decode()
@@ -1122,7 +1122,7 @@ def parse_wheel(wheel_zip: zipfile.ZipFile, name: str) -> tuple[str, Message]:
     try:
         info_dir = wheel_dist_info_dir(wheel_zip, name)
 
-        metadata = wheel_metadata(wheel_zip, info_dir)
+        metadata = read_wheel_format_metadata(wheel_zip, info_dir)
 
         version = wheel_version(metadata)
 

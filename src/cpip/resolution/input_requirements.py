@@ -95,7 +95,7 @@ def install_req_from_line(
             permit_editable_wheels=permit_editable_wheels,
         )
     if looks_like_path(path_text):
-        url, path_mode = get_url_from_path_with_mode(path_text, path_text)
+        url, path_mode = get_url_from_path_with_mode(path_text)
         if url is None:
             raise InstallationError(
                 f"Invalid requirement: {text!r}. It looks like a path.",

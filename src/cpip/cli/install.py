@@ -19,6 +19,7 @@ from cpip.cli.config import SourceConfig, load_source_config
 from cpip.cli.dependency_groups import group_items, parse_dependency_groups
 from cpip.cli.parsers.install import create_parser
 from cpip.cli.requirements import (
+    build_options_from_requirements,
     bundle_install_requirements,
     collect_requirements,
     config_settings,
@@ -55,11 +56,10 @@ from cpip.install.metadata import (
 )
 from cpip.install.output import prepare_install_candidates
 from cpip.install.target import InstallTarget
-from cpip.install.wheel_archive_cache import (
-    CachedWheelArchive,
+from cpip.install.wheel_archive_cache import CachedWheelArchive, prepare_cached_wheel
+from cpip.install.wheel_install_plan_cache import (
     exact_install_plan_key,
     load_cached_install_plan,
-    prepare_cached_wheel,
     save_cached_install_plan,
 )
 from cpip.install.wheel_transaction import (
@@ -176,15 +176,7 @@ def requirement_state(requirements: list[Any], bundle: Any) -> InstallRequiremen
         for requirement in requirements
         if requirement.link is not None and requirement.link.is_existing_dir
     }
-    build_options: dict[str, dict[str, object]] = {}
-    for requirement in requirements:
-        if not requirement.config_settings or requirement.req is None:
-            continue
-        build_options[requirement.req.raw] = dict(requirement.config_settings)
-        if requirement.req.url is not None:
-            build_options[requirement.req.url] = dict(requirement.config_settings)
-        if requirement.link is not None:
-            build_options[requirement.link.url] = dict(requirement.config_settings)
+    build_options = build_options_from_requirements(requirements)
 
     source_requirements_by_name: dict[str, Any] = {}
     requested_extras_by_name: dict[str, set[str]] = {}
@@ -228,6 +220,39 @@ def requirement_state(requirements: list[Any], bundle: Any) -> InstallRequiremen
         source_requirements_by_url=source_requirements_by_url,
         requested_extras_by_name=requested_extras_by_name,
     )
+
+
+def filter_already_satisfied_requirements(
+    requirements: list[InstallRequirement],
+    outcome: InstallOutcome,
+    *,
+    allow_prereleases: bool,
+) -> list[InstallRequirement]:
+    """Drop requirements already satisfied by an installed distribution.
+
+    Recording each dropped requirement's raw text on ``outcome`` is what lets
+    the final report list it without re-deriving satisfaction later.
+    """
+    unresolved_requirements: list[InstallRequirement] = []
+    for requirement in requirements:
+        installed_dist = (
+            find_installed(requirement.req.name)
+            if requirement.req is not None and requirement.req.url is None
+            else None
+        )
+        if (
+            requirement.req is not None
+            and installed_dist is not None
+            and not requirement.req.extras
+            and requirement.req.is_satisfied_by(
+                installed_dist.version,
+                allow_prereleases=allow_prereleases,
+            )
+        ):
+            outcome.satisfied_requirements.append(requirement.req.raw)
+        else:
+            unresolved_requirements.append(requirement)
+    return unresolved_requirements
 
 
 def runtime_setup(
@@ -1059,6 +1084,13 @@ def run_install(args: list[str]) -> int:
         else []
     )
 
+    if not reinstall and not options.upgrade:
+        requirements = filter_already_satisfied_requirements(
+            requirements,
+            outcome,
+            allow_prereleases=options.pre,
+        )
+
     execution = InstallExecutionContext(
         options=options,
         bundle=bundle,
@@ -1068,28 +1100,6 @@ def run_install(args: list[str]) -> int:
         quiet=quiet,
         python_version=resolved_python_version,
     )
-
-    if not reinstall and not options.upgrade:
-        unresolved_requirements: list[InstallRequirement] = []
-        for requirement in requirements:
-            installed_dist = (
-                find_installed(requirement.req.name)
-                if requirement.req is not None and requirement.req.url is None
-                else None
-            )
-            if (
-                requirement.req is not None
-                and installed_dist is not None
-                and not requirement.req.extras
-                and requirement.req.is_satisfied_by(
-                    installed_dist.version,
-                    allow_prereleases=options.pre,
-                )
-            ):
-                outcome.satisfied_requirements.append(requirement.req.raw)
-            else:
-                unresolved_requirements.append(requirement)
-        requirements = unresolved_requirements
 
     requirement_metadata = requirement_state(requirements, bundle)
     requested_order = requirement_metadata.requested_order

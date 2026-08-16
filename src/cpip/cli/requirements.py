@@ -281,6 +281,24 @@ def config_settings(values: list[str]) -> dict[str, object]:
     return result
 
 
+def build_options_from_requirements(
+    requirements: list[InstallRequirement],
+) -> dict[str, dict[str, object]]:
+    """Map each requirement's raw text, URL, and link URL to its config settings."""
+
+    build_options: dict[str, dict[str, object]] = {}
+    for requirement in requirements:
+        if not requirement.config_settings or requirement.req is None:
+            continue
+        settings = dict(requirement.config_settings)
+        build_options[requirement.req.raw] = settings
+        if requirement.req.url is not None:
+            build_options[requirement.req.url] = settings
+        if requirement.link is not None:
+            build_options[requirement.link.url] = settings
+    return build_options
+
+
 def requirements_from_script(path: str) -> list[str]:
     try:
         with open(path, encoding="utf-8") as file:

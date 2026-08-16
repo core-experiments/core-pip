@@ -27,7 +27,8 @@ from cpip.core.packaging import Version, parse_requirement
 from cpip.index.provider import CandidateProvider
 from cpip.resolution.api import ResolutionEngine
 from cpip.resolution.models import ResolutionConfig
-from cpip.resolution.nab_provider import NabProvider, _exact_pin
+from cpip.resolution.nab_provider import NabProvider
+from cpip.resolution.nab_types import _exact_pin
 
 _BENCHMARKS = Path(__file__).resolve().parents[1] / "benchmarks"
 if str(_BENCHMARKS) not in sys.path:  # pragma: no cover - import side effect

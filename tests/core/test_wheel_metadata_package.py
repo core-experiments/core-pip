@@ -111,7 +111,7 @@ def test_wheel_metadata_fails_missing_wheel(tmp_path: Path, zip_dir: ZipDir) -> 
     dist_info_dir.joinpath("METADATA").touch()
 
     with pytest.raises(UnsupportedWheel) as e:
-        wheel.wheel_metadata(zip_dir(tmp_path), dist_info_dir.name)
+        wheel.read_wheel_format_metadata(zip_dir(tmp_path), dist_info_dir.name)
     assert "could not read" in str(e.value)
 
 
@@ -122,7 +122,7 @@ def test_wheel_metadata_fails_on_bad_encoding(tmp_path: Path, zip_dir: ZipDir) -
     dist_info_dir.joinpath("WHEEL").write_bytes(b"\xff")
 
     with pytest.raises(UnsupportedWheel) as e:
-        wheel.wheel_metadata(zip_dir(tmp_path), dist_info_dir.name)
+        wheel.read_wheel_format_metadata(zip_dir(tmp_path), dist_info_dir.name)
     assert "error decoding" in str(e.value)
 
 

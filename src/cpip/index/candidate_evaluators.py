@@ -11,7 +11,7 @@ from cpip.core.errors import InvalidWheelFilename
 from cpip.core.hashes import Hashes
 from cpip.core.packaging import Requirement, SpecifierSet, Version
 from cpip.core.release_control import ReleaseControl
-from cpip.core.target_python import TargetPython, get_supported
+from cpip.core.target_python import get_supported
 from cpip.core.wheel import TargetContext, Wheel, WheelTag, legacy_build_tag
 from cpip.index.candidate_filters import (
     allowed_hashes,
@@ -77,28 +77,22 @@ class CandidateEvaluator:
         cls,
         project_name: str,
         *,
-        target_python: TargetPython | None = None,
         target: TargetContext | None = None,
         release_control: ReleaseControl | None = None,
         prefer_binary: bool = False,
         specifier: SpecifierSet | None = None,
         hashes: Hashes | None = None,
     ) -> CandidateEvaluator:
-        if target_python is None and target is None:
+        if target is None:
             supported_tags = get_supported()
 
-        elif target is not None:
+        else:
             supported_tags = get_supported(
                 version=target.python_version,
                 platforms=list(target.platforms),
                 impl=target.implementation,
                 abis=list(target.abis),
             )
-
-        else:
-            assert target_python is not None
-
-            supported_tags = target_python.get_sorted_tags()
 
         return cls(
             project_name,

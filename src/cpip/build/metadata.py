@@ -102,11 +102,11 @@ class MetadataDistribution:
     ) -> MetadataDistribution:
         import email.parser
 
-        from cpip.core.wheel import read_wheel_metadata_file, validate_wheel
+        from cpip.core.wheel import read_wheel_archive_member, validate_wheel
 
         info_dir = validate_wheel(archive, name)
 
-        contents = read_wheel_metadata_file(archive, f"{info_dir}/METADATA")
+        contents = read_wheel_archive_member(archive, f"{info_dir}/METADATA")
 
         metadata = email.parser.BytesParser().parsebytes(contents)
 
@@ -115,7 +115,7 @@ class MetadataDistribution:
             location=location,
             info_location=f"{location}/{info_dir}",
             entry_points_text=(
-                read_wheel_metadata_file(
+                read_wheel_archive_member(
                     archive,
                     f"{info_dir}/entry_points.txt",
                 ).decode()

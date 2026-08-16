@@ -137,10 +137,5 @@ class Bazaar(VersionControl):
         )
         return revision.splitlines()[-1]
 
-    @classmethod
-    def is_commit_id_equal(cls, dest: str, name: str | None) -> bool:
-        """Always assume the versions don't match"""
-        return False
-
 
 vcs.register(Bazaar)

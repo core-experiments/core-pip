@@ -324,7 +324,9 @@ def test_fresh_target_reuses_copy_on_write_wheel_archive(tmp_path: Path) -> None
     assert (target / "owner_demo-1.0.dist-info" / "REQUESTED").exists()
     assert (target / "bin" / "owner-demo").read_text().startswith("#!/target/python\n")
     assert (target / "bin" / "raw-tool").read_text().startswith("#!/target/python\n")
-    cache_tree = cache / "archive-v1" / digest[:2] / digest / "tree"
+    from cpip.install.wheel_archive_cache import ARCHIVE_CACHE_BUCKET
+
+    cache_tree = cache / ARCHIVE_CACHE_BUCKET / digest[:2] / digest / "tree"
     assert (
         (cache_tree / "owner_demo.data" / "scripts" / "raw-tool")
         .read_text()
@@ -497,12 +499,17 @@ def test_invalid_unpacked_wheel_cache_is_rebuilt(tmp_path: Path) -> None:
         )
         assert (target / "owner_demo" / "__init__.py").exists()
         if index == 0:
-            manifest = cache / "archive-v1" / digest[:2] / digest / "manifest.bin"
+            from cpip.install.wheel_archive_cache import ARCHIVE_CACHE_BUCKET
+
+            manifest = (
+                cache / ARCHIVE_CACHE_BUCKET / digest[:2] / digest / "manifest.bin"
+            )
             manifest.write_bytes(b"invalid")
 
 
 def test_exact_install_plan_receipt_reuses_cached_archives(tmp_path: Path) -> None:
-    from cpip.install.wheel_archive_cache import (
+    from cpip.install.wheel_install_plan_cache import (
+        RESOLUTION_CACHE_BUCKET,
         exact_install_plan_key,
         exact_install_plan_key_from_strings,
         load_cached_install_plan,
@@ -562,7 +569,7 @@ def test_exact_install_plan_receipt_reuses_cached_archives(tmp_path: Path) -> No
     assert loaded.candidates[0].source_hashes == {"sha256": digest}
     assert Path(loaded.candidates[0].path).is_dir()
 
-    receipt = cache / "resolution-v2" / key[:2] / f"{key}.bin"
+    receipt = cache / RESOLUTION_CACHE_BUCKET / key[:2] / f"{key}.bin"
     os.utime(receipt, (0, 0))
     assert load_cached_install_plan(str(cache), key) is None
 

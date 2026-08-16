@@ -1,56 +1,17 @@
 import os
-import shutil
 from pathlib import Path
-from shutil import rmtree
-from tempfile import mkdtemp
-from typing import Any
 from unittest.mock import Mock, patch
 
 import pytest
 from cpip.build.metadata import MetadataDistribution
-from cpip.core.errors import HashMismatch
-from cpip.core.hashes import Hashes
 from cpip.index.links import Link
-from cpip.install.downloads import DownloadManager
 from cpip.install.metadata import (
     MetadataInvalid,
     SidecarMetadataInconsistent,
     check_sidecar_matches_wheel,
 )
 from cpip.network.download import Downloader
-from cpip.network.http import HttpResponse, NetworkSession
-from cpip_test_support import TestData
 from cpip_test_support.requests_mocks import MockResponse
-
-
-def test_unpack_url_with_urllib_response_without_content_type(data: TestData) -> None:
-    """It should download and unpack files even if no Content-Type header exists"""
-    real_session = NetworkSession()
-
-    def fake_session_get(*args: Any, **kwargs: Any) -> HttpResponse:
-        resp = real_session.get(*args, **kwargs)
-        del resp.headers["Content-Type"]
-        return resp
-
-    session = Mock()
-    session.resume_retries = 0
-    session.get = fake_session_get
-    download = Downloader(session)
-
-    uri = data.packages.joinpath("simple-1.0.tar.gz").as_uri()
-    link = Link(uri)
-    temp_dir = mkdtemp()
-    try:
-        DownloadManager(download).unpack(link, temp_dir, verbosity=0)
-        assert set(os.listdir(temp_dir)) == {
-            "PKG-INFO",
-            "setup.cfg",
-            "setup.py",
-            "simple",
-            "simple.egg-info",
-        }
-    finally:
-        rmtree(temp_dir)
 
 
 @patch("cpip.network.download.raise_for_status")
@@ -87,53 +48,6 @@ def test_download_http_url__no_directory_traversal(
     actual = os.listdir(download_dir)
     assert actual == ["out_dir_file"]
     mock_raise_for_status.assert_called_once_with(resp)
-
-
-@pytest.fixture
-def clean_project(tmp_path_factory: pytest.TempPathFactory, data: TestData) -> Path:
-    tmp_path = tmp_path_factory.mktemp("clean_project")
-    new_project_dir = tmp_path.joinpath("FSPkg")
-    path = data.packages.joinpath("FSPkg")
-    shutil.copytree(path, new_project_dir)
-    return new_project_dir
-
-
-class Test_unpack_url:
-    def prep(self, tmp_path: Path, data: TestData) -> None:
-        self.build_dir = os.fspath(tmp_path.joinpath("build"))
-        self.download_dir = tmp_path.joinpath("download")
-        os.mkdir(self.build_dir)
-        os.mkdir(self.download_dir)
-        self.dist_file = "simple-1.0.tar.gz"
-        self.dist_file2 = "simple-2.0.tar.gz"
-        self.dist_path = data.packages.joinpath(self.dist_file)
-        self.dist_path2 = data.packages.joinpath(self.dist_file2)
-        self.dist_url = Link(self.dist_path.as_uri())
-        self.dist_url2 = Link(self.dist_path2.as_uri())
-        self.no_download = Mock(side_effect=AssertionError)
-
-    def test_unpack_url_no_download(self, tmp_path: Path, data: TestData) -> None:
-        self.prep(tmp_path, data)
-        DownloadManager(self.no_download).unpack(
-            self.dist_url,
-            self.build_dir,
-            verbosity=0,
-        )
-        assert os.path.isdir(os.path.join(self.build_dir, "simple"))
-        assert not os.path.isfile(os.path.join(self.download_dir, self.dist_file))
-
-    def test_unpack_url_bad_hash(self, tmp_path: Path, data: TestData) -> None:
-        """Test when the file url hash fragment is wrong"""
-        self.prep(tmp_path, data)
-        url = f"{self.dist_url.url}#md5=bogus"
-        dist_url = Link(url)
-        with pytest.raises(HashMismatch):
-            DownloadManager(self.no_download).unpack(
-                dist_url,
-                self.build_dir,
-                hashes=Hashes({"md5": ["bogus"]}),
-                verbosity=0,
-            )
 
 
 def metadata_internal(*lines: str, name: str = "pkg", version: str = "1.0") -> str:
