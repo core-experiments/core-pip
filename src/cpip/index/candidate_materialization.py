@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import logging
 import os
@@ -13,6 +14,7 @@ import urllib.parse
 import zipfile
 from itertools import chain, islice
 from threading import RLock
+from typing import NamedTuple
 
 from cpip.build.build import build_wheel_from_source, unpack_source_internal
 from cpip.core.errors import BuildError, InstallationError, UnsupportedWheel
@@ -55,6 +57,7 @@ from cpip.index.source_models import (
 )
 from cpip.index.vcs import git_revision, is_immutable_vcs_link
 from cpip.index.vcs import vcs_scheme as parse_vcs_scheme
+from cpip.resolution.archive import WheelArchive, WheelhouseUnavailable
 
 TYPE_CHECKING = False
 
@@ -68,6 +71,107 @@ logger = logging.getLogger(__name__)
 _EXTRA_MARKER_RE = re.compile(r"extra\s*(?:==|in)\s*['\"]([^'\"]+)['\"]")
 
 _METADATA_WORKERS = 32
+
+
+class _ArchiveMemberInfo(NamedTuple):
+    compress_type: int
+
+    CRC: int
+
+    compress_size: int
+
+    file_size: int
+
+    header_offset: int
+
+
+class _ResolverWheelArchive:
+    """ZipFile-shaped adapter over :class:`WheelArchive`.
+
+    A wrong-package backtracking resolve can open thousands of candidate
+    wheels just to read their METADATA -- and ``zipfile.ZipFile.__init__``
+    unconditionally builds a full ``ZipInfo`` for every member of each one,
+    cost that's unrelated to the handful of headers resolution actually
+    reads. ``WheelArchive`` (already relied on by the install-time raw
+    archive reader) does the same central-directory scan without that
+    per-member object construction, and only for the common case a wheel's
+    zip always is -- non-zip64, non-encrypted, deflate/stored -- so this
+    adapter is only ever handed to :func:`wheel_dist_info_dir`,
+    :func:`wheel_archive_identity`, and :func:`wheel_candidate`, the same
+    trio a real ``zipfile.ZipFile`` already serves here.
+    """
+
+    __slots__ = ("NameToInfo", "_archive")
+
+    def __init__(self, archive: WheelArchive) -> None:
+        self._archive = archive
+
+        self.NameToInfo = {
+            name: _ArchiveMemberInfo(*member)
+            for name, member in archive.members.items()
+        }
+
+    def getinfo(self, name: str) -> _ArchiveMemberInfo:
+        try:
+            return self.NameToInfo[name]
+
+        except KeyError:
+            raise KeyError(f"There is no item named {name!r} in the archive") from None
+
+    def read(self, name: str) -> bytes:
+        if name not in self.NameToInfo:
+            raise KeyError(f"There is no item named {name!r} in the archive")
+
+        try:
+            return self._archive.read(name)
+
+        except WheelhouseUnavailable as exc:
+            raise zipfile.BadZipFile(f"Bad archive member {name!r}: {exc}") from exc
+
+    def namelist(self) -> list[str]:
+        return list(self.NameToInfo)
+
+    def open(self, name: str) -> io.BytesIO:
+        return io.BytesIO(self.read(name))
+
+    def close(self) -> None:
+        self._archive.file.close()
+
+    def __enter__(self) -> _ResolverWheelArchive:
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        self.close()
+
+
+def _open_resolver_wheel_archive(
+    path_text: str,
+) -> _ResolverWheelArchive | zipfile.ZipFile:
+    """Open a wheel for metadata-only reads, preferring the faster reader.
+
+    Falls back to a real ``zipfile.ZipFile`` for anything ``WheelArchive``
+    doesn't cover (zip64, encryption, an unusual compression method, or any
+    other parsing surprise) -- so this only ever costs the speedup, never
+    correctness.
+    """
+
+    try:
+        file = open(path_text, "rb", buffering=32768)
+
+        archive = WheelArchive(file)
+
+    except (OSError, ValueError, WheelhouseUnavailable):
+        try:
+            file.close()
+
+        except UnboundLocalError:
+            pass
+
+        # Path form (rather than a passed-in file object) so ZipFile owns
+        # and auto-closes its own file handle on __exit__.
+        return zipfile.ZipFile(path_text)
+
+    return _ResolverWheelArchive(archive)
 
 
 def project_provided_extras(project: object) -> frozenset[str]:
@@ -887,10 +991,7 @@ class CandidateMaterializer:
                         remove_temp_directory(vcs_path)
 
             else:
-                with (
-                    open(path_text, "rb", buffering=32768) as stream,
-                    zipfile.ZipFile(stream) as archive,
-                ):
+                with _open_resolver_wheel_archive(path_text) as archive:
                     try:
                         # Locating the .dist-info directory is all resolution
                         # needs.  Reading WHEEL for its ``Wheel-Version`` costs

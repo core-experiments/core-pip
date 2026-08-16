@@ -18,6 +18,7 @@ from cpip.index.links import Link
 from cpip.index.provider import CandidateProvider
 from cpip.index.source_models import CandidateRecord
 from cpip.resolution.api import ResolutionEngine
+from cpip.resolution.archive import WheelArchive
 
 from ..wheel_helpers import make_wheel
 
@@ -187,17 +188,32 @@ def test_resolution_reads_only_the_metadata_member(
     directory ZipFile already parsed; reading WHEEL on top of METADATA
     doubles the member decompressions per candidate, and resolution has no
     use for the text.
+
+    Candidate materialization opens the archive through ``WheelArchive`` --
+    a leaner central-directory reader tried ahead of ``zipfile.ZipFile`` --
+    so both read entry points are patched here; only whichever one the
+    resolve actually took records anything.
     """
     make_wheel(tmp_path, "demo-pkg", "demo_pkg", "1.0.0")
 
     members: list[str] = []
-    original_read = zipfile.ZipFile.read
+    original_zipfile_read = zipfile.ZipFile.read
+    original_wheel_archive_read = WheelArchive.read
 
-    def recording_read(self: zipfile.ZipFile, name: Any, pwd: Any = None) -> bytes:
+    def recording_zipfile_read(
+        self: zipfile.ZipFile,
+        name: Any,
+        pwd: Any = None,
+    ) -> bytes:
         members.append(name if isinstance(name, str) else name.filename)
-        return original_read(self, name, pwd)
+        return original_zipfile_read(self, name, pwd)
 
-    monkeypatch.setattr(zipfile.ZipFile, "read", recording_read)
+    def recording_wheel_archive_read(self: WheelArchive, name: str) -> bytes:
+        members.append(name)
+        return original_wheel_archive_read(self, name)
+
+    monkeypatch.setattr(zipfile.ZipFile, "read", recording_zipfile_read)
+    monkeypatch.setattr(WheelArchive, "read", recording_wheel_archive_read)
 
     assert resolve_names(tmp_path, ["demo-pkg"]) == ["demo-pkg"]
 
