@@ -313,14 +313,14 @@ class TestVersionComparisonDispatch:
         assert (ours < PackagingVersion("1.0")) is True
         assert (ours >= PackagingVersion("0.5")) is True
 
-    def test_failed_coercion_type_cache_does_not_leak_across_types(self) -> None:
-        """One type's failed coercion must not affect another type, and a
-        cached failure must keep giving the same answers on repeat."""
+    def test_failed_coercion_cache_does_not_leak(self) -> None:
+        """A cached failed coercion must keep giving the same answers on
+        repeat and must not affect coercible operands."""
         from cpip._vendor.nab_resolver.ranges import NEGATIVE_INFINITY
 
         version = Version("1.2.3")
 
-        # Prime the cache with the sentinel's type, twice.
+        # Prime the cache with the sentinel's string form, twice.
         assert (version == NEGATIVE_INFINITY) is False
         assert (version == NEGATIVE_INFINITY) is False
 
@@ -329,6 +329,28 @@ class TestVersionComparisonDispatch:
 
         assert (version == PackagingVersion("1.2.3")) is True
         assert version == "1.2.3"
+
+    def test_mixed_parseability_type_is_judged_per_instance(self) -> None:
+        """A type whose instances only sometimes stringify to a version
+        must be judged per instance: one unparseable instance must not
+        poison a later parseable one (the failure cache is keyed on the
+        string form, not the operand's type).
+        """
+
+        class Moody:
+            def __init__(self, text: str) -> None:
+                self.text = text
+
+            def __str__(self) -> str:
+                return self.text
+
+        version = Version("1.2.3")
+
+        assert (version == Moody("not a version")) is False
+        assert (version == Moody("1.2.3")) is True
+        assert (version == Moody("not a version")) is False
+        assert (version == Moody("1.2.4")) is False
+        assert (version < Moody("2.0")) is True
 
 
 class TestSplitMarker:

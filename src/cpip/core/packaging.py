@@ -117,11 +117,16 @@ class InvalidVersion(ValueError):
     pass
 
 
-# Types whose instances failed comparison coercion (their str() form is not
-# a version) -- see the comparison-method comment block in Version. Grows by
-# at most a handful of entries per process (the resolver's two infinity
-# sentinels, in practice) and is never cleared.
-_uncoercible_types: set[type] = set()
+# String forms that failed comparison coercion -- see the comparison-method
+# comment block in Version. Keyed on the str() result rather than the
+# operand's type so that a type whose instances only sometimes stringify to
+# a version is judged per instance, exactly as uncached parsing would.
+# In practice this holds the resolver sentinels' "-inf"/"+inf"; the cap
+# keeps operands with per-instance str() forms (e.g. bare object()s, whose
+# text embeds their address) from growing it without bound.
+_uncoercible_strings: set[str] = set()
+
+_UNCOERCIBLE_STRINGS_CAP = 64
 
 
 class Version:
@@ -341,23 +346,24 @@ class Version:
     # its infinity sentinels constantly: str(sentinel) is "-inf"/"+inf",
     # so the coercion used to pay a full VERSION_RE match attempt and a
     # raised-and-caught InvalidVersion per bound comparison, only to land
-    # on the reflected dispatch anyway. _uncoercible_types remembers the
-    # types whose instances failed coercion so every later comparison
-    # against them is a set lookup straight to NotImplemented. str is
-    # exempt: one unparseable string must not poison later valid ones.
-    # (Non-str types whose instances only sometimes parse as versions
-    # would be mis-cached, but no such type exists here -- a type's str()
-    # form either is a version representation or is not.)
+    # on the reflected dispatch anyway. _uncoercible_strings remembers the
+    # string forms that failed so every later comparison against them is a
+    # set lookup straight to NotImplemented -- and because whether a given
+    # string parses is deterministic, caching by string is exactly
+    # equivalent to reparsing it, for every operand type.
 
     def _coerced(self, other: object) -> Version | None:
-        if type(other) in _uncoercible_types:
+        text = str(other)
+
+        if text in _uncoercible_strings:
             return None
 
         try:
-            coerced = Version(str(other))
+            coerced = Version(text)
 
         except InvalidVersion:
-            _uncoercible_types.add(type(other))
+            if len(_uncoercible_strings) < _UNCOERCIBLE_STRINGS_CAP:
+                _uncoercible_strings.add(text)
 
             return None
 
