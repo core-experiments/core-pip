@@ -109,6 +109,44 @@ class TestWheelArchiveMatchesRealZipfile:
 
         _assert_matches_real_zipfile(path)
 
+    def test_large_archive_spans_outside_the_cached_tail(self, tmp_path: Path) -> None:
+        """A large early member sits outside the end-of-central-directory
+        scan's cached tail region, forcing read_member()/read_central_directory()
+        back onto the plain seek+read fallback path for it -- while a small
+        late member and the central directory itself still land inside the
+        cached tail. Exercises both branches of that split in one archive.
+        """
+        path = tmp_path / "large.zip"
+
+        members = {
+            "pkg/large_first.bin": bytes(random.Random(2).randbytes(200_000)),
+            "pkg/small_last.py": b"VALUE = 1\n",
+        }
+
+        _write_zip(path, members, compress_type=zipfile.ZIP_STORED)
+
+        tail_threshold = 22 + 65535
+
+        assert path.stat().st_size > tail_threshold, (
+            "test setup no longer produces an archive large enough to "
+            "exercise the outside-the-tail fallback path"
+        )
+
+        archive = _open(path)
+
+        try:
+            large_offset = archive.members["pkg/large_first.bin"][4]
+
+            assert large_offset < path.stat().st_size - tail_threshold, (
+                "the large member's local header is not actually outside "
+                "the cached tail region"
+            )
+
+        finally:
+            archive.file.close()
+
+        _assert_matches_real_zipfile(path)
+
     def test_per_entry_extra_field(self, tmp_path: Path) -> None:
         path = tmp_path / "extra.zip"
 

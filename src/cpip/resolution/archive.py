@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import struct
 import zlib
 
@@ -15,7 +16,7 @@ class WheelhouseUnavailable(Exception):
 
 
 class WheelArchive:
-    __slots__ = ("file", "members", "modes")
+    __slots__ = ("_tail", "_tail_start", "file", "members", "modes")
 
     def __init__(self, file, members=None) -> None:
         self.file = file
@@ -23,6 +24,16 @@ class WheelArchive:
             {} if members is None else members
         )
         self.modes: dict[str, int] = {}
+        # Populated by read_central_directory() with the same bytes its
+        # end-of-central-directory scan already had to read from the tail of
+        # the file. Members whose local header falls inside that region
+        # (the common case for a wheel small enough that the tail scan
+        # covers the whole file) can be read straight out of it in
+        # read_member()/read_many() instead of a second file seek+read.
+        # Empty/zero when unset (a pre-supplied `members` cache skips the
+        # scan), which read_member()/read_many() treat as "nothing cached".
+        self._tail = b""
+        self._tail_start = 0
         if members is None:
             self.read_central_directory()
 
@@ -30,8 +41,11 @@ class WheelArchive:
         self.file.seek(0, 2)
         size = self.file.tell()
         tail_size = min(size, 22 + 65535)
-        self.file.seek(size - tail_size)
+        tail_start = size - tail_size
+        self.file.seek(tail_start)
         tail = self.file.read(tail_size)
+        self._tail = tail
+        self._tail_start = tail_start
         marker = tail.rfind(b"PK\x05\x06")
         if marker < 0 or marker + 22 > len(tail):
             raise WheelhouseUnavailable
@@ -44,9 +58,17 @@ class WheelArchive:
             or directory_offset == 0xFFFFFFFF
         ):
             raise WheelhouseUnavailable
-        self.file.seek(directory_offset)
+        if directory_offset >= tail_start:
+            # Already sitting in `tail` from the scan above -- read the
+            # central directory records out of it instead of paying for a
+            # second seek+read round trip to fetch bytes already in hand.
+            source = io.BytesIO(tail)
+            source.seek(directory_offset - tail_start)
+        else:
+            source = self.file
+            source.seek(directory_offset)
         for _ in range(entries):
-            header = self.file.read(46)
+            header = source.read(46)
             if len(header) != 46 or header[:4] != b"PK\x01\x02":
                 raise WheelhouseUnavailable
             (
@@ -75,8 +97,8 @@ class WheelArchive:
                 or local_offset == 0xFFFFFFFF
             ):
                 raise WheelhouseUnavailable
-            name_bytes = self.file.read(name_size)
-            self.file.seek(extra_size + comment_size, 1)
+            name_bytes = source.read(name_size)
+            source.seek(extra_size + comment_size, 1)
             member = (
                 compression,
                 crc,
@@ -103,15 +125,20 @@ class WheelArchive:
 
     def read_member(self, member: tuple[int, int, int, int, int]) -> bytes:
         compression, crc, compressed_size, uncompressed_size, local_offset = member
-        self.file.seek(local_offset)
-        header = self.file.read(30)
+        if self._tail and local_offset >= self._tail_start:
+            source = io.BytesIO(self._tail)
+            source.seek(local_offset - self._tail_start)
+        else:
+            source = self.file
+            source.seek(local_offset)
+        header = source.read(30)
         if len(header) != 30 or header[:4] != b"PK\x03\x04":
             raise WheelhouseUnavailable
         _, _, _, _, _, _, _, _, _, name_size, extra_size = LOCAL_FILE_HEADER.unpack(
             header,
         )
-        self.file.seek(name_size + extra_size, 1)
-        data = self.file.read(compressed_size)
+        source.seek(name_size + extra_size, 1)
+        data = source.read(compressed_size)
         if len(data) != compressed_size:
             raise WheelhouseUnavailable
         if compression == 0:
@@ -147,19 +174,25 @@ class WheelArchive:
             ordered_names = [name for _, name in ordered]
         ordered_results: list[bytes] = []
         unordered_results: dict[str, bytes] | None = None if in_archive_order else {}
+        tail_source = io.BytesIO(self._tail) if self._tail else None
         position = -1
         for name, member in zip(ordered_names, ordered_members):
             compression, crc, compressed_size, uncompressed_size, local_offset = member
-            if local_offset != position:
-                self.file.seek(local_offset)
-            header = self.file.read(30)
+            if tail_source is not None and local_offset >= self._tail_start:
+                source = tail_source
+                source.seek(local_offset - self._tail_start)
+            else:
+                source = self.file
+                if local_offset != position:
+                    source.seek(local_offset)
+            header = source.read(30)
             if len(header) != 30 or header[:4] != b"PK\x03\x04":
                 raise WheelhouseUnavailable
             (_, _, _, _, _, _, _, _, _, name_size, extra_size) = (
                 LOCAL_FILE_HEADER.unpack(header)
             )
-            self.file.seek(name_size + extra_size, 1)
-            data = self.file.read(compressed_size)
+            source.seek(name_size + extra_size, 1)
+            data = source.read(compressed_size)
             if len(data) != compressed_size:
                 raise WheelhouseUnavailable
             if compression == 0:
@@ -181,7 +214,8 @@ class WheelArchive:
             else:
                 assert unordered_results is not None
                 unordered_results[name] = result
-            position = local_offset + 30 + name_size + extra_size + compressed_size
+            if source is self.file:
+                position = local_offset + 30 + name_size + extra_size + compressed_size
         if in_archive_order:
             return ordered_results
         assert unordered_results is not None
