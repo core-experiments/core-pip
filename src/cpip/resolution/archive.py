@@ -110,6 +110,16 @@ class WheelArchive:
                 name = name_bytes.decode("utf-8" if flags & 0x800 else "cp437")
             except UnicodeDecodeError as exc:
                 raise WheelhouseUnavailable from exc
+            if name in self.members:
+                # self.members is keyed by name, so a second record for the
+                # same name would silently overwrite the first -- including
+                # its independent compressed data at a different offset,
+                # which then never gets read or CRC-checked at all. A real
+                # archive never has two central-directory records for the
+                # same name; something crafted enough to have one shouldn't
+                # get the abbreviated trust this reader extends everything
+                # else.
+                raise WheelhouseUnavailable
             self.members[name] = member
             self.modes[name] = external_attr
 

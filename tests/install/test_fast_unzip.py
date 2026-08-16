@@ -22,6 +22,12 @@ def _write_zip(
         for name, data in members.items():
             info = zipfile.ZipInfo(name)
 
+            # A per-member ZipInfo's own compress_type (default ZIP_STORED)
+            # takes precedence over the archive-level default passed to
+            # ZipFile() above -- set explicitly, or a "compressed" case
+            # silently writes stored members instead.
+            info.compress_type = compress_type
+
             if name in executable:
                 info.external_attr = 0o100755 << 16
 
@@ -134,6 +140,10 @@ class TestFastUnzipMatchesRealZipfile:
 
         _write_zip(archive_path, _sample_members(), compress_type=compress_type)
 
+        with zipfile.ZipFile(archive_path) as archive:
+            for info in archive.infolist():
+                assert info.compress_type == compress_type
+
         _assert_matches_real_zipfile(tmp_path, archive_path)
 
     def test_flatten_strips_leading_dir(self, tmp_path: Path) -> None:
@@ -174,6 +184,46 @@ class TestFastUnzipMatchesRealZipfile:
 
 
 class TestFastUnzipDeclines:
+    def test_duplicate_member_name_declines(self, tmp_path: Path) -> None:
+        """A corrupted *earlier* duplicate-named record must not be able to
+        hide behind a valid later one -- WheelArchive declines the whole
+        archive up front rather than silently keeping only one record.
+        """
+        archive_path = tmp_path / "duplicate.zip"
+
+        with zipfile.ZipFile(archive_path, "w") as archive:
+            archive.writestr("only.txt", "first record")
+
+            archive.writestr("only.txt", "second record")
+
+        dest = tmp_path / "dest"
+
+        dest.mkdir()
+
+        assert unpacking._fast_unzip(str(archive_path), str(dest), False) is False
+
+        assert list(dest.iterdir()) == []
+
+    def test_unzip_file_falls_back_and_still_extracts_duplicate_names(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        archive_path = tmp_path / "duplicate.zip"
+
+        with zipfile.ZipFile(archive_path, "w") as archive:
+            archive.writestr("only.txt", "first record")
+
+            archive.writestr("only.txt", "second record")
+
+        dest = tmp_path / "dest"
+
+        unpacking.unzip_file(str(archive_path), str(dest), flatten=False)
+
+        # The slow zipfile-based path processes both records in order, so
+        # the later one wins -- same last-write-wins outcome the fast path
+        # would have produced too, had it not declined up front.
+        assert (Path(dest) / "only.txt").read_bytes() == b"second record"
+
     def test_zip64_sentinel_declines(self, tmp_path: Path) -> None:
         archive_path = tmp_path / "zip64.zip"
 
