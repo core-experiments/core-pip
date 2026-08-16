@@ -120,22 +120,30 @@ def zip_item_is_executable(info: ZipInfo) -> bool:
     return bool(mode and stat.S_ISREG(mode) and mode & 0o111)
 
 
-def _write_stream_to_path(fp: IO[bytes], path: str) -> None:
+def _write_stream_to_path(fp: IO[bytes], path: str, size_hint: int = -1) -> None:
     """Copy a readable stream to `path` using raw fd calls.
 
     Wheels/sdists are typically many small files, so the per-member cost of
     building an `io.BufferedWriter` (and its buffered flush-then-close on
     exit) dominates over the actual bytes copied. A bare os.open/write/close
     sequence skips that object construction for every member.
+
+    `size_hint`, when known (the archive member's own uncompressed-size
+    field), sizes only the *first* read: zipfile/tarfile's decompressor
+    allocates an output buffer sized to the requested read length, so asking
+    for a full `_COPY_BUFSIZE` chunk for a wheel's typical few-hundred-byte
+    member wastes that allocation. The loop still drains by actual EOF (an
+    empty read), never by the hint, so a size_hint that undercounts the real
+    length (a corrupt or adversarial archive) still copies every byte --  it
+    only costs one extra full-size read to discover that.
     """
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o666)
     try:
         read = fp.read
-        while True:
-            chunk = read(_COPY_BUFSIZE)
-            if not chunk:
-                break
+        chunk = read(_COPY_BUFSIZE if size_hint < 0 else min(size_hint, _COPY_BUFSIZE))
+        while chunk:
             os.write(fd, chunk)
+            chunk = read(_COPY_BUFSIZE)
     finally:
         os.close(fd)
 
@@ -192,7 +200,7 @@ def unzip_file(filename: str, location: str, flatten: bool = True) -> None:
                 # chunk of memory for the file's content
                 fp = zip.open(info)
                 try:
-                    _write_stream_to_path(fp, fn)
+                    _write_stream_to_path(fp, fn, size_hint=info.file_size)
                 finally:
                     fp.close()
                     if zip_item_is_executable(info):
@@ -350,7 +358,7 @@ def _untar_regular_members(
                 f"Unable to extract {member.name!r} from {filename}",
             )
         with source:
-            _write_stream_to_path(source, path)
+            _write_stream_to_path(source, path, size_hint=member.size)
         tar.utime(member, path)
         if member.mode & 0o111:
             os.chmod(path, executable_mode)
@@ -457,7 +465,7 @@ def untar_without_filter(
             ensure_dir(os.path.dirname(path))
             assert fp is not None
             try:
-                _write_stream_to_path(fp, path)
+                _write_stream_to_path(fp, path, size_hint=member.size)
             finally:
                 fp.close()
             # Update the timestamp (useful for cython compiled files)
