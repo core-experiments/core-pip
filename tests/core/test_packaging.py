@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 from cpip.core.packaging import (
+    InvalidVersion,
     Requirement,
     SpecifierSet,
     Version,
@@ -240,3 +241,55 @@ def test_marker_applies_respects_parenthesized_extra_marker() -> None:
 
     assert marker_applies(requirement.marker, extras=()) is False
     assert marker_applies(requirement.marker, extras=("zstd",)) is True
+
+
+class TestVersionComparisonDispatch:
+    """Version's comparators coerce only strings; anything else defers to
+    the other operand's reflected comparator via NotImplemented -- most
+    importantly the resolver's range-arithmetic infinity sentinels, which
+    previously paid a str() + full regex parse attempt + raised-and-caught
+    InvalidVersion per bound comparison before reaching the same dispatch.
+    """
+
+    def test_sentinel_comparisons_defer_to_the_sentinel(self) -> None:
+        from cpip._vendor.nab_resolver.ranges import (
+            NEGATIVE_INFINITY,
+            POSITIVE_INFINITY,
+        )
+
+        version = Version("1.2.3")
+
+        assert (version == NEGATIVE_INFINITY) is False
+        assert (version != POSITIVE_INFINITY) is True
+        # Ordering against a sentinel on the right previously *raised*
+        # InvalidVersion (the coercion in the ordering methods was
+        # uncaught); reflected dispatch makes it just work.
+        assert (version < POSITIVE_INFINITY) is True
+        assert (version > NEGATIVE_INFINITY) is True
+        assert (version <= POSITIVE_INFINITY) is True
+        assert (version >= NEGATIVE_INFINITY) is True
+        assert (NEGATIVE_INFINITY < version) is True
+        assert (POSITIVE_INFINITY > version) is True
+
+    def test_string_coercion_still_works(self) -> None:
+        version = Version("1.2.3")
+
+        assert version == "1.2.3"
+        assert version == "1.2.3.0"
+        assert version != "1.2.4"
+        assert version < "2.0"
+        assert version > "1.0"
+        assert version <= "1.2.3"
+        assert version >= "1.2.3"
+
+    def test_invalid_string_equality_is_false_not_an_error(self) -> None:
+        assert (Version("1.2.3") == "not a version") is False
+
+    def test_invalid_string_ordering_still_raises(self) -> None:
+        with pytest.raises(InvalidVersion):
+            Version("1.2.3") < "not a version"  # noqa: B015
+
+    def test_unrelated_types_are_unequal_without_coercion(self) -> None:
+        assert (Version("1.2.3") == object()) is False
+
+        assert (Version("1.2.3") == None) is False  # noqa: E711

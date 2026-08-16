@@ -326,10 +326,24 @@ class Version:
 
         return release
 
+    # Comparisons coerce only strings. Anything else returns NotImplemented
+    # immediately so Python dispatches to the other operand's reflected
+    # comparator -- which is where every such comparison already ended up:
+    # the resolver's range arithmetic compares Version bounds against its
+    # infinity sentinels constantly, and the old coerce-everything path
+    # first paid str(sentinel), a full VERSION_RE match attempt against
+    # "-inf"/"+inf", and a raised-and-caught InvalidVersion, per bound
+    # comparison, before landing on the very same reflected dispatch. (The
+    # ordering methods didn't even catch InvalidVersion, so a sentinel on
+    # the right would have crashed outright rather than deferred.)
+
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, Version):
+            if not isinstance(other, str):
+                return NotImplemented
+
             try:
-                other = Version(str(other))
+                other = Version(other)
 
             except InvalidVersion:
                 return NotImplemented
@@ -341,25 +355,37 @@ class Version:
 
     def __lt__(self, other: object) -> bool:
         if not isinstance(other, Version):
-            other = Version(str(other))
+            if not isinstance(other, str):
+                return NotImplemented
+
+            other = Version(other)
 
         return self.comparison_key < other.comparison_key
 
     def __le__(self, other: object) -> bool:
         if not isinstance(other, Version):
-            other = Version(str(other))
+            if not isinstance(other, str):
+                return NotImplemented
+
+            other = Version(other)
 
         return self.comparison_key <= other.comparison_key
 
     def __gt__(self, other: object) -> bool:
         if not isinstance(other, Version):
-            other = Version(str(other))
+            if not isinstance(other, str):
+                return NotImplemented
+
+            other = Version(other)
 
         return self.comparison_key > other.comparison_key
 
     def __ge__(self, other: object) -> bool:
         if not isinstance(other, Version):
-            other = Version(str(other))
+            if not isinstance(other, str):
+                return NotImplemented
+
+            other = Version(other)
 
         return self.comparison_key >= other.comparison_key
 
