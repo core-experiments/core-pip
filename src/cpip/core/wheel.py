@@ -6,7 +6,7 @@ import re
 import sys
 import sysconfig
 import zipfile
-from collections.abc import Collection
+from collections.abc import Collection, Mapping
 from email.parser import Parser as EmailParser
 from functools import cache, lru_cache
 from typing import TYPE_CHECKING, Protocol
@@ -28,7 +28,7 @@ from .wheel_metadata import (
 
 if TYPE_CHECKING:
     from email.message import Message
-    from typing import NoReturn
+    from typing import IO, NoReturn
 
 
 class PureWheelCandidate:
@@ -44,6 +44,48 @@ class PureWheelCandidate:
     canonical_name: str
 
     path: str
+
+
+class ZipEntryInfo(Protocol):
+    """The subset of ``zipfile.ZipInfo`` these functions read.
+
+    Satisfied structurally by both ``zipfile.ZipInfo`` and lighter adapters
+    over faster archive readers, so this module never needs to know such an
+    adapter exists. Declared as read-only properties (rather than plain
+    attributes) so an immutable adapter -- e.g. a ``NamedTuple`` -- also
+    satisfies it: a plain attribute requires write support too, which a
+    read-only field doesn't have.
+    """
+
+    @property
+    def CRC(self) -> int: ...
+
+    @property
+    def compress_type(self) -> int: ...
+
+    @property
+    def compress_size(self) -> int: ...
+
+    @property
+    def file_size(self) -> int: ...
+
+    @property
+    def header_offset(self) -> int: ...
+
+
+class ZipArchiveSource(Protocol):
+    """The subset of ``zipfile.ZipFile`` these functions read from."""
+
+    @property
+    def NameToInfo(self) -> Mapping[str, ZipEntryInfo]: ...
+
+    def getinfo(self, name: str) -> ZipEntryInfo: ...
+
+    def read(self, name: str) -> bytes: ...
+
+    def namelist(self) -> list[str]: ...
+
+    def open(self, name: str) -> IO[bytes]: ...
 
 
 MACOS_COMPATIBLE_ARCHES = {
@@ -593,7 +635,7 @@ def wheel_tag_rank(
 
 def wheel_archive_identity(
     path: str,
-    archive: zipfile.ZipFile | None,
+    archive: ZipArchiveSource | None,
     dist_info_dir: str | None,
 ) -> tuple[str, int, int] | None:
     path_text = os.fspath(path)
@@ -653,7 +695,7 @@ def wheel_candidate(
     path: str,
     extras: Collection[str] | None = None,
     *,
-    archive: zipfile.ZipFile | None = None,
+    archive: ZipArchiveSource | None = None,
     filename_info: tuple[str, str | Version] | None = None,
     dist_info_dir: str | None = None,
     wheel_metadata_text: str | None = None,
@@ -781,7 +823,7 @@ def wheel_candidate(
 
 
 def read_core_metadata_headers(
-    archive: zipfile.ZipFile,
+    archive: ZipArchiveSource,
     path: str,
     dist_info_dir: str,
 ) -> dict[str, list[str]]:
@@ -807,7 +849,7 @@ def read_metadata_message(path: str):
 
 
 def read_metadata_message_internal(
-    archive: zipfile.ZipFile,
+    archive: ZipArchiveSource,
     path: str,
     *,
     expected_name: str | None = None,
@@ -875,7 +917,7 @@ def _dist_info_match_key(name: str) -> str:
     return re.sub(r"[-_.]+", "", canonicalize_name(name)).casefold()
 
 
-def wheel_dist_info_dir(source: zipfile.ZipFile, name: str) -> str:
+def wheel_dist_info_dir(source: ZipArchiveSource, name: str) -> str:
     # ZipFile already builds this filename index while reading the central
 
     # directory. Iterating it avoids another ZipInfo lookup for every member,
