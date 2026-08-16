@@ -351,5 +351,66 @@ def test_validate_fresh_destination_uses_a_single_syscall(
     assert calls == {"lstat": 1, "stat": 0}
 
 
+def test_validate_propagates_permission_errors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A permission failure probing the destination must not be recorded as
+    "absent" -- that record is what lets backup_if_needed skip the backup,
+    so swallowing it would authorize an unprotected overwrite later.
+    """
+
+    def denied_lstat(path, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003
+        raise PermissionError(13, "Permission denied", path)
+
+    transaction = InstallTransaction()
+    transaction.add_contents(str(tmp_path / "demo.py"), b"payload")
+    monkeypatch.setattr(transaction_module.os, "lstat", denied_lstat)
+    with pytest.raises(PermissionError):
+        transaction.validate()
+
+
+def test_validate_treats_file_parent_component_as_absent(tmp_path: Path) -> None:
+    """A destination whose parent path component is a regular file lstats
+    to ENOTDIR -- nothing installable exists there, matching the old
+    lexists fallback, and the eventual commit failure (with rollback)
+    happens at directory creation exactly as before.
+    """
+    blocker = tmp_path / "blocker"
+    blocker.write_bytes(b"a file where a directory is expected")
+    destination = blocker / "demo.py"
+
+    transaction = InstallTransaction()
+    transaction.add_contents(str(destination), b"payload")
+    transaction.validate()
+
+    assert transaction.destination_presence[str(destination)] is False
+
+
+def test_chmod_failure_after_replace_rolls_back_a_fresh_destination(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A chmod failure right after os.replace installed a fresh destination
+    must leave rollback able to remove it. (A pre-existing destination is
+    covered by the backup-restore path regardless; a fresh one has no
+    backup, so only the created-paths record can undo the install.)
+    """
+    destination = tmp_path / "site" / "demo.py"
+    source = tmp_path / "stage.py"
+    source.write_text("new", encoding="utf-8")
+
+    def failing_chmod(path, mode, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003
+        raise PermissionError(13, "Operation not permitted", path)
+
+    transaction = InstallTransaction()
+    transaction.add(str(source), str(destination), mode=0o755)
+    monkeypatch.setattr(transaction_module.os, "chmod", failing_chmod)
+    with pytest.raises(PermissionError):
+        transaction.commit()
+
+    assert not destination.exists()
+
+
 def stat_mode(path: Path) -> int:
     return os.stat(path).st_mode & 0o777

@@ -181,7 +181,12 @@ class InstallTransaction:
             # it points at (or that it dangles).
             try:
                 destination_lstat = os.lstat(destination_text)
-            except OSError:
+            except (FileNotFoundError, NotADirectoryError):
+                # Only genuine absence (nothing there, or a parent path
+                # component is a plain file) may be recorded as absent --
+                # that record is what lets backup_if_needed skip the backup,
+                # so a permission or I/O failure here must propagate rather
+                # than silently authorize an unprotected overwrite later.
                 destination_exists = False
                 destination_visible = False
                 destination_is_file = False
@@ -236,7 +241,12 @@ class InstallTransaction:
             replace = os.replace
             chmod = os.chmod
             append_created = self.created_internal.append
-            umask = os.umask(0)
+            # Reading the umask means momentarily setting it; probe with
+            # all-bits-masked rather than the customary os.umask(0) so a
+            # concurrent thread creating a file inside the two-call window
+            # gets an over-restricted mode (a visible glitch) instead of an
+            # under-restricted one (a silent security hole).
+            umask = os.umask(0o777)
             os.umask(umask)
             for item in self.staged_internal:
                 backup_if_needed(item.destination_text)
@@ -257,9 +267,12 @@ class InstallTransaction:
                             if exc.errno != errno.EXDEV:
                                 raise
                             shutil.move(item.source_text, item.destination_text)
+                    # Record before chmod: if chmod raises, the destination
+                    # is already installed and rollback must know to remove
+                    # it (and restore any backup underneath).
+                    append_created(item.destination_text)
                     if item.mode is not None:
                         chmod(item.destination_text, item.mode)
-                    append_created(item.destination_text)
                 else:
                     # Mark the path before writing: a short write must still
                     # be removed by rollback before any backup is restored.
