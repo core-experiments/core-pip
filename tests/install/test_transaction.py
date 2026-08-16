@@ -198,3 +198,219 @@ def test_transaction_rolls_back_staged_contents_on_failure(tmp_path: Path) -> No
         transaction.commit()
 
     assert first.read_text(encoding="utf-8") == "old"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="os.chmod ignores mode bits on Windows")
+@pytest.mark.parametrize("mode", [0o644, 0o755])
+def test_staged_contents_mode_exact_under_permissive_umask(
+    tmp_path: Path,
+    mode: int,
+) -> None:
+    """With umask 022 neither 0o644 nor 0o755 loses any bits at creation,
+    so commit's chmod-skip path is the one that must still produce the
+    exact requested mode on disk.
+    """
+    destination = tmp_path / "demo.py"
+    old_umask = os.umask(0o022)
+    try:
+        with InstallTransaction() as transaction:
+            transaction.add_contents(str(destination), b"payload", mode=mode)
+            transaction.commit()
+    finally:
+        os.umask(old_umask)
+
+    assert stat_mode(destination) == mode
+
+
+@pytest.mark.skipif(os.name == "nt", reason="os.chmod ignores mode bits on Windows")
+def test_staged_contents_mode_exact_under_stripping_umask(tmp_path: Path) -> None:
+    """umask 077 strips group/other bits at creation, so the follow-up
+    chmod must run to restore the full requested mode.
+    """
+    destination = tmp_path / "demo.sh"
+    old_umask = os.umask(0o077)
+    try:
+        with InstallTransaction() as transaction:
+            transaction.add_contents(str(destination), b"#!/bin/sh\n", mode=0o755)
+            transaction.commit()
+    finally:
+        os.umask(old_umask)
+
+    assert stat_mode(destination) == 0o755
+
+
+@pytest.mark.skipif(os.name == "nt", reason="os.chmod ignores mode bits on Windows")
+def test_staged_contents_default_mode_matches_open_builtin(tmp_path: Path) -> None:
+    """mode=None must produce the same permissions the old open(path, "wb")
+    write produced: 0o666 masked by the umask.
+    """
+    destination = tmp_path / "demo.txt"
+    old_umask = os.umask(0o022)
+    try:
+        with InstallTransaction() as transaction:
+            transaction.add_contents(str(destination), b"payload")
+            transaction.commit()
+    finally:
+        os.umask(old_umask)
+
+    assert stat_mode(destination) == 0o666 & ~0o022
+
+
+def test_staged_contents_short_os_write_calls_are_all_retried(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_write = os.write
+
+    def short_write(fd: int, data) -> int:  # noqa: ANN001
+        return original_write(fd, bytes(data)[:3])
+
+    monkeypatch.setattr(transaction_module.os, "write", short_write)
+    destination = tmp_path / "demo.bin"
+    payload = bytes(range(256)) * 40
+
+    with InstallTransaction() as transaction:
+        transaction.add_contents(str(destination), payload)
+        transaction.commit()
+
+    assert destination.read_bytes() == payload
+
+
+def test_staged_contents_zero_write_raises_and_rolls_back(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def zero_write(fd: int, data) -> int:  # noqa: ANN001
+        return 0
+
+    monkeypatch.setattr(transaction_module.os, "write", zero_write)
+    destination = tmp_path / "demo.bin"
+
+    transaction = InstallTransaction()
+    transaction.add_contents(str(destination), b"payload")
+    with pytest.raises(OSError, match="could not write staged file contents"):
+        transaction.commit()
+
+    assert not destination.exists()
+
+
+def test_validate_live_symlink_to_identical_file_is_tolerated(tmp_path: Path) -> None:
+    """A destination that is a live symlink to a byte-identical file must
+    keep passing validation (the follow-the-link stat path), exactly as
+    the old always-follow os.stat call behaved.
+    """
+    real = tmp_path / "real.py"
+    real.write_bytes(b"same contents")
+    destination = tmp_path / "demo.py"
+    destination.symlink_to(real)
+
+    transaction = InstallTransaction()
+    transaction.add_contents(str(destination), b"same contents")
+    transaction.validate()
+
+
+def test_validate_live_symlink_to_different_file_is_rejected(tmp_path: Path) -> None:
+    real = tmp_path / "real.py"
+    real.write_bytes(b"other contents")
+    destination = tmp_path / "demo.py"
+    destination.symlink_to(real)
+
+    transaction = InstallTransaction()
+    transaction.add_contents(str(destination), b"new contents")
+    with pytest.raises(InstallationError, match="an unrelated file already exists"):
+        transaction.validate()
+
+
+def test_validate_fresh_destination_uses_a_single_syscall(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A fresh install's absent destination must be answered by one lstat,
+    not the old stat-then-lexists pair.
+    """
+    calls = {"lstat": 0, "stat": 0}
+    original_lstat = os.lstat
+    original_stat = os.stat
+
+    def counting_lstat(path, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003
+        calls["lstat"] += 1
+        return original_lstat(path, *args, **kwargs)
+
+    def counting_stat(path, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003
+        calls["stat"] += 1
+        return original_stat(path, *args, **kwargs)
+
+    destination = str(tmp_path / "absent.py")
+    transaction = InstallTransaction()
+    transaction.add_contents(str(destination), b"payload")
+    monkeypatch.setattr(transaction_module.os, "lstat", counting_lstat)
+    monkeypatch.setattr(transaction_module.os, "stat", counting_stat)
+    transaction.validate()
+    monkeypatch.undo()
+
+    assert calls == {"lstat": 1, "stat": 0}
+
+
+def test_validate_propagates_permission_errors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A permission failure probing the destination must not be recorded as
+    "absent" -- that record is what lets backup_if_needed skip the backup,
+    so swallowing it would authorize an unprotected overwrite later.
+    """
+
+    def denied_lstat(path, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003
+        raise PermissionError(13, "Permission denied", path)
+
+    transaction = InstallTransaction()
+    transaction.add_contents(str(tmp_path / "demo.py"), b"payload")
+    monkeypatch.setattr(transaction_module.os, "lstat", denied_lstat)
+    with pytest.raises(PermissionError):
+        transaction.validate()
+
+
+def test_validate_treats_file_parent_component_as_absent(tmp_path: Path) -> None:
+    """A destination whose parent path component is a regular file lstats
+    to ENOTDIR -- nothing installable exists there, matching the old
+    lexists fallback, and the eventual commit failure (with rollback)
+    happens at directory creation exactly as before.
+    """
+    blocker = tmp_path / "blocker"
+    blocker.write_bytes(b"a file where a directory is expected")
+    destination = blocker / "demo.py"
+
+    transaction = InstallTransaction()
+    transaction.add_contents(str(destination), b"payload")
+    transaction.validate()
+
+    assert transaction.destination_presence[str(destination)] is False
+
+
+def test_chmod_failure_after_replace_rolls_back_a_fresh_destination(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A chmod failure right after os.replace installed a fresh destination
+    must leave rollback able to remove it. (A pre-existing destination is
+    covered by the backup-restore path regardless; a fresh one has no
+    backup, so only the created-paths record can undo the install.)
+    """
+    destination = tmp_path / "site" / "demo.py"
+    source = tmp_path / "stage.py"
+    source.write_text("new", encoding="utf-8")
+
+    def failing_chmod(path, mode, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003
+        raise PermissionError(13, "Operation not permitted", path)
+
+    transaction = InstallTransaction()
+    transaction.add(str(source), str(destination), mode=0o755)
+    monkeypatch.setattr(transaction_module.os, "chmod", failing_chmod)
+    with pytest.raises(PermissionError):
+        transaction.commit()
+
+    assert not destination.exists()
+
+
+def stat_mode(path: Path) -> int:
+    return os.stat(path).st_mode & 0o777
