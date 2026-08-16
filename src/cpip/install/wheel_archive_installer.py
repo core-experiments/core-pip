@@ -196,7 +196,7 @@ def _build_plans(
     plans: list[_WheelInstallPlan] = []
 
     for owner, (request, candidate, archive) in enumerate(
-        zip(requests, candidates, archives),
+        zip(requests, candidates, archives, strict=True),
     ):
         for entry in archive.entries:
             _reserve_destination(

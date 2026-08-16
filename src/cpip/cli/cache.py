@@ -29,15 +29,22 @@ class CacheManager:
         # interpreter/implementation, since they hold marshal-serialized
         # data); glob every tagged variant rather than just the running
         # interpreter's own, so purge clears caches left by other
-        # interpreters too.
-        self.archive_dirs = glob.glob(
-            os.path.join(self.cache_dir, f"{ARCHIVE_CACHE_BUCKET_FAMILY}-*"),
-        )
+        # interpreters too. Also sweep the untagged family root itself, since
+        # cpip versions before tagging was introduced wrote directly there.
+        self.archive_dirs = [
+            os.path.join(self.cache_dir, ARCHIVE_CACHE_BUCKET_FAMILY),
+            *glob.glob(
+                os.path.join(self.cache_dir, f"{ARCHIVE_CACHE_BUCKET_FAMILY}-*"),
+            ),
+        ]
         self.artifact_dir = os.path.join(self.cache_dir, ARTIFACT_CACHE_BUCKET)
         self.fast_install_tree_dir = os.path.join(self.cache_dir, TREE_CACHE_BUCKET)
-        self.resolution_dirs = glob.glob(
-            os.path.join(self.cache_dir, f"{RESOLUTION_CACHE_BUCKET_FAMILY}-*"),
-        )
+        self.resolution_dirs = [
+            os.path.join(self.cache_dir, RESOLUTION_CACHE_BUCKET_FAMILY),
+            *glob.glob(
+                os.path.join(self.cache_dir, f"{RESOLUTION_CACHE_BUCKET_FAMILY}-*"),
+            ),
+        ]
         self.legacy_resolution_dir = os.path.join(
             self.cache_dir,
             "resolution-v1",

@@ -428,6 +428,39 @@ def test_cache_purge_removes_fast_install_snapshots(
     assert not os.path.exists(tree_file)
 
 
+def test_cache_purge_removes_untagged_legacy_buckets(
+    script: CpipTestEnvironment,
+    cache_dir: str,
+) -> None:
+    """cpip cache purge should also remove archive/resolution buckets
+    written before interpreter tagging was introduced (no ``-<tag>`` suffix).
+    """
+    legacy_archive_file = os.path.join(
+        cache_dir,
+        "archive-v1",
+        "aa",
+        "digest",
+        "wheel",
+    )
+    legacy_resolution_file = os.path.join(
+        cache_dir,
+        "resolution-v2",
+        "bb",
+        "key.bin",
+    )
+    os.makedirs(os.path.dirname(legacy_archive_file))
+    os.makedirs(os.path.dirname(legacy_resolution_file))
+    with open(legacy_archive_file, "wb") as file:
+        file.write(b"archive")
+    with open(legacy_resolution_file, "wb") as file:
+        file.write(b"resolution")
+
+    script.cpip("cache", "purge", "--verbose")
+
+    assert not os.path.exists(legacy_archive_file)
+    assert not os.path.exists(legacy_resolution_file)
+
+
 @pytest.mark.usefixtures("populate_http_cache", "populate_wheel_cache")
 def test_cache_purge_too_many_args(
     script: CpipTestEnvironment,
