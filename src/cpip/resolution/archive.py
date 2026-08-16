@@ -59,20 +59,29 @@ class WheelArchive:
         ):
             raise WheelhouseUnavailable
         if directory_offset >= tail_start:
-            # Already sitting in `tail` from the scan above -- read the
-            # central directory records out of it instead of paying for a
-            # second seek+read round trip to fetch bytes already in hand.
-            source = io.BytesIO(tail)
-            source.seek(directory_offset - tail_start)
+            # Already sitting in `tail` from the scan above -- slice the
+            # central directory out of it instead of paying for a second
+            # seek+read round trip to fetch bytes already in hand.
+            start = directory_offset - tail_start
+            directory = tail[start : start + directory_size]
         else:
-            source = self.file
-            source.seek(directory_offset)
+            self.file.seek(directory_offset)
+            directory = self.file.read(directory_size)
+        # Parse the records in place with a running offset. The obvious
+        # loop -- two stream read()s and a seek() per record -- costs three
+        # method calls and a 46-byte allocation for every member, tens of
+        # thousands of pure overhead calls on a many-file wheel;
+        # unpack_from reads the buffer directly. Bounding the parse by the
+        # end-of-central-directory record's own directory_size also matches
+        # what zipfile itself does.
+        directory_end = len(directory)
+        unpack_record = CENTRAL_DIRECTORY_HEADER.unpack_from
+        offset = 0
         for _ in range(entries):
-            header = source.read(46)
-            if len(header) != 46 or header[:4] != b"PK\x01\x02":
+            if offset + 46 > directory_end:
                 raise WheelhouseUnavailable
             (
-                _,
+                signature,
                 _,
                 _,
                 flags,
@@ -89,7 +98,9 @@ class WheelArchive:
                 _,
                 external_attr,
                 local_offset,
-            ) = CENTRAL_DIRECTORY_HEADER.unpack(header)
+            ) = unpack_record(directory, offset)
+            if signature != b"PK\x01\x02":
+                raise WheelhouseUnavailable
             if (
                 flags & 1
                 or compressed_size == 0xFFFFFFFF
@@ -97,8 +108,11 @@ class WheelArchive:
                 or local_offset == 0xFFFFFFFF
             ):
                 raise WheelhouseUnavailable
-            name_bytes = source.read(name_size)
-            source.seek(extra_size + comment_size, 1)
+            name_end = offset + 46 + name_size
+            if name_end > directory_end:
+                raise WheelhouseUnavailable
+            name_bytes = directory[offset + 46 : name_end]
+            offset = name_end + extra_size + comment_size
             member = (
                 compression,
                 crc,
