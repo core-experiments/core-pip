@@ -168,3 +168,60 @@ def test_check_compatibility() -> None:
     # E.g if wheel to install is 1.0 and we support up to 1.2
     lower_v = (vc[0], max(0, vc[1] - 1))
     wheel.check_compatibility(lower_v, name)
+
+
+class TestParseMetadataHeadersBody:
+    """The header parse must stop at the header/body boundary and never
+    read resolver fields out of the description body.
+    """
+
+    def test_body_lines_never_leak_into_headers(self) -> None:
+        from cpip.core.wheel_metadata import parse_metadata_headers
+
+        contents = (
+            "Metadata-Version: 2.1\n"
+            "Name: demo\n"
+            "Version: 1.0\n"
+            "Requires-Dist: real-dep>=1\n"
+            "\n"
+            "Long description follows.\n"
+            "Requires-Dist: fake-dep-from-the-body>=9\n"
+            "Name: not-a-header\n" * 500
+        )
+
+        headers = parse_metadata_headers(contents)
+
+        assert headers["name"] == ["demo"]
+        assert headers["version"] == ["1.0"]
+        assert headers["requires-dist"] == ["real-dep>=1"]
+
+    def test_crlf_boundary(self) -> None:
+        from cpip.core.wheel_metadata import parse_metadata_headers
+
+        contents = "Name: demo\r\nVersion: 2.0\r\n\r\nRequires-Dist: body-noise>=1\r\n"
+
+        headers = parse_metadata_headers(contents)
+
+        assert headers["name"] == ["demo"]
+        assert headers["version"] == ["2.0"]
+        assert "requires-dist" not in headers
+
+    def test_no_body_at_all(self) -> None:
+        from cpip.core.wheel_metadata import parse_metadata_headers
+
+        headers = parse_metadata_headers("Name: demo\nVersion: 3.0\n")
+
+        assert headers["name"] == ["demo"]
+        assert headers["version"] == ["3.0"]
+
+    def test_continuation_line_falls_back_to_slow_parse(self) -> None:
+        from cpip.core.wheel_metadata import parse_metadata_headers
+
+        contents = (
+            "Name: demo\nRequires-Dist: dep>=1 ;\n python_version >= '3.8'\n\nbody\n"
+        )
+
+        headers = parse_metadata_headers(contents)
+
+        assert headers["name"] == ["demo"]
+        assert headers["requires-dist"] == ["dep>=1 ;\n python_version >= '3.8'"]

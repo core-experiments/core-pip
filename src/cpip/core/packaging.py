@@ -1134,6 +1134,23 @@ def egg_fragment_internal(value: str) -> tuple[str | None, frozenset[str]]:
 
 
 def split_marker(value: str) -> tuple[str, str | None]:
+    # The character walk below exists only to skip a ";" inside a quoted
+    # string. The overwhelming majority of requirement lines have no ";" at
+    # all, and nearly all of the rest have no quote character before their
+    # first ";" (quotes in the marker *after* it, e.g.
+    # `pkg ; python_version >= "3.8"`, don't affect the split point) --
+    # both answered by C-level scans instead of a per-character Python
+    # loop.
+    semicolon = value.find(";")
+
+    if semicolon == -1:
+        return value, None
+
+    head = value[:semicolon]
+
+    if "'" not in head and '"' not in head:
+        return head.strip(), value[semicolon + 1 :].strip()
+
     in_quote: str | None = None
 
     for index, char in enumerate(value):

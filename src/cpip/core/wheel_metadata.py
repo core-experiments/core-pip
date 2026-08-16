@@ -33,10 +33,24 @@ def parse_metadata_member(read: Callable[[str], bytes], member: str) -> Metadata
     return parse_metadata_headers(read(member).decode("utf-8"))
 
 
+def _header_end(contents: str) -> int:
+    separators = (
+        offset
+        for marker in ("\n\n", "\r\n\r\n")
+        if (offset := contents.find(marker)) >= 0
+    )
+    return min(separators, default=len(contents))
+
+
 def parse_metadata_headers(contents: str) -> MetadataHeaders:
     """Parse only the core metadata fields needed by the resolver."""
+    # Split only the header region: splitlines() on the whole document
+    # would also split a long Description body into a list of lines the
+    # loop below never looks at (it stops at the first blank line, which
+    # is exactly where the header region ends).
+    header_end = _header_end(contents)
     fast_headers: MetadataHeaders | None = {}
-    for line in contents.splitlines():
+    for line in contents[:header_end].splitlines():
         if not line:
             break
         if line[0].isspace():
@@ -61,12 +75,6 @@ def parse_metadata_headers(contents: str) -> MetadataHeaders:
         values.append(value.lstrip())
     if fast_headers is not None:
         return fast_headers
-    separators = (
-        offset
-        for marker in ("\n\n", "\r\n\r\n")
-        if (offset := contents.find(marker)) >= 0
-    )
-    header_end = min(separators, default=len(contents))
     headers: MetadataHeaders = {}
     current_values: list[str] | None = None
     saw_header = False

@@ -220,7 +220,10 @@ def _fast_unzip(filename: str, location: str, flatten: bool) -> bool:
     """
 
     try:
-        file = open(filename, "rb")  # noqa: SIM115
+        # Unbuffered on purpose -- see candidate_materialization's
+        # _open_resolver_wheel_archive: WheelArchive reads with exact sizes
+        # and seeks, so buffering only adds per-open cost.
+        file = open(filename, "rb", buffering=0)  # noqa: SIM115
 
         archive = WheelArchive(file)
 

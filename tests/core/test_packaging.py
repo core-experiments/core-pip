@@ -293,3 +293,33 @@ class TestVersionComparisonDispatch:
         assert (Version("1.2.3") == object()) is False
 
         assert (Version("1.2.3") == None) is False  # noqa: E711
+
+
+class TestSplitMarker:
+    """split_marker's fast paths (no semicolon; no quote before the first
+    semicolon) must agree exactly with the quote-aware character walk.
+    """
+
+    @pytest.mark.parametrize(
+        "value, expected",
+        [
+            ("botocore==1.28.50", ("botocore==1.28.50", None)),
+            ("pkg[extra]>=1.0", ("pkg[extra]>=1.0", None)),
+            ("", ("", None)),
+            ("pkg ; python_version >= '3.8'", ("pkg", "python_version >= '3.8'")),
+            ('pkg ; python_version >= "3.8"', ("pkg", 'python_version >= "3.8"')),
+            ("pkg;extra == 'feature'", ("pkg", "extra == 'feature'")),
+            # A quoted ";" before the real separator must not split early --
+            # the quote-aware walk's whole reason to exist.
+            (
+                "pkg @ https://x/y?q=';' ; python_version >= '3.8'",
+                ("pkg @ https://x/y?q=';'", "python_version >= '3.8'"),
+            ),
+            # A ";" inside quotes with no separator after it: no split.
+            ("pkg=='a;b'", ("pkg=='a;b'", None)),
+        ],
+    )
+    def test_split(self, value: str, expected: tuple[str, str | None]) -> None:
+        from cpip.core.packaging import split_marker
+
+        assert split_marker(value) == expected
