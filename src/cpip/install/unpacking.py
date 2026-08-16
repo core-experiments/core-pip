@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
 import stat
 import sys
 import tarfile
@@ -12,6 +13,7 @@ from zipfile import ZipInfo
 
 from cpip.core.errors import InstallationError
 from cpip.core.utils import ensure_dir
+from cpip.install.tar_reader import fast_untar
 
 TYPE_CHECKING = False
 
@@ -80,6 +82,30 @@ def has_leading_dir(paths: Iterable[str]) -> bool:
         elif prefix != common_prefix:
             return False
     return True
+
+
+def _strip_leading_dir_in_place(location: str, sample_name: str) -> None:
+    """Move a fast_untar() extraction's sole top-level directory's contents
+    up a level, matching what stripping the leading directory from every
+    member name before writing would have produced -- without needing a
+    second pass over the archive to do it. `sample_name` is any one of the
+    extracted names; `has_leading_dir` already confirmed they all share the
+    same leading directory.
+    """
+    prefix = split_leading_dir(sample_name)[0]
+
+    prefix_dir = os.path.join(location, prefix)
+
+    if not os.path.isdir(prefix_dir):
+        return
+
+    for entry_name in os.listdir(prefix_dir):
+        shutil.move(
+            os.path.join(prefix_dir, entry_name),
+            os.path.join(location, entry_name),
+        )
+
+    os.rmdir(prefix_dir)
 
 
 def is_within_directory(
@@ -233,6 +259,14 @@ def untar_file(filename: str, location: str) -> None:
             filename,
         )
         mode = "r:*"
+
+    extracted_names = fast_untar(filename, location, mode)
+
+    if extracted_names is not None:
+        if has_leading_dir(extracted_names):
+            _strip_leading_dir_in_place(location, extracted_names[0])
+
+        return
 
     tar = tarfile.open(filename, mode, encoding="utf-8")
     try:
