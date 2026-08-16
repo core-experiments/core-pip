@@ -215,6 +215,82 @@ class TestWheelArchiveFallback:
         with pytest.raises(WheelhouseUnavailable):
             _open(path)
 
+    def test_lying_directory_size_declines(self, tmp_path: Path) -> None:
+        """An EOCD declaring a directory_size that extends past the end of
+        the file (the field can claim up to 4 GiB) must decline before any
+        attempt to materialize that much memory.
+        """
+        path = tmp_path / "lying-size.zip"
+
+        _write_zip(path, {"only.txt": b"contents"})
+
+        raw = bytearray(path.read_bytes())
+
+        eocd = raw.rindex(b"PK\x05\x06")
+
+        # size_cd is the little-endian L at byte 12 of the EOCD record
+        # (<4s4H2LH). 0x7FFFFFF0 is huge but not the 0xFFFFFFFF zip64
+        # sentinel, so it reaches the bounds check rather than the
+        # sentinel check.
+        raw[eocd + 12 : eocd + 16] = (0x7FFFFFF0).to_bytes(4, "little")
+
+        path.write_bytes(bytes(raw))
+
+        with pytest.raises(WheelhouseUnavailable):
+            _open(path)
+
+    def test_lying_directory_size_on_large_archive_declines(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Same lie on an archive big enough that its central directory
+        lives outside the cached tail, exercising the pre-read bound on
+        the file-read branch rather than the tail-slice branch.
+        """
+        path = tmp_path / "lying-size-large.zip"
+
+        members = {
+            "pkg/large.bin": bytes(random.Random(5).randbytes(200_000)),
+            "pkg/small.py": b"VALUE = 1\n",
+        }
+
+        _write_zip(path, members, compress_type=zipfile.ZIP_STORED)
+
+        raw = bytearray(path.read_bytes())
+
+        eocd = raw.rindex(b"PK\x05\x06")
+
+        raw[eocd + 12 : eocd + 16] = (0x7FFFFFF0).to_bytes(4, "little")
+
+        path.write_bytes(bytes(raw))
+
+        with pytest.raises(WheelhouseUnavailable):
+            _open(path)
+
+    def test_final_record_oversized_extra_field_declines(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """A final central-directory record whose declared extra field
+        extends past the directory boundary must decline rather than be
+        accepted with its overrun ignored.
+        """
+        path = tmp_path / "overrun-extra.zip"
+
+        _write_zip(path, {"only.txt": b"contents"})
+
+        raw = bytearray(path.read_bytes())
+
+        cd = raw.index(b"PK\x01\x02")
+
+        # extra_size is the little-endian H at byte 30 of the record.
+        raw[cd + 30 : cd + 32] = (0xFF00).to_bytes(2, "little")
+
+        path.write_bytes(bytes(raw))
+
+        with pytest.raises(WheelhouseUnavailable):
+            _open(path)
+
     def test_not_a_zip_file(self, tmp_path: Path) -> None:
         path = tmp_path / "notazip.txt"
 
