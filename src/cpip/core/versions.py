@@ -83,7 +83,7 @@ _PRE_LABEL = ("a", "b", "rc")
 # with pre_rank 3 meaning "no prerelease", dev_rank 1 meaning "no dev", and
 # a bare dev release (no pre, no post) taking pre_rank -1 so that it sorts
 # before every prerelease of the same release.
-_FINAL_SUFFIX = (3, 0, 0, 0, 1, 0)
+FINAL_SUFFIX = (3, 0, 0, 0, 1, 0)
 _NO_LOCAL: tuple[()] = ()
 
 _VERSIONS_LIMIT = 65536
@@ -105,10 +105,16 @@ class Version(tuple):
             return cached
 
         raw = value.strip()
-        if raw and raw.replace(".", "").isdecimal() and ".." not in raw:
+        if (
+            raw
+            and raw.replace(".", "").isdecimal()
+            and ".." not in raw
+            and raw[0] != "."
+            and raw[-1] != "."
+        ):
             epoch = 0
             release = tuple(map(int, raw.split(".")))
-            suffix = _FINAL_SUFFIX
+            suffix = FINAL_SUFFIX
             local: Any = _NO_LOCAL
         else:
             match = VERSION_RE.match(raw)
@@ -142,7 +148,7 @@ class Version(tuple):
             dev = int(dev_number or 0) if dev_label is not None else None
 
             if pre is None and post is None and dev is None:
-                suffix = _FINAL_SUFFIX
+                suffix = FINAL_SUFFIX
             elif pre is None and post is None:
                 suffix = (-1, 0, 0, 0, 0, dev)
             else:
@@ -205,7 +211,7 @@ class Version(tuple):
     def _format_public(self) -> str:
         epoch, _release, suffix, local = self
         parts = [f"{epoch}!" if epoch else "", ".".join(map(str, self.release))]
-        if suffix != _FINAL_SUFFIX:
+        if suffix != FINAL_SUFFIX:
             pre_rank, pre_number, post_rank, post_number, dev_rank, dev_number = suffix
             if 0 <= pre_rank < 3:
                 parts.append(f"{_PRE_LABEL[pre_rank]}{pre_number}")
@@ -260,7 +266,7 @@ class Version(tuple):
 
     def cache_state_internal(self) -> tuple[Any, ...]:
         suffix = self[2]
-        if suffix == _FINAL_SUFFIX:
+        if suffix == FINAL_SUFFIX:
             pre = post = dev = None
         elif suffix[0] == -1:
             pre = post = None

@@ -4,10 +4,9 @@ from __future__ import annotations
 
 import platform
 from collections.abc import Sequence
-from functools import lru_cache
 from typing import TypeVar
 
-from cpip.core.versions import ZERO_VERSION
+from cpip.core.versions import ZERO_VERSION, Version
 from cpip.core.errors import InvalidWheelFilename
 from cpip.core.hashes import Hashes
 from cpip.core.packaging import Requirement, SpecifierSet
@@ -33,6 +32,7 @@ from cpip.index.source_models import (
 CandidateT = TypeVar("CandidateT", bound=CandidateRecord)
 
 _UNKNOWN_DIRECT_SOURCE_VERSION = ZERO_VERSION
+_RUNNING_PYTHON = Version(platform.python_version())
 
 
 class CandidateEvaluator:
@@ -111,11 +111,8 @@ class CandidateEvaluator:
         allow_prereleases = self.allow_prereleases_internal()
 
         if allow_prereleases is None:
-            specifier_allows_prereleases = any(
-                spec.operator != "==="
-                and not spec.version.endswith(".*")
-                and spec.parsed_version.is_prerelease
-                for spec in self.specifier_internal.specifiers
+            specifier_allows_prereleases = (
+                self.specifier_internal.explicitly_allows_prereleases
             )
 
             if specifier_allows_prereleases:
@@ -207,9 +204,7 @@ class CandidateEvaluator:
     ) -> CandidateRecord | RejectedCandidate:
         """Apply requirement-specific policy to an already parsed link."""
 
-        unnamed_direct = CandidateEvaluator.is_unnamed_direct_requirement(
-            requirement,
-        )
+        unnamed_direct = requirement.is_unnamed_direct
 
         if link.kind is ArtifactKind.WHEEL and not allow_binary:
             return CandidateEvaluator.reject(
@@ -294,9 +289,7 @@ class CandidateEvaluator:
                     f"invalid Requires-Python: {link.requires_python}",
                 )
 
-        if link.is_yanked and not (
-            allow_yanked or CandidateEvaluator.is_exact_pin(requirement)
-        ):
+        if link.is_yanked and not (allow_yanked or requirement.specifier.is_pinned):
             return CandidateEvaluator.reject(
                 link,
                 RejectionReason.YANKED,
@@ -320,20 +313,10 @@ class CandidateEvaluator:
         return parsed
 
     @staticmethod
-    def is_exact_pin(requirement: Requirement) -> bool:
-        return any(
-            spec.operator in {"==", "==="} and not spec.version.endswith(".*")
-            for spec in requirement.specifier.specifiers
-        )
-
-    @staticmethod
-    @lru_cache(maxsize=4096)
     def requires_python_matches(requires_python: str) -> bool:
-        return SpecifierSet(requires_python).contains(platform.python_version())
-
-    @staticmethod
-    def is_unnamed_direct_requirement(requirement: Requirement) -> bool:
-        return requirement.is_unnamed_direct
+        # SpecifierSet is interned by text and memoizes containment, so the
+        # repeat question for the same Requires-Python is a dict lookup.
+        return SpecifierSet(requires_python).contains(_RUNNING_PYTHON)
 
     @staticmethod
     def reject(link: Link, reason: RejectionReason, detail: str) -> RejectedCandidate:

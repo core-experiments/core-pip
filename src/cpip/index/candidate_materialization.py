@@ -1531,7 +1531,7 @@ def validate_build_requirements(source: str | os.PathLike[str]) -> None:
         if canonicalize_name(req.name) == "setuptools":
             minimum = Version("40.8.0")
 
-            _, upper_bound = req.specifier.bounds()
+            _, upper_bound = req.specifier.bounds
 
             if upper_bound is not None and (
                 upper_bound[0] < minimum

@@ -129,15 +129,11 @@ def _normalized_exact_requirement(
     if getattr(requirement, "url", None) is not None:
         return None
 
-    specifier = getattr(requirement, "specifier", None)
+    exact_version = getattr(
+        getattr(requirement, "specifier", None), "exact_version", None
+    )
 
-    specifiers = getattr(specifier, "specifiers", ())
-
-    if (
-        len(specifiers) != 1
-        or specifiers[0].operator != "=="
-        or specifiers[0].version.endswith(".*")
-    ):
+    if exact_version is None:
         return None
 
     canonical_name = getattr(requirement, "canonical_name", None)
@@ -155,7 +151,7 @@ def _normalized_exact_requirement(
 
     return (
         canonical_name,
-        str(Version(specifiers[0].version)),
+        str(exact_version),
         tuple(sorted(extra for extra in extras if isinstance(extra, str))),
     )
 

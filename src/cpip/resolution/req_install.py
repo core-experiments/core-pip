@@ -303,9 +303,7 @@ class InstallRequirement:
         if self.req is None:
             raise ValueError("requirement has no parsed requirement")
 
-        specifiers = self.req.specifier.specifiers
-
-        return len(specifiers) == 1 and specifiers[0].operator in {"==", "==="}
+        return self.req.specifier.is_pinned
 
     @property
     def has_hash_options(self) -> bool:

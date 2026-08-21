@@ -8,17 +8,10 @@ from __future__ import annotations
 
 from urllib.parse import urlsplit
 
-from cpip.core.versions import ZERO_VERSION
 from cpip._vendor.nab_resolver.ranges import Range
 from cpip.core.metadata import InstalledDistribution
 from cpip.core.packaging import Requirement, SpecifierSet, canonicalize_name
 from cpip.core.versions import Version
-
-
-# Version("0") is the "no declared version" sentinel checked against on
-# every candidate in _inconsistent_metadata_rejects; parsing it fresh each
-# call is pure overhead for a fixed value.
-_ZERO_VERSION = ZERO_VERSION
 
 
 class InstalledCandidate:
@@ -80,7 +73,7 @@ def _implied_range(specifier: SpecifierSet) -> Range[Version]:
     independent of which releases the active policy happens to admit -- a
     yanked-only release cannot turn a possible fan-out into a rejected one.
     """
-    lower, upper = specifier.bounds()
+    lower, upper = specifier.bounds
     result: Range[Version] = Range.full()
 
     if lower is not None:
@@ -96,27 +89,6 @@ def _implied_range(specifier: SpecifierSet) -> Range[Version]:
         )
 
     return result
-
-
-def _exact_pin(requirement: Requirement) -> Version | None:
-    """The single release a ``==`` requirement names, or None.
-
-    Anything else -- a range, several clauses, a wildcard, an unparseable
-    version -- has no unique release and so cannot narrow a domain to a point.
-    """
-    clauses = requirement.specifier.specifiers
-    if len(clauses) != 1:
-        return None
-
-    clause = clauses[0]
-    if clause.operator != "==" or clause.version.endswith("*"):
-        return None
-
-    # Specifier.__init__ already parsed exactly this text (and raised on an
-    # invalid one), so the Version is in hand; re-parsing it here ran the
-    # full version regex once per pin of every candidate the lookahead
-    # scanned.
-    return clause._parsed_version
 
 
 def _key(requirement: Requirement) -> str:

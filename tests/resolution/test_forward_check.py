@@ -29,7 +29,6 @@ from cpip.index.provider import CandidateProvider
 from cpip.resolution.api import ResolutionEngine
 from cpip.resolution.models import ResolutionConfig
 from cpip.resolution.nab_provider import NabProvider
-from cpip.resolution.nab_types import _exact_pin
 
 _BENCHMARKS = Path(__file__).resolve().parents[1] / "benchmarks"
 if str(_BENCHMARKS) not in sys.path:  # pragma: no cover - import side effect
@@ -261,7 +260,7 @@ def test_exact_pin_recognizes_only_unique_releases(
     expected: str | None,
 ) -> None:
     """Anything that is not one concrete release must read as "not a pin"."""
-    pinned = _exact_pin(parse_requirement(text))
+    pinned = parse_requirement(text).specifier.exact_version
 
     assert (None if pinned is None else str(pinned)) == expected
 
