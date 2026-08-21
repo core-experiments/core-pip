@@ -303,7 +303,11 @@ def installed_index(paths: Iterable[str] | None = None) -> _InstalledIndex:
 
     index: _InstalledIndex = {}
 
-    for dist in _iter_installed_distributions(paths):
+    # The materialized tuple, not ``paths``: a generator argument was
+    # already consumed computing the key, and None must stay None so the
+    # default scan keeps consulting every metadata finder, not just
+    # sys.path.
+    for dist in _iter_installed_distributions(None if paths is None else search_paths):
         index.setdefault(dist.canonical_name, dist)
 
     _installed_index_cache[search_paths] = (generation, index)

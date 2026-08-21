@@ -599,6 +599,9 @@ def compatible_upper_bound_internal(version: Version) -> Version:
     return Version(".".join(str(part) for part in release))
 
 
+_CONTAINS_CACHE_SIZE = 4096
+
+
 class SpecifierSet:
     __slots__ = (
         "_bounds_cache",
@@ -713,15 +716,28 @@ class SpecifierSet:
                 self._explicitly_allows_prereleases = explicitly_allowed
 
             if not explicitly_allowed:
-                self._contains_cache[key] = False
+                self._remember_contains(key, False)
 
                 return False
 
         result = all(spec.contains(parsed) for spec in self.specifiers)
 
-        self._contains_cache[key] = result
+        self._remember_contains(key, result)
 
         return result
+
+    def _remember_contains(self, key: tuple[Version, bool], result: bool) -> None:
+        # Bounded: instances are shared per specifier text for the life of
+        # the process (see _interned_specifier_set), so a long-lived embedder
+        # checking ever-new versions against ">=1" must not grow this
+        # without limit. A sweep keeps the common case -- a few hundred
+        # versions per specifier -- fully cached.
+        cache = self._contains_cache
+
+        if len(cache) >= _CONTAINS_CACHE_SIZE:
+            cache.clear()
+
+        cache[key] = result
 
     def bounds(
         self,

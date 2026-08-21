@@ -158,3 +158,37 @@ def test_member_paths_escape_uses_members_full_name(
     resolver = MemberPaths(target, os.fspath(tmp_path / "stage"))
     with pytest.raises(InstallationError, match=r"link/escaped\.py"):
         resolver.resolve("link/escaped.py")
+
+
+def test_shared_resolved_roots_survive_concurrent_misses(
+    target: InstallTarget,
+    tmp_path: Path,
+) -> None:
+    """Parallel installs share target.resolved_roots_internal: concurrent
+    misses may each realpath the root, but they store the same value and the
+    plain-dict updates are atomic, so every worker sees one consistent answer."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    from cpip.install.wheel_archive import _resolved_parent_directory
+
+    roots: dict[str, str] = {}
+    directories: dict[tuple[str, str], str] = {}
+
+    def resolve(index: int) -> str:
+        return _resolved_parent_directory(
+            target.purelib,
+            ("pkg", f"sub{index % 3}"),
+            f"pkg/sub{index % 3}/file{index}.py",
+            resolved_directories=directories,
+            resolved_roots=roots,
+        )
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        results = list(pool.map(resolve, range(64)))
+
+    expected_root = os.path.realpath(target.purelib)
+    assert roots == {target.purelib: expected_root}
+    assert set(results) == {
+        os.path.join(expected_root, "pkg", f"sub{index}") for index in range(3)
+    }
+    assert len(directories) == 3

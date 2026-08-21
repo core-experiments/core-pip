@@ -201,3 +201,16 @@ def test_find_installed_first_path_wins(tmp_path: Path) -> None:
     found = find_installed("widget", [str(second), str(first)])
     assert found is not None
     assert found.version == "2.0"
+
+
+def test_find_installed_accepts_a_generator_of_paths(tmp_path: Path) -> None:
+    from cpip.core.metadata import clear_installed_index, find_installed
+
+    site_packages = tmp_path / "site-packages"
+    _write_dist_info(site_packages, "widget-1.2.3.dist-info", _widget_metadata("1.2.3"))
+    clear_installed_index()
+    found = find_installed("widget", (path for path in [str(site_packages)]))
+    assert found is not None
+    assert found.version == "1.2.3"
+    # And the cached index built from that generator is the full one.
+    assert find_installed("widget", [str(site_packages)]) is found

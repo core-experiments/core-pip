@@ -416,3 +416,20 @@ def test_specifier_set_intern_table_is_bounded() -> None:
     # Entries evicted by the sweep are simply rebuilt; requirements already
     # parsed keep the instances they were given.
     assert parse_requirement("pkg-0>=0").specifier == SpecifierSet(">=0")
+
+
+def test_shared_specifier_set_contains_cache_is_bounded() -> None:
+    from cpip.core import packaging as packaging_module
+
+    packaging_module._specifier_sets.clear()
+    parse_requirement.cache_clear()
+    shared = parse_requirement("pkg-a>=1").specifier
+    assert shared is parse_requirement("pkg-b>=1").specifier
+    limit = packaging_module._CONTAINS_CACHE_SIZE
+    for index in range(limit + 50):
+        assert shared.contains(Version(f"1.{index}"))
+        assert not shared.contains(Version(f"0.{index}"))
+    assert len(shared._contains_cache) <= limit
+    # Answers survive the sweep.
+    assert shared.contains(Version("1.0"))
+    assert not shared.contains(Version("0.1"))
