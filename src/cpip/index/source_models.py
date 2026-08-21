@@ -246,10 +246,16 @@ class CandidateRecord:
 
         yanked_rank = 0 if self.link.is_yanked else 1
 
-        if prefer_binary:
-            return (yanked_rank, wheel_rank, self.version, tag_rank)
+        # The version's comparison key orders exactly as the Version does
+        # (Version.__lt__ compares nothing else) and, being a tuple of
+        # ints, compares in C instead of through a Python-level __lt__ per
+        # comparison of the sort.
+        version_key = self.version.comparison_key
 
-        return (yanked_rank, self.version, wheel_rank, tag_rank)
+        if prefer_binary:
+            return (yanked_rank, wheel_rank, version_key, tag_rank)
+
+        return (yanked_rank, version_key, wheel_rank, tag_rank)
 
     def metadata(self) -> CandidateMetadata:
         loader = self.metadata_loader
