@@ -645,6 +645,11 @@ class TestSpecifierClauseGrammar:
         # The grammar only split clauses; Specifier then validated each
         # operand exactly as it does today.
         for operator, version in clauses:
+            if not version:
+                # The one deliberate tightening: the regex grammar let "==="
+                # through with an empty operand (arbitrary equality never
+                # parsed its operand); the clause parser rejects it.
+                return None
             if operator == "===":
                 continue
             wildcard = version.endswith(".*")
