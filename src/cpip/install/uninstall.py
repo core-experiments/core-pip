@@ -41,7 +41,7 @@ def uninstall_distribution(
 
         except FileNotFoundError as exc:
             raise InstallationError(
-                f"Cannot uninstall {distribution.raw_name} {distribution.version}: "
+                f"Cannot uninstall {distribution.raw_name} {distribution.raw_version}: "
                 "no RECORD file was found",
             ) from exc
 

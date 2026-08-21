@@ -797,6 +797,12 @@ def canonicalize_requirement(value: str) -> str:
 
 
 def looks_like_direct_reference(value: str) -> bool:
+    # Every direct-reference form carries a ":" (a URL scheme or a Windows
+    # drive) or starts with ".", "/" or "~"; a text with neither -- nearly
+    # every requirement parsed -- is answered here without the URL parse
+    # and the two Windows-path checks below. Exactly equivalent.
+    if ":" not in value and value[:1] not in (".", "/", "~"):
+        return False
     return (
         looks_like_url(value)
         or value.startswith((".", "/", "~"))

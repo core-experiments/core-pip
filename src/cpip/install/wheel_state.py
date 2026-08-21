@@ -281,13 +281,13 @@ def existing_paths(
 
         except FileNotFoundError as exc:
             raise InstallationError(
-                f"Cannot replace {distribution.raw_name} {distribution.version}: "
+                f"Cannot replace {distribution.raw_name} {distribution.raw_version}: "
                 "no RECORD file was found",
             ) from exc
 
     elif isinstance(distribution, InstalledWheelDistribution):
         raise InstallationError(
-            f"Cannot replace {distribution.raw_name} {distribution.version}: "
+            f"Cannot replace {distribution.raw_name} {distribution.raw_version}: "
             "the installed wheel has no dist-info RECORD",
         )
 
