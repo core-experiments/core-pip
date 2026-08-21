@@ -84,6 +84,8 @@ class _ArchiveMemberInfo(NamedTuple):
 
     header_offset: int
 
+    external_attr: int
+
 
 class _ResolverWheelArchive:
     """ZipFile-shaped adapter over :class:`WheelArchive`.
@@ -106,8 +108,10 @@ class _ResolverWheelArchive:
     def __init__(self, archive: WheelArchive) -> None:
         self._archive = archive
 
+        modes = archive.modes
+
         self.NameToInfo = {
-            name: _ArchiveMemberInfo(*member)
+            name: _ArchiveMemberInfo(*member, modes.get(name, 0))
             for name, member in archive.members.items()
         }
 
@@ -1330,10 +1334,13 @@ class CandidateMaterializer:
                     built = self.wheel_candidates.get(cache_key)
 
                     if built is None:
-                        with (
-                            open(path, "rb", buffering=32768) as stream,
-                            zipfile.ZipFile(stream) as archive,
-                        ):
+                        # The same fast reader the resolver used for this
+                        # wheel's metadata: zipfile.ZipFile would build a
+                        # ZipInfo per member just to hand back the layout
+                        # that WheelArchive's central-directory scan already
+                        # holds (modes included). Falls back to zipfile
+                        # itself for anything WheelArchive declines.
+                        with _open_resolver_wheel_archive(path) as archive:
                             dist_info_dir, wheel_metadata_text = (
                                 validate_wheel_with_metadata(
                                     archive,

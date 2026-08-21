@@ -23,12 +23,14 @@ class WheelhouseUnavailable(Exception):
 class WheelArchive:
     __slots__ = ("_tail", "_tail_start", "file", "members", "modes")
 
-    def __init__(self, file, members=None) -> None:
+    def __init__(self, file, members=None, modes=None) -> None:
         self.file = file
         self.members: dict[str, tuple[int, int, int, int, int]] = (
             {} if members is None else members
         )
-        self.modes: dict[str, int] = {}
+        # External attributes (mode bits) per member, filled alongside
+        # members by read_central_directory() or pre-supplied with them.
+        self.modes: dict[str, int] = {} if modes is None else modes
         # Populated by read_central_directory() with the same bytes its
         # end-of-central-directory scan already had to read from the tail of
         # the file. Members whose local header falls inside that region
