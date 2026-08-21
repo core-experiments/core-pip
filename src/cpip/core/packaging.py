@@ -732,6 +732,9 @@ class SpecifierSet:
         # checking ever-new versions against ">=1" must not grow this
         # without limit. A sweep keeps the common case -- a few hundred
         # versions per specifier -- fully cached.
+        # Unsynchronized like the other parse caches: concurrent misses can
+        # overshoot the bound by a few entries until the next sweep, and dict
+        # operations are atomic, so no answer is ever wrong or lost.
         cache = self._contains_cache
 
         if len(cache) >= _CONTAINS_CACHE_SIZE:
@@ -1105,6 +1108,10 @@ _specifier_sets: dict[str, SpecifierSet] = {}
 
 
 def _interned_specifier_set(spec: str) -> SpecifierSet:
+    # Unsynchronized: two threads missing on the same text build two equal
+    # SpecifierSets and one wins the slot -- the other requirement simply
+    # keeps its own instance, which is what every requirement had before
+    # interning. Sharing is an optimization here, never an invariant.
     specifier_set = _specifier_sets.get(spec)
 
     if specifier_set is None:

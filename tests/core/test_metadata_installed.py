@@ -214,3 +214,38 @@ def test_find_installed_accepts_a_generator_of_paths(tmp_path: Path) -> None:
     assert found.version == "1.2.3"
     # And the cached index built from that generator is the full one.
     assert find_installed("widget", [str(site_packages)]) is found
+
+
+def test_default_and_explicit_scans_are_cached_separately(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``paths=None`` consults every metadata finder; an explicit list equal to
+    sys.path consults only the path finder. Neither order may let one answer
+    stand in for the other."""
+    import importlib.metadata
+    import sys
+
+    from cpip.core import metadata as metadata_module
+
+    metadata_module.clear_installed_index()
+    calls: list[object] = []
+    real = importlib.metadata.distributions
+
+    def recording(**kwargs):  # noqa: ANN003, ANN202
+        calls.append(kwargs.get("path", "<default>"))
+        return real(**kwargs)
+
+    monkeypatch.setattr(importlib.metadata, "distributions", recording)
+    explicit = list(sys.path)
+    for order in ((None, explicit), (explicit, None)):
+        metadata_module.clear_installed_index()
+        calls.clear()
+        for paths in order:
+            metadata_module.find_installed("not-installed-anywhere", paths)
+        assert len(calls) == 2
+        assert "<default>" in calls
+        assert any(call != "<default>" for call in calls)
+        # Repeats hit the respective cached index.
+        for paths in order:
+            metadata_module.find_installed("not-installed-anywhere", paths)
+        assert len(calls) == 2

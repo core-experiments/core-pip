@@ -263,10 +263,16 @@ def iter_installed_distributions(
 # installing or removing a distribution creates or deletes a dist-info
 # directory, which bumps its parent's mtime, so cpip's own installs in the
 # same process (and most external ones) invalidate it for the price of a
-# stat per entry.
+# stat per entry. Rewriting a METADATA file in place without touching its
+# dist-info directory is the one change this does not see; no installer does
+# that (an upgrade replaces the whole dist-info directory), and
+# clear_installed_index covers anything that does.
 _InstalledIndex = dict[str, InstalledDistribution]
+# Keyed by (default scan?, search paths): the default scan consults every
+# metadata finder on sys.meta_path, an explicit path list only the path
+# finder, so an explicit tuple equal to sys.path is a different scan.
 _installed_index_cache: dict[
-    tuple[str, ...], tuple[tuple[int | None, ...], _InstalledIndex]
+    tuple[bool, tuple[str, ...]], tuple[tuple[int | None, ...], _InstalledIndex]
 ] = {}
 
 
@@ -296,7 +302,9 @@ def installed_index(paths: Iterable[str] | None = None) -> _InstalledIndex:
 
     generation = _paths_generation(search_paths)
 
-    cached = _installed_index_cache.get(search_paths)
+    cache_key = (paths is None, search_paths)
+
+    cached = _installed_index_cache.get(cache_key)
 
     if cached is not None and cached[0] == generation:
         return cached[1]
@@ -310,7 +318,7 @@ def installed_index(paths: Iterable[str] | None = None) -> _InstalledIndex:
     for dist in _iter_installed_distributions(None if paths is None else search_paths):
         index.setdefault(dist.canonical_name, dist)
 
-    _installed_index_cache[search_paths] = (generation, index)
+    _installed_index_cache[cache_key] = (generation, index)
 
     return index
 
