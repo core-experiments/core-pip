@@ -31,6 +31,7 @@ from cpip.install.wheel_archive import (
     DestinationCache,
     ResolvedRoots,
     copy_member_with_metadata,
+    MemberPaths,
     destination_internal_parts_text,
     record_metadata_internal,
     validate_member_parts,
@@ -302,14 +303,24 @@ def install_wheel_internal(
                         and row[2].isdigit()
                     ):
                         wheel_record_metadata[row[0]] = (row[1], row[2])
+            member_paths = MemberPaths(
+                target,
+                stage_root_text,
+                resolved_directories=resolved_directories,
+                resolved_roots=resolved_roots,
+            )
             for member in archive.infolist():
                 if member.is_dir():
                     continue
-                relative_parts = validate_member_parts(member.filename)
+                (
+                    relative_parts,
+                    source_text,
+                    destination_text,
+                    record_key,
+                ) = member_paths.resolve(member.filename)
                 relative_name = relative_parts[-1] if relative_parts else ""
                 if relative_parts and relative_parts[0].endswith(".dist-info"):
                     dist_info = relative_parts[0]
-                source_text = os.path.join(stage_root_text, *relative_parts)
                 rewrite_metadata = (
                     relative_name == "METADATA" and candidate.name.isalpha()
                 )
@@ -328,13 +339,6 @@ def install_wheel_internal(
                     and (not pycompile or os.path.splitext(relative_name)[1] != ".py")
                     and relative_name != "entry_points.txt"
                 )
-                destination_text = destination_internal_parts_text(
-                    target,
-                    relative_parts,
-                    member.filename,
-                    resolved_directories=resolved_directories,
-                    resolved_roots=resolved_roots,
-                )
                 if not direct and not direct_content:
                     source_parent_text = os.path.dirname(source_text)
                     if source_parent_text not in stage_directories:
@@ -348,7 +352,7 @@ def install_wheel_internal(
                     contents = archive.read(member)  # ty:ignore[invalid-argument-type]
                     direct_content_size += len(contents)
                 else:
-                    metadata = wheel_record_metadata.get("/".join(relative_parts))
+                    metadata = wheel_record_metadata.get(record_key)
                     if metadata is not None and metadata[1] != str(member.file_size):
                         metadata = None
                     if direct:
@@ -405,7 +409,7 @@ def install_wheel_internal(
                         )
                     rewrite_shebang(source_text, script_executable)
                 elif contents is not None:
-                    metadata = wheel_record_metadata.get("/".join(relative_parts))
+                    metadata = wheel_record_metadata.get(record_key)
                     if metadata is None or metadata[1] != str(len(contents)):
                         metadata = record_metadata_internal(contents)
                     if direct_content:
