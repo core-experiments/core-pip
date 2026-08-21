@@ -236,3 +236,38 @@ def test_resolution_defers_the_wheel_version_check_to_install(
 
     with zipfile.ZipFile(wheel) as archive, pytest.raises(UnsupportedWheel):
         parse_wheel(archive, "future-pkg")
+
+
+def test_materialized_candidate_keeps_the_resolver_layout(tmp_path: Path) -> None:
+    """The layout built during materialization must reach the returned
+    candidate: it is what lets the installer open the wheel again without
+    another central-directory scan."""
+    from cpip.install.wheel_archive_runtime import RawWheelArchive, open_wheel_archive
+    from cpip.resolution import archive as archive_module
+
+    make_wheel(tmp_path, "layout-pkg", "layout_pkg", "1.0")
+    provider = CandidateProvider.from_options(find_links=[str(tmp_path)], no_index=True)
+    [candidate] = list(provider.find_candidates(parse_requirement("layout-pkg")))
+    layout = candidate.wheel_layout
+    assert isinstance(layout, tuple)
+    dist_info, members, root_is_purelib = layout
+    assert dist_info == "layout_pkg-1.0.dist-info"
+    assert members
+    assert all(len(member) == 7 for member in members)
+    assert root_is_purelib is True
+
+    scans = []
+    original = archive_module.WheelArchive.read_central_directory
+
+    def counting(self):  # noqa: ANN001, ANN202
+        scans.append(1)
+        return original(self)
+
+    archive_module.WheelArchive.read_central_directory = counting
+    try:
+        with open_wheel_archive(candidate.path, candidate) as archive:
+            assert isinstance(archive, RawWheelArchive)
+            assert f"{dist_info}/METADATA" in archive.namelist()
+    finally:
+        archive_module.WheelArchive.read_central_directory = original
+    assert scans == []

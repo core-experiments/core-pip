@@ -448,7 +448,7 @@ def test_specifier_clauses_share_one_version_per_text() -> None:
     # Wildcards validate the prefix but keep no parsed version, as before.
     wildcard = parse_requirement("c==1.1.*").specifier.specifiers[0]
     assert wildcard._parsed_version is None
-    with pytest.raises(Exception, match="not-a-version"):
+    with pytest.raises(InvalidVersion, match="not-a-version"):
         parse_requirement("d==not-a-version")
     assert "not-a-version" not in packaging_module._versions_by_text
     limit = packaging_module._VERSION_CACHE_SIZE

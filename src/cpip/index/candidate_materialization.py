@@ -1410,6 +1410,9 @@ class CandidateMaterializer:
                 dependencies=built.dependencies,
                 provided_extras=built.provided_extras,
                 requires_python=built.requires_python or candidate.link.requires_python,
+                # The layout is what lets open_wheel_archive read this wheel
+                # again without another central-directory scan.
+                wheel_layout=built.wheel_layout,
                 source_url=candidate.link.url,
                 source_hashes=cache_hashes
                 if cache_hashes is not None
