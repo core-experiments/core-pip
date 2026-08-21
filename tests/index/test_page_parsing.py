@@ -14,6 +14,16 @@ BASES = (
     "file:///srv/index/",
     "https://u:p@h:8443/a/b",
     "https://pypi.org/simple/pkg",
+    "https://h",
+    "https://h/",
+    "http://h:8080/a/b/c/",
+    "https://h/a//b/",
+    "https://h/a/./b/../c/",
+    "https://h/x?q",
+    "https://h/x#f",
+    "https://h/x;p/",
+    "https:///x/",
+    "https://[::1]/a/",
     "HTTPS://X/",
     "ftp://h/",
     "",
@@ -94,11 +104,51 @@ HREFS = (
     "http://h/a#",
     "http://h",
     "../a.whl",
+    "../../packages/x-1.0-py3-none-any.whl",
+    "../../packages/x.whl#sha256=abc",
     "a.whl",
-    "/a.whl",
+    "./a.whl",
+    "../",
+    "..",
+    ".",
+    "./",
+    "../..",
+    "../../../../../../x",
+    "/abs/x",
+    "/",
     "//cdn/a.whl",
+    "///x",
+    "////x",
+    "a//b",
+    "a///b",
+    "a/./b/../c",
+    "a/b/",
+    "a/..",
+    "a/.",
+    "a/../..",
+    "...",
+    "..a",
+    "a..",
+    ".hidden",
+    "x#",
+    "x#a#b",
+    "x#?q",
+    "x?q",
+    "x;p",
+    "x:y",
+    "mailto:x",
+    " x",
+    "x ",
+    "x\ty",
+    "x\ny",
+    "é",
+    "a\\b",
+    "%20x",
+    "a%2F..%2Fb",
     "?q",
+    "?",
     "#f",
+    "#",
     "",
 )
 
@@ -136,16 +186,65 @@ def test_join_index_url_matches_urljoin_on_random_inputs() -> None:
         ), (base, href)
 
 
+def test_join_index_url_matches_urljoin_on_random_relative_references() -> None:
+    alphabet = "ab./#?:;% -_~\\é\tA"
+    pieces = ("..", ".", "", "a", "b-1.0.whl")
+    rng = random.Random(20260820)
+    for _ in range(20_000):
+        base = rng.choice(BASES)
+        segments = [
+            rng.choice(pieces)
+            if rng.random() < 0.7
+            else "".join(rng.choice(alphabet) for _ in range(rng.randint(0, 5)))
+            for _ in range(rng.randint(0, 6))
+        ]
+        href = "/".join(segments)
+        if rng.random() < 0.2:
+            href = "/" + href
+        if rng.random() < 0.3:
+            href += "#" + "".join(
+                rng.choice(alphabet) for _ in range(rng.randint(0, 4))
+            )
+        assert _outcome(join_index_url, base, href) == _outcome(
+            urllib.parse.urljoin,
+            base,
+            href,
+        ), (base, href)
+
+
 def test_join_index_url_returns_absolute_href_unchanged() -> None:
     href = "https://files.pythonhosted.org/packages/c-1.0-py3-none-any.whl"
     assert join_index_url("https://pypi.org/simple/c/", href) is href
 
 
-def test_join_index_url_resolves_relative_href() -> None:
-    assert (
-        join_index_url("https://pypi.org/simple/c/", "../../packages/c-1.0.tar.gz")
-        == "https://pypi.org/packages/c-1.0.tar.gz"
-    )
+@pytest.mark.parametrize(
+    "base, href, expected",
+    [
+        (
+            "https://pypi.org/simple/c/",
+            "../../packages/c-1.0.tar.gz",
+            "https://pypi.org/packages/c-1.0.tar.gz",
+        ),
+        (
+            "https://pypi.org/simple/c/",
+            "../../packages/c-1.0.whl#sha256=ab",
+            "https://pypi.org/packages/c-1.0.whl#sha256=ab",
+        ),
+        ("https://pypi.org/simple/c", "c-1.0.whl", "https://pypi.org/simple/c-1.0.whl"),
+        ("https://h", "x.whl", "https://h/x.whl"),
+        ("https://h/a/", "../../../x", "https://h/x"),
+        ("https://h/a/", "/abs/x", "https://h/abs/x"),
+        ("https://h/a/b/", "..", "https://h/a/"),
+        ("https://h/a/b/", "x#", "https://h/a/b/x"),
+    ],
+)
+def test_join_index_url_resolves_relative_href(
+    base: str,
+    href: str,
+    expected: str,
+) -> None:
+    assert join_index_url(base, href) == expected
+    assert urllib.parse.urljoin(base, href) == expected
 
 
 PAGE_URL = "https://example.invalid/simple/pkg/"

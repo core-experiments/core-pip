@@ -262,7 +262,85 @@ def join_index_url(base_url: str, href: str) -> str:
         start = 8 if href[4] == "s" else 7
         if href[start : start + 1] not in "/?#":
             return href
+    elif (
+        href
+        and href[0] != " "
+        and href[:2] != "//"
+        and ":" not in href
+        and "?" not in href
+        and ";" not in href
+        and href.isascii()
+        and href.isprintable()
+    ):
+        joined = _join_relative_reference(base_url, href)
+        if joined is not None:
+            return joined
     return urllib.parse.urljoin(base_url, href)
+
+
+def _join_relative_reference(base_url: str, href: str) -> str | None:
+    """``urljoin`` for a plain relative reference against a clean http(s) base.
+
+    Mirrors of the same index page serve hrefs such as
+    ``../../packages/x.whl#sha256=...``; ``urljoin`` resolves those by
+    parsing both URLs into six parts, merging the paths segment by segment
+    and rebuilding. This is that merge -- the same segment walk the stdlib
+    performs -- on the shapes where nothing else in ``urljoin`` can apply:
+    the href carries no scheme, netloc, query or params (the caller has
+    checked for ``:``, ``//``, ``?`` and ``;``), and the base is an absolute
+    ``http(s)`` URL with a non-empty netloc and no query, fragment or params
+    of its own, so its path is exactly the text after the netloc. Returns
+    ``None`` for anything else so the caller falls through to ``urljoin``.
+    """
+    if not (
+        base_url.startswith(_ABSOLUTE_HTTP_PREFIXES)
+        and base_url.isascii()
+        and base_url.isprintable()
+        and "?" not in base_url
+        and "#" not in base_url
+        and ";" not in base_url
+        and "[" not in base_url
+        and "]" not in base_url
+    ):
+        return None
+    start = 8 if base_url[4] == "s" else 7
+    if base_url[start : start + 1] in "/":
+        return None
+    path, _, fragment = href.partition("#")
+    if not path:
+        # An empty path means "the base's own path" (plus the fragment);
+        # leave that branch, and its query inheritance, to urljoin.
+        return None
+    slash = base_url.find("/", start)
+    if slash < 0:
+        origin = base_url
+        base_path = ""
+    else:
+        origin = base_url[:slash]
+        base_path = base_url[slash:]
+    if path[:1] == "/":
+        segments = path.split("/")
+    else:
+        base_parts = base_path.split("/")
+        if base_parts[-1] != "":
+            del base_parts[-1]
+        segments = base_parts + path.split("/")
+        segments[1:-1] = filter(None, segments[1:-1])
+    resolved: list[str] = []
+    for segment in segments:
+        if segment == "..":
+            if resolved:
+                resolved.pop()
+        elif segment != ".":
+            resolved.append(segment)
+    if segments[-1] in (".", ".."):
+        resolved.append("")
+    joined = "/".join(resolved) or "/"
+    if joined[0] != "/":
+        joined = "/" + joined
+    if fragment:
+        return f"{origin}{joined}#{fragment}"
+    return origin + joined
 
 
 def ensure_trailing_slash(url: str) -> str:
