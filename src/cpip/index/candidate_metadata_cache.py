@@ -6,6 +6,7 @@ import json
 import marshal
 import os
 import sqlite3
+from typing import cast
 
 from cpip.core.packaging import Requirement, parse_requirement
 from cpip.core.versions import Version
@@ -22,38 +23,20 @@ CacheValue = tuple[str, str, tuple[str, ...], tuple[str, ...], str | None]
 class CandidateMetadataCache(SqliteBackedCache):
     """Process-local metadata cache backed by an incremental SQLite database."""
 
-    __slots__ = ("_pending_puts", "decoded", "entries", "validated")
+    __slots__ = ("_pending_deletes", "_pending_puts", "decoded", "entries")
+
+    SCHEMA = "CREATE TABLE IF NOT EXISTS candidate_metadata (key TEXT PRIMARY KEY, value BLOB)"
 
     def __init__(self, cache_dir: str | os.PathLike[str]) -> None:
         super().__init__(os.path.join(os.fspath(cache_dir), NAME))
 
+        # Every value in ``entries`` has passed ``valid_value``: it came from
+        # ``put`` or from ``_load``.
         self.entries: dict[CacheKey, CacheValue] = {}
         self.decoded: dict[CacheKey, CandidateMetadata] = {}
-        self.validated: set[CacheKey] = set()
 
         self._pending_puts: dict[CacheKey, CacheValue] = {}
-
-    def _open(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.path, check_same_thread=False)
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA busy_timeout=5000")
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS candidate_metadata ("
-            "key TEXT PRIMARY KEY, value BLOB)"
-        )
-        return conn
-
-    @staticmethod
-    def valid_key(value: object) -> bool:
-        return (
-            isinstance(value, tuple)
-            and len(value) == 4
-            and isinstance(value[0], str)
-            and isinstance(value[1], str)
-            and isinstance(value[2], tuple)
-            and all(isinstance(item, str) for item in value[2])
-            and isinstance(value[3], str)
-        )
+        self._pending_deletes: set[CacheKey] = set()
 
     @staticmethod
     def valid_value(value: object) -> bool:
@@ -69,65 +52,74 @@ class CandidateMetadataCache(SqliteBackedCache):
             and (value[4] is None or isinstance(value[4], str))
         )
 
-    def get(
-        self,
-        key: tuple[str, str, tuple[str, ...], str],
-    ) -> CandidateMetadata | None:
+    def _load(self, key: CacheKey) -> CacheValue | None:
+        """Read one row out of the database, validate it and memoize it."""
+        with self.lock:
+            try:
+                conn = self._reader()
+                row = (
+                    None
+                    if conn is None
+                    else conn.execute(
+                        "SELECT value FROM candidate_metadata WHERE key = ?",
+                        (json.dumps(key),),
+                    ).fetchone()
+                )
+            except sqlite3.Error:
+                return None
+        if row is None:
+            return None
+        try:
+            loaded = marshal.loads(row[0])
+        except Exception:  # noqa: BLE001
+            loaded = None
+        if not self.valid_value(loaded):
+            # A row of the wrong shape is a miss; delete it on the next
+            # flush so no later process reads and rejects it again.
+            self._discard(key)
+            return None
+        value = cast("CacheValue", loaded)
+        self._evict()
+        self.entries[key] = value
+        return value
+
+    def _discard(self, key: CacheKey) -> None:
+        """Forget an entry that failed decoding, in memory and on disk."""
+        self.entries.pop(key, None)
+        self.decoded.pop(key, None)
+        self._pending_puts.pop(key, None)
+        self._pending_deletes.add(key)
+        self.dirty = True
+
+    def _evict(self) -> None:
+        """Make room for one more entry."""
+        if len(self.entries) >= MAX_ENTRIES:
+            evicted = next(iter(self.entries))
+            self.entries.pop(evicted, None)
+            self.decoded.pop(evicted, None)
+
+    def get(self, key: CacheKey) -> CandidateMetadata | None:
         decoded = self.decoded.get(key)
         if decoded is not None:
             return decoded
 
         value = self.entries.get(key)
         if value is None:
-            # Query SQLite
-            with self.lock:
-                try:
-                    conn = self._reader()
-                    row = (
-                        None
-                        if conn is None
-                        else conn.execute(
-                            "SELECT value FROM candidate_metadata WHERE key = ?",
-                            (json.dumps(key),),
-                        ).fetchone()
-                    )
-                except sqlite3.Error:
-                    row = None
-            if row is not None:
-                try:
-                    value = marshal.loads(row[0])
-                    if self.valid_value(value):
-                        if len(self.entries) >= MAX_ENTRIES:
-                            evicted = next(iter(self.entries))
-                            self.entries.pop(evicted, None)
-                            self.decoded.pop(evicted, None)
-                            self.validated.discard(evicted)
-                        self.entries[key] = value
-                except Exception:  # noqa: BLE001, S110
-                    pass
+            value = self._load(key)
+            if value is None:
+                return None
 
-        if value is None or (key not in self.validated and not self.valid_value(value)):
-            if value is not None:
-                self.entries.pop(key, None)
-                self.dirty = True
-            return None
-
-        self.validated.add(key)
         dependencies: list[Requirement] = []
         for raw in value[2]:
             requirement = self.decode_requirement(raw)
             if requirement is None:
-                self.entries.pop(key, None)
-                self.validated.discard(key)
-                self.dirty = True
+                self._discard(key)
                 return None
             dependencies.append(requirement)
 
         version = self.decode_version(value[1])
         if version is None:
-            self.entries.pop(key, None)
-            self.validated.discard(key)
-            self.dirty = True
+            self._discard(key)
             return None
 
         metadata = CandidateMetadata(
@@ -156,56 +148,13 @@ class CandidateMetadataCache(SqliteBackedCache):
         except ValueError:
             return None
 
-    def contains(self, key: tuple[str, str, tuple[str, ...], str]) -> bool:
+    def contains(self, key: CacheKey) -> bool:
         """Check for cached metadata without decoding its requirements."""
-        value = self.entries.get(key)
-        if value is None:
-            # Query SQLite
-            with self.lock:
-                try:
-                    conn = self._reader()
-                    row = (
-                        None
-                        if conn is None
-                        else conn.execute(
-                            "SELECT value FROM candidate_metadata WHERE key = ?",
-                            (json.dumps(key),),
-                        ).fetchone()
-                    )
-                except sqlite3.Error:
-                    row = None
-            if row is not None:
-                try:
-                    value = marshal.loads(row[0])
-                    if self.valid_value(value):
-                        if len(self.entries) >= MAX_ENTRIES:
-                            evicted = next(iter(self.entries))
-                            self.entries.pop(evicted, None)
-                            self.decoded.pop(evicted, None)
-                            self.validated.discard(evicted)
-                        self.entries[key] = value
-                except Exception:  # noqa: BLE001, S110
-                    pass
+        return key in self.entries or self._load(key) is not None
 
-        if value is None:
-            return False
-        if key in self.validated or self.valid_value(value):
-            self.validated.add(key)
-            return True
-        self.entries.pop(key, None)
-        self.dirty = True
-        return False
-
-    def put(
-        self,
-        key: tuple[str, str, tuple[str, ...], str],
-        metadata: CandidateMetadata,
-    ) -> None:
-        if key not in self.entries and len(self.entries) >= MAX_ENTRIES:
-            evicted = next(iter(self.entries))
-            self.entries.pop(evicted)
-            self.decoded.pop(evicted, None)
-            self.validated.discard(evicted)
+    def put(self, key: CacheKey, metadata: CandidateMetadata) -> None:
+        if key not in self.entries:
+            self._evict()
 
         value = (
             metadata.name,
@@ -215,18 +164,20 @@ class CandidateMetadataCache(SqliteBackedCache):
             metadata.requires_python,
         )
         self.entries[key] = value
-        self._pending_puts[key] = value
-
         self.decoded[key] = metadata
-        self.validated.add(key)
+        self._pending_puts[key] = value
+        self._pending_deletes.discard(key)
         self.dirty = True
 
     def _flush_pending(self, conn: sqlite3.Connection) -> None:
-        # Batch insert pending candidate metadata
+        if self._pending_deletes:
+            conn.executemany(
+                "DELETE FROM candidate_metadata WHERE key = ?",
+                [(json.dumps(key),) for key in self._pending_deletes],
+            )
         items = [
-            (json.dumps(k), marshal.dumps(v))
-            for k, v in self._pending_puts.items()
-            if self.valid_key(k) and self.valid_value(v)
+            (json.dumps(key), marshal.dumps(value))
+            for key, value in self._pending_puts.items()
         ]
         if items:
             conn.executemany(
@@ -236,6 +187,7 @@ class CandidateMetadataCache(SqliteBackedCache):
 
     def _clear_pending(self) -> None:
         self._pending_puts.clear()
+        self._pending_deletes.clear()
 
 
 def get_candidate_metadata_cache(

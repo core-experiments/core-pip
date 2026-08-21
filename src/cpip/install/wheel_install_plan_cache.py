@@ -37,13 +37,7 @@ from cpip.resolution.models import ResolutionResult
 # cli/fast_install.py), but the cache should not depend on every future
 # caller remembering that -- receipts are cheap to regenerate, so scope the
 # bucket itself and make it a guarantee rather than a convention.
-#
-# RESOLUTION_CACHE_BUCKET_FAMILY names the pattern shared by every
-# interpreter's bucket, so a cache-wide purge can find and remove all of
-# them, not only the one the running interpreter would look in.
-RESOLUTION_CACHE_BUCKET_FAMILY = "resolution"
-
-RESOLUTION_CACHE_BUCKET = f"{RESOLUTION_CACHE_BUCKET_FAMILY}-{CACHE_INTERPRETER_TAG}"
+RESOLUTION_CACHE_BUCKET = f"resolution-{CACHE_INTERPRETER_TAG}"
 
 # First element of the key context every remote exact-pin caller builds.
 REMOTE_EXACT_CONTEXT = "remote-exact"

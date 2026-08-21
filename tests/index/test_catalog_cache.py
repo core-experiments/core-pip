@@ -173,8 +173,7 @@ def test_malformed_choices_are_a_miss(tmp_path: Path) -> None:
 def test_catalog_cache_ignores_corrupt_entries(tmp_path: Path) -> None:
     cache = SafeFileCache(str(tmp_path))
     key = cache_key("https://example.test/simple/demo/")
-    cache.set(key, b"not marshal")
-    cache.set_body(key, b"1")
+    cache.set_atomic(key, b"not marshal")
 
     assert load_links(cache, "https://example.test/simple/demo/") is None
 

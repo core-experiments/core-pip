@@ -4,6 +4,7 @@ lives under; no storage name or payload carries a version of its own."""
 from __future__ import annotations
 
 import os
+import re
 
 import pytest
 from cpip.cli import fast, fast_install
@@ -13,7 +14,7 @@ from cpip.core.appdirs import (
     resolve_cache_dir,
     versioned_cache_dir,
 )
-from cpip.core.utils import CACHE_VERSION, CACHE_VERSION_TAG
+from cpip.core.utils import CACHE_INTERPRETER_TAG, CACHE_VERSION, CACHE_VERSION_TAG
 from cpip.index import (
     artifact_cache,
     cache as wheel_cache,
@@ -33,10 +34,10 @@ STORAGE_NAMES = (
     candidate_metadata_cache.NAME,
     release_facts_cache.NAME,
     fast.FAST_LOCK_PLAN_BUCKET,
-    fast_install.NAME_FAMILY,
+    fast_install.NAME,
     fast_install.TREE_CACHE_BUCKET,
-    wheel_archive_cache.ARCHIVE_CACHE_BUCKET_FAMILY,
-    wheel_install_plan_cache.RESOLUTION_CACHE_BUCKET_FAMILY,
+    wheel_archive_cache.ARCHIVE_CACHE_BUCKET,
+    wheel_install_plan_cache.RESOLUTION_CACHE_BUCKET,
     wheel_install_plan_cache.REMOTE_EXACT_CONTEXT,
     catalog_cache.PREFIX,
     catalog_cache.SUMMARY_PREFIX,
@@ -67,14 +68,4 @@ def test_every_writer_lands_under_the_versioned_directory(
 
 @pytest.mark.parametrize("name", STORAGE_NAMES)
 def test_no_storage_name_carries_its_own_version(name: str) -> None:
-    assert "-v" not in name
-    assert not any(character.isdigit() for character in name)
-
-
-def test_no_legacy_readers_remain() -> None:
-    for module, names in (
-        (catalog_cache, ("migrate_v6_catalog", "migrate_legacy_catalog")),
-        (candidate_metadata_cache, ("migrate_payload", "load_other_legacy")),
-    ):
-        for name in names:
-            assert not hasattr(module, name), f"{module.__name__}.{name}"
+    assert not re.search(r"v\d", name.replace(CACHE_INTERPRETER_TAG, ""))

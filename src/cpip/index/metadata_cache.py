@@ -27,16 +27,11 @@ class WheelMetadataCache(SqliteBackedCache):
         self.entries: dict[MetadataIdentity, MetadataHeaders] = {}
         self._pending_puts: dict[MetadataIdentity, MetadataHeaders] = {}
 
-    def _open(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.path, check_same_thread=False)
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA busy_timeout=5000")
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS metadata ("
-            "path TEXT, size INTEGER, mtime INTEGER, headers BLOB, "
-            "PRIMARY KEY (path, size, mtime))"
-        )
-        return conn
+    SCHEMA = (
+        "CREATE TABLE IF NOT EXISTS metadata ("
+        "path TEXT, size INTEGER, mtime INTEGER, headers BLOB, "
+        "PRIMARY KEY (path, size, mtime))"
+    )
 
     @staticmethod
     def valid_headers(value: object) -> bool:
