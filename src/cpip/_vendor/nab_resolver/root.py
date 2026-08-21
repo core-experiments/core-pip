@@ -24,9 +24,9 @@ class _RootPackage:
     def __repr__(self) -> str:
         return "<root>"
 
-    @override
-    def __hash__(self) -> int:
-        return hash("__nab_root__")
+    # No __hash__ override: the default identity hash is what object identity
+    # means, and it runs in C. A Python-level __hash__ was a frame on every
+    # dict lookup keyed by package, which is most of propagation.
 
 
 ROOT = _RootPackage()

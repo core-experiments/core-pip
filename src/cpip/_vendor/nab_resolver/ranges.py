@@ -418,33 +418,54 @@ class Range(Generic[VersionType]):
         result: list[Interval] = []
         right_index = 0
 
+        # _ends_before and _interval_is_empty are inlined throughout this
+        # method: conflict analysis subtracts on every probe of the
+        # assignment trail, and those two helpers were the largest self-time
+        # of a deep backtrack.
         for left in self._intervals:
             lower, lower_inclusive, upper, upper_inclusive = left
 
             # Retire right intervals that finish below this one; they cannot
             # touch it or anything after it.
-            while right_index < right_count and _ends_before(
-                right_intervals[right_index], left
-            ):
+            while right_index < right_count:
+                right = right_intervals[right_index]
+                right_upper = right[2]
+                if right_upper is POSITIVE_INFINITY or lower is NEGATIVE_INFINITY:
+                    break
+                if right_upper == lower:
+                    if right[3] and lower_inclusive:
+                        break
+                elif not right_upper < lower:
+                    break
                 right_index += 1
 
             exhausted = False
             scan = right_index
 
             while scan < right_count:
-                remainder = (lower, lower_inclusive, upper, upper_inclusive)
                 right = right_intervals[scan]
-                if _ends_before(remainder, right):
-                    break
-
                 right_lower, right_lower_inclusive, right_upper, right_upper_inc = right
 
-                # Keep the part of the remainder below this right interval.
-                if right_lower is not NEGATIVE_INFINITY and not _interval_is_empty(
-                    lower,
-                    lower_inclusive=lower_inclusive,
-                    upper=right_lower,
-                    upper_inclusive=not right_lower_inclusive,
+                # The remainder ends before this right interval: nothing
+                # further right can touch it either.
+                if upper is not POSITIVE_INFINITY and right_lower is not NEGATIVE_INFINITY:
+                    if upper == right_lower:
+                        if not (upper_inclusive and right_lower_inclusive):
+                            break
+                    elif upper < right_lower:
+                        break
+
+                # Keep the part of the remainder below this right interval,
+                # i.e. (lower .. right_lower) unless that interval is empty.
+                if right_lower is not NEGATIVE_INFINITY and not (
+                    lower is not NEGATIVE_INFINITY
+                    and (
+                        lower > right_lower
+                        or (
+                            lower == right_lower
+                            and not (lower_inclusive and not right_lower_inclusive)
+                        )
+                    )
                 ):
                     result.append(
                         (
@@ -461,22 +482,22 @@ class Range(Generic[VersionType]):
 
                 # Resume above this right interval.
                 lower, lower_inclusive = right_upper, not right_upper_inc
-                if _interval_is_empty(
-                    lower,
-                    lower_inclusive=lower_inclusive,
-                    upper=upper,
-                    upper_inclusive=upper_inclusive,
+                if upper is not POSITIVE_INFINITY and (
+                    lower > upper
+                    or (lower == upper and not (lower_inclusive and upper_inclusive))
                 ):
                     exhausted = True
                     break
 
                 scan += 1
 
-            if not exhausted and not _interval_is_empty(
-                lower,
-                lower_inclusive=lower_inclusive,
-                upper=upper,
-                upper_inclusive=upper_inclusive,
+            if not exhausted and not (
+                lower is not NEGATIVE_INFINITY
+                and upper is not POSITIVE_INFINITY
+                and (
+                    lower > upper
+                    or (lower == upper and not (lower_inclusive and upper_inclusive))
+                )
             ):
                 result.append((lower, lower_inclusive, upper, upper_inclusive))
 
@@ -497,9 +518,17 @@ class Range(Generic[VersionType]):
         for left in self._intervals:
             # Skip right intervals that end before this one starts; they can
             # never cover it, and neither can they cover anything later.
-            while right_index < right_count and _ends_before(
-                right_intervals[right_index], left
-            ):
+            left_lower, left_lower_inclusive = left[0], left[1]
+            while right_index < right_count:  # _ends_before(right, left), inlined
+                right = right_intervals[right_index]
+                right_upper = right[2]
+                if right_upper is POSITIVE_INFINITY or left_lower is NEGATIVE_INFINITY:
+                    break
+                if right_upper == left_lower:
+                    if right[3] and left_lower_inclusive:
+                        break
+                elif not right_upper < left_lower:
+                    break
                 right_index += 1
 
             if right_index >= right_count:
@@ -571,10 +600,20 @@ class Range(Generic[VersionType]):
         right_index = 0
 
         for left in left_intervals:
-            # Skip right intervals that end before this left starts.
-            while right_index < right_count and _ends_before(
-                right_intervals[right_index], left
-            ):
+            left_lower, left_lower_inclusive = left[0], left[1]
+            # Skip right intervals that end before this left starts
+            # (_ends_before, inlined: this is the hottest loop in the
+            # relation check that unit propagation runs per term).
+            while right_index < right_count:
+                right = right_intervals[right_index]
+                right_upper = right[2]
+                if right_upper is POSITIVE_INFINITY or left_lower is NEGATIVE_INFINITY:
+                    break
+                if right_upper == left_lower:
+                    if right[3] and left_lower_inclusive:
+                        break
+                elif not right_upper < left_lower:
+                    break
                 right_index += 1
 
             if right_index >= right_count:
