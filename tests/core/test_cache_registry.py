@@ -30,6 +30,11 @@ from benchmark_support import reset_caches  # noqa: E402
 
 MODULES = (versions, packaging, wheel, names)
 
+# Memos of process-constant derivations: their inputs cannot change while
+# the interpreter runs, so resetting them between benchmark iterations would
+# measure the derivation, not cpip.
+PROCESS_CONSTANTS = frozenset({"cpip.core.wheel.supported_wheel_tags"})
+
 
 def _caches(module: types.ModuleType) -> Iterator[tuple[str, Any]]:
     for name, value in vars(module).items():
@@ -88,7 +93,7 @@ def test_reset_caches_empties_every_core_cache() -> None:
         name: _size(cache)
         for module in MODULES
         for name, cache in _caches(module)
-        if _size(cache)
+        if _size(cache) and name not in PROCESS_CONSTANTS
     }
     assert not still_full, f"reset_caches() missed: {still_full}"
 

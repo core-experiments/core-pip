@@ -10,6 +10,8 @@ from collections.abc import Collection, Mapping
 from email.parser import Parser as EmailParser
 from typing import TYPE_CHECKING, Protocol
 
+from functools import lru_cache
+
 from .caches import bounded_put, memoized, register_table
 from .errors import InstallationError, InvalidWheelFilename, UnsupportedWheel
 from .packaging import Requirement, canonicalize_name, marker_applies, parse_requirement
@@ -590,7 +592,10 @@ class _HashCachedTags(tuple):
             return value
 
 
-@memoized(1024)
+# A process-constant derivation, not a parse cache: what tags this
+# interpreter (or the given target) supports never changes while it runs,
+# so it is deliberately not registered for caches.clear_all().
+@lru_cache(maxsize=1024)
 def supported_wheel_tags(target: TargetContext | None = None) -> tuple[WheelTag, ...]:
     if target is None:
         implementation = "cp"

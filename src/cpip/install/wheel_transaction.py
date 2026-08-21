@@ -18,6 +18,7 @@ from threading import Lock
 
 from cpip.core.errors import InstallationError
 from cpip.core.names import canonicalize_name
+from cpip.core.versions import version_of
 from cpip.core.wheel import (
     WheelCandidate,
     validate_wheel,
@@ -216,15 +217,15 @@ def install_wheel_internal(
             ).find(candidate.name)
         else:
             existing = None
-    if (
-        existing is not None
-        and existing.version == str(candidate.version)
-        and not force
-        and not preserve_existing
-    ):
+    # ``existing`` is a wheel-state record (version as text) or a metadata
+    # distribution (a Version); compare as Versions either way.
+    same_version = existing is not None and (
+        version_of(existing.version) == candidate.version
+    )
+    if same_version and not force and not preserve_existing:
         return candidate
 
-    if existing is not None and (existing.version != str(candidate.version) or force):
+    if existing is not None and (not same_version or force):
         print(f"Uninstalling {existing.raw_name}-{existing.raw_version}")
     if direct and transaction is None:
         raise ValueError("direct wheel installation needs a transaction")
@@ -660,9 +661,7 @@ def install_wheel_internal(
                 active_transaction.commit(finalize=transaction_sink is None)
         if transaction_sink is not None and transaction is None:
             transaction_sink.append(active_transaction)
-        if existing is not None and (
-            existing.version != str(candidate.version) or force
-        ):
+        if existing is not None and (not same_version or force):
             print(
                 f"Successfully uninstalled {existing.raw_name}-{existing.raw_version}",
             )

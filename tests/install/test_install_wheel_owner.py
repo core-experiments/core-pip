@@ -748,3 +748,21 @@ def test_exact_install_plan_key_rejects_local_path_requirements() -> None:
 
     named = SimpleNamespace(req=parse_requirement("demo==1.0"))
     assert exact_install_plan_key((named,), ("test-context",)) is not None
+
+
+def test_reinstalling_the_same_version_is_a_no_op(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The installed distribution's version is text read from METADATA; it
+    must be compared with the wheel's Version as a Version, or every
+    reinstall of the same release uninstalls and copies everything again."""
+    wheel = make_wheel_internal(tmp_path, version="1.0")
+    target = tmp_path / "target"
+
+    install_wheel(wheel, target=str(target), requested=True)
+    capsys.readouterr()
+    install_wheel(wheel, target=str(target), requested=True)
+
+    assert "Uninstalling" not in capsys.readouterr().out
+    assert (target / "owner_demo-1.0.dist-info").exists()
