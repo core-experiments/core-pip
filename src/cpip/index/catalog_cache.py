@@ -216,7 +216,7 @@ def decode_summary(raw: bytes) -> CatalogSummary | None:
         or not isinstance(payload[0], str)
         or not isinstance(payload[1], list)
         or not isinstance(payload[2], bool)
-        or not isinstance(payload[3], dict)
+        or not valid_choice_profiles(payload[3])
         or not all(valid_summary_group(group) for group in payload[1])
     ):
         return None
@@ -244,7 +244,7 @@ def load_choices(
         not isinstance(payload, tuple)
         or len(payload) != 2
         or payload[0] != generation
-        or not isinstance(payload[1], dict)
+        or not valid_choices(payload[1])
     ):
         return {}
     choices = payload[1]
@@ -398,6 +398,37 @@ def valid_fact(value: object) -> bool:
         and isinstance(value[0], int)
         and (value[1] is None or isinstance(value[1], str))
         and (value[2] is None or isinstance(value[2], str))
+    )
+
+
+def valid_choice(value: object) -> bool:
+    return value is None or (
+        isinstance(value, tuple)
+        and len(value) == 3
+        and valid_record(value[0])
+        and isinstance(value[1], int)
+        and (value[2] is None or isinstance(value[2], int))
+    )
+
+
+def valid_choices(value: object) -> bool:
+    """A version-text -> choice map of the exact shape the provider unpacks;
+    anything else is a miss rather than a ValueError deep in resolution."""
+    return isinstance(value, dict) and all(
+        isinstance(version, str) and valid_choice(choice)
+        for version, choice in value.items()
+    )
+
+
+def valid_choice_profiles(value: object) -> bool:
+    return isinstance(value, dict) and all(
+        isinstance(profile, tuple)
+        and len(profile) == 3
+        and isinstance(profile[0], str)
+        and isinstance(profile[1], bool)
+        and isinstance(profile[2], bool)
+        and valid_choices(choices)
+        for profile, choices in value.items()
     )
 
 

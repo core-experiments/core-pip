@@ -1,4 +1,5 @@
 import os
+import pathlib
 import re
 import shutil
 from collections.abc import Callable
@@ -7,7 +8,12 @@ from glob import glob
 import pytest
 from cpip_test_support import CpipTestEnvironment, TestCpipResult
 
+from cpip.cli.fast import FAST_LOCK_PLAN_BUCKET
 from cpip.cli.fast_install import TREE_CACHE_BUCKET
+from cpip.index.cache import WHEEL_CACHE_BUCKET
+from cpip.index.candidate_metadata_cache import NAME as CANDIDATE_METADATA_NAME
+from cpip.index.metadata_cache import NAME as WHEEL_METADATA_NAME
+from cpip.index.release_facts_cache import NAME as RELEASE_FACTS_NAME
 from cpip.network.cache import HTTP_CACHE_BUCKET
 
 
@@ -28,7 +34,7 @@ def http_cache_dir(cache_dir: str) -> str:
 
 @pytest.fixture
 def wheel_cache_dir(cache_dir: str) -> str:
-    return os.path.normcase(os.path.join(cache_dir, "wheels"))
+    return os.path.normcase(os.path.join(cache_dir, WHEEL_CACHE_BUCKET))
 
 
 @pytest.fixture
@@ -425,6 +431,123 @@ def test_cache_purge_removes_fast_install_snapshots(
 
     assert not os.path.exists(snapshot)
     assert not os.path.exists(tree_file)
+
+
+def _plant(path: str, content: bytes = b"x") -> str:
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wb") as file:
+        file.write(content)
+    return path
+
+
+def _plant_every_store(cache_dir: str) -> list[str]:
+    """Seed one file in every location the current cache version writes."""
+    from cpip.cli.fast_install import NAME as FAST_INSTALL_SNAPSHOT_NAME
+
+    return [
+        _plant(os.path.join(cache_dir, HTTP_CACHE_BUCKET, "aa", "entry")),
+        _plant(
+            os.path.join(
+                cache_dir,
+                WHEEL_CACHE_BUCKET,
+                "aa",
+                "bb",
+                "digest",
+                "demo-1.0-py3-none-any.whl",
+            ),
+        ),
+        _plant(os.path.join(cache_dir, "archive-v0-cpython-999", "aa", "wheel")),
+        _plant(os.path.join(cache_dir, "resolution-v0-cpython-999", "aa", "key.bin")),
+        _plant(os.path.join(cache_dir, FAST_LOCK_PLAN_BUCKET, "digest.cache")),
+        _plant(os.path.join(cache_dir, FAST_INSTALL_SNAPSHOT_NAME)),
+        _plant(os.path.join(cache_dir, f"{FAST_INSTALL_SNAPSHOT_NAME}.123.tmp")),
+        _plant(os.path.join(cache_dir, CANDIDATE_METADATA_NAME)),
+        _plant(os.path.join(cache_dir, f"{CANDIDATE_METADATA_NAME}-wal")),
+        _plant(os.path.join(cache_dir, f"{CANDIDATE_METADATA_NAME}-shm")),
+        _plant(os.path.join(cache_dir, WHEEL_METADATA_NAME)),
+        _plant(os.path.join(cache_dir, f"{WHEEL_METADATA_NAME}-wal")),
+        _plant(os.path.join(cache_dir, RELEASE_FACTS_NAME)),
+        _plant(os.path.join(cache_dir, f"{RELEASE_FACTS_NAME}.123.tmp")),
+    ]
+
+
+def test_cache_purge_removes_every_store(
+    script: CpipTestEnvironment,
+    cache_dir: str,
+) -> None:
+    planted = _plant_every_store(cache_dir)
+
+    result = script.cpip("cache", "purge", "--verbose")
+
+    assert f"Files removed: {len(planted)}" in result.stdout
+    assert [path for path in planted if os.path.exists(path)] == []
+    assert "No matching packages" not in result.stderr
+
+
+def test_cache_sees_built_wheels(
+    script: CpipTestEnvironment,
+    cache_dir: str,
+) -> None:
+    wheel = _plant(
+        os.path.join(
+            cache_dir,
+            WHEEL_CACHE_BUCKET,
+            "aa",
+            "bb",
+            "digest",
+            "demo-1.0-py3-none-any.whl",
+        ),
+    )
+
+    assert "Number of locally built wheels: 1" in script.cpip("cache", "info").stdout
+    assert "demo-1.0-py3-none-any.whl" in script.cpip("cache", "list").stdout
+    script.cpip("cache", "remove", "demo")
+    assert not os.path.exists(wheel)
+
+
+def test_cache_purge_escapes_glob_metacharacters_in_cache_dir(
+    script: CpipTestEnvironment,
+    tmp_path: pathlib.Path,
+) -> None:
+    cache_dir = os.fspath(tmp_path / "cache[1]")
+    planted = _plant_every_store(cache_dir)
+
+    result = script.cpip("cache", "purge", "--cache-dir", cache_dir)
+
+    assert f"Files removed: {len(planted)}" in result.stdout
+    assert [path for path in planted if os.path.exists(path)] == []
+
+
+def test_cache_commands_honor_cpip_cache_dir(
+    script: CpipTestEnvironment,
+    tmp_path: pathlib.Path,
+) -> None:
+    """The manager resolves its root the way every cache writer does."""
+    cache_dir = os.fspath(tmp_path / "configured")
+    script.environ["CPIP_CACHE_DIR"] = cache_dir
+    planted = _plant_every_store(cache_dir)
+
+    assert script.cpip("cache", "dir").stdout.strip() == os.path.normcase(cache_dir)
+    result = script.cpip("cache", "purge")
+
+    assert f"Files removed: {len(planted)}" in result.stdout
+    assert [path for path in planted if os.path.exists(path)] == []
+
+
+def test_cache_purge_sweeps_empty_directories_without_files(
+    script: CpipTestEnvironment,
+    http_cache_dir: str,
+) -> None:
+    """A second purge finds only empty buckets; it removes them instead of
+    warning that nothing matched."""
+    os.makedirs(os.path.join(http_cache_dir, "empty", "nested"))
+
+    result = script.cpip("cache", "purge")
+
+    assert "Files removed: 0" in result.stdout
+    assert "Directories removed: 3" in result.stdout
+    assert not os.path.exists(http_cache_dir)
+    assert "No matching packages" not in result.stderr
 
 
 @pytest.mark.usefixtures("populate_http_cache", "populate_wheel_cache")

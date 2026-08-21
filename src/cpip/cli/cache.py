@@ -8,13 +8,14 @@ import glob
 import os
 import sys
 
+from cpip.cli.fast import FAST_LOCK_PLAN_BUCKET
 from cpip.cli.fast_install import NAME_FAMILY as FAST_INSTALL_SNAPSHOT_FAMILY
 from cpip.cli.fast_install import TREE_CACHE_BUCKET
 from cpip.cli.parsers.cache import create_parser
-from cpip.core.appdirs import user_cache_dir
+from cpip.core.appdirs import resolve_cache_dir
 from cpip.core.errors import CommandError
-from cpip.core.utils import CACHE_VERSION_TAG
 from cpip.index.artifact_cache import ARTIFACT_CACHE_BUCKET
+from cpip.index.cache import WHEEL_CACHE_BUCKET
 from cpip.index.candidate_metadata_cache import NAME as CANDIDATE_METADATA_NAME
 from cpip.index.metadata_cache import NAME as WHEEL_METADATA_NAME
 from cpip.index.release_facts_cache import NAME as RELEASE_FACTS_NAME
@@ -22,30 +23,32 @@ from cpip.install.wheel_archive_cache import ARCHIVE_CACHE_BUCKET_FAMILY
 from cpip.install.wheel_install_plan_cache import RESOLUTION_CACHE_BUCKET_FAMILY
 from cpip.network.cache import HTTP_CACHE_BUCKET
 
-FAST_LOCK_PLAN_BUCKET = f"fast-lock-plan-{CACHE_VERSION_TAG}"
-
 
 class CacheManager:
     """Inspect and remove files from cpip's cache directories."""
 
     def __init__(self, cache_dir: str | None = None) -> None:
-        self.cache_dir = os.path.normcase(cache_dir or user_cache_dir("cpip"))
+        # The same resolution every writer uses (explicit, then
+        # CPIP_CACHE_DIR, then the platform default), so the manager looks
+        # where the caches actually are.
+        self.cache_dir = os.path.normcase(resolve_cache_dir(cache_dir))
         self.http_dir = os.path.join(self.cache_dir, HTTP_CACHE_BUCKET)
-        self.wheel_dir = os.path.join(self.cache_dir, "wheels")
+        self.wheel_dir = os.path.join(self.cache_dir, WHEEL_CACHE_BUCKET)
         # The archive and resolution buckets are interpreter-tagged (one
         # bucket per interpreter/implementation, since they hold
         # marshal-serialized data); glob every tagged variant rather than
         # just the running interpreter's own, so purge clears caches left by
         # other interpreters too.
-        self.archive_dirs = glob.glob(
-            os.path.join(self.cache_dir, f"{ARCHIVE_CACHE_BUCKET_FAMILY}-*"),
-        )
+        self.archive_dirs = self._glob(f"{ARCHIVE_CACHE_BUCKET_FAMILY}-*")
         self.artifact_dir = os.path.join(self.cache_dir, ARTIFACT_CACHE_BUCKET)
         self.fast_install_tree_dir = os.path.join(self.cache_dir, TREE_CACHE_BUCKET)
         self.fast_lock_plan_dir = os.path.join(self.cache_dir, FAST_LOCK_PLAN_BUCKET)
-        self.resolution_dirs = glob.glob(
-            os.path.join(self.cache_dir, f"{RESOLUTION_CACHE_BUCKET_FAMILY}-*"),
-        )
+        self.resolution_dirs = self._glob(f"{RESOLUTION_CACHE_BUCKET_FAMILY}-*")
+
+    def _glob(self, pattern: str) -> builtins.list[str]:
+        """Expand ``pattern`` directly under the cache root; the root itself
+        is escaped so a directory name with glob metacharacters still matches."""
+        return glob.glob(os.path.join(glob.escape(self.cache_dir), pattern))
 
     def wheel_files(self) -> builtins.list[str]:
         wheel_dir = self.wheel_dir
@@ -110,16 +113,18 @@ class CacheManager:
                 for path in self._files_under(root)
             ]
             # Single-file caches: the per-interpreter fast-install snapshots
-            # and the SQLite/marshal stores (with SQLite's WAL sidecars).
+            # and the SQLite/marshal stores. The trailing wildcard also takes
+            # SQLite's -wal/-shm sidecars and the .<pid>.tmp files an
+            # interrupted save_snapshot leaves behind.
             files.extend(
                 path
                 for pattern in (
-                    f"{FAST_INSTALL_SNAPSHOT_FAMILY}-*.marshal",
+                    f"{FAST_INSTALL_SNAPSHOT_FAMILY}-*.marshal*",
                     f"{CANDIDATE_METADATA_NAME}*",
                     f"{WHEEL_METADATA_NAME}*",
-                    RELEASE_FACTS_NAME,
+                    f"{RELEASE_FACTS_NAME}*",
                 )
-                for path in glob.glob(os.path.join(self.cache_dir, pattern))
+                for path in self._glob(pattern)
                 if os.path.isfile(path)
             )
         else:
@@ -135,29 +140,37 @@ class CacheManager:
                 )
             ]
 
-        if not files:
-            if purge:
-                print("WARNING: No matching packages", file=sys.stderr)
-            elif pattern is not None:
+        if not files and not purge:
+            if pattern is not None:
                 print(
                     f'WARNING: No matching packages for pattern "{pattern}"',
                     file=sys.stderr,
                 )
             return 0, 0, 0
 
+        files_removed = 0
         bytes_removed = 0
         for path in files:
             try:
-                bytes_removed += os.stat(path).st_size
+                size = os.stat(path).st_size
             except OSError:
-                pass
-            if verbose:
-                print(f"Removed {path}")
+                size = 0
             try:
                 os.unlink(path)
             except FileNotFoundError:
-                pass
+                continue
+            except OSError as error:
+                # Another cpip may hold a store open (Windows refuses to
+                # unlink an open SQLite file): report it and keep going.
+                print(f"WARNING: Could not remove {path}: {error}", file=sys.stderr)
+                continue
+            files_removed += 1
+            bytes_removed += size
+            if verbose:
+                print(f"Removed {path}")
 
+        # A purge sweeps empty bucket directories even when no file was left
+        # to remove, so a second purge finishes the job instead of warning.
         directories_removed = 0
         directories = [
             os.path.join(current, name)
@@ -174,7 +187,9 @@ class CacheManager:
             except OSError:
                 continue
             directories_removed += 1
-        return len(files), bytes_removed, directories_removed
+        if purge and not files_removed and not directories_removed:
+            print("WARNING: No matching packages", file=sys.stderr)
+        return files_removed, bytes_removed, directories_removed
 
     def info(self) -> tuple[str, str, int]:
         return (
@@ -193,7 +208,7 @@ def run_cache(args: list[str]) -> int:
         if options.pattern or options.cache_dir or options.no_cache_dir:
             raise CommandError("Too many arguments")
 
-        print(os.path.normcase(user_cache_dir("cpip")))
+        print(os.path.normcase(resolve_cache_dir()))
 
         return 0
 

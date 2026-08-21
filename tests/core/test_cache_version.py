@@ -3,11 +3,12 @@ single cache-wide ``CACHE_VERSION``; no module may carry its own number."""
 
 from __future__ import annotations
 
-from cpip.cli import fast_install
+from cpip.cli import fast, fast_install
 from cpip.core.utils import CACHE_INTERPRETER_TAG, CACHE_VERSION, CACHE_VERSION_TAG
 from cpip.core.versions import VERSION_WIRE_FORMAT
 from cpip.index import (
     artifact_cache,
+    cache as wheel_cache,
     candidate_metadata_cache,
     catalog_cache,
     metadata_cache,
@@ -26,6 +27,8 @@ def test_every_storage_name_carries_the_cache_version() -> None:
     tag = CACHE_VERSION_TAG
     assert HTTP_CACHE_BUCKET == f"http-{tag}"
     assert artifact_cache.ARTIFACT_CACHE_BUCKET == f"artifacts-{tag}"
+    assert wheel_cache.WHEEL_CACHE_BUCKET == f"wheels-{tag}"
+    assert fast.FAST_LOCK_PLAN_BUCKET == f"fast-lock-plan-{tag}"
     assert metadata_cache.NAME == f"metadata-{tag}.sqlite"
     assert candidate_metadata_cache.NAME == f"candidate-metadata-{tag}.sqlite"
     assert release_facts_cache.NAME == f"release-facts-{tag}.marshal"
@@ -46,6 +49,11 @@ def test_every_storage_name_carries_the_cache_version() -> None:
     assert catalog_cache.CHOICE_PREFIX == f"cpip-index-choice-{tag}:"
     assert catalog_cache.SUMMARY_HEADER == f"cpip-index-summary-{tag}\0".encode()
     assert catalog_cache.CHOICE_HEADER == f"cpip-index-choice-{tag}\0".encode()
+
+
+def test_built_wheels_live_under_the_versioned_bucket() -> None:
+    entry = wheel_cache.wheel_cache_path("/root", "https://example.test/demo.tar.gz")
+    assert entry.startswith(f"/root/{wheel_cache.WHEEL_CACHE_BUCKET}/")
 
 
 def test_every_format_stamp_is_the_cache_version() -> None:
