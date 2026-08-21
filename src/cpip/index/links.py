@@ -40,6 +40,9 @@ SUPPORTED_EXTENSIONS = (WHEEL_EXTENSION, *SOURCE_ARCHIVE_SUFFIXES)
 
 REQ_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 EGG_FRAGMENT_RE = re.compile(r"[#&]egg=([^&]*)")
+# Characters urllib.parse.quote(safe="/:") leaves untouched, minus the
+# separators: a name made only of these is its own quoted form.
+_URL_SAFE_NAME = re.compile(r"[A-Za-z0-9_.~-]+")
 HASH_URL_FRAGMENT_RE = re.compile(
     r"[#&]({choices})=([^&]*)".format(
         choices="|".join(re.escape(name) for name in SUPPORTED_HASHES),
@@ -211,6 +214,64 @@ class Link:
         link.kind = cls.artifact_kind_from_filename(
             posixpath.basename(link.path_internal.rstrip("/")),
         )
+        return link
+
+    @classmethod
+    def from_local_file(
+        cls,
+        name: str,
+        *,
+        directory_path: str,
+        directory_url: str,
+        path_text: str,
+        source_url: str | None,
+        local_identity: str | None,
+    ) -> Link:
+        """``from_path(path_text, is_dir=False, ...)`` for one scanned directory entry.
+
+        A find-links directory scan builds a link per file, and ``from_path``
+        re-derived the same directory-level facts each time: the absolute
+        path, its ``file://`` URL (a ``quote`` pass), an ``urlsplit`` of that
+        URL (the stdlib's 128-entry cache thrashes on any real wheelhouse),
+        an ``unquote`` back, and three ``basename`` calls. Given the
+        directory's absolute path and its ``path_to_url`` result, computed
+        once by the caller, every field follows directly: ``quote`` is
+        per-character with ``/`` safe, so the file URL is the directory URL
+        plus the quoted name; the URL has no netloc, query or fragment (all
+        of ``?``, ``#`` and ``&`` are quoted), so its split is known; and
+        the unquoted path is the directory path plus the name.
+        """
+        if _URL_SAFE_NAME.fullmatch(name) is None:
+            quoted = urllib.parse.quote(name, safe="/:")
+        else:
+            quoted = name
+        separator = "" if directory_path.endswith("/") else "/"
+        url = f"{directory_url}{separator}{quoted}"
+        link = cls.__new__(cls)
+        link.parsed_url_internal = urllib.parse.SplitResult(
+            "file",
+            "",
+            url[7:],  # after "file://"
+            "",
+            "",
+        )
+        link.url = url
+        link._hash = hash(url)
+        link.path_internal = f"{directory_path}{separator}{name}"
+        link.filename_internal = PathComponent.from_name(name)
+        link.file_path_internal = path_text
+        link.hashes_internal = {}
+        link.comes_from = source_url
+        link.requires_python = None
+        link.yanked_reason = None
+        link.metadata_file_data = None
+        link.upload_time = None
+        link.cache_link_parsing = True
+        link.egg_fragment = None
+        link.text = name
+        link.local_identity_internal = local_identity
+        link.local_is_dir_internal = False
+        link.kind = cls.artifact_kind_from_filename(name)
         return link
 
     @classmethod

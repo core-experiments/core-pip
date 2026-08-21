@@ -8,7 +8,7 @@ import urllib.parse
 from functools import lru_cache
 
 from cpip.core.packaging import Requirement, canonicalize_name
-from cpip.core.urls import path_to_url, url_to_path
+from cpip.core.urls import WINDOWS, path_to_url, url_to_path
 from cpip.index.catalog_cache import load_summary
 from cpip.index.directory_index import (
     LocalSourceSnapshot,
@@ -167,6 +167,27 @@ class FindLinksSource:
             self.local_snapshots[path_text] = snapshot
 
         if snapshot is not None and snapshot.is_directory:
+            directory_url: str | None = None
+            if not WINDOWS:
+                # One abspath and one quote pass for the directory; each
+                # entry's link is then assembled from these and its name.
+                directory_path = os.path.abspath(path_text)
+                try:
+                    directory_url = path_to_url(path_text)
+                except UnicodeEncodeError:
+                    directory_url = None
+            if directory_url is not None:
+                return [
+                    Link.from_local_file(
+                        os.path.basename(item.path),
+                        directory_path=directory_path,
+                        directory_url=directory_url,
+                        path_text=item.path,
+                        source_url=path_text,
+                        local_identity=item.identity,
+                    )
+                    for item in snapshot.entries
+                ]
             return [
                 Link.from_path(
                     item.path,
