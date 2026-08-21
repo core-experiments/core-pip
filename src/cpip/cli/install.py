@@ -780,7 +780,7 @@ def warn_about_install_conflicts(changed_names: set[str]) -> None:
         distribution = distributions_by_name[name]
         for _, requirement in requirements:
             print(
-                f"{distribution.canonical_name} {distribution.version} requires "
+                f"{distribution.canonical_name} {distribution.raw_version} requires "
                 f"{requirement.name}, which is not installed.",
                 file=sys.stderr,
             )
@@ -791,7 +791,7 @@ def warn_about_install_conflicts(changed_names: set[str]) -> None:
         distribution = distributions_by_name[name]
         for dependency_name, version, requirement in requirements:
             print(
-                f"{distribution.canonical_name} {distribution.version} requires "
+                f"{distribution.canonical_name} {distribution.raw_version} requires "
                 f"{requirement}, but you have {dependency_name} {version} which is incompatible.",
                 file=sys.stderr,
             )
