@@ -4,6 +4,7 @@ import importlib.metadata
 import os
 import pathlib
 import site
+import sys
 import sysconfig
 from collections.abc import Collection, Iterable
 
@@ -249,14 +250,86 @@ def iter_installed_distributions(
     )
 
 
+# One environment scan per run instead of one per lookup.
+#
+# find_installed is asked once per package during a default (no
+# --ignore-installed) resolve, once per root requirement beforehand, and
+# again per candidate while reporting; each call used to re-walk every
+# sys.path entry through importlib.metadata and re-read every installed
+# distribution's METADATA just to filter by one name -- a 300-distribution
+# environment paid ~20ms a call, so a 60-package resolve spent over a
+# second re-reading the same files. The index below is built once per
+# search-path tuple and revalidated by the mtime of each search-path entry:
+# installing or removing a distribution creates or deletes a dist-info
+# directory, which bumps its parent's mtime, so cpip's own installs in the
+# same process (and most external ones) invalidate it for the price of a
+# stat per entry. Rewriting a METADATA file in place without touching its
+# dist-info directory is the one change this does not see; no installer does
+# that (an upgrade replaces the whole dist-info directory), and
+# clear_installed_index covers anything that does.
+_InstalledIndex = dict[str, InstalledDistribution]
+# Keyed by (default scan?, search paths): the default scan consults every
+# metadata finder on sys.meta_path, an explicit path list only the path
+# finder, so an explicit tuple equal to sys.path is a different scan.
+_installed_index_cache: dict[
+    tuple[bool, tuple[str, ...]], tuple[tuple[int | None, ...], _InstalledIndex]
+] = {}
+
+
+def _search_paths(paths: Iterable[str] | None) -> tuple[str, ...]:
+    if paths is None:
+        return tuple(os.fspath(entry) for entry in sys.path)
+
+    return tuple(os.fspath(path) for path in paths)
+
+
+def _paths_generation(search_paths: tuple[str, ...]) -> tuple[int | None, ...]:
+    generation: list[int | None] = []
+
+    for entry in search_paths:
+        try:
+            generation.append(os.stat(entry).st_mtime_ns)
+
+        except OSError:
+            generation.append(None)
+
+    return tuple(generation)
+
+
+def installed_index(paths: Iterable[str] | None = None) -> _InstalledIndex:
+    """Installed distributions by canonical name, first match on the path wins."""
+    search_paths = _search_paths(paths)
+
+    generation = _paths_generation(search_paths)
+
+    cache_key = (paths is None, search_paths)
+
+    cached = _installed_index_cache.get(cache_key)
+
+    if cached is not None and cached[0] == generation:
+        return cached[1]
+
+    index: _InstalledIndex = {}
+
+    # The materialized tuple, not ``paths``: a generator argument was
+    # already consumed computing the key, and None must stay None so the
+    # default scan keeps consulting every metadata finder, not just
+    # sys.path.
+    for dist in _iter_installed_distributions(None if paths is None else search_paths):
+        index.setdefault(dist.canonical_name, dist)
+
+    _installed_index_cache[cache_key] = (generation, index)
+
+    return index
+
+
+def clear_installed_index() -> None:
+    """Forget every cached environment scan (tests and in-process installers)."""
+    _installed_index_cache.clear()
+
+
 def find_installed(
     name: str,
     paths: Iterable[str] | None = None,
 ) -> InstalledDistribution | None:
-    canonical = canonicalize_name(name)
-
-    for dist in _iter_installed_distributions(paths, {canonical}):
-        if dist.canonical_name == canonical:
-            return dist
-
-    return None
+    return installed_index(paths).get(canonicalize_name(name))

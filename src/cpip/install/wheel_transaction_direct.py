@@ -34,7 +34,7 @@ def direct_batch_preflight(
     """Check whether a batch can write final paths without staging files."""
     destinations: set[str] = set()
     resolved_directories: DestinationCache = {}
-    resolved_roots: ResolvedRoots = {}
+    resolved_roots: ResolvedRoots = target.resolved_roots_internal
     member_sets: list[tuple[tuple[str, int, int, int, int, int], ...]] = []
     total_size = 0
     for request, candidate in zip(requests, candidates):

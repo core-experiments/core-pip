@@ -11,7 +11,6 @@ from urllib.parse import urlsplit
 from cpip._vendor.nab_resolver.ranges import Range
 from cpip.core.metadata import InstalledDistribution
 from cpip.core.packaging import (
-    InvalidVersion,
     Requirement,
     SpecifierSet,
     Version,
@@ -116,10 +115,11 @@ def _exact_pin(requirement: Requirement) -> Version | None:
     if clause.operator != "==" or clause.version.endswith("*"):
         return None
 
-    try:
-        return Version(clause.version)
-    except InvalidVersion:
-        return None
+    # Specifier.__init__ already parsed exactly this text (and raised on an
+    # invalid one), so the Version is in hand; re-parsing it here ran the
+    # full version regex once per pin of every candidate the lookahead
+    # scanned.
+    return clause._parsed_version
 
 
 def _key(requirement: Requirement) -> str:

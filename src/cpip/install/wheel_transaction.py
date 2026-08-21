@@ -255,7 +255,7 @@ def install_wheel_internal(
         resolved_directories = (
             destination_cache if destination_cache is not None else {}
         )
-        resolved_roots: ResolvedRoots = {}
+        resolved_roots: ResolvedRoots = target.resolved_roots_internal
         record_metadata: dict[str, tuple[str, str]] = {}
         direct_contents: dict[str, bytes] = {}
         direct_metadata: dict[str, tuple[str, str]] = {}
@@ -679,7 +679,7 @@ def validate_wheel_batch(
     """Validate a wheel batch before any member of the batch is installed."""
     candidates: list[WheelCandidate] = []
     destinations: set[str] = set()
-    resolved_roots: ResolvedRoots = {}
+    resolved_roots: ResolvedRoots = target.resolved_roots_internal
     resolved_directories = destination_cache if destination_cache is not None else {}
     for path in paths:
         # One archive open covers both the wheel_candidate() metadata read

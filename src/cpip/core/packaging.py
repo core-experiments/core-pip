@@ -599,6 +599,9 @@ def compatible_upper_bound_internal(version: Version) -> Version:
     return Version(".".join(str(part) for part in release))
 
 
+_CONTAINS_CACHE_SIZE = 4096
+
+
 class SpecifierSet:
     __slots__ = (
         "_bounds_cache",
@@ -713,15 +716,31 @@ class SpecifierSet:
                 self._explicitly_allows_prereleases = explicitly_allowed
 
             if not explicitly_allowed:
-                self._contains_cache[key] = False
+                self._remember_contains(key, False)
 
                 return False
 
         result = all(spec.contains(parsed) for spec in self.specifiers)
 
-        self._contains_cache[key] = result
+        self._remember_contains(key, result)
 
         return result
+
+    def _remember_contains(self, key: tuple[Version, bool], result: bool) -> None:
+        # Bounded: instances are shared per specifier text for the life of
+        # the process (see _interned_specifier_set), so a long-lived embedder
+        # checking ever-new versions against ">=1" must not grow this
+        # without limit. A sweep keeps the common case -- a few hundred
+        # versions per specifier -- fully cached.
+        # Unsynchronized like the other parse caches: concurrent misses can
+        # overshoot the bound by a few entries until the next sweep, and dict
+        # operations are atomic, so no answer is ever wrong or lost.
+        cache = self._contains_cache
+
+        if len(cache) >= _CONTAINS_CACHE_SIZE:
+            cache.clear()
+
+        cache[key] = result
 
     def bounds(
         self,
@@ -1068,11 +1087,42 @@ def parse_requirement(value: str) -> Requirement:
     return Requirement(
         name=name,
         extras=extras,
-        specifier=SpecifierSet(spec),
+        specifier=_interned_specifier_set(spec),
         url=url,
         marker=marker,
         raw=raw,
     )
+
+
+# parse_requirement is cached on the whole requirement string, so
+# "leaf-0>=1.1.0" and "leaf-1>=1.1.0" each parsed their own
+# SpecifierSet(">=1.1.0") -- a Specifier and a Version per clause -- although
+# real metadata repeats the same handful of specifier texts across thousands
+# of Requires-Dist lines. SpecifierSet's only mutable state is memo caches
+# (text, contains, bounds, prerelease flag), so one instance per distinct
+# text can back every requirement that uses it, and those memo caches are
+# then shared as well. Bounded like the other parse caches: a sweep of
+# unique texts clears it rather than growing without limit.
+_SPECIFIER_SET_CACHE_SIZE = 4096
+_specifier_sets: dict[str, SpecifierSet] = {}
+
+
+def _interned_specifier_set(spec: str) -> SpecifierSet:
+    # Unsynchronized: two threads missing on the same text build two equal
+    # SpecifierSets and one wins the slot -- the other requirement simply
+    # keeps its own instance, which is what every requirement had before
+    # interning. Sharing is an optimization here, never an invariant.
+    specifier_set = _specifier_sets.get(spec)
+
+    if specifier_set is None:
+        specifier_set = SpecifierSet(spec)
+
+        if len(_specifier_sets) >= _SPECIFIER_SET_CACHE_SIZE:
+            _specifier_sets.clear()
+
+        _specifier_sets[spec] = specifier_set
+
+    return specifier_set
 
 
 def canonicalize_requirement(value: str) -> str:
