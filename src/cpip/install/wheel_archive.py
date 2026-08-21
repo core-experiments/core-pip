@@ -81,8 +81,27 @@ def _safe_destination_parts_with_text(
     resolved_directories: DestinationCache | None = None,
     resolved_roots: ResolvedRoots | None = None,
 ) -> str:
+    resolved_parent = _resolved_parent_directory(
+        root,
+        parts[:-1],
+        display_relative,
+        resolved_directories=resolved_directories,
+        resolved_roots=resolved_roots,
+    )
+    name = parts[-1] if parts else ""
+    destination_text = os.path.join(resolved_parent, name)
+    return destination_text
+
+
+def _resolved_parent_directory(
+    root: str,
+    parent_parts: tuple[str, ...],
+    display_relative: tuple[str, ...] | str,
+    *,
+    resolved_directories: DestinationCache | None = None,
+    resolved_roots: ResolvedRoots | None = None,
+) -> str:
     root_text = root
-    parent_parts = parts[:-1]
     parent_text = os.path.join(*parent_parts) if parent_parts else ""
     cache_key = (root_text, parent_text)
     resolved_parent = (
@@ -116,9 +135,129 @@ def _safe_destination_parts_with_text(
         if resolved_directories is not None:
             resolved_directories[cache_key] = resolved_parent_text
         resolved_parent = resolved_parent_text
-    name = parts[-1] if parts else ""
-    destination_text = os.path.join(resolved_parent, name)
-    return destination_text
+    return resolved_parent
+
+
+_DATA_KINDS = frozenset({"purelib", "platlib", "scripts", "data", "headers"})
+
+
+class MemberPaths:
+    """Per-wheel resolver for one member's staged source, destination and RECORD key.
+
+    The install loop used to validate, split, join and destination-resolve
+    every member name from scratch -- a tuple of parts, a join of the stage
+    root with all of them, another join of the parent parts just to key the
+    realpath cache, and a final join of the resolved parent with the name --
+    which on a many-thousand-member wheel put posixpath.join and friends at
+    a quarter of the install's time. Members are overwhelmingly siblings,
+    so this resolves each *directory* once (validation, staged prefix,
+    resolved destination prefix, RECORD key prefix) and appends the bare
+    name per member.
+
+    Anything the per-directory shortcut cannot answer byte-for-byte --
+    an empty, ``.``, ``..``, backslash- or colon-bearing basename, a
+    top-level name ending in ``.data``, or a directory that fails validation
+    -- takes the original per-member path so every error message and edge
+    case stays exactly as before.
+    """
+
+    __slots__ = (
+        "directories",
+        "resolved_directories",
+        "resolved_roots",
+        "stage_root",
+        "target",
+    )
+
+    def __init__(
+        self,
+        target: InstallTarget,
+        stage_root: str,
+        *,
+        resolved_directories: DestinationCache | None = None,
+        resolved_roots: ResolvedRoots | None = None,
+    ) -> None:
+        self.target = target
+        self.stage_root = stage_root
+        self.resolved_directories = resolved_directories
+        self.resolved_roots = resolved_roots
+        self.directories: dict[str, tuple[tuple[str, ...], str, str, str] | None] = {}
+
+    def resolve(self, filename: str) -> tuple[tuple[str, ...], str, str, str]:
+        """Return ``(relative_parts, source_text, destination_text, record_key)``.
+
+        Identical to ``validate_member_parts(filename)``,
+        ``os.path.join(stage_root, *parts)``,
+        ``destination_internal_parts_text(target, parts, filename, ...)`` and
+        ``"/".join(parts)`` computed independently.
+        """
+        directory, _, name = filename.rpartition("/")
+        if (
+            name
+            and name != "."
+            and name != ".."
+            and "\\" not in name
+            and ":" not in name
+            and (directory or not name.endswith(".data"))
+        ):
+            try:
+                entry = self.directories[directory]
+            except KeyError:
+                entry = self._directory_entry(directory, filename)
+                self.directories[directory] = entry
+            if entry is not None:
+                prefix, source_prefix, destination_prefix, record_prefix = entry
+                return (
+                    (*prefix, name),
+                    source_prefix + name,
+                    destination_prefix + name,
+                    record_prefix + name,
+                )
+        parts = validate_member_parts(filename)
+        return (
+            parts,
+            os.path.join(self.stage_root, *parts),
+            destination_internal_parts_text(
+                self.target,
+                parts,
+                filename,
+                resolved_directories=self.resolved_directories,
+                resolved_roots=self.resolved_roots,
+            ),
+            "/".join(parts),
+        )
+
+    def _directory_entry(
+        self,
+        directory: str,
+        display_relative: str,
+    ) -> tuple[tuple[str, ...], str, str, str] | None:
+        try:
+            prefix = validate_member_parts(directory)
+        except InstallationError:
+            # Let the per-member path raise, with the member's full name.
+            return None
+        if prefix and prefix[0].endswith(".data"):
+            if len(prefix) < 2 or prefix[1] not in _DATA_KINDS:
+                return None
+            root = getattr(self.target, prefix[1])
+            parent_parts = prefix[2:]
+        else:
+            root = self.target.purelib
+            parent_parts = prefix
+        resolved_parent = _resolved_parent_directory(
+            root,
+            parent_parts,
+            display_relative,
+            resolved_directories=self.resolved_directories,
+            resolved_roots=self.resolved_roots,
+        )
+        return (
+            prefix,
+            os.path.join(self.stage_root, *prefix, ""),
+            os.path.join(resolved_parent, ""),
+            "/".join(prefix) + "/" if prefix else "",
+        )
 
 
 def mode_from_external_attr(external_attr: int) -> int | None:

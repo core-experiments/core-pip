@@ -489,7 +489,15 @@ no_layout_candidate_cache: dict[
 
 
 def parse_wheel_file(path: str) -> WheelFile | None:
-    return _parse_wheel_filename(os.path.basename(os.fspath(path)))
+    name = os.fspath(path)
+    # Most callers already hold a bare filename (Link.filename is one), and
+    # basename of a string with no separator is the identity -- on ntpath
+    # too, which additionally splits on a backslash and a drive colon. Skip
+    # the call for those; it was the single largest cost of evaluating a
+    # wheel link.
+    if "/" in name or "\\" in name or ":" in name:
+        name = os.path.basename(name)
+    return _parse_wheel_filename(name)
 
 
 @lru_cache(maxsize=4096)
