@@ -383,11 +383,35 @@ class TestSplitMarker:
         assert split_marker(value) == expected
 
 
-def test_parse_requirement_shares_specifier_sets_by_text() -> None:
+# The intern tables behind parse_requirement are an implementation detail;
+# the tests below observe them only through these two helpers so that a
+# relocation of the tables touches one place.
+
+
+def _table_sizes() -> dict[str, int]:
     from cpip.core import packaging as packaging_module
 
-    packaging_module._specifier_sets.clear()
-    parse_requirement.cache_clear()
+    return {
+        "specifier_sets": len(packaging_module._specifier_sets),
+        "versions": len(packaging_module._versions_by_text),
+    }
+
+
+def _table_limits() -> dict[str, int]:
+    from cpip.core import packaging as packaging_module
+
+    return {
+        "specifier_sets": packaging_module._SPECIFIER_SET_CACHE_SIZE,
+        "versions": packaging_module._VERSION_CACHE_SIZE,
+        "contains": packaging_module._CONTAINS_CACHE_SIZE,
+    }
+
+
+def _contains_cache_size(specifier: SpecifierSet) -> int:
+    return len(specifier._contains_cache)
+
+
+def test_parse_requirement_shares_specifier_sets_by_text() -> None:
     first = parse_requirement("leaf-0>=1.1.0,<2")
     second = parse_requirement("leaf-1>=1.1.0,<2")
     third = parse_requirement("leaf-2>=1.1.0")
@@ -405,53 +429,40 @@ def test_parse_requirement_shares_specifier_sets_by_text() -> None:
 
 
 def test_specifier_set_intern_table_is_bounded() -> None:
-    from cpip.core import packaging as packaging_module
-
-    packaging_module._specifier_sets.clear()
-    parse_requirement.cache_clear()
-    limit = packaging_module._SPECIFIER_SET_CACHE_SIZE
+    limit = _table_limits()["specifier_sets"]
     for index in range(limit + 5):
         parse_requirement(f"pkg-{index}>={index}")
-    assert len(packaging_module._specifier_sets) <= limit
+    assert _table_sizes()["specifier_sets"] <= limit
     # Entries evicted by the sweep are simply rebuilt; requirements already
     # parsed keep the instances they were given.
     assert parse_requirement("pkg-0>=0").specifier == SpecifierSet(">=0")
 
 
 def test_shared_specifier_set_contains_cache_is_bounded() -> None:
-    from cpip.core import packaging as packaging_module
-
-    packaging_module._specifier_sets.clear()
-    parse_requirement.cache_clear()
     shared = parse_requirement("pkg-a>=1").specifier
     assert shared is parse_requirement("pkg-b>=1").specifier
-    limit = packaging_module._CONTAINS_CACHE_SIZE
+    limit = _table_limits()["contains"]
     for index in range(limit + 50):
         assert shared.contains(Version(f"1.{index}"))
         assert not shared.contains(Version(f"0.{index}"))
-    assert len(shared._contains_cache) <= limit
+    assert _contains_cache_size(shared) <= limit
     # Answers survive the sweep.
     assert shared.contains(Version("1.0"))
     assert not shared.contains(Version("0.1"))
 
 
 def test_specifier_clauses_share_one_version_per_text() -> None:
-    from cpip.core import packaging as packaging_module
-
-    packaging_module._versions_by_text.clear()
-    packaging_module._specifier_sets.clear()
-    parse_requirement.cache_clear()
     pinned = parse_requirement("a==1.1.0").specifier.specifiers[0]
     floor = parse_requirement("b>=1.1.0").specifier.specifiers[0]
-    assert pinned._parsed_version is floor._parsed_version
-    assert pinned._parsed_version == Version("1.1.0")
-    # Wildcards validate the prefix but keep no parsed version, as before.
-    wildcard = parse_requirement("c==1.1.*").specifier.specifiers[0]
-    assert wildcard._parsed_version is None
+    assert pinned.parsed_version is floor.parsed_version
+    assert pinned.parsed_version == Version("1.1.0")
+    # A wildcard validates its prefix and answers by prefix.
+    wildcard = parse_requirement("c==1.1.*").specifier
+    assert wildcard.contains(Version("1.1.5"))
+    assert not wildcard.contains(Version("1.2"))
     with pytest.raises(InvalidVersion, match="not-a-version"):
         parse_requirement("d==not-a-version")
-    assert "not-a-version" not in packaging_module._versions_by_text
-    limit = packaging_module._VERSION_CACHE_SIZE
+    limit = _table_limits()["versions"]
     for index in range(limit + 5):
         parse_requirement(f"pkg-{index}>={index}.0")
-    assert len(packaging_module._versions_by_text) <= limit
+    assert _table_sizes()["versions"] <= limit

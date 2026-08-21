@@ -12,7 +12,7 @@ def test_exact_pin_reuses_the_specifiers_parsed_version() -> None:
     pinned = _exact_pin(requirement)
     assert pinned == Version("1.2.3.post1")
     # The same object the Specifier parsed at construction -- no re-parse.
-    assert pinned is requirement.specifier.specifiers[0]._parsed_version
+    assert pinned is requirement.specifier.specifiers[0].parsed_version
 
 
 @pytest.mark.parametrize(
