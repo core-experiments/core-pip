@@ -2506,9 +2506,14 @@ class CandidateProvider:
             tuple(ordered_summaries)
             if ordered_summaries is not None
             else tuple(
+                # Sort on the comparison key, not the Version: the order is
+                # the same by definition (Version.__lt__ compares exactly
+                # this), but tuples of ints compare in C where Versions pay
+                # a Python-level __lt__ per comparison -- tens of thousands
+                # of them for a package with a few thousand releases.
                 sorted(
                     versions.values(),
-                    key=lambda item: (item.version, item.is_yanked),
+                    key=lambda item: (item.version.comparison_key, item.is_yanked),
                 ),
             )
         )

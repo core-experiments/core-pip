@@ -360,7 +360,7 @@ class CandidateEvaluator:
     def sort_key_internal(
         self,
         candidate: InstallationCandidate,
-    ) -> tuple[int, int, Version, int, int, int, int, tuple[int, str] | tuple[()]]:
+    ) -> tuple[int, int, object, int, int, int, int, tuple[int, str] | tuple[()]]:
         digest = None
 
         if candidate.link.hashes is not None:
@@ -431,7 +431,8 @@ class CandidateEvaluator:
         return (
             hash_rank,
             yanked_rank,
-            candidate.version,
+            # Comparison key, not the Version: same order, compared in C.
+            candidate.version.comparison_key,
             binary_preference,
             wheel_rank,
             egg_fragment_rank,

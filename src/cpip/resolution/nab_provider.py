@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import operator
 import sys
 from collections.abc import Mapping
 from contextlib import nullcontext
@@ -36,6 +37,12 @@ TYPE_CHECKING = False
 
 if TYPE_CHECKING:
     from contextlib import AbstractContextManager
+
+
+# Sorting Versions through their comparison keys gives the order
+# Version.__lt__ defines, with the tuple comparison done in C instead of a
+# Python-level dunder per comparison.
+_VERSION_ORDER = operator.attrgetter("comparison_key")
 
 
 @dataclass
@@ -271,7 +278,9 @@ class NabProvider:
             constrained_versions = {
                 candidate.version for candidate in constrained_candidates
             }
-            versions = tuple(sorted(set(versions) | constrained_versions))
+            versions = tuple(
+                sorted(set(versions) | constrained_versions, key=_VERSION_ORDER)
+            )
         matching = [
             version
             for version in versions
@@ -430,7 +439,7 @@ class NabProvider:
             # answer -- and the metadata it would read is not free.
             return matching[0]
 
-        newest_first = sorted(matching, reverse=True)
+        newest_first = sorted(matching, key=_VERSION_ORDER, reverse=True)
         for version in newest_first:
             if not self._pins_are_impossible(package, version):
                 return version
@@ -631,7 +640,7 @@ class NabProvider:
         matching: list[Version],
     ) -> tuple[Version, WheelCandidate] | None:
         """Walk back to the newest release whose metadata actually loads."""
-        for fallback in sorted(matching, reverse=True):
+        for fallback in sorted(matching, key=_VERSION_ORDER, reverse=True):
             if fallback == selected:
                 continue
             alternatives = tuple(
@@ -679,7 +688,7 @@ class NabProvider:
         matching: list[Version],
     ) -> tuple[Version, WheelCandidate] | None:
         """Walk back to the newest release this interpreter can install."""
-        for fallback in sorted(matching, reverse=True):
+        for fallback in sorted(matching, key=_VERSION_ORDER, reverse=True):
             if fallback == selected:
                 continue
             alternatives = tuple(
@@ -719,7 +728,7 @@ class NabProvider:
         matching: list[Version],
     ) -> tuple[Version, WheelCandidate] | None:
         """Walk back to the newest release whose metadata matches its filename."""
-        for fallback in sorted(matching, reverse=True):
+        for fallback in sorted(matching, key=_VERSION_ORDER, reverse=True):
             if fallback == selected:
                 continue
             alternatives = tuple(
@@ -938,7 +947,7 @@ class NabProvider:
         dependency edge.  Distinct versions give disjoint, non-touching
         singletons, so sorting once produces exactly what ``Range`` wants.
         """
-        ordered = sorted(set(versions))
+        ordered = sorted(set(versions), key=_VERSION_ORDER)
         return Range(tuple((version, True, version, True) for version in ordered))
 
     def begin_decision_scan(self) -> None:
