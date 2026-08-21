@@ -6,11 +6,14 @@ from pathlib import Path
 
 from cpip.core.versions import VERSION_WIRE_FORMAT, Version, is_version_wire
 from cpip.index.catalog_cache import (
+    CHOICE_HEADER,
     SUMMARY_HEADER,
     VERSION as CATALOG_VERSION,
     WHEEL_RECORD,
     CatalogChoices,
     cache_key,
+    choice_key,
+    encode_checked_payload,
     decode_summary,
     load_catalog,
     load_choices,
@@ -18,6 +21,7 @@ from cpip.index.catalog_cache import (
     load_summary,
     save_choices,
     save_links,
+    save_summary_value,
     summary_key,
 )
 from cpip.index.links import Link
@@ -134,6 +138,40 @@ def test_catalog_choices_are_scoped_to_generation(tmp_path: Path) -> None:
         )
         == {}
     )
+
+
+def test_malformed_choices_are_a_miss(tmp_path: Path) -> None:
+    """A choice of the wrong arity never reaches the provider's unpack, and a
+    summary carrying one is recompiled rather than re-served on every run."""
+    cache = SafeFileCache(str(tmp_path))
+    page_url = "https://example.test/simple/demo/"
+    link = Link.from_url(
+        "https://files.example.test/demo-1.0-py3-none-any.whl",
+        source_url=page_url,
+    )
+    save_links(cache, page_url, [link])
+    catalog = load_catalog(cache, page_url)
+    summary = load_summary(cache, page_url)
+    assert catalog is not None
+    assert summary is not None
+    record = catalog[0][0][2][0][1]
+    generation = summary[0]
+    malformed = {"1.0": (record, WHEEL_RECORD)}
+
+    cache.set_atomic(
+        choice_key(page_url, "target", True, True),
+        encode_checked_payload(CHOICE_HEADER, (generation, malformed)),
+    )
+    assert load_choices(cache, page_url, generation, "target", True, True) == {}
+
+    save_summary_value(
+        cache,
+        page_url,
+        (generation, summary[1], summary[2], {("target", True, True): malformed}),  # ty:ignore[invalid-argument-type]
+    )
+    recompiled = load_summary(cache, page_url)
+    assert recompiled is not None
+    assert recompiled[3] == {}
 
 
 def test_summary_payload_carries_the_version_wire_format(tmp_path: Path) -> None:

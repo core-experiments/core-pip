@@ -375,20 +375,22 @@ emptiness requirement means adopting the resolving check.
 
 ## Cache architecture
 
-cpip currently uses independent filesystem caches rather than SQLite. The
-storage shape follows the data: small validated maps use atomic marshal
-snapshots; large immutable bytes use content-addressed files; reusable installs
-use cloneable directory trees.
+cpip uses independent per-purpose caches under one root rather than a single
+database. The storage shape follows the data: small validated maps use atomic
+marshal snapshots; the two incremental key/value stores use SQLite; large
+immutable bytes use content-addressed files; reusable installs use cloneable
+directory trees.
 
 | Owner | Storage | Contents and validity |
 | --- | --- | --- |
 | `network/cache.py` | `http-v0/` | HTTP metadata/body pairs under hashed keys; missing or partial pairs are misses |
-| `index/catalog_cache.py` | records in the HTTP cache | versioned parsed Simple API links keyed by source URL; the release summary stores each version as `Version.to_wire()` (`public`, `release`, ordering key) stamped with `VERSION_WIRE_FORMAT`, and a summary of another format is recompiled from the text-only catalog |
+| `index/catalog_cache.py` | records in the HTTP cache | versioned parsed Simple API links keyed by source URL; the release summary stores each version as `Version.to_wire()` (`public`, `release`, ordering key) stamped with `VERSION_WIRE_FORMAT`; a summary that fails its checksum or shape check is recompiled from the text-only catalog |
 | `index/artifact_cache.py` | `artifacts-v0/` | immutable bodies by SHA-256 plus normalized-URL receipts and expected-hash validation |
-| `index/candidate_cache.py` | `wheels/` | wheels built from source, keyed by stable source identity |
+| `index/candidate_cache.py` | `wheels-v0/` | wheels built from source, keyed by stable source identity |
 | `index/metadata_cache.py` | `metadata-v0.sqlite` | parsed local wheel headers keyed by absolute path, size, and modification time |
 | `index/candidate_metadata_cache.py` | `candidate-metadata-v0.sqlite` | dependency metadata safe to reuse during resolution, stored as text and reparsed through the `core` intern tables |
 | `index/release_facts_cache.py` | `release-facts-v0.marshal` | deterministic release-level rejection reasons |
+| `cli/fast.py` | `fast-lock-plan-v0/` | rendered lock output keyed by interpreter, requirements and find-links |
 | `cli/fast_install.py` (`FastInstallMetadataCache`) | `fast-install-v0-<interpreter>.marshal` and `fast-install-trees-v0/` | narrow local plans, wheel metadata, and cloneable completed targets |
 | `install/wheel_archive_cache.py` | `archive-v0-<interpreter>/` | validated, unpacked immutable wheel trees keyed by wheel digest |
 | `install/wheel_install_plan_cache.py` | `resolution-v0-<interpreter>/` | short-lived exact-pin plan receipts referencing validated archives |

@@ -21,6 +21,9 @@ from cpip.core.appdirs import configured_cache_dir
 from cpip.core.names import canonicalize_name
 from cpip.core.utils import CACHE_VERSION_TAG
 
+FAST_LOCK_PLAN_BUCKET = f"fast-lock-plan-{CACHE_VERSION_TAG}"
+"""Directory under the cache root holding rendered lock plans."""
+
 REMOTE_EXACT_OPTIONS = ("--ignore-installed", "--no-compile", "--target")
 LOCAL_WHEELHOUSE_OPTIONS = (
     "--no-index",
@@ -378,7 +381,7 @@ def cache_path(options: LockOptions) -> str | None:
         digest = cache_digest(serialized)
     except (OSError, TypeError, ValueError):
         return None
-    return os.path.join(root, f"fast-lock-plan-{CACHE_VERSION_TAG}", f"{digest}.cache")
+    return os.path.join(root, FAST_LOCK_PLAN_BUCKET, f"{digest}.cache")
 
 
 def load_plan_cache(path: str | None, key: bytes | None) -> str | None:
