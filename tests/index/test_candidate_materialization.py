@@ -245,7 +245,7 @@ def test_materialized_candidate_keeps_the_resolver_layout(tmp_path: Path) -> Non
     from cpip.install.wheel_archive_runtime import RawWheelArchive, open_wheel_archive
     from cpip.resolution import archive as archive_module
 
-    make_wheel(tmp_path, "layout-pkg", "layout_pkg", "1.0")
+    wheel = _write_wheel_with_script(tmp_path, "layout-pkg", "1.0")
     provider = CandidateProvider.from_options(find_links=[str(tmp_path)], no_index=True)
     [candidate] = list(provider.find_candidates(parse_requirement("layout-pkg")))
     layout = candidate.wheel_layout
@@ -255,6 +255,13 @@ def test_materialized_candidate_keeps_the_resolver_layout(tmp_path: Path) -> Non
     assert members
     assert all(len(member) == 7 for member in members)
     assert root_is_purelib is True
+    # The seventh field is the member's external attributes, exactly as
+    # zipfile reports them -- including the script's 0755.
+    with zipfile.ZipFile(wheel) as archive:
+        expected = {info.filename: info.external_attr for info in archive.infolist()}
+    assert {member[0]: member[6] for member in members} == expected
+    script_mode = expected["layout_pkg-1.0.data/scripts/layout-pkg-tool"] >> 16
+    assert script_mode & 0o777 == 0o755
 
     scans = []
     original = archive_module.WheelArchive.read_central_directory
@@ -271,3 +278,57 @@ def test_materialized_candidate_keeps_the_resolver_layout(tmp_path: Path) -> Non
     finally:
         archive_module.WheelArchive.read_central_directory = original
     assert scans == []
+
+
+def _write_wheel_with_script(
+    wheelhouse: Path,
+    project: str,
+    version: str,
+    *,
+    metadata_compression: int = zipfile.ZIP_DEFLATED,
+) -> Path:
+    """A wheel with an executable script member and a chosen METADATA codec."""
+    import stat
+
+    dist = project.replace("-", "_")
+    dist_info = f"{dist}-{version}.dist-info"
+    path = wheelhouse / f"{dist}-{version}-py3-none-any.whl"
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr(f"{dist}/__init__.py", b"VALUE = 1\n")
+        script = zipfile.ZipInfo(f"{dist}-{version}.data/scripts/{project}-tool")
+        script.external_attr = (stat.S_IFREG | 0o755) << 16
+        script.compress_type = zipfile.ZIP_DEFLATED
+        archive.writestr(script, b"#!python\nprint('hi')\n")
+        metadata = zipfile.ZipInfo(f"{dist_info}/METADATA")
+        metadata.compress_type = metadata_compression
+        archive.writestr(
+            metadata,
+            f"Metadata-Version: 2.1\nName: {project}\nVersion: {version}\n",
+        )
+        archive.writestr(
+            f"{dist_info}/WHEEL",
+            "Wheel-Version: 1.0\nRoot-Is-Purelib: true\nTag: py3-none-any\n",
+        )
+        archive.writestr(f"{dist_info}/RECORD", "")
+    return path
+
+
+def test_unsupported_member_compression_falls_back_to_zipfile(tmp_path: Path) -> None:
+    """A METADATA the raw reader cannot decode must still resolve and
+    materialize -- through zipfile, as it did before the raw reader was used
+    for materialization."""
+    from cpip.index.candidate_materialization import _open_resolver_wheel_archive
+
+    wheel = _write_wheel_with_script(
+        tmp_path,
+        "odd-pkg",
+        "1.0",
+        metadata_compression=zipfile.ZIP_BZIP2,
+    )
+    with _open_resolver_wheel_archive(os.fspath(wheel)) as archive:
+        assert isinstance(archive, zipfile.ZipFile)
+    provider = CandidateProvider.from_options(find_links=[str(tmp_path)], no_index=True)
+    [candidate] = list(provider.find_candidates(parse_requirement("odd-pkg")))
+    assert candidate.name == "odd-pkg"
+    assert str(candidate.version) == "1.0"
+    assert isinstance(candidate.wheel_layout, tuple)

@@ -169,6 +169,14 @@ def _open_resolver_wheel_archive(
 
         archive = WheelArchive(file)
 
+        if any(member[0] not in {0, 8} for member in archive.members.values()):
+            # A compression method the raw reader cannot decode (bzip2,
+            # lzma): read() would fail on it later, so hand the whole
+            # wheel to zipfile now instead of reporting it invalid.
+            file.close()
+
+            return zipfile.ZipFile(path_text)
+
     except (OSError, ValueError, WheelhouseUnavailable):
         try:
             file.close()
