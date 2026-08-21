@@ -28,7 +28,15 @@ _HAS_PREAD = hasattr(os, "pread")
 
 
 class WheelArchive:
-    __slots__ = ("_fd", "_tail", "_tail_start", "file", "members", "modes")
+    __slots__ = (
+        "_fd",
+        "_tail",
+        "_tail_start",
+        "file",
+        "members",
+        "modes",
+        "needs_zipfile",
+    )
 
     def __init__(self, file, members=None, modes=None) -> None:
         self.file = file
@@ -49,6 +57,11 @@ class WheelArchive:
         # scan), which read_member()/read_many() treat as "nothing cached".
         self._tail = b""
         self._tail_start = 0
+        # Set by read_central_directory() when a member uses a compression
+        # method this reader cannot decode (anything but stored/deflate), so
+        # an opener can hand the wheel to zipfile without a second pass over
+        # the members.
+        self.needs_zipfile = False
         if members is None:
             self.read_central_directory()
 
@@ -170,10 +183,19 @@ class WheelArchive:
                 uncompressed_size,
                 local_offset,
             )
-            try:
-                name = name_bytes.decode("utf-8" if flags & 0x800 else "cp437")
-            except UnicodeDecodeError as exc:
-                raise WheelhouseUnavailable from exc
+            # Member names are almost always ASCII, which decodes the same
+            # under every codec here; the ASCII codec runs in C where cp437
+            # goes through the Python-level charmap codec (5x slower), and
+            # a wheel with a few thousand members pays that per member.
+            if name_bytes.isascii():
+                name = name_bytes.decode("ascii")
+            else:
+                try:
+                    name = name_bytes.decode("utf-8" if flags & 0x800 else "cp437")
+                except UnicodeDecodeError as exc:
+                    raise WheelhouseUnavailable from exc
+            if compression != 8 and compression != 0:
+                self.needs_zipfile = True
             if name in self.members:
                 # self.members is keyed by name, so a second record for the
                 # same name would silently overwrite the first -- including

@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import datetime
 import hashlib
+import operator
 import os
 import stat
 import time
@@ -71,6 +72,10 @@ _CATALOG_WORKERS = 32
 
 _CATALOG_METADATA_PREFETCH = 2
 
+
+# Orders CandidateSummary records by (version, is_yanked) without a Python
+# frame per comparison key.
+_SUMMARY_ORDER = operator.attrgetter("version", "is_yanked")
 
 CatalogSummaryGroup = tuple[
     str,
@@ -2404,6 +2409,8 @@ class CandidateProvider:
                                     ),
                                 )
 
+        parsed_link_cache = self.parsed_link_cache
+
         for link in catalog_links:
             if link.kind is ArtifactKind.WHEEL and not allow_binary:
                 continue
@@ -2430,8 +2437,10 @@ class CandidateProvider:
                     )
                     continue
 
-            with self.cache_lock:
-                parsed = self.parsed_link_cache.get(link)
+            # A dict get is atomic under the GIL; only the insert takes the
+            # lock. This runs once per link of every package listed, and a
+            # wheelhouse directory can hold thousands.
+            parsed = parsed_link_cache.get(link)
 
             if parsed is None:
                 try:
@@ -2441,7 +2450,7 @@ class CandidateProvider:
                     continue
 
                 with self.cache_lock:
-                    self.parsed_link_cache[link] = parsed
+                    parsed_link_cache[link] = parsed
 
             if not isinstance(parsed, InstallationCandidate):
                 continue
@@ -2482,15 +2491,9 @@ class CandidateProvider:
             tuple(ordered_summaries)
             if ordered_summaries is not None
             else tuple(
-                # Sort on the comparison key, not the Version: the order is
-                # the same by definition (Version.__lt__ compares exactly
-                # this), but tuples of ints compare in C where Versions pay
-                # a Python-level __lt__ per comparison -- tens of thousands
-                # of them for a package with a few thousand releases.
-                sorted(
-                    versions.values(),
-                    key=lambda item: (item.version, item.is_yanked),
-                ),
+                # attrgetter: a C-level key for a sort over every release of a
+                # package, where a lambda pays a frame per element.
+                sorted(versions.values(), key=_SUMMARY_ORDER),
             )
         )
 
