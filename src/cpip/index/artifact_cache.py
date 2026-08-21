@@ -10,7 +10,6 @@ import tempfile
 from collections.abc import Iterable, Mapping
 
 from cpip.core.errors import HashMismatch
-from cpip.core.utils import CACHE_VERSION, CACHE_VERSION_TAG
 
 TYPE_CHECKING = False
 
@@ -23,8 +22,7 @@ if TYPE_CHECKING:
         def hexdigest(self) -> str: ...
 
 
-ARTIFACT_CACHE_BUCKET = f"artifacts-{CACHE_VERSION_TAG}"
-ARTIFACT_CACHE_FORMAT = CACHE_VERSION
+ARTIFACT_CACHE_BUCKET = "artifacts"
 
 
 class CachedArtifact:
@@ -86,18 +84,17 @@ class ArtifactCache:
             return None
         if not (
             isinstance(value, tuple)
-            and len(value) == 5
-            and value[0] == ARTIFACT_CACHE_FORMAT
-            and value[1] == url
-            and isinstance(value[2], str)
-            and isinstance(value[3], int)
-            and isinstance(value[4], str)
+            and len(value) == 4
+            and value[0] == url
+            and isinstance(value[1], str)
+            and isinstance(value[2], int)
+            and isinstance(value[3], str)
         ):
             return None
-        digest = value[2]
+        digest = value[1]
         if expected_sha256 is not None and digest != expected_sha256.lower():
             return None
-        return self._body(digest, value[3])
+        return self._body(digest, value[2])
 
     @staticmethod
     def _digests(
@@ -149,7 +146,6 @@ class ArtifactCache:
             with os.fdopen(descriptor, "wb") as file:
                 marshal.dump(
                     (
-                        ARTIFACT_CACHE_FORMAT,
                         url,
                         artifact.digest,
                         artifact.size,

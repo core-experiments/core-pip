@@ -13,6 +13,7 @@ from typing import Any
 
 import pytest
 from cpip.cli import download as download_module
+from cpip.core.appdirs import resolve_cache_dir
 
 
 class Stop(Exception):
@@ -78,7 +79,7 @@ def test_no_cache_dir_disables_it(captured: dict[str, Any]) -> None:
 def test_cache_dir_is_honored(captured: dict[str, Any], tmp_path: Any) -> None:
     run(["somepackage", "--cache-dir", str(tmp_path)])
 
-    assert captured["collect_cache_dir"] == str(tmp_path)
+    assert captured["collect_cache_dir"] == resolve_cache_dir(str(tmp_path))
 
 
 def test_no_cache_dir_wins_over_an_explicit_directory(

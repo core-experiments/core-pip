@@ -8,12 +8,11 @@ import os
 import sqlite3
 
 from cpip.core.packaging import Requirement, parse_requirement
-from cpip.core.utils import CACHE_VERSION_TAG
 from cpip.core.versions import Version
 from cpip.index.source_models import CandidateMetadata
 from cpip.index.sqlite_cache import SqliteBackedCache
 
-NAME = f"candidate-metadata-{CACHE_VERSION_TAG}.sqlite"
+NAME = "candidate-metadata.sqlite"
 MAX_ENTRIES = 16_384
 INSTANCES: dict[str, CandidateMetadataCache] = {}
 CacheKey = tuple[str, str, tuple[str, ...], str]

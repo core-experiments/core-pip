@@ -7,15 +7,15 @@ import os
 import shutil
 from contextlib import contextmanager
 
-from cpip.core.utils import CACHE_VERSION_TAG, ensure_dir
+from cpip.core.utils import ensure_dir
 from cpip.platform.filesystem import (
     adjacent_tmp_file,
     copy_directory_permissions,
     replace,
 )
 
-HTTP_CACHE_BUCKET = f"http-{CACHE_VERSION_TAG}"
-"""Directory under the cache root holding the HTTP page cache."""
+HTTP_CACHE_BUCKET = "http"
+"""Directory under the cache directory holding the HTTP page cache."""
 
 TYPE_CHECKING = False
 

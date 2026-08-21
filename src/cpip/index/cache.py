@@ -7,17 +7,15 @@ import json
 import logging
 import os
 
-from cpip.core.utils import CACHE_VERSION_TAG
-
 logger = logging.getLogger(__name__)
 
 
-WHEEL_CACHE_BUCKET = f"wheels-{CACHE_VERSION_TAG}"
-"""Directory under the cache root holding wheels built from source."""
+WHEEL_CACHE_BUCKET = "wheels"
+"""Directory under the cache directory holding wheels built from source."""
 
 
 def wheel_cache_path(root: str, url: str) -> str:
-    """The entry directory for ``url``'s built wheel under cache root ``root``."""
+    """The entry directory for ``url``'s built wheel under cache directory ``root``."""
     digest = hashlib.sha256(url.encode("utf-8")).hexdigest()
     return os.path.join(root, WHEEL_CACHE_BUCKET, digest[:2], digest[2:4], digest)
 

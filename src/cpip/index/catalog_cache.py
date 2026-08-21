@@ -8,13 +8,7 @@ import marshal
 import posixpath
 import urllib.parse
 
-from cpip.core.utils import CACHE_VERSION, CACHE_VERSION_TAG
-from cpip.core.versions import (
-    InvalidVersion,
-    VERSION_WIRE_FORMAT,
-    Version,
-    is_version_wire,
-)
+from cpip.core.versions import InvalidVersion, Version, is_version_wire
 from cpip.core.wheel import WheelFile, WheelTag, parse_wheel_file
 from cpip.index.datetime import parse_iso_datetime
 from cpip.index.directory_index import project_version_from_filename
@@ -26,14 +20,11 @@ TYPE_CHECKING = False
 if TYPE_CHECKING:
     from typing import Any
 
-# Every key prefix and header carries the cache-wide version, so an entry
-# written under another version is never read (and never migrated).
-VERSION = CACHE_VERSION
-PREFIX = f"cpip-index-catalog-{CACHE_VERSION_TAG}:"
-SUMMARY_PREFIX = f"cpip-index-summary-{CACHE_VERSION_TAG}:"
-CHOICE_PREFIX = f"cpip-index-choice-{CACHE_VERSION_TAG}:"
-SUMMARY_HEADER = f"cpip-index-summary-{CACHE_VERSION_TAG}\0".encode("ascii")
-CHOICE_HEADER = f"cpip-index-choice-{CACHE_VERSION_TAG}\0".encode("ascii")
+PREFIX = "cpip-index-catalog:"
+SUMMARY_PREFIX = "cpip-index-summary:"
+CHOICE_PREFIX = "cpip-index-choice:"
+SUMMARY_HEADER = b"cpip-index-summary\0"
+CHOICE_HEADER = b"cpip-index-choice\0"
 
 WHEEL_RECORD = 1
 SDIST_RECORD = 2
@@ -156,15 +147,14 @@ def _load_catalog_uncached(
         payload = marshal.loads(raw)
         if (
             not isinstance(payload, tuple)
-            or len(payload) != 4
+            or len(payload) != 3
             or payload[0] != "cpip-index-catalog"
-            or payload[1] != VERSION
+            or not isinstance(payload[1], list)
             or not isinstance(payload[2], list)
-            or not isinstance(payload[3], list)
         ):
             return None
-        groups = payload[2]
-        unparsed = payload[3]
+        groups = payload[1]
+        unparsed = payload[2]
         if not all(valid_group(group) for group in groups) or not all(
             valid_record(record) for record in unparsed
         ):
@@ -211,8 +201,7 @@ def decode_summary(raw: bytes) -> CatalogSummary | None:
     payload = decode_checked_payload(raw, SUMMARY_HEADER)
     if (
         not isinstance(payload, tuple)
-        or len(payload) != 5
-        or payload[4] != VERSION_WIRE_FORMAT
+        or len(payload) != 4
         or not isinstance(payload[0], str)
         or not isinstance(payload[1], list)
         or not isinstance(payload[2], bool)
@@ -492,7 +481,7 @@ def release_facts(artifacts: list[CatalogArtifact]) -> list[CatalogFact]:
 def save_catalog(cache: Any, url: str, catalog: CatalogData) -> None:
     try:
         payload = marshal.dumps(
-            ("cpip-index-catalog", VERSION, catalog[0], catalog[1]),
+            ("cpip-index-catalog", catalog[0], catalog[1]),
         )
     except (TypeError, ValueError):
         return
@@ -543,10 +532,7 @@ def save_summary_value(
     summary: CatalogSummary,
 ) -> None:
     try:
-        payload = encode_checked_payload(
-            SUMMARY_HEADER,
-            (*summary, VERSION_WIRE_FORMAT),
-        )
+        payload = encode_checked_payload(SUMMARY_HEADER, summary)
     except (TypeError, ValueError):
         return
     set_cache_entry(cache, summary_key(url), payload)

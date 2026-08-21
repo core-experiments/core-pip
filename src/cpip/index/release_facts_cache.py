@@ -6,15 +6,9 @@ import atexit
 import os
 from typing import cast
 
-from cpip.core.utils import (
-    CACHE_VERSION,
-    CACHE_VERSION_TAG,
-    load_snapshot,
-    save_snapshot,
-)
+from cpip.core.utils import load_snapshot, save_snapshot
 
-VERSION = CACHE_VERSION
-NAME = f"release-facts-{CACHE_VERSION_TAG}.marshal"
+NAME = "release-facts.marshal"
 MAX_ENTRIES = 32_768
 INSTANCES: dict[str, ReleaseFactsCache] = {}
 FactKey = tuple[str, str, str]
@@ -36,13 +30,12 @@ class ReleaseFactsCache:
         payload = load_snapshot(self.path)
         if (
             not isinstance(payload, tuple)
-            or len(payload) != 3
+            or len(payload) != 2
             or payload[0] != "cpip-release-facts"
-            or payload[1] != VERSION
-            or not isinstance(payload[2], dict)
+            or not isinstance(payload[1], dict)
         ):
             return
-        for key, value in payload[2].items():
+        for key, value in payload[1].items():
             if self.valid_key(key) and isinstance(value, str):
                 self.entries[cast("FactKey", key)] = value
 
@@ -68,7 +61,7 @@ class ReleaseFactsCache:
             return
         if save_snapshot(
             self.path,
-            ("cpip-release-facts", VERSION, self.entries),
+            ("cpip-release-facts", self.entries),
         ):
             self.dirty = False
 
