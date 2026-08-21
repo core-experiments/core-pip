@@ -1068,11 +1068,38 @@ def parse_requirement(value: str) -> Requirement:
     return Requirement(
         name=name,
         extras=extras,
-        specifier=SpecifierSet(spec),
+        specifier=_interned_specifier_set(spec),
         url=url,
         marker=marker,
         raw=raw,
     )
+
+
+# parse_requirement is cached on the whole requirement string, so
+# "leaf-0>=1.1.0" and "leaf-1>=1.1.0" each parsed their own
+# SpecifierSet(">=1.1.0") -- a Specifier and a Version per clause -- although
+# real metadata repeats the same handful of specifier texts across thousands
+# of Requires-Dist lines. SpecifierSet's only mutable state is memo caches
+# (text, contains, bounds, prerelease flag), so one instance per distinct
+# text can back every requirement that uses it, and those memo caches are
+# then shared as well. Bounded like the other parse caches: a sweep of
+# unique texts clears it rather than growing without limit.
+_SPECIFIER_SET_CACHE_SIZE = 4096
+_specifier_sets: dict[str, SpecifierSet] = {}
+
+
+def _interned_specifier_set(spec: str) -> SpecifierSet:
+    specifier_set = _specifier_sets.get(spec)
+
+    if specifier_set is None:
+        specifier_set = SpecifierSet(spec)
+
+        if len(_specifier_sets) >= _SPECIFIER_SET_CACHE_SIZE:
+            _specifier_sets.clear()
+
+        _specifier_sets[spec] = specifier_set
+
+    return specifier_set
 
 
 def canonicalize_requirement(value: str) -> str:

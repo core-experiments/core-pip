@@ -381,3 +381,38 @@ class TestSplitMarker:
         from cpip.core.packaging import split_marker
 
         assert split_marker(value) == expected
+
+
+def test_parse_requirement_shares_specifier_sets_by_text() -> None:
+    from cpip.core import packaging as packaging_module
+
+    packaging_module._specifier_sets.clear()
+    parse_requirement.cache_clear()
+    first = parse_requirement("leaf-0>=1.1.0,<2")
+    second = parse_requirement("leaf-1>=1.1.0,<2")
+    third = parse_requirement("leaf-2>=1.1.0")
+    assert first.specifier is second.specifier
+    assert first.specifier is not third.specifier
+    assert first.specifier == SpecifierSet(">=1.1.0,<2")
+    assert (
+        parse_requirement("bare-a").specifier is parse_requirement("bare-b").specifier
+    )
+    assert not parse_requirement("bare-a").specifier.specifiers
+    # Sharing changes nothing about the answers.
+    assert first.specifier.contains(Version("1.5"))
+    assert not second.specifier.contains(Version("2.0"))
+    assert str(first.specifier) == str(second.specifier)
+
+
+def test_specifier_set_intern_table_is_bounded() -> None:
+    from cpip.core import packaging as packaging_module
+
+    packaging_module._specifier_sets.clear()
+    parse_requirement.cache_clear()
+    limit = packaging_module._SPECIFIER_SET_CACHE_SIZE
+    for index in range(limit + 5):
+        parse_requirement(f"pkg-{index}>={index}")
+    assert len(packaging_module._specifier_sets) <= limit
+    # Entries evicted by the sweep are simply rebuilt; requirements already
+    # parsed keep the instances they were given.
+    assert parse_requirement("pkg-0>=0").specifier == SpecifierSet(">=0")
