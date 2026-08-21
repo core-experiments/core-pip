@@ -13,7 +13,12 @@ import zipfile
 from pathlib import Path
 
 from cpip.core import caches
+from cpip.index import candidate_metadata_cache as candidate_metadata_cache_module
+from cpip.index.candidate_metadata_cache import get_candidate_metadata_cache
+from cpip.index.metadata_cache import get_wheel_metadata_cache
+from cpip.index.release_facts_cache import get_release_facts_cache
 from cpip.index import metadata_cache as metadata_cache_module
+from cpip.index import release_facts_cache as release_facts_cache_module
 
 SHA256_PLACEHOLDER = "a" * 64
 METADATA_PLACEHOLDER = "b" * 64
@@ -516,6 +521,18 @@ def cold_metadata_cache_dir() -> str:
     return str(directory)
 
 
+def flush_persistent_caches(cache_dir: str) -> None:
+    """Write the per-directory stores to disk the way process exit would.
+
+    ``put`` only queues an entry; the SQLite and marshal stores flush at
+    ``atexit``, so a benchmark that primes a cache directory in-process
+    must flush explicitly before the warm iterations read it back.
+    """
+    get_wheel_metadata_cache(cache_dir).flush()
+    get_candidate_metadata_cache(cache_dir).flush()
+    get_release_facts_cache(cache_dir).flush()
+
+
 def reset_caches() -> None:
     """Drop the memoization that would otherwise hide parsing work.
 
@@ -526,6 +543,10 @@ def reset_caches() -> None:
     cannot show up at all.
     """
     caches.clear_all()
-    # Persistent wheel metadata caches are one instance per directory per
-    # process, so they outlive the provider that opened them.
+    # Persistent caches are one instance per directory per process, so they
+    # outlive the provider that opened them; dropping the instances makes
+    # the next provider read the directory again instead of the instance's
+    # in-memory entries.
     metadata_cache_module._CACHE_INSTANCES.clear()
+    candidate_metadata_cache_module.INSTANCES.clear()
+    release_facts_cache_module.INSTANCES.clear()
