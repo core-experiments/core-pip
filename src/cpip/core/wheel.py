@@ -713,11 +713,23 @@ def project_wheel_dependencies(
     if dependencies is not None:
         return dependencies
 
-    dependencies = tuple(
-        requirement
-        for requirement in metadata.dependencies
-        if marker_applies(requirement.marker, extras=extras)
-    )
+    declared = metadata.dependencies
+
+    # A wheel whose Requires-Dist lines carry no markers applies them all
+    # for every extras set: hand back the metadata's own tuple instead of
+    # filtering -- and when filtering is needed, a list comprehension runs
+    # in one frame where the generator expression paid a frame resumption
+    # per dependency, per candidate wheel examined.
+    if all(requirement.marker is None for requirement in declared):
+        dependencies = declared
+    else:
+        dependencies = tuple(
+            [
+                requirement
+                for requirement in declared
+                if marker_applies(requirement.marker, extras=extras)
+            ],
+        )
 
     if key is not None:
         bounded_cache_put(wheel_dependency_cache, key, dependencies)
@@ -943,6 +955,9 @@ def read_metadata_message_internal(
         return Parser().parsestr(contents)
 
 
+_NAME_SEPARATORS_RE = re.compile(r"[-_.]+")
+
+
 @lru_cache(maxsize=4096)
 def _dist_info_match_key(name: str) -> str:
     """Normalized project name for matching against a dist-info directory.
@@ -980,7 +995,9 @@ def wheel_dist_info_dir(source: ZipArchiveSource, name: str) -> str:
 
     expected = _dist_info_match_key(name)
 
-    actual = re.sub(r"[-_.]+", "", dist_info_dir.removesuffix(".dist-info")).casefold()
+    actual = _NAME_SEPARATORS_RE.sub(
+        "", dist_info_dir.removesuffix(".dist-info")
+    ).casefold()
 
     if not actual.startswith(expected):
         raise UnsupportedWheel(

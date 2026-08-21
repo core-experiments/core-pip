@@ -282,3 +282,42 @@ def test_parse_wheel_file_bare_name_matches_path(tmp_path: Path) -> None:
     assert parse_wheel_file(str(tmp_path / name)) == bare
     assert parse_wheel_file(f"nested/dir/{name}") == bare
     assert parse_wheel_file("nested/dir/") is None
+
+
+def test_project_wheel_dependencies_marker_filtering() -> None:
+    from cpip.core.packaging import Version, parse_requirement
+    from cpip.core.wheel import WheelResolutionMetadata, project_wheel_dependencies
+
+    plain = WheelResolutionMetadata(
+        name="pkg",
+        version=Version("1.0"),
+        dependencies=tuple(map(parse_requirement, ("a>=1", "b", "c[x]==2"))),
+        provided_extras=frozenset(),
+        requires_python=None,
+    )
+    # No markers: every dependency applies for any extras set, and the
+    # metadata's own tuple is handed back rather than a filtered copy.
+    assert project_wheel_dependencies(plain, None, frozenset()) is plain.dependencies
+    assert (
+        project_wheel_dependencies(plain, None, frozenset({"x"})) is plain.dependencies
+    )
+
+    marked = WheelResolutionMetadata(
+        name="pkg",
+        version=Version("1.0"),
+        dependencies=tuple(
+            map(
+                parse_requirement,
+                ("a", 'b; extra == "fast"', 'c; python_version < "2.0"', "d"),
+            ),
+        ),
+        provided_extras=frozenset({"fast"}),
+        requires_python=None,
+    )
+    assert [r.name for r in project_wheel_dependencies(marked, None, frozenset())] == [
+        "a",
+        "d",
+    ]
+    assert [
+        r.name for r in project_wheel_dependencies(marked, None, frozenset({"fast"}))
+    ] == ["a", "b", "d"]
