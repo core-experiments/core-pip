@@ -273,3 +273,12 @@ def test_target_context_cached_tag_lookup_is_stable() -> None:
     second = TargetContext(platforms=("linux_x86_64",), implementation="cp")
 
     assert supported_wheel_tags(first) is supported_wheel_tags(second)
+
+
+def test_parse_wheel_file_bare_name_matches_path(tmp_path: Path) -> None:
+    name = "simple-1.1-4-py2.py3-abi1.abi2-any.whl"
+    bare = parse_wheel_file(name)
+    assert bare is not None
+    assert parse_wheel_file(str(tmp_path / name)) == bare
+    assert parse_wheel_file(f"nested/dir/{name}") == bare
+    assert parse_wheel_file("nested/dir/") is None
