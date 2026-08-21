@@ -126,7 +126,11 @@ def exact_install_plan_key_from_strings(
 def _normalized_exact_requirement(
     requirement: object,
 ) -> tuple[str, str, tuple[str, ...]] | None:
-    if getattr(requirement, "url", None) is not None:
+    # A URL or a local path locates one artifact; a plan keyed by name and
+    # version alone must never be reused for (or from) it.
+    if getattr(requirement, "url", None) is not None or getattr(
+        requirement, "is_unnamed_direct", False
+    ):
         return None
 
     exact_version = getattr(

@@ -6,6 +6,7 @@ import json
 import marshal
 import os
 import sqlite3
+from pathlib import Path
 from typing import cast
 
 from cpip.core.packaging import Requirement, parse_requirement
@@ -133,9 +134,12 @@ class CandidateMetadataCache(SqliteBackedCache):
 
     def _import_v3(self, path: str) -> bool:
         """Copy the metadata rows of a v3 database; they have the same shape."""
+        # A URI, so the path must be percent-encoded: a literal "?" or "#"
+        # in a cache directory would otherwise be read as query or fragment.
+        uri = Path(path).resolve().as_uri() + "?mode=ro"
         try:
-            source = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
-        except sqlite3.Error:
+            source = sqlite3.connect(uri, uri=True)
+        except (sqlite3.Error, OSError, ValueError):
             return False
         try:
             rows = source.execute(

@@ -118,6 +118,10 @@ def test_candidate_metadata_cache_imports_v3_database(tmp_path: Path) -> None:
     import marshal
     import sqlite3
 
+    # A directory name with URI-reserved characters: the import opens the
+    # v3 store by URI and must escape the path.
+    tmp_path = tmp_path / "cache?dir#1"
+    tmp_path.mkdir()
     key = ("https://example.test/demo.whl", "3.0", ("x",), "sha256:v3")
     value = ("demo", "3.0", ("requests>=2",), ("x",), ">=3.9")
     source = sqlite3.connect(tmp_path / V3_NAME)
