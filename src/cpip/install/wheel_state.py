@@ -10,6 +10,7 @@ import stat
 from collections.abc import Iterable, Mapping
 
 from cpip.build.metadata import InstalledDistributionStore
+from cpip.core.versions import version_of
 from cpip.core.errors import InstallationError
 
 TYPE_CHECKING = False
@@ -68,7 +69,8 @@ class InstalledWheelDistribution:
 
         self.raw_version = version
 
-        self.version = version
+        # None for a legacy, non-PEP 440 version: never \"the same version\".
+        self.version = version_of(version)
 
         self.canonical_name = _canonicalize_installed_name(name)
 

@@ -32,7 +32,12 @@ class InstalledCandidate:
     ) -> None:
         self.distribution = distribution
         self.name = distribution.name
-        self.version = Version(distribution.version)
+        version = distribution.version
+        if version is None:
+            # A legacy, non-PEP 440 installed version cannot take part in
+            # resolution; the adapter treats the package as not installed.
+            raise ValueError(f"installed {distribution.name} has no PEP 440 version")
+        self.version = version
         self.dependencies = tuple(distribution.dependencies(extras))
         self.path = distribution.location
 

@@ -14,6 +14,7 @@ from .packaging import (
     marker_applies,
     parse_requirement,
 )
+from .versions import Version, version_of
 from .wheel_metadata import parse_metadata_headers
 
 TYPE_CHECKING = False
@@ -71,12 +72,21 @@ def _read_raw_metadata_text(
 
 
 class InstalledDistribution:
+    """An installed distribution as found on disk.
+
+    ``raw_version`` is the text in its METADATA; ``version`` is that text
+    as a Version, or None when it is not a PEP 440 version (a legacy
+    package), which every comparison reads as "not that version" so that
+    inspection and removal keep working for such packages.
+    """
+
     __slots__ = (
         "_fast_headers",
         "location",
         "metadata_location",
         "name",
         "raw",
+        "raw_version",
         "version",
     )
 
@@ -90,7 +100,9 @@ class InstalledDistribution:
     ) -> None:
         self.name = name
 
-        self.version = version
+        self.raw_version = version
+
+        self.version = version_of(version)
 
         self.location = location
 
@@ -102,7 +114,9 @@ class InstalledDistribution:
 
     name: str
 
-    version: str
+    raw_version: str
+
+    version: Version | None
 
     location: str
 

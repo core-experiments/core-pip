@@ -236,7 +236,7 @@ class InstalledMetadataDistribution:
 
     @property
     def raw_version(self) -> str:
-        return self.distribution_internal.version
+        return self.distribution_internal.raw_version
 
     @property
     def version(self) -> Version:

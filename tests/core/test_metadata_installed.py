@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pytest
 from cpip.core.metadata import iter_installed_distributions
+from cpip.core.versions import Version
 
 
 def _write_dist_info(
@@ -48,7 +49,7 @@ def test_iter_installed_distributions_matches_stdlib(tmp_path: Path) -> None:
     )
 
     assert distribution.name == stdlib_dist.metadata.get("Name")
-    assert distribution.version == stdlib_dist.version
+    assert distribution.raw_version == stdlib_dist.version
     assert distribution.canonical_name == "widget"
 
     assert sorted(distribution._fast_metadata_headers()["requires-dist"]) == sorted(
@@ -75,7 +76,7 @@ def test_iter_installed_distributions_falls_back_to_pkg_info(tmp_path: Path) -> 
     [distribution] = iter_installed_distributions(paths=[str(site_packages)])
 
     assert distribution.name == "legacy"
-    assert distribution.version == "0.1"
+    assert distribution.raw_version == "0.1"
     assert distribution.dependencies() == []
 
 
@@ -121,11 +122,15 @@ def test_find_installed_matches_an_uncached_scan(tmp_path: Path) -> None:
     paths = [str(site_packages)]
     found = find_installed("WIDGET", paths)
     assert found is not None
-    assert (found.name, found.version) == ("widget", "1.2.3")
+    assert (found.name, found.raw_version, found.version) == (
+        "widget",
+        "1.2.3",
+        Version("1.2.3"),
+    )
     assert find_installed("other-thing", paths) is not None
     assert find_installed("missing", paths) is None
     expected = {
-        d.canonical_name: d.version for d in iter_installed_distributions(paths)
+        d.canonical_name: d.raw_version for d in iter_installed_distributions(paths)
     }
     assert expected == {"widget": "1.2.3", "other-thing": "0.1"}
 
@@ -184,7 +189,7 @@ def test_find_installed_notices_a_new_distribution(tmp_path: Path) -> None:
     os.utime(site_packages, (later, later))
     found = find_installed("gadget", paths)
     assert found is not None
-    assert found.version == "2.0"
+    assert found.raw_version == "2.0"
 
 
 def test_find_installed_first_path_wins(tmp_path: Path) -> None:
@@ -197,10 +202,10 @@ def test_find_installed_first_path_wins(tmp_path: Path) -> None:
     clear_installed_index()
     found = find_installed("widget", [str(first), str(second)])
     assert found is not None
-    assert found.version == "1.0"
+    assert found.raw_version == "1.0"
     found = find_installed("widget", [str(second), str(first)])
     assert found is not None
-    assert found.version == "2.0"
+    assert found.raw_version == "2.0"
 
 
 def test_find_installed_accepts_a_generator_of_paths(tmp_path: Path) -> None:
@@ -211,7 +216,7 @@ def test_find_installed_accepts_a_generator_of_paths(tmp_path: Path) -> None:
     clear_installed_index()
     found = find_installed("widget", (path for path in [str(site_packages)]))
     assert found is not None
-    assert found.version == "1.2.3"
+    assert found.raw_version == "1.2.3"
     # And the cached index built from that generator is the full one.
     assert find_installed("widget", [str(site_packages)]) is found
 
@@ -249,3 +254,23 @@ def test_default_and_explicit_scans_are_cached_separately(
         for paths in order:
             metadata_module.find_installed("not-installed-anywhere", paths)
         assert len(calls) == 2
+
+
+def test_installed_distribution_keeps_a_legacy_version_as_text(tmp_path: Path) -> None:
+    """A non-PEP 440 version never matches a Version (so it is replaced on
+    install and ignored by the resolver) but the distribution stays
+    inspectable and removable through its text."""
+    from cpip.core.metadata import clear_installed_index, find_installed
+
+    site_packages = tmp_path / "site-packages"
+    _write_dist_info(
+        site_packages,
+        "legacy-1.0_beta.dist-info",
+        "Metadata-Version: 2.1\nName: legacy\nVersion: 1.0 beta\n",
+    )
+    clear_installed_index()
+    found = find_installed("legacy", [str(site_packages)])
+    assert found is not None
+    assert found.raw_version == "1.0 beta"
+    assert found.version is None
+    assert found.version != Version("1.0")

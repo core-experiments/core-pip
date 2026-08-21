@@ -18,7 +18,6 @@ from threading import Lock
 
 from cpip.core.errors import InstallationError
 from cpip.core.names import canonicalize_name
-from cpip.core.versions import version_of
 from cpip.core.wheel import (
     WheelCandidate,
     validate_wheel,
@@ -217,11 +216,9 @@ def install_wheel_internal(
             ).find(candidate.name)
         else:
             existing = None
-    # ``existing`` is a wheel-state record (version as text) or a metadata
-    # distribution (a Version); compare as Versions either way.
-    same_version = existing is not None and (
-        version_of(existing.version) == candidate.version
-    )
+    # A legacy (non-PEP 440) installed version is None and so never "the
+    # same version": it is replaced.
+    same_version = existing is not None and existing.version == candidate.version
     if same_version and not force and not preserve_existing:
         return candidate
 
