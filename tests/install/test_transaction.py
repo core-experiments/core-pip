@@ -24,7 +24,7 @@ def test_lightweight_installed_wheel_inventory_reads_dist_info(tmp_path: Path) -
 
     assert installed is not None
     distribution = installed["demo-pkg"]
-    assert distribution.version == "1.2"
+    assert distribution.raw_version == "1.2"
     assert distribution.read_text("RECORD") == "demo.py,,\n"
 
 

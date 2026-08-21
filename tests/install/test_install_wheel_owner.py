@@ -766,3 +766,25 @@ def test_reinstalling_the_same_version_is_a_no_op(
 
     assert "Uninstalling" not in capsys.readouterr().out
     assert (target / "owner_demo-1.0.dist-info").exists()
+
+
+def test_installed_wheel_distribution_versions_are_versions() -> None:
+    from cpip.core.versions import Version
+    from cpip.install.wheel_state import InstalledWheelDistribution
+
+    record = InstalledWheelDistribution(
+        location="/site",
+        info_location="/site/demo-1.0.dist-info",
+        name="Demo",
+        version="1.0",
+    )
+    assert record.version == Version("1.0.0")
+    assert record.raw_version == "1.0"
+    legacy = InstalledWheelDistribution(
+        location="/site",
+        info_location="/site/x.dist-info",
+        name="x",
+        version="1.0 beta",
+    )
+    assert legacy.version is None
+    assert legacy.raw_version == "1.0 beta"

@@ -17,7 +17,6 @@ import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING
 
-from cpip.core.versions import version_of
 from cpip.core.errors import InstallationError
 from cpip.install.wheel_archive import record_metadata_internal, validate_member_parts
 from cpip.install.wheel_archive_cache import INSTALL_WORKERS, prepare_cached_wheels
@@ -677,7 +676,7 @@ def install_wheels_from_archive_cache(
 
                 if (
                     distribution is not None
-                    and version_of(distribution.version) == plan.candidate.version
+                    and distribution.version == plan.candidate.version
                     and not force
                     and not preserve_existing
                 ):

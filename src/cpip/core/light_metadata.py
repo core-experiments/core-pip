@@ -35,7 +35,7 @@ if TYPE_CHECKING:
 
     from cpip.core.packaging import Requirement
 
-stdlib_pkgs = {"python", "wsgiref", "argparse"}
+stdlib_pkgs = frozenset({"python", "wsgiref", "argparse"})
 
 
 class LightMetadata:
