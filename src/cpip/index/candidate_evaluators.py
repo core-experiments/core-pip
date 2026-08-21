@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import platform
+from functools import lru_cache
 from collections.abc import Sequence
 from typing import TypeVar
 
@@ -313,9 +314,12 @@ class CandidateEvaluator:
         return parsed
 
     @staticmethod
+    @lru_cache(maxsize=4096)
     def requires_python_matches(requires_python: str) -> bool:
-        # SpecifierSet is interned by text and memoizes containment, so the
-        # repeat question for the same Requires-Python is a dict lookup.
+        # Whether the running interpreter satisfies a Requires-Python text is
+        # a process constant, like supported_wheel_tags: memoized for the life
+        # of the process and deliberately not a cpip.core.caches table, so
+        # the benchmarks' reset leaves it alone.
         return SpecifierSet(requires_python).contains(_RUNNING_PYTHON)
 
     @staticmethod

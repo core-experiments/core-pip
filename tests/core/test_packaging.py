@@ -609,3 +609,14 @@ class TestPep440ContainmentRules:
             (Version("1!1.3"), True),
             (Version("1!2"), False),
         )
+
+
+def test_version_of_parses_text_and_passes_versions_through() -> None:
+    from cpip.core.versions import version_of
+
+    assert version_of("2.0.0") == Version("2.0")
+    assert version_of(Version("2.0")) is Version("2.0")
+    assert version_of("not a version") is None
+    # The check installed-distribution comparisons rely on.
+    assert version_of("2.0.0") == Version("2.0.0")
+    assert (Version("2.0.0") == "2.0.0") is False

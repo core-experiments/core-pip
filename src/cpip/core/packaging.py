@@ -506,8 +506,8 @@ class Requirement:
     """
 
     __slots__ = (
+        "_canonical_name",
         "_is_unnamed_direct",
-        "canonical_name",
         "extras",
         "marker",
         "name",
@@ -517,7 +517,7 @@ class Requirement:
     )
 
     name: str
-    canonical_name: str
+    _canonical_name: str
     specifier: SpecifierSet
     extras: frozenset[str]
     url: str | None
@@ -535,12 +535,26 @@ class Requirement:
         raw: str = "",
     ) -> None:
         _write_name(self, name)
-        _write_canonical_name(self, canonicalize_name(name))
         _write_specifier(self, specifier)
         _write_extras(self, extras)
         _write_url(self, url)
         _write_marker(self, marker)
         _write_raw(self, raw)
+
+    @property
+    def canonical_name(self) -> str:
+        """PEP 503 normalised name, computed on first read.
+
+        Not computed at construction: parsing a Requires-Dist line must not
+        pay a name normalisation the caller may never ask for, and the
+        interned Requirement pays it at most once.
+        """
+        try:
+            return self._canonical_name
+        except AttributeError:
+            canonical = canonicalize_name(self.name)
+            object.__setattr__(self, "_canonical_name", canonical)
+            return canonical
 
     @property
     def is_unnamed_direct(self) -> bool:
@@ -628,7 +642,6 @@ class Requirement:
 
 
 _write_name = Requirement.__dict__["name"].__set__
-_write_canonical_name = Requirement.__dict__["canonical_name"].__set__
 _write_specifier = Requirement.__dict__["specifier"].__set__
 _write_extras = Requirement.__dict__["extras"].__set__
 _write_url = Requirement.__dict__["url"].__set__

@@ -27,6 +27,7 @@ from cpip.cli.requirements import (
 )
 from cpip.cli.resolution_errors import resolution_error_message
 from cpip.cli.target import target_prefix
+from cpip.core.versions import version_of
 from cpip.core.appdirs import resolve_cache_dir
 from cpip.core.cpip_version import CPIP_DISTRIBUTION_NAMES
 from cpip.core.errors import (
@@ -999,7 +1000,7 @@ def install_editables(
                     if (
                         execution.options.upgrade
                         and existing is not None
-                        and existing.version == candidate.version
+                        and version_of(existing.version) == candidate.version
                     ):
                         if not execution.quiet:
                             print(
@@ -1306,7 +1307,7 @@ def run_install(args: list[str]) -> int:
                 existing = find_installed(candidate.name)
                 dependency = needed_versions.get(candidate.canonical_name)
                 if existing is not None and (
-                    existing.version == candidate.version
+                    version_of(existing.version) == candidate.version
                     or (
                         candidate.canonical_name not in requested_roots
                         and dependency is not None

@@ -303,5 +303,21 @@ def is_version_wire(value: object) -> bool:
     return isinstance(local, tuple)
 
 
+def version_of(value: Version | str) -> Version | None:
+    """The Version for an attribute that may still be text.
+
+    Installed-distribution records carry the version as the text read from
+    METADATA or RECORD; comparing that text with a Version must parse it
+    first (a Version never compares equal to text). None when the text is
+    not a PEP 440 version, which a caller treats as "not the same version".
+    """
+    if isinstance(value, Version):
+        return value
+    try:
+        return Version(value)
+    except InvalidVersion:
+        return None
+
+
 ZERO_VERSION = Version("0")
 """The one "no declared version" sentinel (unknown direct sources, the resolver root)."""
