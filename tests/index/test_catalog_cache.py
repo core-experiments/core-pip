@@ -5,7 +5,7 @@ import marshal
 import urllib.parse
 from pathlib import Path
 
-from cpip.core.packaging import Version
+from cpip.core.versions import Version
 from cpip.index.catalog_cache import (
     LEGACY_PREFIX,
     LEGACY_SUMMARY_HEADER,

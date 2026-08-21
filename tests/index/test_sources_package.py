@@ -7,7 +7,8 @@ from pathlib import Path
 
 import pytest
 from cpip.cli.main import main
-from cpip.core.packaging import Requirement, Version, parse_requirement
+from cpip.core.packaging import Requirement, parse_requirement
+from cpip.core.versions import Version
 from cpip.core.wheel import TargetContext
 from cpip.index.cache import origin_hashes
 from cpip.index.candidate_evaluators import CandidateEvaluator

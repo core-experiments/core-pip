@@ -29,12 +29,8 @@ from typing import Any
 
 from cpip.build.pep517_hooks import BuildBackendHookCaller, HookMissing
 from cpip.core.errors import BuildError
-from cpip.core.packaging import (
-    InvalidVersion,
-    Version,
-    canonicalize_name,
-    parse_requirement,
-)
+from cpip.core.packaging import canonicalize_name, parse_requirement
+from cpip.core.versions import InvalidVersion, Version
 from cpip.core.subprocess import call_subprocess
 from cpip.install.build_env.venv import create_isolated_venv
 

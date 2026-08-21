@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from cpip.core.packaging import Version, parse_requirement
+from cpip.core.packaging import parse_requirement
+from cpip.core.versions import Version
 from cpip.core.utils import save_snapshot
 from cpip.index.candidate_metadata_cache import (
     LEGACY_NAME,

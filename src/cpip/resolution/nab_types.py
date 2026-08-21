@@ -8,20 +8,17 @@ from __future__ import annotations
 
 from urllib.parse import urlsplit
 
+from cpip.core.versions import ZERO_VERSION
 from cpip._vendor.nab_resolver.ranges import Range
 from cpip.core.metadata import InstalledDistribution
-from cpip.core.packaging import (
-    Requirement,
-    SpecifierSet,
-    Version,
-    canonicalize_name,
-)
+from cpip.core.packaging import Requirement, SpecifierSet, canonicalize_name
+from cpip.core.versions import Version
 
 
 # Version("0") is the "no declared version" sentinel checked against on
 # every candidate in _inconsistent_metadata_rejects; parsing it fresh each
 # call is pure overhead for a fixed value.
-_ZERO_VERSION = Version("0")
+_ZERO_VERSION = ZERO_VERSION
 
 
 class InstalledCandidate:

@@ -1,5 +1,6 @@
 import pytest
-from cpip.core.packaging import SpecifierSet, Version, parse_requirement
+from cpip.core.packaging import SpecifierSet, parse_requirement
+from cpip.core.versions import Version
 from cpip.core.wheel import WheelTag
 from cpip.index.candidate_evaluators import CandidateEvaluator
 from cpip.index.candidates import InstallationCandidate

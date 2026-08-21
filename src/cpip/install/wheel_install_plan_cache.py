@@ -18,7 +18,8 @@ import tempfile
 import time
 from types import MappingProxyType
 
-from cpip.core.packaging import Version, parse_requirement
+from cpip.core.packaging import parse_requirement
+from cpip.core.versions import Version
 from cpip.core.utils import CACHE_INTERPRETER_TAG
 from cpip.core.wheel import WheelCandidate
 from cpip.install.wheel_archive_cache import (

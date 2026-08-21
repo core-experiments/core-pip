@@ -2,15 +2,14 @@ from __future__ import annotations
 
 import pytest
 from cpip.core.packaging import (
-    InvalidVersion,
     Requirement,
     SpecifierSet,
-    Version,
     canonicalize_name,
     canonicalize_requirement,
     marker_applies,
     parse_requirement,
 )
+from cpip.core.versions import InvalidVersion, Version
 
 
 def test_canonicalize_name() -> None:
@@ -243,14 +242,9 @@ def test_marker_applies_respects_parenthesized_extra_marker() -> None:
     assert marker_applies(requirement.marker, extras=("zstd",)) is True
 
 
-class TestVersionComparisonDispatch:
-    """Version's comparators coerce strings and version-shaped objects
-    (anything whose str() parses -- notably another packaging library's
-    Version), while types whose instances fail coercion are remembered so
-    later comparisons skip straight to reflected dispatch. The resolver's
-    range-arithmetic infinity sentinels previously paid a str() + full
-    regex parse attempt + raised-and-caught InvalidVersion per bound
-    comparison before reaching that same dispatch.
+class TestVersionIsItsOwnKey:
+    """Version is a tuple whose elements are its PEP 440 ordering key: it
+    compares only with other Versions, in C, and is immutable and interned.
     """
 
     def test_sentinel_comparisons_defer_to_the_sentinel(self) -> None:
@@ -263,9 +257,6 @@ class TestVersionComparisonDispatch:
 
         assert (version == NEGATIVE_INFINITY) is False
         assert (version != POSITIVE_INFINITY) is True
-        # Ordering against a sentinel on the right previously *raised*
-        # InvalidVersion (the coercion in the ordering methods was
-        # uncaught); reflected dispatch makes it just work.
         assert (version < POSITIVE_INFINITY) is True
         assert (version > NEGATIVE_INFINITY) is True
         assert (version <= POSITIVE_INFINITY) is True
@@ -273,84 +264,92 @@ class TestVersionComparisonDispatch:
         assert (NEGATIVE_INFINITY < version) is True
         assert (POSITIVE_INFINITY > version) is True
 
-    def test_string_coercion_still_works(self) -> None:
+    def test_never_compares_with_text(self) -> None:
         version = Version("1.2.3")
 
-        assert version == "1.2.3"
-        assert version == "1.2.3.0"
-        assert version != "1.2.4"
-        assert version < "2.0"
-        assert version > "1.0"
-        assert version <= "1.2.3"
-        assert version >= "1.2.3"
-
-    def test_invalid_string_equality_is_false_not_an_error(self) -> None:
-        assert (Version("1.2.3") == "not a version") is False
-
-    def test_invalid_string_ordering_still_raises(self) -> None:
-        with pytest.raises(InvalidVersion):
-            Version("1.2.3") < "not a version"  # noqa: B015
+        assert (version == "1.2.3") is False
+        assert (version != "1.2.3") is True
+        with pytest.raises(TypeError):
+            version < "2.0"  # noqa: B015
+        with pytest.raises(TypeError):
+            version >= "1.0"  # noqa: B015
 
     def test_unrelated_types_are_unequal(self) -> None:
         assert (Version("1.2.3") == object()) is False
-
         assert (Version("1.2.3") == None) is False  # noqa: E711
 
-    def test_cross_library_version_objects_compare_by_value(self) -> None:
-        """Another packaging library's Version (whose str() is a valid
-        version) must keep comparing by value -- the regression CI caught
-        when coercion was briefly restricted to plain strings: the
-        lazy-wheel path compares a real `packaging` Version against ours.
-        """
-        from packaging.version import Version as PackagingVersion
-
-        ours = Version("0.782")
-
-        theirs = PackagingVersion("0.782")
-
-        assert (ours == theirs) is True
-        assert (ours != PackagingVersion("0.783")) is True
-        assert (ours < PackagingVersion("1.0")) is True
-        assert (ours >= PackagingVersion("0.5")) is True
-
-    def test_failed_coercion_cache_does_not_leak(self) -> None:
-        """A cached failed coercion must keep giving the same answers on
-        repeat and must not affect coercible operands."""
-        from cpip._vendor.nab_resolver.ranges import NEGATIVE_INFINITY
-
+    def test_is_frozen(self) -> None:
         version = Version("1.2.3")
 
-        # Prime the cache with the sentinel's string form, twice.
-        assert (version == NEGATIVE_INFINITY) is False
-        assert (version == NEGATIVE_INFINITY) is False
+        with pytest.raises(AttributeError):
+            version.public = "9"  # type: ignore[misc]
+        with pytest.raises(AttributeError):
+            del version.release
+        with pytest.raises(AttributeError):
+            version.anything = 1  # type: ignore[attr-defined]
 
-        # Coercible operands are unaffected.
-        from packaging.version import Version as PackagingVersion
+    def test_is_interned_by_text(self) -> None:
+        assert Version("1.2.3") is Version("1.2.3")
+        # Equal texts that differ in spelling are equal, not identical.
+        assert Version("1.2.3") == Version("1.2.3.0")
+        assert Version("1.2.3") is not Version("1.2.3.0")
 
-        assert (version == PackagingVersion("1.2.3")) is True
-        assert version == "1.2.3"
+    def test_equal_versions_share_dict_slots(self) -> None:
+        table = {Version("1.0"): "a"}
+        assert table[Version("1.0.0")] == "a"
+        assert table[Version("1")] == "a"
+        assert len({Version("1.0"), Version("1.0.0"), Version("1.0+x")}) == 2
 
-    def test_mixed_parseability_type_is_judged_per_instance(self) -> None:
-        """A type whose instances only sometimes stringify to a version
-        must be judged per instance: one unparseable instance must not
-        poison a later parseable one (the failure cache is keyed on the
-        string form, not the operand's type).
-        """
+    def test_copies_and_pickles_are_the_same_value(self) -> None:
+        import copy
+        import pickle
 
-        class Moody:
-            def __init__(self, text: str) -> None:
-                self.text = text
+        version = Version("1!2.0rc1.post2.dev3+linux-x86_64")
 
-            def __str__(self) -> str:
-                return self.text
+        assert copy.copy(version) is version
+        assert copy.deepcopy(version) is version
+        restored = pickle.loads(pickle.dumps(version))
+        assert restored == version
+        assert str(restored) == str(version)
 
-        version = Version("1.2.3")
+    def test_zero_version_is_the_shared_sentinel(self) -> None:
+        from cpip.core.versions import ZERO_VERSION
 
-        assert (version == Moody("not a version")) is False
-        assert (version == Moody("1.2.3")) is True
-        assert (version == Moody("not a version")) is False
-        assert (version == Moody("1.2.4")) is False
-        assert (version < Moody("2.0")) is True
+        assert ZERO_VERSION == Version("0")
+        assert ZERO_VERSION < Version("0.0.1")
+        assert not ZERO_VERSION.is_prerelease
+
+    def test_derived_fields(self) -> None:
+        version = Version("1!2.0rc1.post2.dev3+Linux_x86-64")
+
+        assert version.epoch == 1
+        assert version.release == (2, 0)
+        assert version.local == "linux.x86.64"
+        assert version.public == "1!2.0rc1.post2.dev3+linux.x86.64"
+        assert version.base_version == "1!2.0"
+        assert version.is_prerelease
+        assert Version("1.0.post1").is_prerelease is False
+        assert Version("1.0.post1.dev0").is_prerelease is True
+        assert Version("1.0").local is None
+        assert Version("1.0").base_version == "1.0"
+
+    def test_bare_dev_and_pre_segments_mean_zero(self) -> None:
+        assert str(Version("1.0.dev")) == "1.0.dev0"
+        assert Version("1.0.dev") == Version("1.0.dev0")
+        assert Version("1.0.dev").is_prerelease
+        assert Version("1.0-dev") < Version("1.0a0")
+        assert str(Version("1.0a")) == "1.0a0"
+        assert str(Version("1.0.post")) == "1.0.post0"
+
+    def test_key_internal_keeps_the_three_element_form_without_local(self) -> None:
+        assert Version("1.2").key_internal() == (0, (1, 2), (3, 0, 0, 0, 1, 0))
+        assert Version("1.2+a").key_internal() == (
+            0,
+            (1, 2),
+            (3, 0, 0, 0, 1, 0),
+            ((0, "a"),),
+        )
+        assert type(Version("1.2").key_internal()) is tuple
 
 
 class TestSplitMarker:
@@ -390,19 +389,21 @@ class TestSplitMarker:
 
 def _table_sizes() -> dict[str, int]:
     from cpip.core import packaging as packaging_module
+    from cpip.core import versions as versions_module
 
     return {
         "specifier_sets": len(packaging_module._specifier_sets),
-        "versions": len(packaging_module._versions_by_text),
+        "versions": len(versions_module._versions),
     }
 
 
 def _table_limits() -> dict[str, int]:
     from cpip.core import packaging as packaging_module
+    from cpip.core import versions as versions_module
 
     return {
         "specifier_sets": packaging_module._SPECIFIER_SET_CACHE_SIZE,
-        "versions": packaging_module._VERSION_CACHE_SIZE,
+        "versions": versions_module._VERSIONS_LIMIT,
         "contains": packaging_module._CONTAINS_CACHE_SIZE,
     }
 

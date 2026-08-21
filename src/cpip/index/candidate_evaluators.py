@@ -7,9 +7,10 @@ from collections.abc import Sequence
 from functools import lru_cache
 from typing import TypeVar
 
+from cpip.core.versions import ZERO_VERSION
 from cpip.core.errors import InvalidWheelFilename
 from cpip.core.hashes import Hashes
-from cpip.core.packaging import Requirement, SpecifierSet, Version
+from cpip.core.packaging import Requirement, SpecifierSet
 from cpip.core.release_control import ReleaseControl
 from cpip.core.target_python import get_supported
 from cpip.core.wheel import TargetContext, Wheel, WheelTag, legacy_build_tag
@@ -31,7 +32,7 @@ from cpip.index.source_models import (
 
 CandidateT = TypeVar("CandidateT", bound=CandidateRecord)
 
-_UNKNOWN_DIRECT_SOURCE_VERSION = Version("0")
+_UNKNOWN_DIRECT_SOURCE_VERSION = ZERO_VERSION
 
 
 class CandidateEvaluator:
@@ -431,8 +432,7 @@ class CandidateEvaluator:
         return (
             hash_rank,
             yanked_rank,
-            # Comparison key, not the Version: same order, compared in C.
-            candidate.version.comparison_key,
+            candidate.version,
             binary_preference,
             wheel_rank,
             egg_fragment_rank,

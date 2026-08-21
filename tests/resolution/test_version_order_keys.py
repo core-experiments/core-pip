@@ -1,13 +1,18 @@
-"""Sorting by Version.comparison_key must order exactly as the Versions do."""
+"""Version is its own sort key: every ordering built around it agrees with it.
+
+The candidate sort keys put the Version itself into their tuples, and the
+cached catalog summaries bisect on ``Version.key_internal()``; both must
+order exactly as the Versions do.
+"""
 
 from __future__ import annotations
 
 import random
 
-from cpip.core.packaging import Version
+from cpip.core.versions import Version
 from cpip.index.links import Link
 from cpip.index.source_models import CandidateRecord
-from cpip.resolution.nab_provider import _VERSION_ORDER
+from packaging.version import Version as TheirVersion
 
 
 def _random_versions(rng: random.Random, count: int) -> list[Version]:
@@ -28,17 +33,26 @@ def _random_versions(rng: random.Random, count: int) -> list[Version]:
     return [Version(text) for text in texts]
 
 
-def test_version_order_key_matches_version_sorting() -> None:
+def test_version_sorts_like_the_reference_implementation() -> None:
     rng = random.Random(20260820)
     versions = _random_versions(rng, 3000)
-    assert sorted(versions, key=_VERSION_ORDER) == sorted(versions)
-    assert sorted(versions, key=_VERSION_ORDER, reverse=True) == sorted(
+    ours = [str(v) for v in sorted(versions)]
+    theirs = [str(v) for v in sorted(TheirVersion(str(v)) for v in versions)]
+    # Equal versions have no defined relative order; compare by text.
+    assert ours == theirs
+
+
+def test_summary_key_orders_like_the_version() -> None:
+    rng = random.Random(20260820)
+    versions = _random_versions(rng, 3000)
+    assert sorted(versions, key=Version.key_internal) == sorted(versions)
+    assert sorted(versions, key=Version.key_internal, reverse=True) == sorted(
         versions,
         reverse=True,
     )
     # Equal versions ("1.0" and "1.0.0") keep their input order under both.
     pairs = [Version("1.0"), Version("1.0.0"), Version("1"), Version("1.0.0.0")]
-    assert [str(v) for v in sorted(pairs, key=_VERSION_ORDER)] == [
+    assert [str(v) for v in sorted(pairs, key=Version.key_internal)] == [
         str(v) for v in sorted(pairs)
     ]
 

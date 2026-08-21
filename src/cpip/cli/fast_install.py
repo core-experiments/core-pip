@@ -24,7 +24,8 @@ from collections.abc import Iterable, Sequence
 
 from cpip.cli.fast import consume_option, extend_requirements
 from cpip.core.appdirs import resolve_cache_dir
-from cpip.core.packaging import EMPTY_FROZENSET, Version
+from cpip.core.packaging import EMPTY_FROZENSET
+from cpip.core.versions import Version
 from cpip.core.utils import CACHE_INTERPRETER_TAG, load_snapshot, save_snapshot
 from cpip.core.wheel import PureWheelCandidate, WheelCandidate
 from cpip.core.wheel import parse_wheel_filename as parse_wheel_filename_core

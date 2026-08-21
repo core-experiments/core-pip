@@ -8,6 +8,7 @@ import re
 import sys
 from collections.abc import Iterable
 
+from cpip.core.versions import ZERO_VERSION
 from cpip.core.errors import ResolutionError as CpipResolutionError
 from cpip.index.provider import CandidateProvider
 from cpip.resolution.inputs import (
@@ -98,7 +99,7 @@ class ResolutionEngine:
         requirements = coerce_requirements(requirements_input)
         adapter = NabProvider(self.provider, context=self.config)
         roots = adapter.add_roots(requirements)
-        resolver = Resolver(adapter, root_version="0")
+        resolver = Resolver(adapter, root_version=ZERO_VERSION)
         try:
             selected = resolver.resolve(roots)
         except Exception as error:

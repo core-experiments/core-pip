@@ -8,18 +8,12 @@ import sysconfig
 import zipfile
 from collections.abc import Collection, Mapping
 from email.parser import Parser as EmailParser
-from functools import cache, lru_cache
 from typing import TYPE_CHECKING, Protocol
 
+from .caches import bounded_put, memoized, register_table
 from .errors import InstallationError, InvalidWheelFilename, UnsupportedWheel
-from .packaging import (
-    InvalidVersion,
-    Requirement,
-    Version,
-    canonicalize_name,
-    marker_applies,
-    parse_requirement,
-)
+from .packaging import Requirement, canonicalize_name, marker_applies, parse_requirement
+from .versions import InvalidVersion, Version
 from .utils import CURRENT_PYTHON_VERSION_DIGITS
 from .wheel_metadata import (
     metadata_paths,
@@ -474,12 +468,14 @@ class WheelResolutionMetadata:
     requires_python: str | None
 
 
-wheel_metadata_cache: dict[tuple[str, int, int], WheelResolutionMetadata] = {}
+wheel_metadata_cache: dict[tuple[str, int, int], WheelResolutionMetadata] = (
+    register_table({})
+)
 
 wheel_dependency_cache: dict[
     tuple[tuple[str, int, int], frozenset[str]],
     tuple[Requirement, ...],
-] = {}
+] = register_table({})
 
 # Keyed by (stat-based identity, requested extras) rather than
 # wheel_metadata_cache's own (possibly archive/CRC-based) identity, so
@@ -488,7 +484,7 @@ wheel_dependency_cache: dict[
 no_layout_candidate_cache: dict[
     tuple[tuple[str, int, int], frozenset[str]],
     tuple[str, Version, tuple[Requirement, ...], frozenset[str], str | None],
-] = {}
+] = register_table({})
 
 
 def parse_wheel_file(path: str) -> WheelFile | None:
@@ -503,7 +499,7 @@ def parse_wheel_file(path: str) -> WheelFile | None:
     return _parse_wheel_filename(name)
 
 
-@lru_cache(maxsize=4096)
+@memoized(4096)
 def _parse_wheel_filename(name: str) -> WheelFile | None:
     if not name.endswith(".whl"):
         return None
@@ -527,7 +523,7 @@ def _parse_wheel_filename(name: str) -> WheelFile | None:
         return None
 
     try:
-        parsed_version = parsed_wheel_version(version)
+        parsed_version = Version(version)
 
     except InvalidVersion:
         return None
@@ -545,12 +541,7 @@ def _parse_wheel_filename(name: str) -> WheelFile | None:
     )
 
 
-@lru_cache(maxsize=4096)
-def parsed_wheel_version(value: str) -> Version:
-    return Version(value)
-
-
-@lru_cache(maxsize=1024)
+@memoized(1024)
 def parsed_wheel_tags(
     python_tags: str,
     abi_tags: str,
@@ -599,7 +590,7 @@ class _HashCachedTags(tuple):
             return value
 
 
-@cache
+@memoized(1024)
 def supported_wheel_tags(target: TargetContext | None = None) -> tuple[WheelTag, ...]:
     if target is None:
         implementation = "cp"
@@ -655,7 +646,7 @@ def current_platform_tag() -> str:
     return platform_name.replace("-", "_").replace(".", "_")
 
 
-@lru_cache(maxsize=4096)
+@memoized(4096)
 def wheel_tag_rank(
     tags: tuple[WheelTag, ...],
     supported_tags: tuple[WheelTag, ...] | None = None,
@@ -697,13 +688,6 @@ def wheel_archive_identity(
         return None
 
 
-def bounded_cache_put(cache: dict, key: object, value: object) -> None:
-    if len(cache) >= WHEEL_METADATA_CACHE_SIZE:
-        cache.clear()
-
-    cache[key] = value
-
-
 def project_wheel_dependencies(
     metadata: WheelResolutionMetadata,
     identity: tuple[str, int, int] | None,
@@ -735,7 +719,9 @@ def project_wheel_dependencies(
         )
 
     if key is not None:
-        bounded_cache_put(wheel_dependency_cache, key, dependencies)
+        bounded_put(
+            wheel_dependency_cache, key, dependencies, WHEEL_METADATA_CACHE_SIZE
+        )
 
     return dependencies
 
@@ -833,7 +819,9 @@ def wheel_candidate(
         )
 
         if identity is not None:
-            bounded_cache_put(wheel_metadata_cache, identity, metadata)
+            bounded_put(
+                wheel_metadata_cache, identity, metadata, WHEEL_METADATA_CACHE_SIZE
+            )
 
     requested_extras = frozenset(extras or ())
 
@@ -965,7 +953,7 @@ def read_metadata_message_internal(
 _NAME_SEPARATORS_RE = re.compile(r"[-_.]+")
 
 
-@lru_cache(maxsize=4096)
+@memoized(4096)
 def _dist_info_match_key(name: str) -> str:
     """Normalized project name for matching against a dist-info directory.
 
@@ -1207,7 +1195,7 @@ def wheel_candidate_from_path(
         identity = wheel_archive_identity(path, None, None)
 
         if identity is not None:
-            bounded_cache_put(
+            bounded_put(
                 no_layout_candidate_cache,
                 (identity, requested_extras),
                 (
@@ -1217,6 +1205,7 @@ def wheel_candidate_from_path(
                     candidate.provided_extras,
                     candidate.requires_python,
                 ),
+                WHEEL_METADATA_CACHE_SIZE,
             )
 
     return candidate

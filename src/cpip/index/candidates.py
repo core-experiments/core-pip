@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import os
 
+from cpip.core.versions import ZERO_VERSION
 from cpip.core.errors import BuildError
-from cpip.core.packaging import Version
+from cpip.core.versions import Version
 from cpip.core.temp_dir import remove_temp_directory
 from cpip.core.wheel import (
     parse_wheel_file,
@@ -156,7 +157,7 @@ class InstallationCandidate(CandidateRecord):
             if link.source_url is None and not project_files:
                 return cls(
                     name=os.path.basename(local) or "source",
-                    version=Version("0"),
+                    version=ZERO_VERSION,
                     link=link,
                 )
 
@@ -177,7 +178,7 @@ class InstallationCandidate(CandidateRecord):
 
             return cls(
                 name=os.path.basename(local) or "source",
-                version=Version("0"),
+                version=ZERO_VERSION,
                 link=link,
             )
 

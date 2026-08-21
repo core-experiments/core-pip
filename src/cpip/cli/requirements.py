@@ -15,12 +15,8 @@ except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility
 from cpip.build.build_backend import prepare_project_metadata
 from cpip.core.errors import InstallationError
 from cpip.core.format_control import FormatControl
-from cpip.core.packaging import (
-    SpecifierSet,
-    Version,
-    canonicalize_name,
-    parse_requirement,
-)
+from cpip.core.packaging import SpecifierSet, canonicalize_name, parse_requirement
+from cpip.core.versions import Version
 from cpip.core.release_control import ReleaseControl
 from cpip.core.wheel import parse_wheel_file, supported_wheel_tags, wheel_tag_rank
 from cpip.index.config import DEFAULT_INDEX_URL

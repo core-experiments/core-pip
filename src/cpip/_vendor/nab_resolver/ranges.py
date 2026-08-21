@@ -111,11 +111,26 @@ Bound: TypeAlias = Any  # V | _NegativeInfinity | _PositiveInfinity
 Interval: TypeAlias = tuple[Bound, bool, Bound, bool]
 
 
+def _same_bound(left: Bound, right: Bound) -> bool:
+    """Whether two bounds are the same point, without comparing a version
+    against an infinity sentinel."""
+    if left is right:
+        return True
+    if (
+        left is NEGATIVE_INFINITY
+        or left is POSITIVE_INFINITY
+        or right is NEGATIVE_INFINITY
+        or right is POSITIVE_INFINITY
+    ):
+        return False
+    return bool(left == right)
+
+
 def _max_lower_bound(left: Interval, right: Interval) -> tuple[Bound, bool]:
     """Return the higher of two lower bounds (for intersection)."""
     left_lower, left_lower_inc = left[0], left[1]
     right_lower, right_lower_inc = right[0], right[1]
-    if left_lower == right_lower:
+    if _same_bound(left_lower, right_lower):
         return left_lower, left_lower_inc and right_lower_inc
     if left_lower is NEGATIVE_INFINITY or (
         right_lower is not NEGATIVE_INFINITY and left_lower < right_lower
@@ -128,7 +143,7 @@ def _min_upper_bound(left: Interval, right: Interval) -> tuple[Bound, bool]:
     """Return the lower of two upper bounds (for intersection)."""
     left_upper, left_upper_inc = left[2], left[3]
     right_upper, right_upper_inc = right[2], right[3]
-    if left_upper == right_upper:
+    if _same_bound(left_upper, right_upper):
         return left_upper, left_upper_inc and right_upper_inc
     if left_upper is POSITIVE_INFINITY or (
         right_upper is not POSITIVE_INFINITY and left_upper > right_upper
@@ -318,7 +333,7 @@ class Range(Generic[VersionType]):
             # Advance the side with the smaller upper bound
             left_upper = left_interval[2]
             right_upper = right_interval[2]
-            if left_upper == right_upper:
+            if _same_bound(left_upper, right_upper):
                 left_index += 1
                 right_index += 1
             elif left_upper is POSITIVE_INFINITY or (
@@ -498,7 +513,12 @@ class Range(Generic[VersionType]):
             lower, lower_inclusive = _max_lower_bound(left, right)
             upper, upper_inclusive = _min_upper_bound(left, right)
 
-            if (lower, lower_inclusive, upper, upper_inclusive) != left:
+            if (
+                lower_inclusive is not left[1]
+                or upper_inclusive is not left[3]
+                or not _same_bound(lower, left[0])
+                or not _same_bound(upper, left[2])
+            ):
                 return False
 
         return True
@@ -578,7 +598,12 @@ class Range(Generic[VersionType]):
             lower, lower_inclusive = _max_lower_bound(left, right)
             upper, upper_inclusive = _min_upper_bound(left, right)
 
-            if (lower, lower_inclusive, upper, upper_inclusive) != left:
+            if (
+                lower_inclusive is not left[1]
+                or upper_inclusive is not left[3]
+                or not _same_bound(lower, left[0])
+                or not _same_bound(upper, left[2])
+            ):
                 is_subset = False
                 if not is_disjoint:  # always True here
                     return _OVERLAPPING_REL

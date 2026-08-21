@@ -8,7 +8,8 @@ import os
 import sqlite3
 from typing import cast
 
-from cpip.core.packaging import Requirement, Version, parse_requirement
+from cpip.core.packaging import Requirement, parse_requirement
+from cpip.core.versions import Version
 from cpip.core.utils import load_snapshot
 from cpip.index.source_models import CandidateMetadata
 from cpip.index.sqlite_cache import SqliteBackedCache

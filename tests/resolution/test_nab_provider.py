@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from cpip.core.packaging import Version, parse_requirement
+from cpip.core.packaging import parse_requirement
+from cpip.core.versions import Version
 from cpip.resolution.models import ResolutionConfig
 from cpip.resolution.nab_provider import NabProvider
 

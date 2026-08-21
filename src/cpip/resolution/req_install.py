@@ -19,11 +19,11 @@ from cpip.core.packaging import (
 )
 from cpip.core.packaging import (
     SpecifierSet,
-    Version,
     canonicalize_name,
     marker_applies,
     parse_requirement,
 )
+from cpip.core.versions import Version
 from cpip.index.links import Link
 from cpip.resolution.input_paths import looks_like_path
 
