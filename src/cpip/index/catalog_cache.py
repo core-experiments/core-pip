@@ -8,7 +8,7 @@ import marshal
 import posixpath
 import urllib.parse
 
-from cpip.core.versions import Version
+from cpip.core.versions import VERSION_WIRE_FORMAT, Version, is_version_wire
 from cpip.core.wheel import WheelFile, WheelTag, parse_wheel_file
 from cpip.index.datetime import parse_iso_datetime
 from cpip.index.directory_index import project_version_from_filename
@@ -24,14 +24,11 @@ VERSION = 7
 PREFIX = "cpip-index-catalog-v7:"
 V6_PREFIX = "cpip-index-catalog-v6:"
 LEGACY_PREFIX = "cpip-index-catalog-v2:"
-SUMMARY_VERSION = 3
-SUMMARY_PREFIX = "cpip-index-summary-v3:"
-LEGACY_SUMMARY_VERSION = 2
-LEGACY_SUMMARY_PREFIX = "cpip-index-summary-v2:"
+SUMMARY_VERSION = 4
+SUMMARY_PREFIX = "cpip-index-summary-v4:"
 CHOICE_VERSION = 1
 CHOICE_PREFIX = "cpip-index-choice-v1:"
-SUMMARY_HEADER = b"cpip-index-summary-v3\0"
-LEGACY_SUMMARY_HEADER = b"cpip-index-summary-v2\0"
+SUMMARY_HEADER = b"cpip-index-summary-v4\0"
 CHOICE_HEADER = b"cpip-index-choice-v1\0"
 
 WHEEL_RECORD = 1
@@ -187,15 +184,9 @@ def load_summary(cache: Any, url: str) -> CatalogSummary | None:
     if raw is not None:
         summary = decode_summary(raw)
         if summary is not None:
-            if not raw.startswith(SUMMARY_HEADER):
-                save_summary_value(cache, url, summary)
             return summary
-    legacy_raw = get_cache_entry(cache, LEGACY_SUMMARY_PREFIX + url)
-    if legacy_raw is not None:
-        summary = decode_legacy_summary(legacy_raw)
-        if summary is not None:
-            save_summary_value(cache, url, summary)
-            return summary
+    # No v4 summary (a first run, or one written by an older cpip under its
+    # own key): compile it from the catalog, which is text-only and stable.
     pending = _pending_catalogs(cache)
     catalog = pending.pop(url, None) if pending is not None else None
     catalog_raw: bytes | None = None
@@ -216,70 +207,21 @@ def load_summary(cache: Any, url: str) -> CatalogSummary | None:
 
 
 def decode_summary(raw: bytes) -> CatalogSummary | None:
-    if raw.startswith(SUMMARY_HEADER):
-        payload = decode_checked_payload(raw, SUMMARY_HEADER)
-        if (
-            not isinstance(payload, tuple)
-            or len(payload) not in {3, 4}
-            or not isinstance(payload[0], str)
-            or not isinstance(payload[1], list)
-            or not isinstance(payload[2], bool)
-            or (len(payload) == 4 and not isinstance(payload[3], dict))
-        ):
-            return None
-        if len(payload) == 3:
-            return (payload[0], payload[1], payload[2], {})  # ty:ignore[invalid-return-type]
-        return payload  # ty:ignore[invalid-return-type]
-    try:
-        payload = marshal.loads(raw)
-    except (EOFError, TypeError, ValueError):
+    if not raw.startswith(SUMMARY_HEADER):
         return None
+    payload = decode_checked_payload(raw, SUMMARY_HEADER)
     if (
         not isinstance(payload, tuple)
         or len(payload) != 5
-        or payload[0] != "cpip-index-summary"
-        or payload[1] != SUMMARY_VERSION
-        or not isinstance(payload[2], str)
-        or not isinstance(payload[3], list)
-        or not isinstance(payload[4], bool)
-        or not all(valid_summary_group(group) for group in payload[3])
+        or payload[4] != VERSION_WIRE_FORMAT
+        or not isinstance(payload[0], str)
+        or not isinstance(payload[1], list)
+        or not isinstance(payload[2], bool)
+        or not isinstance(payload[3], dict)
+        or not all(valid_summary_group(group) for group in payload[1])
     ):
         return None
-    return (payload[2], payload[3], payload[4], {})
-
-
-def decode_legacy_summary(raw: bytes) -> CatalogSummary | None:
-    if raw.startswith(LEGACY_SUMMARY_HEADER):
-        payload = decode_checked_payload(raw, LEGACY_SUMMARY_HEADER)
-        if (
-            not isinstance(payload, tuple)
-            or len(payload) != 3
-            or not isinstance(payload[0], str)
-            or not isinstance(payload[1], list)
-            or not isinstance(payload[2], bool)
-            or not all(valid_summary_group(group) for group in payload[1])
-        ):
-            return None
-        summary = (payload[0], payload[1], payload[2], {})
-    else:
-        try:
-            payload = marshal.loads(raw)
-        except (EOFError, TypeError, ValueError):
-            return None
-        if (
-            not isinstance(payload, tuple)
-            or len(payload) != 5
-            or payload[0] != "cpip-index-summary"
-            or payload[1] != LEGACY_SUMMARY_VERSION
-            or not isinstance(payload[2], str)
-            or not isinstance(payload[3], list)
-            or not isinstance(payload[4], bool)
-            or not all(valid_summary_group(group) for group in payload[3])
-        ):
-            return None
-        summary = (payload[2], payload[3], payload[4], {})
-    summary[1].sort(key=summary_group_sort_key)  # ty:ignore[no-matching-overload]
-    return summary  # ty:ignore[invalid-return-type]
+    return payload[0], payload[1], payload[2], payload[3]  # ty:ignore[invalid-return-type]
 
 
 def load_choices(
@@ -432,7 +374,7 @@ def valid_summary_group(value: object) -> bool:
         and len(value) == 4
         and isinstance(value[0], str)
         and isinstance(value[1], str)
-        and valid_version_state(value[2])
+        and is_version_wire(value[2])
         and isinstance(value[3], list)
         and all(valid_fact(fact) for fact in value[3])
     )
@@ -482,30 +424,6 @@ def valid_choice(value: object) -> bool:
         and valid_record(value[0])
         and isinstance(value[1], int)
         and (value[2] is None or isinstance(value[2], int))
-    )
-
-
-def valid_version_state(value: object) -> bool:
-    return (
-        isinstance(value, tuple)
-        and len(value) == 8
-        and isinstance(value[0], int)
-        and isinstance(value[1], tuple)
-        and bool(value[1])
-        and all(isinstance(part, int) for part in value[1])
-        and (
-            value[2] is None
-            or (
-                isinstance(value[2], tuple)
-                and len(value[2]) == 2
-                and all(isinstance(part, int) for part in value[2])
-            )
-        )
-        and (value[3] is None or isinstance(value[3], int))
-        and (value[4] is None or isinstance(value[4], int))
-        and (value[5] is None or isinstance(value[5], str))
-        and isinstance(value[6], str)
-        and isinstance(value[7], tuple)
     )
 
 
@@ -591,17 +509,17 @@ def summary_from_catalog(
         (
             name,
             version,
-            Version(version).cache_state_internal(),
+            Version(version).to_wire(),
             facts,
         )
         for name, version, _artifacts, facts in groups
     ]
     summary_groups.sort(key=summary_group_sort_key)
-    return generation, summary_groups, bool(unparsed), {}
+    return generation, summary_groups, bool(unparsed), {}  # ty:ignore[invalid-return-type]
 
 
 def summary_group_sort_key(group: CatalogSummaryGroup) -> Any:
-    return group[2][7]
+    return group[2][2]
 
 
 def save_summary(
@@ -622,7 +540,7 @@ def save_summary_value(
     try:
         payload = encode_checked_payload(
             SUMMARY_HEADER,
-            summary,
+            (*summary, VERSION_WIRE_FORMAT),
         )
     except (TypeError, ValueError):
         return

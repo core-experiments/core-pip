@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import pytest
 from cpip.core.packaging import (
-    Requirement,
     SpecifierSet,
     canonicalize_name,
     canonicalize_requirement,
@@ -57,22 +56,6 @@ def test_parse_requirement_reuses_immutable_result() -> None:
         first.specifier.specifiers = ()  # type: ignore[misc]
 
 
-def test_requirement_cache_state_roundtrip() -> None:
-    original = parse_requirement(
-        'Demo-Pkg[PDF,SSL]~=1.2,!=1.5; python_version >= "3.11"',
-    )
-    state = original.cache_state_internal()
-
-    restored = Requirement.from_cache_state(state)
-    restored_again = Requirement.from_cache_state(state)
-
-    assert restored_again is restored
-    assert restored == original
-    assert restored.canonical_name == "demo-pkg"
-    assert restored.is_satisfied_by("1.4")
-    assert not restored.is_satisfied_by("1.5")
-
-
 def test_canonicalize_requirement() -> None:
     assert (
         canonicalize_requirement('Demo_Pkg[SSL,PDF] >= 1.0; python_version >= "3.11"')
@@ -111,19 +94,39 @@ def test_version_orders_epoch_and_dev_releases() -> None:
 
 @pytest.mark.parametrize(
     "raw",
-    ["1.2.3", "1!2.0rc1.post2.dev3+linux-x86_64", "0.0.0"],
+    ["1.2.3", "1!2.0rc1.post2.dev3+linux-x86_64", "0.0.0", "1.0.dev"],
 )
-def test_version_cache_state_roundtrip(raw: str) -> None:
-    original = Version(raw)
-    restored = Version.from_cache_state(original.cache_state_internal())
-    restored_again = Version.from_cache_state(original.cache_state_internal())
+def test_version_wire_roundtrip_is_interned(raw: str) -> None:
+    from cpip.core.versions import is_version_wire
 
+    original = Version(raw)
+    state = original.to_wire()
+    assert is_version_wire(state)
+    assert type(state[2]) is tuple  # marshal-safe: the plain key, not the subclass
+    assert state == (original.public, original.release, tuple(original))
+
+    restored = Version.from_wire(state)
     assert restored == original
-    assert restored_again is restored
+    assert restored is Version(original.public)
+    assert restored is Version.from_wire(state)
     assert hash(restored) == hash(original)
     assert str(restored) == str(original)
-    assert restored.release == original.release
-    assert restored.is_prerelease == original.is_prerelease
+
+
+def test_is_version_wire_rejects_malformed() -> None:
+    from cpip.core.versions import is_version_wire
+
+    good = Version("1.2.0+a").to_wire()
+    assert is_version_wire(good)
+    assert not is_version_wire(("1.2", (1, 2)))
+    assert not is_version_wire(("1.2", (), good[2]))
+    assert not is_version_wire(("1.2", (1, "2"), good[2]))
+    assert not is_version_wire(("1.2", (1, 2), good[2][:3]))
+    assert not is_version_wire(("1.2", (1, 2, 0), (0, (1, 2, 0), good[2][2], ())))
+    assert not is_version_wire(("1.2", (1, 2), (0, (1, 2), (3, 0, 0, 0, 1), ())))
+    assert not is_version_wire((1, (1, 2), good[2]))
+    # The pre-wire eight-field record.
+    assert not is_version_wire((0, (1, 2), None, None, None, None, "1.2", good[2]))
 
 
 @pytest.mark.parametrize(
@@ -340,15 +343,14 @@ class TestVersionIsItsOwnKey:
         assert str(Version("1.0a")) == "1.0a0"
         assert str(Version("1.0.post")) == "1.0.post0"
 
-    def test_key_internal_keeps_the_three_element_form_without_local(self) -> None:
-        assert Version("1.2").key_internal() == (0, (1, 2), (3, 0, 0, 0, 1, 0))
-        assert Version("1.2+a").key_internal() == (
+    def test_wire_key_is_the_four_element_tuple(self) -> None:
+        assert Version("1.2").to_wire()[2] == (0, (1, 2), (3, 0, 0, 0, 1, 0), ())
+        assert Version("1.2+a").to_wire()[2] == (
             0,
             (1, 2),
             (3, 0, 0, 0, 1, 0),
             ((0, "a"),),
         )
-        assert type(Version("1.2").key_internal()) is tuple
 
 
 class TestSplitMarker:

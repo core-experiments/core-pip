@@ -15,8 +15,8 @@ The rules that follow from that:
 * Format with f-strings or ``str()``; ``"%s" % version`` would treat the
   tuple as the argument list.
 * ``marshal`` rejects the subclass, so a Version that leaks into an
-  on-disk payload fails closed; :meth:`cache_state_internal` produces the
-  plain-tuple record the catalog caches store.
+  on-disk payload fails closed; :meth:`to_wire` produces the plain-tuple
+  record the catalog summaries store and :meth:`from_wire` reads it.
 * Instances are immutable and interned: ``Version(text)`` returns the
   instance already built for that text while it is in the table, so equal
   texts normally share one object, and the table is bounded and swept.
@@ -253,43 +253,54 @@ class Version(tuple):
         release = ".".join(map(str, self.release))
         return f"{self[0]}!{release}" if self[0] else release
 
-    # --- cached-catalog record (positional, validated by catalog_cache) --
+    # --- wire record --------------------------------------------------
 
-    def key_internal(self) -> tuple[Any, ...]:
-        """The key as stored in cached catalog summaries.
+    def to_wire(self) -> tuple[str, tuple[int, ...], tuple[Any, ...]]:
+        """The record cached catalog summaries store: ``(public, release, key)``.
 
-        Summaries written before ``local`` became a fixed element carry a
-        three-element key for versions without a local label; this keeps
-        the bisection over those records exact.
+        Plain tuples only (``marshal`` rejects the subclass). The key is kept
+        on disk so a sorted summary can be bisected without rebuilding its
+        Versions; the text is the source of truth when one is rebuilt.
         """
-        return tuple(self) if self[3] else tuple(self[:3])
-
-    def cache_state_internal(self) -> tuple[Any, ...]:
-        suffix = self[2]
-        if suffix == FINAL_SUFFIX:
-            pre = post = dev = None
-        elif suffix[0] == -1:
-            pre = post = None
-            dev = suffix[5]
-        else:
-            pre = None if suffix[0] == 3 else (suffix[0], suffix[1])
-            post = suffix[3] if suffix[2] else None
-            dev = suffix[5] if suffix[4] == 0 else None
-        return (
-            self[0],
-            self.release,
-            pre,
-            post,
-            dev,
-            self.local,
-            self.public,
-            self.key_internal(),
-        )
+        return (self.public, self.release, tuple(self))
 
     @classmethod
-    def from_cache_state(cls, state: Any) -> Version:
-        """Restore a version from a record; the public text is the source of truth."""
-        return cls(state[6])
+    def from_wire(cls, state: Any) -> Version:
+        """The Version for a :meth:`to_wire` record, through the intern table."""
+        return cls(state[0])
+
+
+VERSION_WIRE_FORMAT = 1
+"""Bumped whenever :meth:`Version.to_wire`'s shape changes; stored in every
+payload that embeds wire records so a reader can reject the wrong shape."""
+
+
+def is_version_wire(value: object) -> bool:
+    """Whether ``value`` has the exact shape of a :meth:`Version.to_wire` record."""
+    if not isinstance(value, tuple) or len(value) != 3:
+        return False
+    public, release, key = value
+    if not isinstance(public, str) or not isinstance(release, tuple) or not release:
+        return False
+    if not all(type(part) is int for part in release):
+        return False
+    if not isinstance(key, tuple) or len(key) != 4:
+        return False
+    epoch, normalized, suffix, local = key
+    if type(epoch) is not int or not isinstance(normalized, tuple) or not normalized:
+        return False
+    stripped = release
+    while len(stripped) > 1 and stripped[-1] == 0:
+        stripped = stripped[:-1]
+    if normalized != stripped:
+        return False
+    if (
+        not isinstance(suffix, tuple)
+        or len(suffix) != 6
+        or not all(type(part) is int for part in suffix)
+    ):
+        return False
+    return isinstance(local, tuple)
 
 
 ZERO_VERSION = Version("0")

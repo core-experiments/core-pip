@@ -1,7 +1,7 @@
 """Version is its own sort key: every ordering built around it agrees with it.
 
 The candidate sort keys put the Version itself into their tuples, and the
-cached catalog summaries bisect on ``Version.key_internal()``; both must
+cached catalog summaries bisect on the key in ``Version.to_wire()``; both must
 order exactly as the Versions do.
 """
 
@@ -42,17 +42,21 @@ def test_version_sorts_like_the_reference_implementation() -> None:
     assert ours == theirs
 
 
+def _wire_key(version: Version) -> tuple:
+    return version.to_wire()[2]
+
+
 def test_summary_key_orders_like_the_version() -> None:
     rng = random.Random(20260820)
     versions = _random_versions(rng, 3000)
-    assert sorted(versions, key=Version.key_internal) == sorted(versions)
-    assert sorted(versions, key=Version.key_internal, reverse=True) == sorted(
+    assert sorted(versions, key=_wire_key) == sorted(versions)
+    assert sorted(versions, key=_wire_key, reverse=True) == sorted(
         versions,
         reverse=True,
     )
     # Equal versions ("1.0" and "1.0.0") keep their input order under both.
     pairs = [Version("1.0"), Version("1.0.0"), Version("1"), Version("1.0.0.0")]
-    assert [str(v) for v in sorted(pairs, key=Version.key_internal)] == [
+    assert [str(v) for v in sorted(pairs, key=_wire_key)] == [
         str(v) for v in sorted(pairs)
     ]
 
