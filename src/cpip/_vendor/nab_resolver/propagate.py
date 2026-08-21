@@ -40,44 +40,98 @@ def unit_propagation(
     conflicting incompatibility if all terms are satisfied, or
     None if propagation completes without conflict.
 
+    The per-term relation check is inlined here rather than calling
+    ``term_relation`` per term: this loop is the resolver's inner loop
+    during backtracking, and on a deep backtrack it evaluates tens of
+    thousands of terms, each of which would otherwise pay two function
+    calls and re-fetch the solution, the relation cache and the
+    incompatibility tables from the resolver.
+
     Reference: https://github.com/dart-lang/pub/blob/master/doc/solver.md#unit-propagation
     """
+    solution = resolver.solution
+    solution_get = solution.get
+    has_positive_constraint = solution.has_positive_constraint
+    derive = solution.derive
+    cache = resolver.relation_cache
+    incompatibilities = resolver.incompatibilities
+    related_by_package = resolver.package_to_incompatibilities
+    stats = resolver.stats
+    observer = resolver.observer
+    satisfied = SetRelation.SATISFIED
+    contradicted = SetRelation.CONTRADICTED
+
     propagation_queue: deque[Any] = deque([changed_package])
     in_queue: set[Any] = {changed_package}
 
     while propagation_queue:
         package = propagation_queue.popleft()
         in_queue.discard(package)
-        related_indices = resolver.package_to_incompatibilities.get(package, [])
 
-        for incompatibility_index in related_indices:
-            incompatibility = resolver.incompatibilities[incompatibility_index]
-            evaluation = evaluate_incompatibility(resolver, incompatibility)
+        for incompatibility_index in related_by_package.get(package, ()):
+            incompatibility = incompatibilities[incompatibility_index]
 
-            if evaluation is IncompatibilityState.CONFLICT:
-                return incompatibility
+            # evaluate_incompatibility, inlined.
+            undetermined_term = None
+            conflict = True
+            for term in incompatibility.terms:
+                # term_relation, inlined.
+                assignment = solution_get(term.package)
+                if assignment is None:
+                    relation = None
+                else:
+                    positive = term._positive  # noqa: SLF001
+                    key = (positive, assignment, term.constraint)
+                    relation = cache.get(key)
+                    if relation is None:
+                        range_relation = assignment.relation(term.constraint)
+                        relation = classify_relation(
+                            term,
+                            subset=range_relation.is_subset,
+                            disjoint=range_relation.is_disjoint,
+                        )
+                        if len(cache) >= RELATION_CACHE_MAX:
+                            cache.clear()
+                        cache[key] = relation
+                    if (
+                        (positive and relation is satisfied)
+                        or (not positive and relation is contradicted)
+                    ) and not has_positive_constraint(term.package):
+                        relation = None
+                if relation is satisfied:
+                    continue
+                if relation is contradicted or undetermined_term is not None:
+                    conflict = False
+                    undetermined_term = None
+                    break
+                undetermined_term = term
 
-            if isinstance(evaluation, Term):
-                negated_term = evaluation.negate()
-                range_before = resolver.solution.get(negated_term.package)
-                resolver.solution.derive(
-                    negated_term.package,
-                    negated_term.constraint,
-                    positive=negated_term.is_positive(),
+            if undetermined_term is None:
+                if conflict:
+                    return incompatibility
+                continue
+
+            # Derive the negation of the one undetermined term.
+            negated_package = undetermined_term.package
+            negated_positive = not undetermined_term._positive  # noqa: SLF001
+            range_before = solution_get(negated_package)
+            derive(
+                negated_package,
+                undetermined_term.constraint,
+                positive=negated_positive,
+                cause=incompatibility,
+            )
+            range_after = solution_get(negated_package)
+            if range_before != range_after:
+                stats.derivations += 1
+                observer.on_derivation(
+                    negated_package,
+                    positive=negated_positive,
                     cause=incompatibility,
                 )
-                range_after = resolver.solution.get(negated_term.package)
-
-                if range_before != range_after:
-                    resolver.stats.derivations += 1
-                    resolver.observer.on_derivation(
-                        negated_term.package,
-                        positive=negated_term.is_positive(),
-                        cause=incompatibility,
-                    )
-                    if negated_term.package not in in_queue:
-                        propagation_queue.append(negated_term.package)
-                        in_queue.add(negated_term.package)
+                if negated_package not in in_queue:
+                    propagation_queue.append(negated_package)
+                    in_queue.add(negated_package)
 
     return None
 
@@ -91,6 +145,9 @@ def evaluate_incompatibility(
       ``IncompatibilityState.CONFLICT``: all terms satisfied
       ``Term``: exactly one undetermined term (unit propagation candidate)
       ``None``: 0 or 2+ undetermined terms (nothing to do yet)
+
+    ``unit_propagation`` inlines this; it stays as the reference form and
+    for callers outside the hot loop.
     """
     undetermined_term: Term[Any, Any] | None = None
 
@@ -122,7 +179,7 @@ def term_relation(resolver: Resolver[Any, Any], term: Term[Any, Any]) -> SetRela
     if assignment is None:
         return SetRelation.UNDETERMINED
 
-    positive = term.is_positive()
+    positive = term._positive  # noqa: SLF001
     cache = resolver.relation_cache
     key = (positive, assignment, term.constraint)
     result = cache.get(key)
@@ -140,7 +197,6 @@ def term_relation(resolver: Resolver[Any, Any], term: Term[Any, Any]) -> SetRela
     )
     if needs_positive and not resolver.solution.has_positive_constraint(term.package):
         return SetRelation.UNDETERMINED
-
     return result
 
 

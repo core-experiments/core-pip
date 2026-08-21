@@ -148,7 +148,7 @@ class PartialSolution(Generic[PackageType, VersionType]):
         """
         cached = self._effective_range_cache.get(package, _UNSET)
         if cached is not _UNSET:
-            return cast("RangeProtocol[VersionType] | None", cached)
+            return cached  # type: ignore[return-value]  # typing.cast is a call on the hottest read
 
         positive = self._positive_ranges.get(package)
         negative = self._negative_ranges.get(package)
