@@ -5,16 +5,16 @@ import marshal
 import urllib.parse
 from pathlib import Path
 
-from cpip.core.versions import Version
+from cpip.core.versions import VERSION_WIRE_FORMAT, Version, is_version_wire
 from cpip.index.catalog_cache import (
     LEGACY_PREFIX,
-    LEGACY_SUMMARY_HEADER,
-    LEGACY_SUMMARY_PREFIX,
+    SUMMARY_HEADER,
     RECORD_WHEEL_IDENTITY,
     V6_PREFIX,
     WHEEL_RECORD,
     CatalogChoices,
     cache_key,
+    decode_summary,
     load_catalog,
     load_choices,
     load_links,
@@ -61,7 +61,7 @@ def test_catalog_cache_roundtrip(tmp_path: Path) -> None:
     ]
     assert catalog[1] == []
     assert [
-        (name, version, str(Version.from_cache_state(version_state)), facts)
+        (name, version, str(Version.from_wire(version_state)), facts)
         for name, version, version_state, facts in summary[1]
     ] == [
         (
@@ -140,29 +140,68 @@ def test_catalog_choices_are_scoped_to_generation(tmp_path: Path) -> None:
     )
 
 
-def test_catalog_summary_migrates_v2_in_version_order(tmp_path: Path) -> None:
+def test_v3_summary_is_recompiled_from_catalog(tmp_path: Path) -> None:
+    """A summary written by an older cpip lives under its own key and is
+    never read; the v4 summary is compiled from the text-only catalog."""
     cache = SafeFileCache(str(tmp_path))
     page_url = "https://example.test/simple/demo/"
-    groups = [
-        (
-            "demo",
-            version,
-            Version(version).cache_state_internal(),
-            [(WHEEL_RECORD, None, None)],
+    links = [
+        Link.from_url(
+            f"https://files.example.test/demo-{version}-py3-none-any.whl",
+            source_url=page_url,
         )
         for version in ("2.0", "1.0")
     ]
-    body = marshal.dumps(("generation", groups, False))
+    save_links(cache, page_url, links)
+    cache.delete(summary_key(page_url))
+    stale_groups = [
+        (
+            "demo",
+            version,
+            (0, (2, 0), None, None, None, None, version, (0, (2,), ())),
+            [],
+        )
+        for version in ("2.0", "1.0")
+    ]
+    body = marshal.dumps(("generation", stale_groups, False))
     cache.set_atomic(
-        LEGACY_SUMMARY_PREFIX + page_url,
-        LEGACY_SUMMARY_HEADER + hashlib.sha256(body).digest() + body,
+        "cpip-index-summary-v3:" + page_url,
+        b"cpip-index-summary-v3\0" + hashlib.sha256(body).digest() + body,
     )
 
     summary = load_summary(cache, page_url)
 
     assert summary is not None
     assert [group[1] for group in summary[1]] == ["1.0", "2.0"]
+    assert all(is_version_wire(group[2]) for group in summary[1])
     assert cache.get_atomic(summary_key(page_url)) is not None
+
+
+def test_summary_payload_carries_the_version_wire_format(tmp_path: Path) -> None:
+    cache = SafeFileCache(str(tmp_path))
+    page_url = "https://example.test/simple/demo/"
+    link = Link.from_url(
+        "https://files.example.test/demo-1.0-py3-none-any.whl",
+        source_url=page_url,
+    )
+    save_links(cache, page_url, [link])
+    raw = cache.get_atomic(summary_key(page_url))
+    assert raw is not None
+    assert raw.startswith(SUMMARY_HEADER)
+    payload = marshal.loads(raw[len(SUMMARY_HEADER) + hashlib.sha256().digest_size :])
+    assert payload[4] == VERSION_WIRE_FORMAT
+    assert is_version_wire(payload[1][0][2])
+
+    # A payload with the wrong wire format is a miss, not a wrong answer.
+    body = marshal.dumps((*payload[:4], VERSION_WIRE_FORMAT + 1))
+    cache.set_atomic(
+        summary_key(page_url),
+        SUMMARY_HEADER + hashlib.sha256(body).digest() + body,
+    )
+    assert decode_summary(cache.get_atomic(summary_key(page_url))) is None
+    recompiled = load_summary(cache, page_url)
+    assert recompiled is not None
+    assert recompiled[1][0][1] == "1.0"
 
 
 def test_catalog_cache_ignores_corrupt_entries(tmp_path: Path) -> None:

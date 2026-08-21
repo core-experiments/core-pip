@@ -1584,12 +1584,8 @@ class CandidateProvider:
             while low < high:
                 middle = (low + high) // 2
 
-                state = groups[middle][2]
-
-                if not isinstance(state, tuple) or len(state) != 8:
-                    return 0 if not right else len(groups)
-
-                candidate_key: Any = state[7]
+                # A validated wire record: (public, release, key).
+                candidate_key: Any = groups[middle][2][2]
 
                 if candidate_key < key or (right and candidate_key == key):
                     low = middle + 1
@@ -1606,10 +1602,10 @@ class CandidateProvider:
         stop = len(groups)
 
         if lower is not None:
-            start = bound(lower[0].key_internal(), right=not lower[1])
+            start = bound(lower[0], right=not lower[1])
 
         if upper is not None:
-            stop = bound(upper[0].key_internal(), right=upper[1])
+            stop = bound(upper[0], right=upper[1])
 
         return min(start, stop), stop
 
@@ -1703,7 +1699,7 @@ class CandidateProvider:
             ):
                 continue
 
-            version = Version.from_cache_state(version_state)
+            version = Version.from_wire(version_state)
 
             if version in seen_versions:
                 continue
@@ -2329,7 +2325,7 @@ class CandidateProvider:
                     )
 
                     if version is None:
-                        version = Version.from_cache_state(version_state)
+                        version = Version.from_wire(version_state)
 
                         if ordered_summaries is None:
                             parsed_versions[version_text] = version

@@ -9,6 +9,7 @@ from cpip.index.candidate_metadata_cache import (
     LEGACY_NAME,
     LEGACY_VERSION,
     NAME,
+    V3_NAME,
     VERSION,
     CandidateMetadataCache,
     get_candidate_metadata_cache,
@@ -44,8 +45,6 @@ def test_candidate_metadata_cache_roundtrip(tmp_path: Path) -> None:
     assert loaded.dependencies[0].raw == "requests>=2"
     assert loaded.provided_extras == frozenset(("docs",))
     assert loaded.requires_python == ">=3.9"
-    assert "requests>=2" in cache.requirement_states
-    assert "1.2.3" in cache.version_states
 
 
 def test_candidate_metadata_cache_defers_database_creation(tmp_path: Path) -> None:
@@ -110,3 +109,37 @@ def test_candidate_metadata_cache_migrates_v2_snapshot(tmp_path: Path) -> None:
     assert reloaded.name == metadata.name
     assert reloaded.version == metadata.version
     assert reloaded.dependencies == metadata.dependencies
+
+
+def test_candidate_metadata_cache_imports_v3_database(tmp_path: Path) -> None:
+    """The v3 store's metadata rows have the same shape; they are copied so
+    an upgrade does not re-fetch every candidate's metadata."""
+    import json
+    import marshal
+    import sqlite3
+
+    key = ("https://example.test/demo.whl", "3.0", ("x",), "sha256:v3")
+    value = ("demo", "3.0", ("requests>=2",), ("x",), ">=3.9")
+    source = sqlite3.connect(tmp_path / V3_NAME)
+    source.execute("CREATE TABLE candidate_metadata (key TEXT PRIMARY KEY, value BLOB)")
+    source.execute(
+        "CREATE TABLE version_states (raw TEXT PRIMARY KEY, state BLOB)",
+    )
+    source.execute(
+        "INSERT INTO candidate_metadata (key, value) VALUES (?, ?)",
+        (json.dumps(key), marshal.dumps(value)),
+    )
+    source.execute(
+        "INSERT INTO candidate_metadata (key, value) VALUES (?, ?)",
+        ("not json", marshal.dumps(value)),
+    )
+    source.commit()
+    source.close()
+
+    cache = CandidateMetadataCache(tmp_path)
+    metadata = cache.get(key)
+    assert metadata is not None
+    assert metadata.version == Version("3.0")
+    assert metadata.dependencies[0].raw == "requests>=2"
+    assert (tmp_path / NAME).is_file()
+    assert CandidateMetadataCache(tmp_path).get(key) is not None

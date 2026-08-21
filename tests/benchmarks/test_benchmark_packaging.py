@@ -117,11 +117,11 @@ def test_evaluate_markers(benchmark: BenchmarkFixture) -> None:
 def test_restore_versions_from_state(benchmark: BenchmarkFixture) -> None:
     """The cold path by which cached catalog summaries hand back Versions
     without reparsing: one record per version, restored in bulk."""
-    states = [version.cache_state_internal() for version in PARSED_VERSIONS]
+    states = [version.to_wire() for version in PARSED_VERSIONS]
 
     def restore_all() -> int:
         reset_caches()
-        return len([Version.from_cache_state(state) for state in states])
+        return len([Version.from_wire(state) for state in states])
 
     assert benchmark(restore_all) == len(PARSED_VERSIONS)
 

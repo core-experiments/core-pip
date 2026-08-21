@@ -18,7 +18,7 @@ from typing import Any
 
 import pytest
 from cpip.core import names, packaging, versions, wheel
-from cpip.core.packaging import Requirement, marker_applies, parse_requirement
+from cpip.core.packaging import marker_applies, parse_requirement
 from cpip.core.versions import Version
 from cpip.core.wheel import parsed_wheel_tags, supported_wheel_tags, wheel_tag_rank
 
@@ -57,12 +57,7 @@ def _warm_everything() -> None:
     assert requirement.specifier.contains(Version("1.5"))
     assert marker_applies(requirement.marker, extras=("extra",))
 
-    assert Version.from_cache_state(Version("1.2.3").cache_state_internal()) == Version(
-        "1.2.3"
-    )
-    assert (
-        Requirement.from_cache_state(requirement.cache_state_internal()) == requirement
-    )
+    assert Version.from_wire(Version("1.2.3").to_wire()) == Version("1.2.3")
     assert names.canonicalize_name("Some_Project") == "some-project"
     assert wheel.parse_wheel_filename("pkg-1.0-py3-none-any.whl") is not None
     tags = parsed_wheel_tags("py3", "none", "any")

@@ -383,11 +383,11 @@ use cloneable directory trees.
 | Owner | Storage | Contents and validity |
 | --- | --- | --- |
 | `network/cache.py` | `http-v2/` | HTTP metadata/body pairs under hashed keys; missing or partial pairs are misses |
-| `index/catalog_cache.py` | records in the HTTP cache | versioned parsed Simple API links keyed by source URL |
+| `index/catalog_cache.py` | records in the HTTP cache | versioned parsed Simple API links keyed by source URL; the release summary stores each version as `Version.to_wire()` (`public`, `release`, ordering key) stamped with `VERSION_WIRE_FORMAT`, and a summary of another format is recompiled from the text-only catalog |
 | `index/artifact_cache.py` | `artifacts-v1/` | immutable bodies by SHA-256 plus normalized-URL receipts and expected-hash validation |
 | `index/candidate_cache.py` | `wheels/` | wheels built from source, keyed by stable source identity |
 | `index/metadata_cache.py` | `metadata-v2.sqlite` | parsed local wheel headers keyed by absolute path, size, and modification time |
-| `index/candidate_metadata_cache.py` | `candidate-metadata-v2.marshal` | dependency metadata safe to reuse during resolution |
+| `index/candidate_metadata_cache.py` | `candidate-metadata-v4.sqlite` | dependency metadata safe to reuse during resolution, stored as text and reparsed through the `core` intern tables |
 | `index/release_facts_cache.py` | `release-facts-v1.marshal` | deterministic release-level rejection reasons |
 | `cli/fast_install.py` (`FastInstallMetadataCache`) | `fast-install-v3.marshal` and `fast-install-trees-v1/` | narrow local plans, wheel metadata, and cloneable completed targets |
 | `install/wheel_archive_cache.py` | `archive-v1/` | validated, unpacked immutable wheel trees keyed by wheel digest |

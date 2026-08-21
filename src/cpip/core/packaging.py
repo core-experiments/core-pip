@@ -568,40 +568,6 @@ class Requirement:
     def __delattr__(self, name: str) -> None:
         raise AttributeError(f"Requirement is immutable (tried to delete {name!r})")
 
-    @classmethod
-    def from_cache_state(cls, state: tuple[Any, ...]) -> Requirement:
-        """Restore a requirement from a cached record.
-
-        The record's own text is parsed when it has one (so the restored
-        requirement is the interned instance for that text); a field-built
-        requirement without text is rebuilt from its fields.
-        """
-        raw = state[5]
-        if raw:
-            try:
-                return parse_requirement(raw)
-            except ValueError:
-                pass
-        return cls(
-            name=state[0],
-            specifier=SpecifierSet(state[1][0]),
-            extras=frozenset(state[2]),
-            url=state[3],
-            marker=state[4],
-            raw=raw,
-        )
-
-    def cache_state_internal(self) -> tuple[object, ...]:
-        text = self.specifier.text
-        return (
-            self.name,
-            (text, (), text),
-            tuple(sorted(self.extras)),
-            self.url,
-            self.marker,
-            self.raw,
-        )
-
     def __eq__(self, other: object) -> bool:
         return isinstance(other, Requirement) and (
             self.canonical_name,
