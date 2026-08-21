@@ -44,6 +44,10 @@ if TYPE_CHECKING:
 # Python-level dunder per comparison.
 _VERSION_ORDER = operator.attrgetter("comparison_key")
 
+# SpecifierSet's mutable state is all memo caches, so one empty instance can
+# stand in for every "any version" requirement.
+_EMPTY_SPECIFIERS = SpecifierSet()
+
 
 @dataclass
 class NabProvider:
@@ -63,6 +67,7 @@ class NabProvider:
         ] = {}
         self.requirements: _RecordingRequirements = _RecordingRequirements()
         self.display_requirements: dict[str, Requirement] = {}
+        self._unpinned_requirements: dict[str, tuple[Requirement, Requirement]] = {}
         self._version_cache: dict[tuple[object, ...], tuple[Version, ...]] = {}
         # Fast paths in front of ``_version_cache``, whose key costs more to
         # build than the lookup it guards. A package's entry in
@@ -263,13 +268,24 @@ class NabProvider:
             if not isinstance(self.provider, CandidateProvider):
                 candidate_requirement = parse_requirement(package)
             else:
-                candidate_requirement = Requirement(
-                    name=requirement.name,
-                    specifier=SpecifierSet(),
-                    extras=requirement.extras,
-                    marker=requirement.marker,
-                    raw=requirement.raw,
-                )
+                # The same name-only requirement is needed on every decision
+                # for this package; a package's entry in self.requirements
+                # is replaced, never mutated, so identity tells when the
+                # memoized one no longer matches.
+                memo = self._unpinned_requirements.get(package)
+                if memo is None or memo[0] is not requirement:
+                    memo = (
+                        requirement,
+                        Requirement(
+                            name=requirement.name,
+                            specifier=_EMPTY_SPECIFIERS,
+                            extras=requirement.extras,
+                            marker=requirement.marker,
+                            raw=requirement.raw,
+                        ),
+                    )
+                    self._unpinned_requirements[package] = memo
+                candidate_requirement = memo[1]
         versions = self._versions(package)
         if len(url_constraints) == 1 and requirement.url is None:
             constrained_candidates = tuple(
@@ -923,14 +939,9 @@ class NabProvider:
             # Keep exact dependency constraints in diagnostics even when no
             # matching artifact exists; a finite available-version range
             # would otherwise collapse to ``<empty>`` and hide ``==N``.
-            specifier_text = str(dependency.specifier)
-            if specifier_text.startswith("==") and "," not in specifier_text:
-                try:
-                    dependencies[dependency_key] = Range.singleton(
-                        Version(specifier_text[2:]),
-                    )
-                except ValueError:
-                    dependencies[dependency_key] = self._finite_range(selected)
+            pinned = _exact_pin(dependency)
+            if pinned is not None:
+                dependencies[dependency_key] = Range.singleton(pinned)
             else:
                 dependencies[dependency_key] = self._finite_range(selected)
         result = dict(dependencies)
