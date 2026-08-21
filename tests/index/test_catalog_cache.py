@@ -1,20 +1,16 @@
 from __future__ import annotations
 
-import hashlib
 import marshal
 from pathlib import Path
 
-from cpip.core.versions import VERSION_WIRE_FORMAT, Version, is_version_wire
+from cpip.core.versions import Version
 from cpip.index.catalog_cache import (
     CHOICE_HEADER,
-    SUMMARY_HEADER,
-    VERSION as CATALOG_VERSION,
     WHEEL_RECORD,
     CatalogChoices,
     cache_key,
     choice_key,
     encode_checked_payload,
-    decode_summary,
     load_catalog,
     load_choices,
     load_links,
@@ -174,33 +170,6 @@ def test_malformed_choices_are_a_miss(tmp_path: Path) -> None:
     assert recompiled[3] == {}
 
 
-def test_summary_payload_carries_the_version_wire_format(tmp_path: Path) -> None:
-    cache = SafeFileCache(str(tmp_path))
-    page_url = "https://example.test/simple/demo/"
-    link = Link.from_url(
-        "https://files.example.test/demo-1.0-py3-none-any.whl",
-        source_url=page_url,
-    )
-    save_links(cache, page_url, [link])
-    raw = cache.get_atomic(summary_key(page_url))
-    assert raw is not None
-    assert raw.startswith(SUMMARY_HEADER)
-    payload = marshal.loads(raw[len(SUMMARY_HEADER) + hashlib.sha256().digest_size :])
-    assert payload[4] == VERSION_WIRE_FORMAT
-    assert is_version_wire(payload[1][0][2])
-
-    # A payload with the wrong wire format is a miss, not a wrong answer.
-    body = marshal.dumps((*payload[:4], VERSION_WIRE_FORMAT + 1))
-    cache.set_atomic(
-        summary_key(page_url),
-        SUMMARY_HEADER + hashlib.sha256(body).digest() + body,
-    )
-    assert decode_summary(cache.get_atomic(summary_key(page_url))) is None
-    recompiled = load_summary(cache, page_url)
-    assert recompiled is not None
-    assert recompiled[1][0][1] == "1.0"
-
-
 def test_catalog_cache_ignores_corrupt_entries(tmp_path: Path) -> None:
     cache = SafeFileCache(str(tmp_path))
     key = cache_key("https://example.test/simple/demo/")
@@ -221,7 +190,7 @@ def test_catalog_with_an_unparseable_version_is_a_miss(tmp_path: Path) -> None:
     ]
     cache.set_atomic(
         cache_key(page_url),
-        marshal.dumps(("cpip-index-catalog", CATALOG_VERSION, groups, [])),
+        marshal.dumps(("cpip-index-catalog", groups, [])),
     )
 
     assert load_catalog(cache, page_url) is None

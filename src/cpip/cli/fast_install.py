@@ -23,16 +23,10 @@ import tempfile
 from collections.abc import Iterable, Sequence
 
 from cpip.cli.fast import consume_option, extend_requirements
-from cpip.core.appdirs import resolve_cache_dir
+from cpip.core.appdirs import resolve_cache_dir, versioned_cache_dir
 from cpip.core.packaging import EMPTY_FROZENSET
 from cpip.core.versions import Version
-from cpip.core.utils import (
-    CACHE_INTERPRETER_TAG,
-    CACHE_VERSION,
-    CACHE_VERSION_TAG,
-    load_snapshot,
-    save_snapshot,
-)
+from cpip.core.utils import CACHE_INTERPRETER_TAG, load_snapshot, save_snapshot
 from cpip.core.wheel import PureWheelCandidate, WheelCandidate
 from cpip.core.wheel import parse_wheel_filename as parse_wheel_filename_core
 from cpip.install.target import InstallTarget
@@ -50,7 +44,6 @@ from cpip.resolution.archive import (
     WheelhouseUnavailable,
 )
 
-VERSION = CACHE_VERSION
 # Scoped to the interpreter: marshal's wire format is not guaranteed
 # compatible across Python versions/implementations. TREE_CACHE_BUCKET does
 # not need the same treatment -- it is only ever reached through a plan
@@ -60,13 +53,12 @@ VERSION = CACHE_VERSION
 # NAME_FAMILY names the pattern shared by every interpreter's snapshot, so a
 # cache-wide purge can find and remove all of them, not only the one the
 # running interpreter would look in.
-NAME_FAMILY = f"fast-install-{CACHE_VERSION_TAG}"
+NAME_FAMILY = "fast-install"
 
 NAME = f"{NAME_FAMILY}-{CACHE_INTERPRETER_TAG}.marshal"
 MAX_ENTRIES = 8_192
 MAX_PLANS = 256
-TREE_CACHE_BUCKET = f"fast-install-trees-{CACHE_VERSION_TAG}"
-TREE_CACHE_FORMAT = CACHE_VERSION
+TREE_CACHE_BUCKET = "fast-install-trees"
 
 Metadata = tuple[tuple[str, ...], bool]
 StoredMetadata = tuple[tuple[str, ...], bool, str | None]
@@ -95,20 +87,19 @@ class FastInstallMetadataCache:
         payload = load_snapshot(self.path)
         if (
             not isinstance(payload, tuple)
-            or len(payload) != 4
+            or len(payload) != 3
             or payload[0] != "cpip-fast-install"
-            or payload[1] != VERSION
+            or not isinstance(payload[1], dict)
             or not isinstance(payload[2], dict)
-            or not isinstance(payload[3], dict)
         ):
             return
 
-        for key, value in payload[2].items():
+        for key, value in payload[1].items():
             metadata = self._coerce_metadata(value)
             if self._valid_identity(key) and metadata is not None:
                 self.entries[key] = metadata  # ty: ignore[invalid-assignment]
 
-        for key, value in payload[3].items():
+        for key, value in payload[2].items():
             if self._valid_plan_key(key) and self._valid_plan_value(value):
                 self.plans[key] = value  # ty: ignore[invalid-assignment]
 
@@ -372,7 +363,7 @@ class FastInstallMetadataCache:
             return
         tree_key = hashlib.sha256(
             marshal.dumps(
-                ("cpip-fast-install-tree", TREE_CACHE_FORMAT, key, value[0]),
+                ("cpip-fast-install-tree", key, value[0]),
             ),
         ).hexdigest()
         tree = self._tree_path(tree_key)
@@ -408,7 +399,7 @@ class FastInstallMetadataCache:
             return
         if save_snapshot(
             self.path,
-            ("cpip-fast-install", VERSION, self.entries, self.plans),
+            ("cpip-fast-install", self.entries, self.plans),
         ):
             self.dirty = False
 
@@ -572,7 +563,8 @@ def parse_arguments(args: list[str]) -> InstallOptions | None:
             elif name == "--target":
                 options.target = value
             elif name == "--cache-dir":
-                options.cache_dir = value
+                # The versioned directory every other writer uses.
+                options.cache_dir = versioned_cache_dir(value)
             else:
                 if not extend_requirements(options.requirements, value):
                     return None
@@ -622,7 +614,7 @@ def run_cached_remote(args: list[str]) -> int | None:
     ):
         return None
 
-    cache_dir = resolve_cache_dir(options.cache_dir)
+    cache_dir = options.cache_dir or resolve_cache_dir()
 
     index_url = _remote_index_url()
 

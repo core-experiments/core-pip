@@ -7,13 +7,12 @@ import os
 import sqlite3
 from typing import TypeAlias
 
-from cpip.core.utils import CACHE_VERSION_TAG
 from cpip.index.sqlite_cache import SqliteBackedCache
 
 MetadataHeaders: TypeAlias = dict[str, list[str]]
 MetadataIdentity: TypeAlias = tuple[str, int, int]
 
-NAME = f"metadata-{CACHE_VERSION_TAG}.sqlite"
+NAME = "metadata.sqlite"
 _MAX_ENTRIES = 8_192
 _CACHE_INSTANCES: dict[str, WheelMetadataCache] = {}
 

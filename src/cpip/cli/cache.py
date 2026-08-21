@@ -8,47 +8,40 @@ import glob
 import os
 import sys
 
-from cpip.cli.fast import FAST_LOCK_PLAN_BUCKET
-from cpip.cli.fast_install import NAME_FAMILY as FAST_INSTALL_SNAPSHOT_FAMILY
-from cpip.cli.fast_install import TREE_CACHE_BUCKET
 from cpip.cli.parsers.cache import create_parser
-from cpip.core.appdirs import resolve_cache_dir
+from cpip.core.appdirs import cache_root, versioned_cache_dir
 from cpip.core.errors import CommandError
-from cpip.index.artifact_cache import ARTIFACT_CACHE_BUCKET
 from cpip.index.cache import WHEEL_CACHE_BUCKET
-from cpip.index.candidate_metadata_cache import NAME as CANDIDATE_METADATA_NAME
-from cpip.index.metadata_cache import NAME as WHEEL_METADATA_NAME
-from cpip.index.release_facts_cache import NAME as RELEASE_FACTS_NAME
-from cpip.install.wheel_archive_cache import ARCHIVE_CACHE_BUCKET_FAMILY
-from cpip.install.wheel_install_plan_cache import RESOLUTION_CACHE_BUCKET_FAMILY
 from cpip.network.cache import HTTP_CACHE_BUCKET
 
 
 class CacheManager:
-    """Inspect and remove files from cpip's cache directories."""
+    """Inspect and remove files from cpip's cache directories.
+
+    Every persisted cache lives under one ``v<N>`` directory of the cache
+    root, so the manager never needs to know the individual stores: a purge
+    removes every ``v*`` directory, and list/info/remove work on this
+    version's built-wheel bucket.
+    """
 
     def __init__(self, cache_dir: str | None = None) -> None:
         # The same resolution every writer uses (explicit, then
         # CPIP_CACHE_DIR, then the platform default), so the manager looks
         # where the caches actually are.
-        self.cache_dir = os.path.normcase(resolve_cache_dir(cache_dir))
+        self.root = os.path.normcase(cache_root(cache_dir))
+        self.cache_dir = versioned_cache_dir(self.root)
         self.http_dir = os.path.join(self.cache_dir, HTTP_CACHE_BUCKET)
         self.wheel_dir = os.path.join(self.cache_dir, WHEEL_CACHE_BUCKET)
-        # The archive and resolution buckets are interpreter-tagged (one
-        # bucket per interpreter/implementation, since they hold
-        # marshal-serialized data); glob every tagged variant rather than
-        # just the running interpreter's own, so purge clears caches left by
-        # other interpreters too.
-        self.archive_dirs = self._glob(f"{ARCHIVE_CACHE_BUCKET_FAMILY}-*")
-        self.artifact_dir = os.path.join(self.cache_dir, ARTIFACT_CACHE_BUCKET)
-        self.fast_install_tree_dir = os.path.join(self.cache_dir, TREE_CACHE_BUCKET)
-        self.fast_lock_plan_dir = os.path.join(self.cache_dir, FAST_LOCK_PLAN_BUCKET)
-        self.resolution_dirs = self._glob(f"{RESOLUTION_CACHE_BUCKET_FAMILY}-*")
 
-    def _glob(self, pattern: str) -> builtins.list[str]:
-        """Expand ``pattern`` directly under the cache root; the root itself
-        is escaped so a directory name with glob metacharacters still matches."""
-        return glob.glob(os.path.join(glob.escape(self.cache_dir), pattern))
+    def version_dirs(self) -> builtins.list[str]:
+        """Every ``v<N>`` cache directory under the root, this cpip's or another's."""
+        # The root is escaped so a directory name with glob metacharacters
+        # still matches.
+        return sorted(
+            path
+            for path in glob.glob(os.path.join(glob.escape(self.root), "v*"))
+            if os.path.isdir(path)
+        )
 
     def wheel_files(self) -> builtins.list[str]:
         wheel_dir = self.wheel_dir
@@ -63,12 +56,11 @@ class CacheManager:
 
     @staticmethod
     def _files_under(root: str) -> builtins.list[str]:
-        root_text = root
-        if not os.path.isdir(root_text):
+        if not os.path.isdir(root):
             return []
         return [
             os.path.join(current, name)
-            for current, _, files in os.walk(root_text, followlinks=False)
+            for current, _, files in os.walk(root, followlinks=False)
             for name in files
         ]
 
@@ -101,32 +93,9 @@ class CacheManager:
         if purge:
             files = [
                 path
-                for root in (
-                    self.http_dir,
-                    self.wheel_dir,
-                    *self.archive_dirs,
-                    self.artifact_dir,
-                    self.fast_install_tree_dir,
-                    self.fast_lock_plan_dir,
-                    *self.resolution_dirs,
-                )
-                for path in self._files_under(root)
+                for version_dir in self.version_dirs()
+                for path in self._files_under(version_dir)
             ]
-            # Single-file caches: the per-interpreter fast-install snapshots
-            # and the SQLite/marshal stores. The trailing wildcard also takes
-            # SQLite's -wal/-shm sidecars and the .<pid>.tmp files an
-            # interrupted save_snapshot leaves behind.
-            files.extend(
-                path
-                for pattern in (
-                    f"{FAST_INSTALL_SNAPSHOT_FAMILY}-*.marshal*",
-                    f"{CANDIDATE_METADATA_NAME}*",
-                    f"{WHEEL_METADATA_NAME}*",
-                    f"{RELEASE_FACTS_NAME}*",
-                )
-                for path in self._glob(pattern)
-                if os.path.isfile(path)
-            )
         else:
             files = [
                 path
@@ -169,13 +138,13 @@ class CacheManager:
             if verbose:
                 print(f"Removed {path}")
 
-        # A purge sweeps empty bucket directories even when no file was left
-        # to remove, so a second purge finishes the job instead of warning.
+        # A purge sweeps empty directories even when no file was left to
+        # remove, so a second purge finishes the job instead of warning.
         directories_removed = 0
         directories = [
             os.path.join(current, name)
             for current, directory_names, _ in os.walk(
-                self.cache_dir,
+                self.root,
                 topdown=False,
                 followlinks=False,
             )
@@ -208,7 +177,7 @@ def run_cache(args: list[str]) -> int:
         if options.pattern or options.cache_dir or options.no_cache_dir:
             raise CommandError("Too many arguments")
 
-        print(os.path.normcase(resolve_cache_dir()))
+        print(os.path.normcase(cache_root()))
 
         return 0
 

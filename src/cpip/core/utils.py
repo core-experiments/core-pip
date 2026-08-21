@@ -62,8 +62,9 @@ CACHE_INTERPRETER_TAG = f"{sys.implementation.name}-{CURRENT_PYTHON_VERSION_DIGI
 
 CACHE_VERSION = 0
 """Version of cpip's on-disk cache formats as a whole. Every persisted cache
-folds it into its storage name (bucket, file, key prefix, header) and stamps
-it into its payloads; bumping it makes every older cache a miss. There is no
+lives under the ``v<CACHE_VERSION>`` directory of the cache root (see
+``core/appdirs.py:versioned_cache_dir``), so bumping it makes every older
+cache a miss without any cache carrying a version of its own. There is no
 migration code: a cache of another version is simply never read."""
 
 CACHE_VERSION_TAG = f"v{CACHE_VERSION}"

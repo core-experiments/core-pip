@@ -22,7 +22,7 @@ from contextlib import contextmanager
 from typing import TYPE_CHECKING, Generator
 
 from cpip.core.errors import InstallationError
-from cpip.core.utils import CACHE_INTERPRETER_TAG, CACHE_VERSION, CACHE_VERSION_TAG
+from cpip.core.utils import CACHE_INTERPRETER_TAG
 from cpip.core.wheel import validate_wheel
 from cpip.install.wheel_archive import (
     copy_member_with_metadata,
@@ -77,11 +77,9 @@ else:
 # ARCHIVE_CACHE_BUCKET_FAMILY names the pattern shared by every interpreter's
 # bucket, so a cache-wide purge can find and remove all of them, not only the
 # one the running interpreter would look in.
-ARCHIVE_CACHE_BUCKET_FAMILY = f"archive-{CACHE_VERSION_TAG}"
+ARCHIVE_CACHE_BUCKET_FAMILY = "archive"
 
 ARCHIVE_CACHE_BUCKET = f"{ARCHIVE_CACHE_BUCKET_FAMILY}-{CACHE_INTERPRETER_TAG}"
-
-ARCHIVE_CACHE_FORMAT = CACHE_VERSION
 
 _LOCK_WAIT_SECONDS = 30.0
 
@@ -174,20 +172,19 @@ def load_archive(entry_root: str, digest: str) -> CachedWheelArchive | None:
 
     if not (
         isinstance(value, tuple)
-        and len(value) == 4
-        and value[0] == ARCHIVE_CACHE_FORMAT
-        and value[1] == digest
-        and isinstance(value[2], str)
-        and isinstance(value[3], tuple)
+        and len(value) == 3
+        and value[0] == digest
+        and isinstance(value[1], str)
+        and isinstance(value[2], tuple)
     ):
         return None
 
-    entries = value[3]
+    entries = value[2]
 
     if not valid_archive_entries(entries):
         return None
 
-    return CachedWheelArchive(digest, tree, value[2], entries)
+    return CachedWheelArchive(digest, tree, value[1], entries)
 
 
 def _remove_cache_path(path: str) -> None:
@@ -356,7 +353,6 @@ def _extract_archive(
             )
 
         manifest = (
-            ARCHIVE_CACHE_FORMAT,
             digest,
             dist_info,
             tuple(entries),

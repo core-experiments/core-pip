@@ -10,6 +10,7 @@ from cpip_test_support import CpipTestEnvironment, TestCpipResult
 
 from cpip.cli.fast import FAST_LOCK_PLAN_BUCKET
 from cpip.cli.fast_install import TREE_CACHE_BUCKET
+from cpip.core.appdirs import versioned_cache_dir
 from cpip.index.cache import WHEEL_CACHE_BUCKET
 from cpip.index.candidate_metadata_cache import NAME as CANDIDATE_METADATA_NAME
 from cpip.index.metadata_cache import NAME as WHEEL_METADATA_NAME
@@ -29,12 +30,16 @@ def cache_dir(script: CpipTestEnvironment) -> str:
 
 @pytest.fixture
 def http_cache_dir(cache_dir: str) -> str:
-    return os.path.normcase(os.path.join(cache_dir, HTTP_CACHE_BUCKET))
+    return os.path.normcase(
+        os.path.join(versioned_cache_dir(cache_dir), HTTP_CACHE_BUCKET),
+    )
 
 
 @pytest.fixture
 def wheel_cache_dir(cache_dir: str) -> str:
-    return os.path.normcase(os.path.join(cache_dir, WHEEL_CACHE_BUCKET))
+    return os.path.normcase(
+        os.path.join(versioned_cache_dir(cache_dir), WHEEL_CACHE_BUCKET),
+    )
 
 
 @pytest.fixture
@@ -412,9 +417,9 @@ def test_cache_purge_removes_fast_install_snapshots(
 ) -> None:
     from cpip.cli.fast_install import NAME as FAST_INSTALL_SNAPSHOT_NAME
 
-    snapshot = os.path.join(cache_dir, FAST_INSTALL_SNAPSHOT_NAME)
+    snapshot = os.path.join(versioned_cache_dir(cache_dir), FAST_INSTALL_SNAPSHOT_NAME)
     tree_file = os.path.join(
-        cache_dir,
+        versioned_cache_dir(cache_dir),
         TREE_CACHE_BUCKET,
         "aa",
         "digest",
@@ -440,11 +445,14 @@ def _plant(path: str, content: bytes = b"x") -> str:
     return path
 
 
-def _plant_every_store(cache_dir: str) -> list[str]:
-    """Seed one file in every location the current cache version writes."""
+def _plant_every_store(cache_root: str) -> list[str]:
+    """Seed one file in every location the current cache version writes, plus
+    one under another version's directory."""
     from cpip.cli.fast_install import NAME as FAST_INSTALL_SNAPSHOT_NAME
 
+    cache_dir = versioned_cache_dir(cache_root)
     return [
+        _plant(os.path.join(cache_root, "v999", "http", "aa", "entry")),
         _plant(os.path.join(cache_dir, HTTP_CACHE_BUCKET, "aa", "entry")),
         _plant(
             os.path.join(
@@ -456,8 +464,8 @@ def _plant_every_store(cache_dir: str) -> list[str]:
                 "demo-1.0-py3-none-any.whl",
             ),
         ),
-        _plant(os.path.join(cache_dir, "archive-v0-cpython-999", "aa", "wheel")),
-        _plant(os.path.join(cache_dir, "resolution-v0-cpython-999", "aa", "key.bin")),
+        _plant(os.path.join(cache_dir, "archive-cpython-999", "aa", "wheel")),
+        _plant(os.path.join(cache_dir, "resolution-cpython-999", "aa", "key.bin")),
         _plant(os.path.join(cache_dir, FAST_LOCK_PLAN_BUCKET, "digest.cache")),
         _plant(os.path.join(cache_dir, FAST_INSTALL_SNAPSHOT_NAME)),
         _plant(os.path.join(cache_dir, f"{FAST_INSTALL_SNAPSHOT_NAME}.123.tmp")),
@@ -490,7 +498,7 @@ def test_cache_sees_built_wheels(
 ) -> None:
     wheel = _plant(
         os.path.join(
-            cache_dir,
+            versioned_cache_dir(cache_dir),
             WHEEL_CACHE_BUCKET,
             "aa",
             "bb",
@@ -545,7 +553,7 @@ def test_cache_purge_sweeps_empty_directories_without_files(
     result = script.cpip("cache", "purge")
 
     assert "Files removed: 0" in result.stdout
-    assert "Directories removed: 3" in result.stdout
+    assert "Directories removed: 4" in result.stdout
     assert not os.path.exists(http_cache_dir)
     assert "No matching packages" not in result.stderr
 

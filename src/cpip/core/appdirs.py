@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 import sys
 
+from cpip.core.utils import CACHE_VERSION_TAG
+
 
 def user_cache_dir(appname: str) -> str:
     if sys.platform == "win32":
@@ -19,6 +21,24 @@ def user_cache_dir(appname: str) -> str:
     return os.path.join(home, ".cache", appname)
 
 
+def cache_root(explicit: str | None = None) -> str:
+    """The user-facing cache root: explicit, then ``CPIP_CACHE_DIR``, then default."""
+
+    return explicit or os.environ.get("CPIP_CACHE_DIR") or user_cache_dir("cpip")
+
+
+def versioned_cache_dir(root: str) -> str:
+    """The directory under ``root`` that holds this cpip's cache formats.
+
+    Every persisted cache lives under one ``v<N>`` directory named by
+    ``CACHE_VERSION``; bumping the version moves everything at once and a
+    purge removes every ``v*`` directory, so no cache needs a version of its
+    own.
+    """
+
+    return os.path.join(root, CACHE_VERSION_TAG)
+
+
 def resolve_cache_dir(explicit: str | None = None) -> str:
     """The cache a command should use: explicit, then ``CPIP_CACHE_DIR``, then default.
 
@@ -26,7 +46,7 @@ def resolve_cache_dir(explicit: str | None = None) -> str:
     answers only "which directory".
     """
 
-    return explicit or os.environ.get("CPIP_CACHE_DIR") or user_cache_dir("cpip")
+    return versioned_cache_dir(cache_root(explicit))
 
 
 def configured_cache_dir() -> str | None:
@@ -37,7 +57,8 @@ def configured_cache_dir() -> str | None:
     default cache".
     """
 
-    return os.environ.get("CPIP_CACHE_DIR")
+    root = os.environ.get("CPIP_CACHE_DIR")
+    return None if not root else versioned_cache_dir(root)
 
 
 def site_config_dirs(appname: str) -> list[str]:

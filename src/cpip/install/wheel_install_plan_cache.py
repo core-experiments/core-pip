@@ -20,7 +20,7 @@ from types import MappingProxyType
 
 from cpip.core.packaging import parse_requirement
 from cpip.core.versions import Version
-from cpip.core.utils import CACHE_INTERPRETER_TAG, CACHE_VERSION, CACHE_VERSION_TAG
+from cpip.core.utils import CACHE_INTERPRETER_TAG
 from cpip.core.wheel import WheelCandidate
 from cpip.install.wheel_archive_cache import (
     CachedWheelArchive,
@@ -41,15 +41,12 @@ from cpip.resolution.models import ResolutionResult
 # RESOLUTION_CACHE_BUCKET_FAMILY names the pattern shared by every
 # interpreter's bucket, so a cache-wide purge can find and remove all of
 # them, not only the one the running interpreter would look in.
-RESOLUTION_CACHE_BUCKET_FAMILY = f"resolution-{CACHE_VERSION_TAG}"
+RESOLUTION_CACHE_BUCKET_FAMILY = "resolution"
 
 RESOLUTION_CACHE_BUCKET = f"{RESOLUTION_CACHE_BUCKET_FAMILY}-{CACHE_INTERPRETER_TAG}"
 
-RESOLUTION_CACHE_FORMAT = CACHE_VERSION
-
-# First element of the key context every remote exact-pin caller builds, so
-# the receipts of one cache version never key-collide with another's.
-REMOTE_EXACT_CONTEXT = f"remote-exact-{CACHE_VERSION_TAG}"
+# First element of the key context every remote exact-pin caller builds.
+REMOTE_EXACT_CONTEXT = "remote-exact"
 
 RESOLUTION_CACHE_TTL_SECONDS = 600.0
 
@@ -172,7 +169,7 @@ def _exact_install_plan_key(
         return None
 
     payload = json.dumps(
-        (RESOLUTION_CACHE_FORMAT, tuple(sorted(normalized)), context),
+        (tuple(sorted(normalized)), context),
         ensure_ascii=True,
         separators=(",", ":"),
     ).encode("ascii")
@@ -239,7 +236,6 @@ def save_cached_install_plan(
         )
 
         value = (
-            RESOLUTION_CACHE_FORMAT,
             time.time(),
             key,
             tuple(records),
@@ -300,22 +296,21 @@ def load_cached_install_plan(
 
     if not (
         isinstance(value, tuple)
-        and len(value) == 5
-        and value[0] == RESOLUTION_CACHE_FORMAT
-        and isinstance(value[1], float)
-        and value[2] == key
+        and len(value) == 4
+        and isinstance(value[0], float)
+        and value[1] == key
+        and isinstance(value[2], tuple)
         and isinstance(value[3], tuple)
-        and isinstance(value[4], tuple)
     ):
         return None
 
-    if time.time() - value[1] > RESOLUTION_CACHE_TTL_SECONDS:
+    if time.time() - value[0] > RESOLUTION_CACHE_TTL_SECONDS:
         return None
 
     candidates: list[WheelCandidate] = []
 
     try:
-        for record in value[3]:
+        for record in value[2]:
             if not (
                 isinstance(record, tuple)
                 and len(record) == 13
@@ -381,7 +376,7 @@ def load_cached_install_plan(
 
         graph: dict[str, set[str]] = {}
 
-        for graph_record in value[4]:
+        for graph_record in value[3]:
             if not (
                 isinstance(graph_record, tuple)
                 and len(graph_record) == 2
@@ -398,7 +393,7 @@ def load_cached_install_plan(
     except (TypeError, ValueError):
         return None
 
-    if len(graph) != len(value[4]):
+    if len(graph) != len(value[3]):
         return None
 
     selected = {candidate.canonical_name: candidate for candidate in candidates}

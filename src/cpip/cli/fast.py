@@ -19,10 +19,9 @@ import sys
 from cpip.cli.lock_format import render_wheel_lock, write_lock_output
 from cpip.core.appdirs import configured_cache_dir
 from cpip.core.names import canonicalize_name
-from cpip.core.utils import CACHE_VERSION_TAG
 
-FAST_LOCK_PLAN_BUCKET = f"fast-lock-plan-{CACHE_VERSION_TAG}"
-"""Directory under the cache root holding rendered lock plans."""
+FAST_LOCK_PLAN_BUCKET = "fast-lock-plan"
+"""Directory under the cache directory holding rendered lock plans."""
 
 REMOTE_EXACT_OPTIONS = ("--ignore-installed", "--no-compile", "--target")
 LOCAL_WHEELHOUSE_OPTIONS = (
