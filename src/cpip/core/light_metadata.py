@@ -24,12 +24,8 @@ import re
 import sys
 
 from cpip.core.direct_url import DirectUrl
-from cpip.core.packaging import (
-    Version,
-    canonicalize_name,
-    marker_applies,
-    parse_requirement,
-)
+from cpip.core.packaging import canonicalize_name, marker_applies, parse_requirement
+from cpip.core.versions import Version
 from cpip.core.urls import url_to_path
 
 TYPE_CHECKING = False

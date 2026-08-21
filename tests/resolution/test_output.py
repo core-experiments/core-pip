@@ -3,7 +3,8 @@ from __future__ import annotations
 import threading
 import time
 
-from cpip.core.packaging import Version, parse_requirement
+from cpip.core.packaging import parse_requirement
+from cpip.core.versions import Version
 from cpip.core.wheel import WheelCandidate
 from cpip.index.candidate_materialization import (
     CandidateMaterializer,

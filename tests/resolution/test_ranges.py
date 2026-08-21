@@ -179,3 +179,91 @@ def test_difference_matches_complement_and_intersect(seed: int) -> None:
 
         assert (left - right)._intervals == (left & ~right)._intervals
         assert members(left - right) == members(left) - members(right)
+
+
+class Strict:
+    """An integer-like bound that refuses to compare with anything else.
+
+    ``Version`` compares only with ``Version``; a range operation that lets
+    an infinity sentinel reach a bound comparison would raise here instead
+    of quietly succeeding through the sentinel's reflected methods.
+    """
+
+    __slots__ = ("value",)
+
+    def __init__(self, value: int) -> None:
+        self.value = value
+
+    def _other(self, other: object) -> int:
+        assert isinstance(other, Strict), f"bound compared with {other!r}"
+        return other.value
+
+    def __eq__(self, other: object) -> bool:
+        return self.value == self._other(other)
+
+    def __hash__(self) -> int:
+        return hash(self.value)
+
+    def __lt__(self, other: object) -> bool:
+        return self.value < self._other(other)
+
+    def __le__(self, other: object) -> bool:
+        return self.value <= self._other(other)
+
+    def __gt__(self, other: object) -> bool:
+        return self.value > self._other(other)
+
+    def __ge__(self, other: object) -> bool:
+        return self.value >= self._other(other)
+
+    def __repr__(self) -> str:
+        return f"Strict({self.value})"
+
+
+def strict(candidate: Range) -> Range:
+    return Range(
+        tuple(
+            (
+                lower if lower is NEGATIVE_INFINITY else Strict(lower),
+                lower_inclusive,
+                upper if upper is POSITIVE_INFINITY else Strict(upper),
+                upper_inclusive,
+            )
+            for lower, lower_inclusive, upper, upper_inclusive in candidate._intervals
+        ),
+    )
+
+
+def plain(candidate: Range) -> Range:
+    return Range(
+        tuple(
+            (
+                lower if lower is NEGATIVE_INFINITY else lower.value,
+                lower_inclusive,
+                upper if upper is POSITIVE_INFINITY else upper.value,
+                upper_inclusive,
+            )
+            for lower, lower_inclusive, upper, upper_inclusive in candidate._intervals
+        ),
+    )
+
+
+@pytest.mark.parametrize("seed", range(8))
+def test_bounds_are_never_compared_with_a_sentinel(seed: int) -> None:
+    """The interval algebra over bounds that refuse foreign operands gives
+    the same answers as over plain integers."""
+    rng = random.Random(seed)
+
+    for _ in range(300):
+        left, right = random_range(rng), random_range(rng)
+        strict_left, strict_right = strict(left), strict(right)
+
+        assert plain(strict_left & strict_right) == (left & right)
+        assert plain(strict_left | strict_right) == (left | right)
+        assert plain(strict_left - strict_right) == (left - right)
+        assert plain(~strict_left) == ~left
+        assert strict_left.is_subset(strict_right) == left.is_subset(right)
+        assert strict_left.is_disjoint(strict_right) == left.is_disjoint(right)
+        assert strict_left.relation(strict_right) == left.relation(right)
+        for probe in range(-1, 10):
+            assert (Strict(probe) in strict_left) == (probe in left)

@@ -8,7 +8,7 @@ import marshal
 import posixpath
 import urllib.parse
 
-from cpip.core.packaging import Version
+from cpip.core.versions import Version
 from cpip.core.wheel import WheelFile, WheelTag, parse_wheel_file
 from cpip.index.datetime import parse_iso_datetime
 from cpip.index.directory_index import project_version_from_filename

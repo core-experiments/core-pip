@@ -4,7 +4,8 @@ from collections.abc import Mapping
 from enum import Enum
 from typing import TYPE_CHECKING, Callable, Protocol
 
-from cpip.core.packaging import Requirement, Version, canonicalize_name
+from cpip.core.packaging import Requirement, canonicalize_name
+from cpip.core.versions import Version
 
 if TYPE_CHECKING:
     from cpip.core.wheel import WheelFile
@@ -250,7 +251,7 @@ class CandidateRecord:
         # (Version.__lt__ compares nothing else) and, being a tuple of
         # ints, compares in C instead of through a Python-level __lt__ per
         # comparison of the sort.
-        version_key = self.version.comparison_key
+        version_key = self.version
 
         if prefer_binary:
             return (yanked_rank, wheel_rank, version_key, tag_rank)

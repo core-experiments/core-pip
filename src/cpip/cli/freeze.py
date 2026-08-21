@@ -14,7 +14,8 @@ from typing import NamedTuple
 from cpip.cli.parsers.freeze import create_parser
 from cpip.core.cpip_version import CPIP_DISTRIBUTION_NAMES
 from cpip.core.errors import InstallationError
-from cpip.core.packaging import InvalidVersion, canonicalize_name
+from cpip.core.packaging import canonicalize_name
+from cpip.core.versions import InvalidVersion
 
 TYPE_CHECKING = False
 

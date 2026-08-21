@@ -11,11 +11,11 @@ from cpip.core.cpip_version import CPIP_DISTRIBUTION_NAMES
 from cpip.core.light_metadata import LightDistributionStore
 from cpip.core.packaging import (
     Requirement,
-    Version,
     canonicalize_name,
     marker_applies,
     parse_requirement,
 )
+from cpip.core.versions import Version
 
 TYPE_CHECKING = False
 

@@ -15,7 +15,8 @@ from types import MappingProxyType
 
 from cpip.core.errors import InstallationError
 from cpip.core.hashes import Hashes
-from cpip.core.packaging import Requirement, Version
+from cpip.core.packaging import Requirement
+from cpip.core.versions import Version
 from cpip.core.release_control import ReleaseControl
 from cpip.core.urls import path_to_url, url_to_path
 from cpip.core.wheel import supported_wheel_tags, wheel_tag_rank
@@ -2513,7 +2514,7 @@ class CandidateProvider:
                 # of them for a package with a few thousand releases.
                 sorted(
                     versions.values(),
-                    key=lambda item: (item.version.comparison_key, item.is_yanked),
+                    key=lambda item: (item.version, item.is_yanked),
                 ),
             )
         )

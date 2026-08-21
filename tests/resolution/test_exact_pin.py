@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import pytest
-from cpip.core.packaging import Version, parse_requirement
+from cpip.core.packaging import parse_requirement
+from cpip.core.versions import Version
 from cpip.resolution.nab_types import _exact_pin
 
 

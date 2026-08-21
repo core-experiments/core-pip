@@ -10,7 +10,7 @@ from cpip.network.lazy_wheel import (
 from cpip_test_support import TestData
 from cpip_test_support.server import MockServer, file_response
 from packaging.utils import canonicalize_name
-from packaging.version import Version
+from cpip.core.versions import Version
 
 MYPY_0_782_WHL = (
     "https://files.pythonhosted.org/packages/9d/65/"

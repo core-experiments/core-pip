@@ -11,7 +11,8 @@ from cpip.build.query import (
     marker_allows,
     package_set_from_dependencies,
 )
-from cpip.core.packaging import Version, canonicalize_name, parse_requirement
+from cpip.core.packaging import canonicalize_name, parse_requirement
+from cpip.core.versions import Version
 
 
 class FakeDistribution:

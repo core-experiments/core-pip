@@ -23,7 +23,8 @@ from pathlib import Path
 
 import pytest
 from cpip.core.errors import ResolutionError
-from cpip.core.packaging import Version, parse_requirement
+from cpip.core.packaging import parse_requirement
+from cpip.core.versions import Version
 from cpip.index.provider import CandidateProvider
 from cpip.resolution.api import ResolutionEngine
 from cpip.resolution.models import ResolutionConfig

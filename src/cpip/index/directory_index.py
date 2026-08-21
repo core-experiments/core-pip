@@ -6,7 +6,8 @@ import os
 import stat
 from typing import NamedTuple
 
-from cpip.core.packaging import Version, canonicalize_name
+from cpip.core.packaging import canonicalize_name
+from cpip.core.versions import Version
 from cpip.index.links import SOURCE_ARCHIVE_SUFFIXES
 
 

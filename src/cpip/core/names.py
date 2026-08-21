@@ -10,11 +10,11 @@ benefit.
 from __future__ import annotations
 
 import re
-from functools import lru_cache
+from cpip.core.caches import memoized
 
 NORMALIZE_RE = re.compile(r"[-_.]+")
 
 
-@lru_cache(maxsize=4096)
+@memoized(4096)
 def canonicalize_name(name: str) -> str:
     return NORMALIZE_RE.sub("-", name).lower()

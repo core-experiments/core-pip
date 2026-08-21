@@ -12,9 +12,7 @@ import tempfile
 import zipfile
 from pathlib import Path
 
-from cpip.core import packaging as packaging_module
-from cpip.core import wheel as wheel_module
-from cpip.core.packaging import canonicalize_name, parse_requirement
+from cpip.core import caches
 from cpip.index import metadata_cache as metadata_cache_module
 
 SHA256_PLACEHOLDER = "a" * 64
@@ -527,24 +525,7 @@ def reset_caches() -> None:
     a steady state the first call never sees and a regression in the cold path
     cannot show up at all.
     """
-    canonicalize_name.cache_clear()
-    parse_requirement.cache_clear()
-    packaging_module._specifier_sets.clear()
-    packaging_module._versions_by_text.clear()
-    packaging_module._uncoercible_strings.clear()
-    packaging_module._marker_applies_cached.cache_clear()
-    packaging_module.default_environment.cache_clear()
-    packaging_module.Version.from_cache_state.cache_clear()
-    packaging_module.Requirement.from_cache_state.cache_clear()
-    wheel_module._parse_wheel_filename.cache_clear()
-    wheel_module.parsed_wheel_version.cache_clear()
-    wheel_module.parsed_wheel_tags.cache_clear()
-    wheel_module.supported_wheel_tags.cache_clear()
-    wheel_module.wheel_tag_rank.cache_clear()
-    wheel_module._dist_info_match_key.cache_clear()
-    wheel_module.wheel_metadata_cache.clear()
-    wheel_module.wheel_dependency_cache.clear()
-    wheel_module.no_layout_candidate_cache.clear()
+    caches.clear_all()
     # Persistent wheel metadata caches are one instance per directory per
     # process, so they outlive the provider that opened them.
     metadata_cache_module._CACHE_INSTANCES.clear()

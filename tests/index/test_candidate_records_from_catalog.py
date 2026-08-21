@@ -10,7 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
-from cpip.core.packaging import Version
+from cpip.core.versions import Version
 from cpip.index.catalog_cache import (
     cache_key,
     catalog_generation,

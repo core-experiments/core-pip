@@ -12,11 +12,11 @@ from cpip.core.direct_url import DirectUrl
 from cpip.core.metadata import find_installed, iter_installed_distributions
 from cpip.core.packaging import (
     SpecifierSet,
-    Version,
     canonicalize_name,
     marker_applies,
     parse_requirement,
 )
+from cpip.core.versions import Version
 from cpip.core.urls import url_to_path
 
 TYPE_CHECKING = False

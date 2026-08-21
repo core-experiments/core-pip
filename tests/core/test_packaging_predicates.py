@@ -24,10 +24,10 @@ import pytest
 from cpip.core.packaging import (
     Requirement,
     SpecifierSet,
-    Version,
     is_windows_path,
     parse_requirement,
 )
+from cpip.core.versions import Version
 
 from cpip.index.candidate_evaluators import CandidateEvaluator
 from cpip.index.provider import (

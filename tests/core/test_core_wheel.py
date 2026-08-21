@@ -285,7 +285,8 @@ def test_parse_wheel_file_bare_name_matches_path(tmp_path: Path) -> None:
 
 
 def test_project_wheel_dependencies_marker_filtering() -> None:
-    from cpip.core.packaging import Version, parse_requirement
+    from cpip.core.packaging import parse_requirement
+    from cpip.core.versions import Version
     from cpip.core.wheel import WheelResolutionMetadata, project_wheel_dependencies
 
     plain = WheelResolutionMetadata(

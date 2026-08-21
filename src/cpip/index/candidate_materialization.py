@@ -20,11 +20,11 @@ from cpip.build.build import build_wheel_from_source, unpack_source_internal
 from cpip.core.errors import BuildError, InstallationError, UnsupportedWheel
 from cpip.core.packaging import (
     Requirement,
-    Version,
     canonicalize_name,
     marker_applies,
     parse_requirement,
 )
+from cpip.core.versions import Version, ZERO_VERSION
 from cpip.core.temp_dir import remove_temp_directory
 from cpip.core.urls import path_to_url
 from cpip.core.wheel import (
@@ -1394,7 +1394,7 @@ class CandidateMaterializer:
 
                 continue
 
-            if built.version != candidate.version and candidate.version != Version("0"):
+            if built.version != candidate.version and candidate.version != ZERO_VERSION:
                 print(
                     f"WARNING: {candidate.name} has an inconsistent version: "
                     f"expected '{candidate.version}', but metadata has "

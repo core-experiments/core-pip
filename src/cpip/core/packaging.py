@@ -4,9 +4,10 @@ import os
 import re
 import sys
 import urllib.parse
-from functools import lru_cache
 
-from cpip.core.names import NORMALIZE_RE, canonicalize_name
+from cpip.core.caches import memoized, register_table
+from cpip.core.names import canonicalize_name
+from cpip.core.versions import InvalidVersion, Version
 
 TYPE_CHECKING = False
 
@@ -14,53 +15,6 @@ if TYPE_CHECKING:
     from collections.abc import Iterable
     from typing import Any
 
-
-VERSION_RE = re.compile(
-    r"""
-
-    ^\s*
-
-    v?
-
-    (?:(?P<epoch>\d+)!)?
-
-    (?P<release>\d+(?:\.\d+)*)
-
-    (?:
-
-        [._-]?
-
-        (?P<pre_l>a|b|c|rc|alpha|beta|pre|preview)
-
-        [._-]?
-
-        (?P<pre_n>\d+)?
-
-    )?
-
-    (?:
-
-        (?:-(?P<post_n1>\d+))
-
-        |
-
-        (?:[._-]?(?P<post_l>post|rev|r)[._-]?(?P<post_n2>\d+)?)
-
-    )?
-
-    (?:
-
-        [._-]?dev[._-]?(?P<dev_n>\d+)?
-
-    )?
-
-    (?:\+(?P<local>[a-z0-9]+(?:[-_.][a-z0-9]+)*))?
-
-    \s*$
-
-    """,
-    re.IGNORECASE | re.VERBOSE,
-)
 
 REQ_NAME_RE = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)")
 
@@ -72,17 +26,11 @@ SPEC_RE = re.compile(r"(===|==|!=|~=|<=|>=|<|>)\s*([^,]+)")
 EMPTY_FROZENSET: frozenset[str] = frozenset()
 
 
-def canonicalize_version(version: str) -> str:
-    """Return the normalized public form of a PEP 440 version."""
-
-    return str(Version(version))
-
-
 def safe_extra(extra: str) -> str:
     return canonicalize_name(extra)
 
 
-@lru_cache(maxsize=8)
+@memoized(8)
 def default_environment(extra: str | None = None) -> dict[str, str]:
     # Only reached when a requirement actually carries an environment
     # marker (see marker_applies' early exit), so keep it off the far more
@@ -113,365 +61,6 @@ def default_environment(extra: str | None = None) -> dict[str, str]:
     }
 
 
-class InvalidVersion(ValueError):
-    pass
-
-
-# String forms that failed comparison coercion -- see the comparison-method
-# comment block in Version. Keyed on the str() result rather than the
-# operand's type so that a type whose instances only sometimes stringify to
-# a version is judged per instance, exactly as uncached parsing would.
-# In practice this holds the resolver sentinels' "-inf"/"+inf"; the cap
-# keeps operands with per-instance str() forms (e.g. bare object()s, whose
-# text embeds their address) from growing it without bound.
-_uncoercible_strings: set[str] = set()
-
-_UNCOERCIBLE_STRINGS_CAP = 64
-
-
-class Version:
-    __slots__ = (
-        "_hash",
-        "_public",
-        "comparison_key",
-        "dev",
-        "epoch",
-        "local",
-        "post",
-        "pre",
-        "release",
-    )
-
-    def __init__(self, value: str):
-        raw = value.strip()
-
-        if raw and raw.replace(".", "").isdecimal() and ".." not in raw:
-            release = raw.split(".")
-
-            self.epoch = 0
-
-            self.release = tuple(map(int, release))
-
-            self.pre = None
-
-            self.post = None
-
-            self.dev = None
-
-            self.local = None
-
-            self._public = None
-
-            self.comparison_key = self.build_comparison_key()
-
-            self._hash = hash(self.comparison_key)
-
-            return
-
-        match = VERSION_RE.match(raw)
-
-        if match is None:
-            raise InvalidVersion(value)
-
-        self.epoch = int(match.group("epoch") or 0)
-
-        self.release = tuple(int(part) for part in match.group("release").split("."))
-
-        pre_l = match.group("pre_l")
-
-        pre_n = match.group("pre_n")
-
-        if pre_l:
-            label = pre_l.lower()
-
-            if label in {"alpha"}:
-                label = "a"
-
-            elif label in {"beta"}:
-                label = "b"
-
-            elif label in {"c", "pre", "preview"}:
-                label = "rc"
-
-            self.pre = ({"a": 0, "b": 1, "rc": 2}[label], int(pre_n or 0))
-
-        else:
-            self.pre = None
-
-        post_n = match.group("post_n1") or match.group("post_n2")
-
-        self.post = (
-            int(post_n or 0)
-            if match.group("post_l") is not None or match.group("post_n1") is not None
-            else None
-        )
-
-        self.dev = (
-            int(match.group("dev_n") or 0) if match.group("dev_n") is not None else None
-        )
-
-        self.local = (
-            NORMALIZE_RE.sub(".", match.group("local").lower())
-            if match.group("local") is not None
-            else None
-        )
-
-        self._public = None
-
-        self.comparison_key = self.build_comparison_key()
-
-        self._hash = hash(self.comparison_key)
-
-    @classmethod
-    @lru_cache(maxsize=65536)
-    def from_cache_state(cls, state: tuple[object, ...]) -> Version:
-        """Restore a previously validated parsed version without reparsing it."""
-
-        value = cls.__new__(cls)
-
-        value.epoch = state[0]
-
-        value.release = state[1]
-
-        value.pre = state[2]
-
-        value.post = state[3]
-
-        value.dev = state[4]
-
-        value.local = state[5]
-
-        value._public = state[6]
-
-        value.comparison_key = state[7]
-
-        value._hash = hash(value.comparison_key)
-
-        return value
-
-    def cache_state_internal(self) -> tuple[object, ...]:
-        return (
-            self.epoch,
-            self.release,
-            self.pre,
-            self.post,
-            self.dev,
-            self.local,
-            self.public,
-            self.comparison_key,
-        )
-
-    @property
-    def public(self) -> str:
-        public = self._public
-
-        if public is None:
-            public = self.format_public()
-
-            self._public = public
-
-        return public
-
-    @property
-    def is_prerelease(self) -> bool:
-        return self.pre is not None or self.dev is not None
-
-    @property
-    def base_version(self) -> str:
-        """Return the release portion without pre/dev/post/local markers."""
-
-        return ".".join(str(part) for part in self.release)
-
-    def key_internal(
-        self,
-    ) -> Any:
-        return self.comparison_key
-
-    def build_comparison_key(
-        self,
-    ) -> Any:
-        release = self.normalized_release()
-
-        if self.pre is None and self.post is None and self.dev is None:
-            suffix = (3, 0, 0, 0, 1, 0)
-
-        elif self.pre is None and self.post is None and self.dev is not None:
-            suffix = (-1, 0, 0, 0, 0, self.dev)
-
-        else:
-            pre_rank, pre_number = (
-                (3, 0) if self.pre is None else (self.pre[0], self.pre[1])
-            )
-
-            post_rank = 0 if self.post is None else 1
-
-            post_number = 0 if self.post is None else self.post
-
-            dev_rank = 1 if self.dev is None else 0
-
-            suffix = (
-                pre_rank,
-                pre_number,
-                post_rank,
-                post_number,
-                dev_rank,
-                self.dev or 0,
-            )
-
-        key: tuple[object, ...] = (self.epoch, release, suffix)
-
-        if self.local is not None:
-            local = tuple(
-                (1, int(part)) if part.isdigit() else (0, part)
-                for part in self.local.split(".")
-            )
-
-            key += (local,)
-
-        return key
-
-    def normalized_release(self) -> tuple[int, ...]:
-        release = self.release
-
-        while len(release) > 1 and release[-1] == 0:
-            release = release[:-1]
-
-        return release
-
-    # Comparisons coerce strings directly and any other operand through
-    # Version(str(other)) -- the latter is what lets this class compare
-    # against another packaging library's Version (whose str() is a valid
-    # version) rather than only its own instances. The wrinkle is the
-    # resolver's range arithmetic, which compares Version bounds against
-    # its infinity sentinels constantly: str(sentinel) is "-inf"/"+inf",
-    # so the coercion used to pay a full VERSION_RE match attempt and a
-    # raised-and-caught InvalidVersion per bound comparison, only to land
-    # on the reflected dispatch anyway. _uncoercible_strings remembers the
-    # string forms that failed so every later comparison against them is a
-    # set lookup straight to NotImplemented -- and because whether a given
-    # string parses is deterministic, caching by string is exactly
-    # equivalent to reparsing it, for every operand type.
-
-    def _coerced(self, other: object) -> Version | None:
-        text = str(other)
-
-        if text in _uncoercible_strings:
-            return None
-
-        try:
-            coerced = Version(text)
-
-        except InvalidVersion:
-            if len(_uncoercible_strings) < _UNCOERCIBLE_STRINGS_CAP:
-                _uncoercible_strings.add(text)
-
-            return None
-
-        return coerced
-
-    def __eq__(self, other: object) -> bool:
-        if not isinstance(other, Version):
-            if isinstance(other, str):
-                try:
-                    other = Version(other)
-
-                except InvalidVersion:
-                    return NotImplemented
-
-            else:
-                other = self._coerced(other)
-
-                if other is None:
-                    return NotImplemented
-
-        return self.comparison_key == other.comparison_key
-
-    def __hash__(self) -> int:
-        return self._hash
-
-    def __lt__(self, other: object) -> bool:
-        if not isinstance(other, Version):
-            if isinstance(other, str):
-                other = Version(other)
-
-            else:
-                other = self._coerced(other)
-
-                if other is None:
-                    return NotImplemented
-
-        return self.comparison_key < other.comparison_key
-
-    def __le__(self, other: object) -> bool:
-        if not isinstance(other, Version):
-            if isinstance(other, str):
-                other = Version(other)
-
-            else:
-                other = self._coerced(other)
-
-                if other is None:
-                    return NotImplemented
-
-        return self.comparison_key <= other.comparison_key
-
-    def __gt__(self, other: object) -> bool:
-        if not isinstance(other, Version):
-            if isinstance(other, str):
-                other = Version(other)
-
-            else:
-                other = self._coerced(other)
-
-                if other is None:
-                    return NotImplemented
-
-        return self.comparison_key > other.comparison_key
-
-    def __ge__(self, other: object) -> bool:
-        if not isinstance(other, Version):
-            if isinstance(other, str):
-                other = Version(other)
-
-            else:
-                other = self._coerced(other)
-
-                if other is None:
-                    return NotImplemented
-
-        return self.comparison_key >= other.comparison_key
-
-    def __str__(self) -> str:
-        return self.public
-
-    def __repr__(self) -> str:
-        return f"<Version({self.public!r})>"
-
-    def format_public(self) -> str:
-        parts = []
-
-        if self.epoch:
-            parts.append(f"{self.epoch}!")
-
-        parts.append(".".join(str(part) for part in self.release))
-
-        if self.pre is not None:
-            label = {0: "a", 1: "b", 2: "rc"}[self.pre[0]]
-
-            parts.append(f"{label}{self.pre[1]}")
-
-        if self.post is not None:
-            parts.append(f".post{self.post}")
-
-        if self.dev is not None:
-            parts.append(f".dev{self.dev}")
-
-        if self.local is not None:
-            parts.append(f"+{self.local}")
-
-        return "".join(parts)
-
-
 class Specifier:
     __slots__ = ("_compatible_upper_bound", "_parsed_version", "operator", "version")
 
@@ -487,7 +76,7 @@ class Specifier:
         if self.operator == "===":
             return
 
-        validated = _interned_version(self.version.rstrip(".*"))
+        validated = Version(self.version.rstrip(".*"))
 
         if not self.version.endswith(".*"):
             self._parsed_version = validated
@@ -600,28 +189,6 @@ def compatible_upper_bound_internal(version: Version) -> Version:
 
 
 _CONTAINS_CACHE_SIZE = 4096
-
-# Versions named by specifier clauses repeat across requirements ("==1.1.0"
-# and ">=1.1.0" in different lines name the same release), and Version is
-# immutable apart from memo fields, so one instance per text serves every
-# clause. Bounded like the other parse caches; an invalid text raises before
-# anything is stored.
-_VERSION_CACHE_SIZE = 4096
-_versions_by_text: dict[str, Version] = {}
-
-
-def _interned_version(text: str) -> Version:
-    version = _versions_by_text.get(text)
-
-    if version is None:
-        version = Version(text)
-
-        if len(_versions_by_text) >= _VERSION_CACHE_SIZE:
-            _versions_by_text.clear()
-
-        _versions_by_text[text] = version
-
-    return version
 
 
 class SpecifierSet:
@@ -876,7 +443,7 @@ class Requirement:
         self._is_unnamed_direct: bool | None = None
 
     @classmethod
-    @lru_cache(maxsize=16384)
+    @memoized(16384)
     def from_cache_state(cls, state: tuple[object, ...]) -> Requirement:
         """Restore a previously validated requirement without reparsing it."""
 
@@ -993,7 +560,7 @@ class Requirement:
         return "".join(parts)
 
 
-@lru_cache(maxsize=16384)
+@memoized(16384)
 def parse_requirement(value: str) -> Requirement:
     raw = value.strip()
 
@@ -1126,7 +693,7 @@ def parse_requirement(value: str) -> Requirement:
 # then shared as well. Bounded like the other parse caches: a sweep of
 # unique texts clears it rather than growing without limit.
 _SPECIFIER_SET_CACHE_SIZE = 4096
-_specifier_sets: dict[str, SpecifierSet] = {}
+_specifier_sets: dict[str, SpecifierSet] = register_table({})
 
 
 def _interned_specifier_set(spec: str) -> SpecifierSet:
@@ -1300,7 +867,7 @@ def marker_applies(marker: str | None, *, extras: Iterable[str] = ()) -> bool:
     return _marker_applies_cached(marker, normalized_extras)
 
 
-@lru_cache(maxsize=4096)
+@memoized(4096)
 def _marker_applies_cached(marker: str, extras: tuple[str, ...]) -> bool:
     env = default_environment()
 
@@ -1363,9 +930,9 @@ def marker_and_clause_matches(
 
                 expected_v = Version(expected)
 
-                actual_cmp: object = actual_v
+                actual_cmp: Any = actual_v
 
-                expected_cmp: object = expected_v
+                expected_cmp: Any = expected_v
 
             except InvalidVersion:
                 actual_cmp = actual
@@ -1444,9 +1011,9 @@ def compare_extra(actual: str, op: str, expected: str) -> bool:
 
         expected_v = Version(expected)
 
-        actual_cmp: object = actual_v
+        actual_cmp: Any = actual_v
 
-        expected_cmp: object = expected_v
+        expected_cmp: Any = expected_v
 
     except InvalidVersion:
         actual_cmp = actual

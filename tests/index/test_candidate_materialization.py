@@ -6,7 +6,8 @@ from typing import Any
 
 import pytest
 from cpip.core.errors import UnsupportedWheel
-from cpip.core.packaging import Version, parse_requirement
+from cpip.core.packaging import parse_requirement
+from cpip.core.versions import Version
 from cpip.core.wheel import WheelCandidate, parse_wheel
 from cpip.index.candidate_materialization import (
     CandidateMaterializer,

@@ -28,7 +28,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from cpip.core.packaging import InvalidVersion, SpecifierSet, Version
+from cpip.core.packaging import SpecifierSet
+from cpip.core.versions import InvalidVersion, Version
 from packaging.specifiers import InvalidSpecifier
 from packaging.specifiers import SpecifierSet as TheirSpecifierSet
 from packaging.version import InvalidVersion as TheirInvalidVersion
@@ -220,18 +221,11 @@ def collect_divergences() -> list[Divergence]:
 
 # --- classification ---
 
-_BARE_DEV = re.compile(r"dev(?!\d)", re.IGNORECASE)
 _WILDCARD_CLAUSE = re.compile(r"(?:==|!=)[^,]*\.\*")
 _EXCLUSIVE_CLAUSE = re.compile(r"(?:^|,)[<>](?!=)")
 _NOT_EQUAL_PRERELEASE = re.compile(
     r"!=[^,]*(?:a|b|c|rc|alpha|beta|pre|preview|dev)", re.IGNORECASE
 )
-
-
-def _involves_bare_dev(d: Divergence) -> bool:
-    return bool(
-        _BARE_DEV.search(d.version) or (d.specifier and _BARE_DEV.search(d.specifier))
-    )
 
 
 def _packaging_disagrees_with_its_normalised_self(d: Divergence) -> bool:
@@ -249,13 +243,6 @@ def _packaging_disagrees_with_its_normalised_self(d: Divergence) -> bool:
 
 
 KNOWN_DIVERGENCES: dict[str, Callable[[Divergence], bool]] = {
-    # cpip drops a ``dev`` segment written without a number ("1.0.dev",
-    # "1.0-dev"); PEP 440 reads it as dev0. Shows up in str, is_prerelease,
-    # ordering, hashing and containment of such versions.
-    "bare dev segment is dropped": _involves_bare_dev,
-    # cpip's base_version omits the epoch; PEP 440's includes it ("2!1.1").
-    "base_version omits the epoch": lambda d: d.observable == "base_version"
-    and "!" in d.version,
     # cpip's specifier grammar accepts texts packaging rejects: local labels
     # on ordering/compatible operators, "v" prefixes and leading zeros in
     # operands, r/rev post spellings, wildcards after a prerelease, and ``~=``
