@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 
 from cpip.cli.requirements import collect_requirements
+from cpip.network.cache import HTTP_CACHE_BUCKET
 
 
 def test_collect_requirements_uses_http_cache_directory(tmp_path: Path) -> None:
@@ -14,5 +15,5 @@ def test_collect_requirements_uses_http_cache_directory(tmp_path: Path) -> None:
 
     assert bundle.session.cache.directory == os.path.join(
         os.fspath(tmp_path),
-        "http-v1",
+        HTTP_CACHE_BUCKET,
     )

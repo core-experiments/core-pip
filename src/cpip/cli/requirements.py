@@ -22,6 +22,7 @@ from cpip.core.wheel import parse_wheel_file, supported_wheel_tags, wheel_tag_ra
 from cpip.index.config import DEFAULT_INDEX_URL
 from cpip.index.links import Link
 from cpip.index.source_locations import resolve_source_location
+from cpip.network.cache import HTTP_CACHE_BUCKET
 from cpip.network.http import NetworkSession
 from cpip.resolution.files import parse_requirements
 from cpip.resolution.input_requirements import install_req_from_line
@@ -173,7 +174,9 @@ class DeferredNetworkSession:
             session = NetworkSession(
                 index_urls=self.index_urls,
                 cache=(
-                    os.path.join(self.cache_dir, "http-v1") if self.cache_dir else None
+                    os.path.join(self.cache_dir, HTTP_CACHE_BUCKET)
+                    if self.cache_dir
+                    else None
                 ),
             )
 

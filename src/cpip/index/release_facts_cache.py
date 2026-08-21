@@ -6,10 +6,15 @@ import atexit
 import os
 from typing import cast
 
-from cpip.core.utils import load_snapshot, save_snapshot
+from cpip.core.utils import (
+    CACHE_VERSION,
+    CACHE_VERSION_TAG,
+    load_snapshot,
+    save_snapshot,
+)
 
-VERSION = 1
-NAME = "release-facts-v1.marshal"
+VERSION = CACHE_VERSION
+NAME = f"release-facts-{CACHE_VERSION_TAG}.marshal"
 MAX_ENTRIES = 32_768
 INSTANCES: dict[str, ReleaseFactsCache] = {}
 FactKey = tuple[str, str, str]

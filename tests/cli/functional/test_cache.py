@@ -1,4 +1,3 @@
-import json
 import os
 import re
 import shutil
@@ -7,6 +6,9 @@ from glob import glob
 
 import pytest
 from cpip_test_support import CpipTestEnvironment, TestCpipResult
+
+from cpip.cli.fast_install import TREE_CACHE_BUCKET
+from cpip.network.cache import HTTP_CACHE_BUCKET
 
 
 @pytest.fixture
@@ -21,7 +23,7 @@ def cache_dir(script: CpipTestEnvironment) -> str:
 
 @pytest.fixture
 def http_cache_dir(cache_dir: str) -> str:
-    return os.path.normcase(os.path.join(cache_dir, "http-v2"))
+    return os.path.normcase(os.path.join(cache_dir, HTTP_CACHE_BUCKET))
 
 
 @pytest.fixture
@@ -207,10 +209,7 @@ def test_cache_info(
 ) -> None:
     result = script.cpip("cache", "info")
 
-    assert (
-        f"Package index page cache location (cpip v23.3+): {http_cache_dir}"
-        in result.stdout
-    )
+    assert f"Package index page cache location: {http_cache_dir}" in result.stdout
     assert f"Locally built wheels location: {wheel_cache_dir}" in result.stdout
     num_wheels = len(wheel_cache_files)
     assert f"Number of locally built wheels: {num_wheels}" in result.stdout
@@ -410,7 +409,7 @@ def test_cache_purge_removes_fast_install_snapshots(
     snapshot = os.path.join(cache_dir, FAST_INSTALL_SNAPSHOT_NAME)
     tree_file = os.path.join(
         cache_dir,
-        "fast-install-trees-v1",
+        TREE_CACHE_BUCKET,
         "aa",
         "digest",
         "tree",
@@ -426,39 +425,6 @@ def test_cache_purge_removes_fast_install_snapshots(
 
     assert not os.path.exists(snapshot)
     assert not os.path.exists(tree_file)
-
-
-def test_cache_purge_removes_untagged_legacy_buckets(
-    script: CpipTestEnvironment,
-    cache_dir: str,
-) -> None:
-    """cpip cache purge should also remove archive/resolution buckets
-    written before interpreter tagging was introduced (no ``-<tag>`` suffix).
-    """
-    legacy_archive_file = os.path.join(
-        cache_dir,
-        "archive-v1",
-        "aa",
-        "digest",
-        "wheel",
-    )
-    legacy_resolution_file = os.path.join(
-        cache_dir,
-        "resolution-v2",
-        "bb",
-        "key.bin",
-    )
-    os.makedirs(os.path.dirname(legacy_archive_file))
-    os.makedirs(os.path.dirname(legacy_resolution_file))
-    with open(legacy_archive_file, "wb") as file:
-        file.write(b"archive")
-    with open(legacy_resolution_file, "wb") as file:
-        file.write(b"resolution")
-
-    script.cpip("cache", "purge", "--verbose")
-
-    assert not os.path.exists(legacy_archive_file)
-    assert not os.path.exists(legacy_resolution_file)
 
 
 @pytest.mark.usefixtures("populate_http_cache", "populate_wheel_cache")
@@ -514,74 +480,43 @@ def populate_wheel_cache_with_empty_dirs(wheel_cache_dir: str) -> None:
 
 
 @pytest.fixture
-def populate_http_cache_with_empty_dirs(cache_dir: str) -> None:
-    http_cache_dir = os.path.join(cache_dir, "http")
-    empty1 = os.path.join(http_cache_dir, "empty1")
-    empty2 = os.path.join(http_cache_dir, "empty2", "nested")
-
-    os.makedirs(empty1)
-    os.makedirs(empty2)
-
-    http_v2_cache_dir = os.path.join(cache_dir, "http-v2")
-    empty3 = os.path.join(http_v2_cache_dir, "empty3", "nested")
-
-    os.makedirs(empty3)
-
-
-@pytest.fixture
-def create_selfcheck_json(cache_dir: str) -> None:
-    selfcheck_path = os.path.join(cache_dir, "selfcheck.json")
-    with open(selfcheck_path, "w") as statefile:
-        json.dump(
-            {
-                "/some/prefix": {
-                    "last_check": "2020-01-01T00:00:00",
-                    "pypi_version": "20.0.1",
-                },
-            },
-            statefile,
-        )
+def populate_http_cache_with_empty_dirs(http_cache_dir: str) -> None:
+    os.makedirs(os.path.join(http_cache_dir, "empty1"))
+    os.makedirs(os.path.join(http_cache_dir, "empty2", "nested"))
+    os.makedirs(os.path.join(http_cache_dir, "empty3", "nested"))
 
 
 @pytest.mark.usefixtures(
     "populate_wheel_cache_with_empty_dirs",
     "populate_http_cache_with_empty_dirs",
-    "create_selfcheck_json",
 )
-def test_cache_purge_removes_empty_dirs_and_legacy_files(
+def test_cache_purge_removes_empty_dirs(
     script: CpipTestEnvironment,
-    cache_dir: str,
+    http_cache_dir: str,
     wheel_cache_dir: str,
 ) -> None:
-    """Test cpip cache purge/remove with empty dirs and legacy files.
+    """Test cpip cache purge/remove with empty directories.
 
     Verifies purge removes:
     - Wheel cache directories without .whl files
     - HTTP cache empty directories
-    - Legacy selfcheck.json file
     - Reports correct directory counts
     Also tests that 'cache remove' works similarly.
     """
-    selfcheck_path = os.path.join(cache_dir, "selfcheck.json")
-    http_cache_dir = os.path.join(cache_dir, "http")
-    http_v2_cache_dir = os.path.join(cache_dir, "http-v2")
     metadata_dir = os.path.join(wheel_cache_dir, "metadata_only")
 
     # Verify setup
-    assert os.path.exists(selfcheck_path)
     assert os.path.exists(metadata_dir)
     assert os.path.exists(os.path.join(http_cache_dir, "empty1"))
-    assert os.path.exists(os.path.join(http_v2_cache_dir, "empty3"))
+    assert os.path.exists(os.path.join(http_cache_dir, "empty3"))
 
     result = script.cpip("cache", "purge", "--verbose", allow_stderr_warning=True)
 
     # Verify all cleanup happened
-    assert not os.path.exists(selfcheck_path)
-    assert "Removed legacy selfcheck.json file" in result.stdout
     assert not os.path.exists(metadata_dir)
     assert not os.path.exists(os.path.join(wheel_cache_dir, "completely_empty"))
     assert not os.path.exists(os.path.join(http_cache_dir, "empty1"))
-    assert not os.path.exists(os.path.join(http_v2_cache_dir, "empty3"))
+    assert not os.path.exists(os.path.join(http_cache_dir, "empty3"))
     assert "Directories removed:" in result.stdout
 
     # Verify directory count is positive

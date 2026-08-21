@@ -10,6 +10,7 @@ import tempfile
 from collections.abc import Iterable, Mapping
 
 from cpip.core.errors import HashMismatch
+from cpip.core.utils import CACHE_VERSION, CACHE_VERSION_TAG
 
 TYPE_CHECKING = False
 
@@ -22,8 +23,8 @@ if TYPE_CHECKING:
         def hexdigest(self) -> str: ...
 
 
-ARTIFACT_CACHE_BUCKET = "artifacts-v1"
-ARTIFACT_CACHE_FORMAT = 1
+ARTIFACT_CACHE_BUCKET = f"artifacts-{CACHE_VERSION_TAG}"
+ARTIFACT_CACHE_FORMAT = CACHE_VERSION
 
 
 class CachedArtifact:

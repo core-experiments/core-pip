@@ -26,7 +26,13 @@ from cpip.cli.fast import consume_option, extend_requirements
 from cpip.core.appdirs import resolve_cache_dir
 from cpip.core.packaging import EMPTY_FROZENSET
 from cpip.core.versions import Version
-from cpip.core.utils import CACHE_INTERPRETER_TAG, load_snapshot, save_snapshot
+from cpip.core.utils import (
+    CACHE_INTERPRETER_TAG,
+    CACHE_VERSION,
+    CACHE_VERSION_TAG,
+    load_snapshot,
+    save_snapshot,
+)
 from cpip.core.wheel import PureWheelCandidate, WheelCandidate
 from cpip.core.wheel import parse_wheel_filename as parse_wheel_filename_core
 from cpip.install.target import InstallTarget
@@ -34,6 +40,7 @@ from cpip.install.wheel_archive import mode_from_external_attr
 from cpip.install.wheel_archive_cache import prepare_cached_wheel
 from cpip.install.wheel_archive_installer import install_wheels_from_archive_cache
 from cpip.install.wheel_install_plan_cache import (
+    REMOTE_EXACT_CONTEXT,
     exact_install_plan_key_from_strings,
     load_cached_install_plan,
 )
@@ -43,7 +50,7 @@ from cpip.resolution.archive import (
     WheelhouseUnavailable,
 )
 
-VERSION = 3
+VERSION = CACHE_VERSION
 # Scoped to the interpreter: marshal's wire format is not guaranteed
 # compatible across Python versions/implementations. TREE_CACHE_BUCKET does
 # not need the same treatment -- it is only ever reached through a plan
@@ -53,13 +60,13 @@ VERSION = 3
 # NAME_FAMILY names the pattern shared by every interpreter's snapshot, so a
 # cache-wide purge can find and remove all of them, not only the one the
 # running interpreter would look in.
-NAME_FAMILY = "fast-install-v3"
+NAME_FAMILY = f"fast-install-{CACHE_VERSION_TAG}"
 
 NAME = f"{NAME_FAMILY}-{CACHE_INTERPRETER_TAG}.marshal"
 MAX_ENTRIES = 8_192
 MAX_PLANS = 256
-TREE_CACHE_BUCKET = "fast-install-trees-v1"
-TREE_CACHE_FORMAT = 1
+TREE_CACHE_BUCKET = f"fast-install-trees-{CACHE_VERSION_TAG}"
+TREE_CACHE_FORMAT = CACHE_VERSION
 
 Metadata = tuple[tuple[str, ...], bool]
 StoredMetadata = tuple[tuple[str, ...], bool, str | None]
@@ -120,14 +127,14 @@ class FastInstallMetadataCache:
     def _coerce_metadata(value: object) -> StoredMetadata | None:
         if not (
             isinstance(value, tuple)
-            and len(value) in {2, 3}
+            and len(value) == 3
             and isinstance(value[0], tuple)
             and all(isinstance(item, str) for item in value[0])
             and isinstance(value[1], bool)
         ):
             return None
 
-        digest = value[2] if len(value) == 3 else None
+        digest = value[2]
         if digest is not None and not (
             isinstance(digest, str)
             and len(digest) == 64
@@ -625,7 +632,7 @@ def run_cached_remote(args: list[str]) -> int | None:
     keyed = exact_install_plan_key_from_strings(
         tuple(options.requirements),
         (
-            "remote-exact-v1",
+            REMOTE_EXACT_CONTEXT,
             index_url,
             (),
             (),

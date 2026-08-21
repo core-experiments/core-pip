@@ -4,13 +4,8 @@ from pathlib import Path
 
 from cpip.core.packaging import parse_requirement
 from cpip.core.versions import Version
-from cpip.core.utils import save_snapshot
 from cpip.index.candidate_metadata_cache import (
-    LEGACY_NAME,
-    LEGACY_VERSION,
     NAME,
-    V3_NAME,
-    VERSION,
     CandidateMetadataCache,
     get_candidate_metadata_cache,
 )
@@ -71,79 +66,31 @@ def test_candidate_metadata_cache_defers_database_creation(tmp_path: Path) -> No
 
 
 def test_candidate_metadata_cache_validates_entries_lazily(tmp_path: Path) -> None:
+    """A stored row of the wrong shape is a miss when it is read, not an
+    error when the database is opened."""
+    import json
+    import marshal
+    import sqlite3
+
     valid_key = ("https://example.test/valid.whl", "1", (), "sha256:valid")
     invalid_key = ("https://example.test/invalid.whl", "1", (), "sha256:bad")
     entries = {
         valid_key: ("valid", "1", (), (), None),
         invalid_key: ("invalid", "1", (42,), (), None),
     }
-    assert save_snapshot(
-        tmp_path / NAME,
-        ("cpip-candidate-metadata", VERSION, entries, {}, {}),
+    connection = sqlite3.connect(tmp_path / NAME)
+    connection.execute(
+        "CREATE TABLE candidate_metadata (key TEXT PRIMARY KEY, value BLOB)",
     )
+    connection.executemany(
+        "INSERT INTO candidate_metadata (key, value) VALUES (?, ?)",
+        [(json.dumps(key), marshal.dumps(value)) for key, value in entries.items()],
+    )
+    connection.commit()
+    connection.close()
 
     cache = CandidateMetadataCache(tmp_path)
 
     assert cache.contains(valid_key)
     assert not cache.contains(invalid_key)
     assert invalid_key not in cache.entries
-
-
-def test_candidate_metadata_cache_migrates_v2_snapshot(tmp_path: Path) -> None:
-    key = ("https://example.test/demo.whl", "2.0", (), "sha256:legacy")
-    entries = {key: ("demo", "2.0", ("requests>=2",), (), ">=3.9")}
-    assert save_snapshot(
-        tmp_path / LEGACY_NAME,
-        ("cpip-candidate-metadata", LEGACY_VERSION, entries),
-    )
-
-    cache = CandidateMetadataCache(tmp_path)
-    metadata = cache.get(key)
-    cache.flush()
-
-    assert metadata is not None
-    assert metadata.dependencies[0].raw == "requests>=2"
-    assert (tmp_path / NAME).is_file()
-    reloaded = CandidateMetadataCache(tmp_path).get(key)
-    assert reloaded is not None
-    assert reloaded.name == metadata.name
-    assert reloaded.version == metadata.version
-    assert reloaded.dependencies == metadata.dependencies
-
-
-def test_candidate_metadata_cache_imports_v3_database(tmp_path: Path) -> None:
-    """The v3 store's metadata rows have the same shape; they are copied so
-    an upgrade does not re-fetch every candidate's metadata."""
-    import json
-    import marshal
-    import sqlite3
-
-    # A directory name with URI-reserved characters: the import opens the
-    # v3 store by URI and must escape the path.
-    tmp_path = tmp_path / "cache?dir#1"
-    tmp_path.mkdir()
-    key = ("https://example.test/demo.whl", "3.0", ("x",), "sha256:v3")
-    value = ("demo", "3.0", ("requests>=2",), ("x",), ">=3.9")
-    source = sqlite3.connect(tmp_path / V3_NAME)
-    source.execute("CREATE TABLE candidate_metadata (key TEXT PRIMARY KEY, value BLOB)")
-    source.execute(
-        "CREATE TABLE version_states (raw TEXT PRIMARY KEY, state BLOB)",
-    )
-    source.execute(
-        "INSERT INTO candidate_metadata (key, value) VALUES (?, ?)",
-        (json.dumps(key), marshal.dumps(value)),
-    )
-    source.execute(
-        "INSERT INTO candidate_metadata (key, value) VALUES (?, ?)",
-        ("not json", marshal.dumps(value)),
-    )
-    source.commit()
-    source.close()
-
-    cache = CandidateMetadataCache(tmp_path)
-    metadata = cache.get(key)
-    assert metadata is not None
-    assert metadata.version == Version("3.0")
-    assert metadata.dependencies[0].raw == "requests>=2"
-    assert (tmp_path / NAME).is_file()
-    assert CandidateMetadataCache(tmp_path).get(key) is not None

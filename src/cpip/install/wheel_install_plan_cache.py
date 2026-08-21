@@ -20,7 +20,7 @@ from types import MappingProxyType
 
 from cpip.core.packaging import parse_requirement
 from cpip.core.versions import Version
-from cpip.core.utils import CACHE_INTERPRETER_TAG
+from cpip.core.utils import CACHE_INTERPRETER_TAG, CACHE_VERSION, CACHE_VERSION_TAG
 from cpip.core.wheel import WheelCandidate
 from cpip.install.wheel_archive_cache import (
     CachedWheelArchive,
@@ -41,11 +41,15 @@ from cpip.resolution.models import ResolutionResult
 # RESOLUTION_CACHE_BUCKET_FAMILY names the pattern shared by every
 # interpreter's bucket, so a cache-wide purge can find and remove all of
 # them, not only the one the running interpreter would look in.
-RESOLUTION_CACHE_BUCKET_FAMILY = "resolution-v2"
+RESOLUTION_CACHE_BUCKET_FAMILY = f"resolution-{CACHE_VERSION_TAG}"
 
 RESOLUTION_CACHE_BUCKET = f"{RESOLUTION_CACHE_BUCKET_FAMILY}-{CACHE_INTERPRETER_TAG}"
 
-RESOLUTION_CACHE_FORMAT = 2
+RESOLUTION_CACHE_FORMAT = CACHE_VERSION
+
+# First element of the key context every remote exact-pin caller builds, so
+# the receipts of one cache version never key-collide with another's.
+REMOTE_EXACT_CONTEXT = f"remote-exact-{CACHE_VERSION_TAG}"
 
 RESOLUTION_CACHE_TTL_SECONDS = 600.0
 

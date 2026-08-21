@@ -60,6 +60,14 @@ CURRENT_PYTHON_FULL_TAG = f"py{CURRENT_PYTHON_VERSION_DIGITS}"
 # restarts (unlike hash()), so it is safe to use as part of an on-disk name.
 CACHE_INTERPRETER_TAG = f"{sys.implementation.name}-{CURRENT_PYTHON_VERSION_DIGITS}"
 
+CACHE_VERSION = 0
+"""Version of cpip's on-disk cache formats as a whole. Every persisted cache
+folds it into its storage name (bucket, file, key prefix, header) and stamps
+it into its payloads; bumping it makes every older cache a miss. There is no
+migration code: a cache of another version is simply never read."""
+
+CACHE_VERSION_TAG = f"v{CACHE_VERSION}"
+
 
 def ensure_dir(path: str) -> None:
     try:

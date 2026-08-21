@@ -58,6 +58,7 @@ from cpip.install.output import prepare_install_candidates
 from cpip.install.target import InstallTarget
 from cpip.install.wheel_archive_cache import CachedWheelArchive, prepare_cached_wheel
 from cpip.install.wheel_install_plan_cache import (
+    REMOTE_EXACT_CONTEXT,
     exact_install_plan_key,
     load_cached_install_plan,
     save_cached_install_plan,
@@ -694,7 +695,7 @@ def cached_remote_plan_key(
         return None
 
     context = (
-        "remote-exact-v1",
+        REMOTE_EXACT_CONTEXT,
         bundle.index_url,
         tuple(bundle.extra_index_urls),
         tuple(target.platforms),

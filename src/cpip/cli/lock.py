@@ -18,6 +18,7 @@ from cpip.core.urls import path_to_url, url_to_path
 from cpip.index.artifacts import ArtifactLocator
 from cpip.index.provider import CandidateProvider
 from cpip.index.vcs import git_revision, materialize_vcs, vcs_reference
+from cpip.network.cache import HTTP_CACHE_BUCKET
 from cpip.network.http import NetworkSession
 from cpip.resolution.api import ResolutionEngine
 from cpip.resolution.files import parse_requirements
@@ -136,7 +137,7 @@ def run_lock(args: list[str]) -> int:
     cache_dir = configured_cache_dir()
 
     resolution_session = NetworkSession(
-        cache=(os.path.join(cache_dir, "http-v1") if cache_dir else None),
+        cache=(os.path.join(cache_dir, HTTP_CACHE_BUCKET) if cache_dir else None),
     )
 
     artifact_locator = ArtifactLocator(resolution_session, cache_dir=cache_dir)

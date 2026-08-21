@@ -7,13 +7,13 @@ import os
 import sqlite3
 from typing import TypeAlias
 
+from cpip.core.utils import CACHE_VERSION_TAG
 from cpip.index.sqlite_cache import SqliteBackedCache
 
 MetadataHeaders: TypeAlias = dict[str, list[str]]
 MetadataIdentity: TypeAlias = tuple[str, int, int]
 
-_CACHE_VERSION = 2
-_CACHE_NAME = "metadata-v2.sqlite"
+NAME = f"metadata-{CACHE_VERSION_TAG}.sqlite"
 _MAX_ENTRIES = 8_192
 _CACHE_INSTANCES: dict[str, WheelMetadataCache] = {}
 
@@ -24,7 +24,7 @@ class WheelMetadataCache(SqliteBackedCache):
     __slots__ = ("_pending_puts", "entries")
 
     def __init__(self, cache_dir: str | os.PathLike[str]) -> None:
-        super().__init__(os.path.join(os.fspath(cache_dir), _CACHE_NAME))
+        super().__init__(os.path.join(os.fspath(cache_dir), NAME))
         self.entries: dict[MetadataIdentity, MetadataHeaders] = {}
         self._pending_puts: dict[MetadataIdentity, MetadataHeaders] = {}
 
