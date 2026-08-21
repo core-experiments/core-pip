@@ -49,6 +49,11 @@ HASH_URL_FRAGMENT_RE = re.compile(
 
 @functools.lru_cache(maxsize=4096)
 def hash_from_url_fragment(url: str) -> tuple[str, str] | None:
+    # The pattern needs a ``#`` or ``&`` to anchor on. PEP 691 JSON pages
+    # carry hashes in their own field rather than a URL fragment, so on a
+    # cache miss for such a URL the regex has nothing to find; skip it.
+    if "#" not in url and "&" not in url:
+        return None
     match = HASH_URL_FRAGMENT_RE.search(url)
     return match.groups() if match is not None else None  # ty:ignore[invalid-return-type]
 
@@ -310,7 +315,10 @@ class Link:
         cached = self.filename_internal
         if cached is not None:
             return cached
-        name = PathComponent.from_name(posixpath.basename(self.path.rstrip("/")))
+        # posixpath.basename inlined (it is exactly this rfind slice for a
+        # str); from_name applies the platform basename on top, as before.
+        path = self.path_internal.rstrip("/")
+        name = PathComponent.from_name(path[path.rfind("/") + 1 :])
         filename = name or PathComponent.from_name(
             split_auth_from_netloc(self.netloc)[0],
         )
