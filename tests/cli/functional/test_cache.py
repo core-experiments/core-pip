@@ -8,14 +8,10 @@ from glob import glob
 import pytest
 from cpip_test_support import CpipTestEnvironment, TestCpipResult
 
-from cpip.cli.fast import FAST_LOCK_PLAN_BUCKET
 from cpip.cli.fast_install import TREE_CACHE_BUCKET
 from cpip.core.appdirs import versioned_cache_dir
 from cpip.index.cache import WHEEL_CACHE_BUCKET
-from cpip.index.candidate_metadata_cache import NAME as CANDIDATE_METADATA_NAME
-from cpip.index.metadata_cache import NAME as WHEEL_METADATA_NAME
-from cpip.index.release_facts_cache import NAME as RELEASE_FACTS_NAME
-from cpip.network.cache import HTTP_CACHE_BUCKET
+from cpip.network.cache import http_cache_path
 
 
 @pytest.fixture
@@ -30,9 +26,7 @@ def cache_dir(script: CpipTestEnvironment) -> str:
 
 @pytest.fixture
 def http_cache_dir(cache_dir: str) -> str:
-    return os.path.normcase(
-        os.path.join(versioned_cache_dir(cache_dir), HTTP_CACHE_BUCKET),
-    )
+    return os.path.normcase(http_cache_path(versioned_cache_dir(cache_dir)))
 
 
 @pytest.fixture
@@ -446,14 +440,13 @@ def _plant(path: str, content: bytes = b"x") -> str:
 
 
 def _plant_every_store(cache_root: str) -> list[str]:
-    """Seed one file in every location the current cache version writes, plus
-    one under another version's directory."""
-    from cpip.cli.fast_install import NAME as FAST_INSTALL_SNAPSHOT_NAME
-
+    """Seed every shape a purge must remove: a nested bucket, a built wheel,
+    a SQLite store with its -wal sidecar, a snapshot temp file, and a file
+    under another cpip version's directory."""
     cache_dir = versioned_cache_dir(cache_root)
     return [
         _plant(os.path.join(cache_root, "v999", "http", "aa", "entry")),
-        _plant(os.path.join(cache_dir, HTTP_CACHE_BUCKET, "aa", "entry")),
+        _plant(os.path.join(http_cache_path(cache_dir), "aa", "entry")),
         _plant(
             os.path.join(
                 cache_dir,
@@ -464,18 +457,9 @@ def _plant_every_store(cache_root: str) -> list[str]:
                 "demo-1.0-py3-none-any.whl",
             ),
         ),
-        _plant(os.path.join(cache_dir, "archive-cpython-999", "aa", "wheel")),
-        _plant(os.path.join(cache_dir, "resolution-cpython-999", "aa", "key.bin")),
-        _plant(os.path.join(cache_dir, FAST_LOCK_PLAN_BUCKET, "digest.cache")),
-        _plant(os.path.join(cache_dir, FAST_INSTALL_SNAPSHOT_NAME)),
-        _plant(os.path.join(cache_dir, f"{FAST_INSTALL_SNAPSHOT_NAME}.123.tmp")),
-        _plant(os.path.join(cache_dir, CANDIDATE_METADATA_NAME)),
-        _plant(os.path.join(cache_dir, f"{CANDIDATE_METADATA_NAME}-wal")),
-        _plant(os.path.join(cache_dir, f"{CANDIDATE_METADATA_NAME}-shm")),
-        _plant(os.path.join(cache_dir, WHEEL_METADATA_NAME)),
-        _plant(os.path.join(cache_dir, f"{WHEEL_METADATA_NAME}-wal")),
-        _plant(os.path.join(cache_dir, RELEASE_FACTS_NAME)),
-        _plant(os.path.join(cache_dir, f"{RELEASE_FACTS_NAME}.123.tmp")),
+        _plant(os.path.join(cache_dir, "store.sqlite")),
+        _plant(os.path.join(cache_dir, "store.sqlite-wal")),
+        _plant(os.path.join(cache_dir, "snapshot.marshal.123.tmp")),
     ]
 
 

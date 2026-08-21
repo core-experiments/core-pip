@@ -27,15 +27,17 @@ class SqliteBackedCache:
     """Base class for a process-local cache backed by an incremental
     SQLite database.
 
-    Subclasses provide the schema (``_open``, which must call
-    ``sqlite3.connect`` then create their own tables) and what a flush
-    writes (``_flush_pending``, given an open connection to write through
-    but not commit; ``_clear_pending``, called only once ``flush`` has
-    confirmed the commit succeeded, to reset whatever containers
-    ``_flush_pending`` drained).
+    Subclasses provide the schema (``SCHEMA``, DDL run on every open) and
+    what a flush writes (``_flush_pending``, given an open connection to
+    write through but not commit; ``_clear_pending``, called only once
+    ``flush`` has confirmed the commit succeeded, to reset whatever
+    containers ``_flush_pending`` drained).
     """
 
     __slots__ = ("_db_exists", "conn", "dirty", "lock", "path")
+
+    SCHEMA = ""
+    """``CREATE TABLE IF NOT EXISTS ...`` for this cache's table."""
 
     def __init__(self, path: str) -> None:
         self.path = path
@@ -78,8 +80,12 @@ class SqliteBackedCache:
         return conn
 
     def _open(self) -> sqlite3.Connection:
-        """Open a connection and ensure this cache's schema exists."""
-        raise NotImplementedError
+        """Open a WAL-mode connection and ensure this cache's schema exists."""
+        conn = sqlite3.connect(self.path, check_same_thread=False)
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=5000")
+        conn.execute(self.SCHEMA)
+        return conn
 
     def flush(self) -> None:
         if not self.dirty:

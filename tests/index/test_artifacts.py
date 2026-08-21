@@ -7,7 +7,7 @@ import pytest
 from cpip.core.errors import HashMismatch
 from cpip.index.artifacts import ArtifactLocator
 from cpip.index.artifact_cache import ARTIFACT_CACHE_BUCKET
-from cpip.network.cache import HTTP_CACHE_BUCKET, SafeFileCache
+from cpip.network.cache import SafeFileCache, http_cache_path
 
 
 class FakeResponse:
@@ -70,7 +70,7 @@ def test_artifacts_are_stored_once_by_sha256(
     body = b"content addressed wheel"
     digest = hashlib.sha256(body).hexdigest()
     cache_root = tmp_path / "cache"
-    http_cache = SafeFileCache(str(cache_root / HTTP_CACHE_BUCKET))
+    http_cache = SafeFileCache(http_cache_path(str(cache_root)))
     url = f"https://example.test/demo-1.0-py3-none-any.whl#sha256={digest}"
 
     first_session = FakeSession(http_cache, body)
@@ -105,7 +105,7 @@ def test_unhashed_artifact_uses_url_receipt(
 
     monkeypatch.setattr(artifacts, "DOWNLOAD_DIR", str(tmp_path / "downloads"))
     cache_root = tmp_path / "cache"
-    http_cache = SafeFileCache(str(cache_root / HTTP_CACHE_BUCKET))
+    http_cache = SafeFileCache(http_cache_path(str(cache_root)))
     url = "https://example.test/demo-1.0-py3-none-any.whl"
     body = b"wheel without an index hash"
 
@@ -133,7 +133,7 @@ def test_hash_mismatch_is_not_published(
     monkeypatch.setattr(artifacts, "DOWNLOAD_DIR", str(tmp_path / "downloads"))
     cache_root = tmp_path / "cache"
     session = FakeSession(
-        SafeFileCache(str(cache_root / HTTP_CACHE_BUCKET)),
+        SafeFileCache(http_cache_path(str(cache_root))),
         b"wrong body",
     )
     url = "https://example.test/demo-1.0-py3-none-any.whl"
@@ -163,7 +163,7 @@ def test_artifact_cache_write_failure_falls_back_to_download(
     )
     cache_root = tmp_path / "cache"
     body = b"uncached fallback"
-    session = FakeSession(SafeFileCache(str(cache_root / HTTP_CACHE_BUCKET)), body)
+    session = FakeSession(SafeFileCache(http_cache_path(str(cache_root))), body)
 
     path = ArtifactLocator(session, cache_root).ensure_local(
         "https://example.test/demo-1.0-py3-none-any.whl",

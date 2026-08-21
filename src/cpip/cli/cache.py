@@ -12,7 +12,12 @@ from cpip.cli.parsers.cache import create_parser
 from cpip.core.appdirs import cache_root, versioned_cache_dir
 from cpip.core.errors import CommandError
 from cpip.index.cache import WHEEL_CACHE_BUCKET
-from cpip.network.cache import HTTP_CACHE_BUCKET
+from cpip.network.cache import http_cache_path
+
+
+def _match_expression(pattern: str) -> str:
+    """A glob pattern as given; plain text matches as a substring."""
+    return pattern if any(char in pattern for char in "*?[]") else f"*{pattern}*"
 
 
 class CacheManager:
@@ -30,7 +35,7 @@ class CacheManager:
         # where the caches actually are.
         self.root = os.path.normcase(cache_root(cache_dir))
         self.cache_dir = versioned_cache_dir(self.root)
-        self.http_dir = os.path.join(self.cache_dir, HTTP_CACHE_BUCKET)
+        self.http_dir = http_cache_path(self.cache_dir)
         self.wheel_dir = os.path.join(self.cache_dir, WHEEL_CACHE_BUCKET)
 
     def version_dirs(self) -> builtins.list[str]:
@@ -67,9 +72,7 @@ class CacheManager:
     def list(self, pattern: str | None, *, absolute: bool) -> builtins.list[str]:
         wheels = self.wheel_files()
         if pattern:
-            expression = (
-                pattern if any(char in pattern for char in "*?[]") else f"*{pattern}*"
-            )
+            expression = _match_expression(pattern)
             wheels = [
                 path
                 for path in wheels
@@ -97,16 +100,12 @@ class CacheManager:
                 for path in self._files_under(version_dir)
             ]
         else:
+            expression = None if pattern is None else _match_expression(pattern)
             files = [
                 path
                 for path in self.wheel_files()
-                if pattern is not None
-                and fnmatch.fnmatch(
-                    os.path.basename(path),
-                    pattern
-                    if any(char in pattern for char in "*?[]")
-                    else f"*{pattern}*",
-                )
+                if expression is not None
+                and fnmatch.fnmatch(os.path.basename(path), expression)
             ]
 
         if not files and not purge:

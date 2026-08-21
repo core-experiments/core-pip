@@ -94,3 +94,5 @@ def test_candidate_metadata_cache_validates_entries_lazily(tmp_path: Path) -> No
     assert cache.contains(valid_key)
     assert not cache.contains(invalid_key)
     assert invalid_key not in cache.entries
+    cache.flush()
+    assert not cache.contains(invalid_key)

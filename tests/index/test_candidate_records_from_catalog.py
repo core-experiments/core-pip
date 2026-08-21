@@ -14,7 +14,6 @@ from cpip.core.versions import Version
 from cpip.index.catalog_cache import (
     cache_key,
     catalog_generation,
-    get_cache_entry,
     load_choices,
     save_links,
 )
@@ -25,7 +24,7 @@ from cpip.network.cache import SafeFileCache
 
 
 def _generation(cache: SafeFileCache, source_url: str) -> str:
-    raw = get_cache_entry(cache, cache_key(source_url))
+    raw = cache.get_atomic(cache_key(source_url))
     assert raw is not None
     return catalog_generation(raw)
 

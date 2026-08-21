@@ -660,19 +660,11 @@ class NetworkSession:
 
             self.fresh_cached_response_cache.pop(url, None)
 
-        metadata_reader = getattr(self.cache, "get_metadata_if_body_exists", None)
+        # get() only returns metadata whose body is present.
+        metadata = self.cache.get(url)
 
-        if metadata_reader is None:
-            metadata = self.cache.get(url)
-
-            if metadata is None or self.cache.get_body_path(url) is None:
-                return False
-
-        else:
-            metadata = metadata_reader(url)
-
-            if metadata is None:
-                return False
+        if metadata is None:
+            return False
 
         try:
             values = json.loads(metadata.decode("utf-8"))

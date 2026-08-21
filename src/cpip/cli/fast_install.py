@@ -49,13 +49,7 @@ from cpip.resolution.archive import (
 # not need the same treatment -- it is only ever reached through a plan
 # entry recorded in this file, so a tagged (and therefore missing, for a
 # different interpreter) snapshot already makes tree lookups miss cleanly.
-#
-# NAME_FAMILY names the pattern shared by every interpreter's snapshot, so a
-# cache-wide purge can find and remove all of them, not only the one the
-# running interpreter would look in.
-NAME_FAMILY = "fast-install"
-
-NAME = f"{NAME_FAMILY}-{CACHE_INTERPRETER_TAG}.marshal"
+NAME = f"fast-install-{CACHE_INTERPRETER_TAG}.marshal"
 MAX_ENTRIES = 8_192
 MAX_PLANS = 256
 TREE_CACHE_BUCKET = "fast-install-trees"

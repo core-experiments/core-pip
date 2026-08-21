@@ -140,7 +140,7 @@ def _load_catalog_uncached(
     """Load compact records grouped by their target-independent release."""
     if cache is None:
         return None
-    raw = get_cache_entry(cache, cache_key(url))
+    raw = cache.get_atomic(cache_key(url))
     if raw is None:
         return None
     try:
@@ -168,7 +168,7 @@ def load_summary(cache: Any, url: str) -> CatalogSummary | None:
     """Load the release-only resolver view, compiling it locally if needed."""
     if cache is None:
         return None
-    raw = get_cache_entry(cache, summary_key(url))
+    raw = cache.get_atomic(summary_key(url))
     if raw is not None:
         summary = decode_summary(raw)
         if summary is not None:
@@ -187,7 +187,7 @@ def load_summary(cache: Any, url: str) -> CatalogSummary | None:
         return None
     _remember_pending_catalog(cache, url, catalog)
     if catalog_raw is None:
-        catalog_raw = get_cache_entry(cache, cache_key(url))
+        catalog_raw = cache.get_atomic(cache_key(url))
     if catalog_raw is None:
         return None
     generation = catalog_generation(catalog_raw)
@@ -222,10 +222,7 @@ def load_choices(
 ) -> CatalogChoices:
     if cache is None:
         return {}
-    raw = get_cache_entry(
-        cache,
-        choice_key(url, target_key, allow_binary, allow_source),
-    )
+    raw = cache.get_atomic(choice_key(url, target_key, allow_binary, allow_source))
     if raw is None or not raw.startswith(CHOICE_HEADER):
         return {}
     payload = decode_checked_payload(raw, CHOICE_HEADER)
@@ -267,8 +264,7 @@ def save_choices(
         )
     except (TypeError, ValueError):
         return
-    set_cache_entry(
-        cache,
+    cache.set_atomic(
         choice_key(url, target_key, allow_binary, allow_source),
         payload,
     )
@@ -486,7 +482,7 @@ def save_catalog(cache: Any, url: str, catalog: CatalogData) -> None:
     except (TypeError, ValueError):
         return
     generation = catalog_generation(payload)
-    set_cache_entry(cache, cache_key(url), payload)
+    cache.set_atomic(cache_key(url), payload)
     save_summary(cache, url, catalog, generation)
 
 
@@ -535,7 +531,7 @@ def save_summary_value(
         payload = encode_checked_payload(SUMMARY_HEADER, summary)
     except (TypeError, ValueError):
         return
-    set_cache_entry(cache, summary_key(url), payload)
+    cache.set_atomic(summary_key(url), payload)
 
 
 def encode_checked_payload(header: bytes, payload: object) -> bytes:
@@ -555,29 +551,6 @@ def decode_checked_payload(raw: bytes, header: bytes) -> object | None:
         return marshal.loads(body)
     except (EOFError, TypeError, ValueError):
         return None
-
-
-def set_cache_entry(cache: Any, key: str, payload: bytes) -> None:
-    setter = getattr(cache, "set_atomic", None)
-    if setter is not None:
-        setter(key, payload)
-        return
-    cache.set(key, payload)
-    cache.set_body(key, b"1")
-
-
-def get_cache_entry(cache: Any, key: str) -> bytes | None:
-    getter = getattr(cache, "get_atomic", None)
-    if getter is not None:
-        value = getter(key)
-        if value is not None:
-            return value
-    value = cache.get(key)
-    if value is not None:
-        setter = getattr(cache, "set_atomic", None)
-        if setter is not None:
-            setter(key, value)
-    return value
 
 
 def artifact_identity(
