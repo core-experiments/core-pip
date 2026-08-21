@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import os
 import struct
 import zlib
 
@@ -20,15 +21,24 @@ class WheelhouseUnavailable(Exception):
     pass
 
 
-class WheelArchive:
-    __slots__ = ("_tail", "_tail_start", "file", "members", "modes")
+# Positioned reads (one syscall) replace seek+read pairs on a real file
+# descriptor; anything else -- a BytesIO, a lazy HTTP wheel, Windows --
+# keeps the stream calls.
+_HAS_PREAD = hasattr(os, "pread")
 
-    def __init__(self, file, members=None) -> None:
+
+class WheelArchive:
+    __slots__ = ("_fd", "_tail", "_tail_start", "file", "members", "modes")
+
+    def __init__(self, file, members=None, modes=None) -> None:
         self.file = file
+        self._fd = file.fileno() if _HAS_PREAD and isinstance(file, io.FileIO) else -1
         self.members: dict[str, tuple[int, int, int, int, int]] = (
             {} if members is None else members
         )
-        self.modes: dict[str, int] = {}
+        # External attributes (mode bits) per member, filled alongside
+        # members by read_central_directory() or pre-supplied with them.
+        self.modes: dict[str, int] = {} if modes is None else modes
         # Populated by read_central_directory() with the same bytes its
         # end-of-central-directory scan already had to read from the tail of
         # the file. Members whose local header falls inside that region
@@ -42,13 +52,36 @@ class WheelArchive:
         if members is None:
             self.read_central_directory()
 
+    def _read_at(self, offset: int, size: int) -> bytes:
+        """Read ``size`` bytes at ``offset``: one pread on a file descriptor."""
+        fd = self._fd
+        if fd < 0:
+            self.file.seek(offset)
+            return self.file.read(size)
+        data = os.pread(fd, size, offset)
+        if len(data) < size:
+            # pread may return short (a signal, or EOF); finish the read
+            # exactly as a stream read would, stopping at end of file.
+            chunks = [data]
+            got = len(data)
+            while got < size:
+                chunk = os.pread(fd, size - got, offset + got)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                got += len(chunk)
+            data = b"".join(chunks)
+        return data
+
     def read_central_directory(self) -> None:
-        self.file.seek(0, 2)
-        size = self.file.tell()
+        if self._fd >= 0:
+            size = os.fstat(self._fd).st_size
+        else:
+            self.file.seek(0, 2)
+            size = self.file.tell()
         tail_size = min(size, 22 + 65535)
         tail_start = size - tail_size
-        self.file.seek(tail_start)
-        tail = self.file.read(tail_size)
+        tail = self._read_at(tail_start, tail_size)
         self._tail = tail
         self._tail_start = tail_start
         marker = tail.rfind(b"PK\x05\x06")
@@ -76,8 +109,7 @@ class WheelArchive:
             start = directory_offset - tail_start
             directory = tail[start : start + directory_size]
         else:
-            self.file.seek(directory_offset)
-            directory = self.file.read(directory_size)
+            directory = self._read_at(directory_offset, directory_size)
         if len(directory) != directory_size:
             raise WheelhouseUnavailable
         # Parse the records in place with a running offset. The obvious
@@ -181,14 +213,14 @@ class WheelArchive:
             start = base + 30 + name_size + extra_size
             data = tail[start : start + compressed_size]
         else:
-            self.file.seek(local_offset)
-            # One combined over-read: header, the (nearly always short)
-            # name and extra field, and the member data together -- sliced
-            # apart afterward. The obvious sequence pays a header read, a
-            # relative seek, and a data read: three syscalls per member on
-            # the unbuffered file this reader is handed, per member
-            # extracted from a many-file wheel.
-            blob = self.file.read(
+            # One combined positioned over-read: header, the (nearly always
+            # short) name and extra field, and the member data together --
+            # sliced apart afterward. The obvious sequence pays a seek, a
+            # header read, a relative seek, and a data read: four syscalls
+            # per member on the unbuffered file this reader is handed, per
+            # member extracted from a many-file wheel.
+            blob = self._read_at(
+                local_offset,
                 30 + _LOCAL_HEADER_HEADROOM + compressed_size,
             )
             header = blob[:30]
@@ -204,8 +236,7 @@ class WheelArchive:
             else:
                 # The name plus extra field exceeded the headroom (or the
                 # blob was cut short) -- one exact positioned read instead.
-                self.file.seek(local_offset + start)
-                data = self.file.read(compressed_size)
+                data = self._read_at(local_offset + start, compressed_size)
         if len(data) != compressed_size:
             raise WheelhouseUnavailable
         if compression == 0:

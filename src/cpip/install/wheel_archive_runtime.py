@@ -152,6 +152,65 @@ class CachedWheelTreeArchive:
         pass
 
 
+_STREAMING_MEMBER_LIMIT = 1024 * 1024
+
+
+def _raw_archive_from_layout(path: str, layout: object) -> RawWheelArchive | None:
+    """Open the raw reader straight from a resolver layout, or None to decline.
+
+    The layout already holds every member's central-directory record (name,
+    compression, CRC, sizes, local header offset) and its mode bits, so the
+    archive is reconstructed with no directory scan at all -- the resolver
+    parsed it once, materialization reused it, and this is the third time
+    the same wheel is opened on the way to being installed.
+    """
+    if not (isinstance(layout, tuple) and len(layout) == 3):
+        return None
+
+    raw_members = layout[1]
+
+    if not isinstance(raw_members, tuple):
+        return None
+
+    members: dict[str, tuple[int, int, int, int, int]] = {}
+
+    modes: dict[str, int] = {}
+
+    for raw_member in raw_members:
+        if not isinstance(raw_member, tuple) or len(raw_member) != 7:
+            return None
+
+        name, compress_type, crc, compress_size, file_size, header_offset, mode = (
+            raw_member
+        )
+
+        if not (
+            isinstance(name, str)
+            and isinstance(compress_type, int)
+            and isinstance(crc, int)
+            and isinstance(compress_size, int)
+            and isinstance(file_size, int)
+            and isinstance(header_offset, int)
+            and isinstance(mode, int)
+        ):
+            return None
+
+        if compress_type not in {0, 8} or file_size > _STREAMING_MEMBER_LIMIT:
+            return None
+
+        members[name] = (compress_type, crc, compress_size, file_size, header_offset)
+
+        modes[name] = mode
+
+    try:
+        file = open(path, "rb", buffering=0)  # noqa: SIM115
+
+    except OSError:
+        return None
+
+    return RawWheelArchive(file, WheelArchive(file, members, modes))
+
+
 def open_wheel_archive(
     path: str,
     candidate: WheelCandidate,
@@ -165,10 +224,14 @@ def open_wheel_archive(
             return CachedWheelTreeArchive(layout)
 
     if layout is not None:
-        # The resolver layout predates external mode bits; retain ZipInfo for
+        raw = _raw_archive_from_layout(path, layout)
 
-        # those candidates so executable members keep their original modes.
+        if raw is not None:
+            return raw
 
+        # A layout this reader cannot serve (an unsupported compression
+        # method, a member over the streaming limit, or an older layout
+        # shape without mode bits): zipfile keeps the original modes.
         return zipfile.ZipFile(path)
 
     try:

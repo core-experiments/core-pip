@@ -84,6 +84,8 @@ class _ArchiveMemberInfo(NamedTuple):
 
     header_offset: int
 
+    external_attr: int
+
 
 class _ResolverWheelArchive:
     """ZipFile-shaped adapter over :class:`WheelArchive`.
@@ -106,8 +108,10 @@ class _ResolverWheelArchive:
     def __init__(self, archive: WheelArchive) -> None:
         self._archive = archive
 
+        modes = archive.modes
+
         self.NameToInfo = {
-            name: _ArchiveMemberInfo(*member)
+            name: _ArchiveMemberInfo(*member, modes.get(name, 0))
             for name, member in archive.members.items()
         }
 
@@ -164,6 +168,14 @@ def _open_resolver_wheel_archive(
         file = open(path_text, "rb", buffering=0)  # noqa: SIM115
 
         archive = WheelArchive(file)
+
+        if any(member[0] not in {0, 8} for member in archive.members.values()):
+            # A compression method the raw reader cannot decode (bzip2,
+            # lzma): read() would fail on it later, so hand the whole
+            # wheel to zipfile now instead of reporting it invalid.
+            file.close()
+
+            return zipfile.ZipFile(path_text)
 
     except (OSError, ValueError, WheelhouseUnavailable):
         try:
@@ -1330,10 +1342,13 @@ class CandidateMaterializer:
                     built = self.wheel_candidates.get(cache_key)
 
                     if built is None:
-                        with (
-                            open(path, "rb", buffering=32768) as stream,
-                            zipfile.ZipFile(stream) as archive,
-                        ):
+                        # The same fast reader the resolver used for this
+                        # wheel's metadata: zipfile.ZipFile would build a
+                        # ZipInfo per member just to hand back the layout
+                        # that WheelArchive's central-directory scan already
+                        # holds (modes included). Falls back to zipfile
+                        # itself for anything WheelArchive declines.
+                        with _open_resolver_wheel_archive(path) as archive:
                             dist_info_dir, wheel_metadata_text = (
                                 validate_wheel_with_metadata(
                                     archive,
@@ -1403,6 +1418,9 @@ class CandidateMaterializer:
                 dependencies=built.dependencies,
                 provided_extras=built.provided_extras,
                 requires_python=built.requires_python or candidate.link.requires_python,
+                # The layout is what lets open_wheel_archive read this wheel
+                # again without another central-directory scan.
+                wheel_layout=built.wheel_layout,
                 source_url=candidate.link.url,
                 source_hashes=cache_hashes
                 if cache_hashes is not None

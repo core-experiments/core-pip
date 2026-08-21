@@ -64,6 +64,9 @@ class ZipEntryInfo(Protocol):
     def compress_type(self) -> int: ...
 
     @property
+    def external_attr(self) -> int: ...
+
+    @property
     def compress_size(self) -> int: ...
 
     @property
@@ -842,6 +845,9 @@ def wheel_candidate(
         if wheel_metadata_text is None:
             wheel_metadata_text = archive.read(f"{dist_info_dir}/WHEEL").decode("utf-8")
 
+        # Everything open_wheel_archive needs to read the members again
+        # without re-parsing the central directory -- the mode bits
+        # included, so executable members keep their modes on that path.
         wheel_layout = (
             dist_info_dir,
             tuple(
@@ -852,6 +858,7 @@ def wheel_candidate(
                     info.compress_size,
                     info.file_size,
                     info.header_offset,
+                    info.external_attr,
                 )
                 for name, info in archive.NameToInfo.items()
             ),
@@ -1007,7 +1014,7 @@ def wheel_dist_info_dir(source: ZipArchiveSource, name: str) -> str:
     return dist_info_dir
 
 
-def read_wheel_archive_member(source: zipfile.ZipFile, path: str) -> bytes:
+def read_wheel_archive_member(source: ZipArchiveSource, path: str) -> bytes:
     try:
         return source.read(path)
 
@@ -1015,7 +1022,7 @@ def read_wheel_archive_member(source: zipfile.ZipFile, path: str) -> bytes:
         raise UnsupportedWheel(f"could not read {path!r} file: {exc!r}") from exc
 
 
-def read_wheel_format_metadata(source: zipfile.ZipFile, dist_info_dir: str) -> Message:
+def read_wheel_format_metadata(source: ZipArchiveSource, dist_info_dir: str) -> Message:
     wheel_path = f"{dist_info_dir}/WHEEL"
 
     raw = read_wheel_archive_member(source, wheel_path)
@@ -1086,7 +1093,9 @@ def check_compatibility(version: tuple[int, ...], name: str) -> None:
         )
 
 
-def validate_wheel_with_metadata(source: zipfile.ZipFile, name: str) -> tuple[str, str]:
+def validate_wheel_with_metadata(
+    source: ZipArchiveSource, name: str
+) -> tuple[str, str]:
     """Validate a wheel and return its metadata directory and WHEEL text."""
 
     try:
@@ -1112,7 +1121,7 @@ def validate_wheel_with_metadata(source: zipfile.ZipFile, name: str) -> tuple[st
     return info_dir, text
 
 
-def validate_wheel(source: zipfile.ZipFile, name: str) -> str:
+def validate_wheel(source: ZipArchiveSource, name: str) -> str:
     """Validate a wheel without materializing its WHEEL metadata message."""
 
     return validate_wheel_with_metadata(source, name)[0]
