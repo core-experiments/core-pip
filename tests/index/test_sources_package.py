@@ -107,7 +107,9 @@ def test_find_links_reuses_local_artifact_identity_until_refresh(
     first = source.links_from_local_path(tmp_path)
     second = source.links_from_local_path(tmp_path)
 
-    assert first[0].local_identity_internal == second[0].local_identity_internal
+    # The scan attaches no stat identity; it is computed on first use.
+    assert first[0].local_identity_internal is None
+    assert second[0].local_identity_internal is None
     assert calls == 1
 
     source.refresh_local_sources(str(tmp_path))
@@ -1373,3 +1375,44 @@ def write_simple_project_html(index: Path, project: str, html: str) -> None:
     project_dir.mkdir(parents=True)
     project_html = f"<!DOCTYPE html><html><body>{html}</body></html>"
     (project_dir / "index.html").write_text(project_html, encoding="utf-8")
+
+
+def test_find_links_scan_defers_the_stat_to_the_first_fingerprint(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Scanning a wheelhouse must not stat every entry: the identity is
+    computed when an artifact's metadata is first fingerprinted, in the
+    same ``stat:dev:ino:size:mtime`` form, and remembered on the link."""
+    import cpip.index.candidate_materialization as materialization
+    from cpip.core.versions import Version
+    from cpip.index.candidate_materialization import candidate_metadata_fingerprint
+    from cpip.index.source_models import CandidateRecord
+
+    wheel = tmp_path / "demo-1.0-py3-none-any.whl"
+    wheel.write_bytes(b"artifact")
+    source = FindLinksSource((str(tmp_path),))
+    original_stat = materialization.os.stat
+    stats = 0
+
+    def counting_stat(*args: object, **kwargs: object) -> object:
+        nonlocal stats
+        stats += 1
+        return original_stat(*args, **kwargs)
+
+    monkeypatch.setattr(materialization.os, "stat", counting_stat)
+    links = source.links_from_local_path(tmp_path)
+    assert len(links) == 1
+    assert stats == 0
+    assert links[0].local_identity_internal is None
+
+    record = CandidateRecord(name="demo", version=Version("1.0"), link=links[0])
+    fingerprint = candidate_metadata_fingerprint(record)
+    info = original_stat(wheel)
+    assert fingerprint == (
+        f"stat:{info.st_dev}:{info.st_ino}:{info.st_size}:{info.st_mtime_ns}"
+    )
+    assert links[0].local_identity_internal == fingerprint
+    assert stats == 1
+    assert candidate_metadata_fingerprint(record) == fingerprint
+    assert stats == 1

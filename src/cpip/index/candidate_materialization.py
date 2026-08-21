@@ -260,10 +260,13 @@ def candidate_metadata_fingerprint(candidate: CandidateRecord) -> str:
             pass
 
         else:
-            return (
-                f"stat:{os.path.abspath(candidate.link.file_path)}:"
-                f"{stat.st_size}:{stat.st_mtime_ns}"
+            # The same identity a directory scan attaches when it has the
+            # stat in hand, remembered on the link so it is computed once.
+            local_identity = (
+                f"stat:{stat.st_dev}:{stat.st_ino}:{stat.st_size}:{stat.st_mtime_ns}"
             )
+            candidate.link.local_identity_internal = local_identity
+            return local_identity
 
     return candidate.link.url
 

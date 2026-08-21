@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import stat
 from typing import NamedTuple
 
 from cpip.core.packaging import canonicalize_name
@@ -13,16 +12,21 @@ from cpip.index.links import SOURCE_ARCHIVE_SUFFIXES
 
 class LocalSourceEntry(NamedTuple):
     path: str
-    identity: str
-    stat_identity: tuple[int, int, int]
+    # The stat-based identity is computed on first use by the Link built
+    # from the entry (Link.artifact_kind / candidate_metadata_fingerprint),
+    # not while scanning: a wheelhouse directory holds thousands of entries
+    # and a resolve touches the metadata of a fraction of them, so a stat
+    # per entry here was mostly wasted syscalls.
+    identity: str | None
+    stat_identity: tuple[int, int, int] | None
 
 
 class LocalSourceSnapshot:
     """A single discovery view of a local package source directory.
 
-    The identity is captured while the directory entry is already being
-    inspected.  Consumers can carry it through candidate discovery and avoid
-    issuing another stat for the same artifact later in resolution.
+    Entries carry no stat identity: the Link built from an entry computes
+    one on first use, so only artifacts whose metadata is actually read pay
+    a stat.
     """
 
     __slots__ = ("entries", "is_directory", "path")
@@ -62,22 +66,15 @@ def local_source_snapshot(
                 normalized_suffixes
             ):
                 continue
+            # is_file() follows symlinks like stat() did and answers from the
+            # directory entry's type without a syscall on the common
+            # filesystems; only a symlink costs a stat.
             try:
-                info = entry.stat()
+                if not entry.is_file():
+                    continue
             except OSError:
                 continue
-            if not stat.S_ISREG(info.st_mode):
-                continue
-            identity = (
-                f"stat:{info.st_dev}:{info.st_ino}:{info.st_size}:{info.st_mtime_ns}"
-            )
-            discovered.append(
-                LocalSourceEntry(
-                    entry.path,
-                    identity,
-                    (info.st_ino, info.st_size, info.st_mtime_ns),
-                ),
-            )
+            discovered.append(LocalSourceEntry(entry.path, None, None))
     return LocalSourceSnapshot(path_text, tuple(discovered))
 
 

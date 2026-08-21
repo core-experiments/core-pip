@@ -199,7 +199,9 @@ class CandidateRecord:
 
         self.metadata_loader = metadata_loader
 
-        self._canonical_name: str | None = None
+        # Eager: read on every link of every package listed, so a property
+        # with a memo slot was a frame per read; canonicalize_name is memoized.
+        self._canonical_name: str | None = canonicalize_name(name)
 
     def __eq__(self, other: object) -> bool:
         return isinstance(other, CandidateRecord) and (
