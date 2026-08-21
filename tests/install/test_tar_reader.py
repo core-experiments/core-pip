@@ -752,3 +752,21 @@ class TestDirectoryCache:
         names = tar_reader.fast_untar(str(archive_path), str(dest), "r")
         assert names == ["pkg-1.0/a/file.txt", "pkg-1.0/a/.", "pkg-1.0/a/.."]
         assert (dest / "pkg-1.0" / "a" / "file.txt").read_bytes() == b"a"
+
+    @pytest.mark.parametrize("name", ["/foo", "/a/b", "//foo"])
+    def test_absolute_member_names_are_rejected(
+        self, tmp_path: Path, name: str
+    ) -> None:
+        from cpip.core.errors import InstallationError
+
+        archive_path = tmp_path / "absolute.tar"
+        with archive_path.open("wb") as fp:
+            _write_raw_member(fp, "pkg-1.0/ok.txt", b"ok")
+            _write_raw_member(fp, name, b"no")
+            _write_eof_marker(fp)
+        dest = tmp_path / "dest"
+        dest.mkdir()
+        with pytest.raises(InstallationError, match="outside the destination"):
+            tar_reader.fast_untar(str(archive_path), str(dest), "r")
+        assert not (dest / "foo").exists()
+        assert not (dest / "a").exists()

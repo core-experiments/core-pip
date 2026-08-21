@@ -364,7 +364,11 @@ def fast_untar(filename: str, location: str, mode: str) -> list[str] | None:
 
             directory, _, base = name.rpartition("/")
 
-            if base and base != "." and base != "..":
+            # An absolute name must keep the per-member handling: joined
+            # onto the location it *replaces* it, which is what the
+            # containment check below rejects, whereas the directory cache
+            # would read "/foo" as a top-level "foo".
+            if base and base != "." and base != ".." and name[0] != "/":
                 entry = directories.get(directory)
 
                 if entry is None:
