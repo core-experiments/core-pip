@@ -50,11 +50,13 @@ HASH_URL_FRAGMENT_RE = re.compile(
 )
 
 
-@functools.lru_cache(maxsize=4096)
 def hash_from_url_fragment(url: str) -> tuple[str, str] | None:
-    # The pattern needs a ``#`` or ``&`` to anchor on. PEP 691 JSON pages
-    # carry hashes in their own field rather than a URL fragment, so on a
-    # cache miss for such a URL the regex has nothing to find; skip it.
+    # Uncached on purpose: every link on an index page is a distinct URL,
+    # so an lru_cache here never hit (600 misses, 0 hits on a 600-link
+    # page) and only added an insert and an eviction per call. The pattern
+    # needs a ``#`` or ``&`` to anchor on; PEP 691 JSON pages carry hashes
+    # in their own field rather than a URL fragment, so most URLs skip the
+    # regex entirely.
     if "#" not in url and "&" not in url:
         return None
     match = HASH_URL_FRAGMENT_RE.search(url)
