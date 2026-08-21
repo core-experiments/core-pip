@@ -161,6 +161,35 @@ class TestWheelArchiveMatchesRealZipfile:
 
         _assert_matches_real_zipfile(path)
 
+    def test_member_name_longer_than_read_headroom(self, tmp_path: Path) -> None:
+        """A member whose name exceeds read_member's combined-read headroom
+        must fall back to the exact positioned read -- exercised on a
+        file-resident member (an early member of an archive larger than
+        the cached tail).
+        """
+        long_name = "pkg/" + "x" * 600 + ".txt"
+
+        members = {
+            long_name: b"long-named member contents",
+            "pkg/filler.bin": bytes(random.Random(6).randbytes(200_000)),
+        }
+
+        path = tmp_path / "long-name.zip"
+
+        _write_zip(path, members, compress_type=zipfile.ZIP_STORED)
+
+        archive = _open(path)
+
+        try:
+            # The long-named member sits before the filler, outside the
+            # tail region of this >64KB archive.
+            assert archive.members[long_name][4] < path.stat().st_size - (22 + 65535)
+
+            assert archive.read(long_name) == b"long-named member contents"
+
+        finally:
+            archive.file.close()
+
     def test_read_many_matches_read(self, tmp_path: Path) -> None:
         path = tmp_path / "many.zip"
 

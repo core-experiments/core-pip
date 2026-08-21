@@ -108,25 +108,28 @@ class IndexPageParser:
     def links_from_json(self, body: str, url: str) -> list[Link]:
         data = json.loads(body)
         links: list[Link] = []
+        append = links.append
+        link_factory = self.link_factory
         base_url = ensure_trailing_slash(url)
         for file_data in data.get("files", []):
             if not isinstance(file_data, dict):
                 continue
             file_url = file_data.get("url")
-            filename = file_data.get("filename")
             if not isinstance(file_url, str):
                 continue
-            absolute = urllib.parse.urljoin(base_url, file_url)
+            filename = file_data.get("filename")
             hashes = file_data.get("hashes")
             yanked = file_data.get("yanked")
-            links.append(
-                self.link_factory(
-                    absolute,
+            requires_python = file_data.get("requires-python")
+            upload_time = file_data.get("upload-time")
+            append(
+                link_factory(
+                    join_index_url(base_url, file_url),
                     source_url=url,
                     text=str(filename or ""),
                     hashes=hashes if isinstance(hashes, dict) else None,
-                    requires_python=file_data.get("requires-python")
-                    if isinstance(file_data.get("requires-python"), str)
+                    requires_python=requires_python
+                    if isinstance(requires_python, str)
                     else None,
                     yanked_reason=(
                         None
@@ -137,9 +140,7 @@ class IndexPageParser:
                     ),
                     metadata_file=metadata_file_from_json(file_data),
                     upload_time=(
-                        parse_iso_datetime(file_data["upload-time"])
-                        if file_data.get("upload-time")
-                        else None
+                        parse_iso_datetime(upload_time) if upload_time else None
                     ),
                 ),
             )
@@ -178,7 +179,7 @@ class LinkParser(HTMLParser):
         if href:
             self.links.append(
                 self.link_factory(
-                    urllib.parse.urljoin(self.base_url_internal, href),
+                    join_index_url(self.base_url_internal, href),
                     source_url=self.page_url,
                     text="".join(self.text_internal).strip(),
                     requires_python=self.current_internal.get("data-requires-python"),
@@ -223,6 +224,45 @@ def metadata_file_from_value(value: str | None) -> MetadataFile | None:
     return MetadataFile(
         {name: digest} if sep and name in SUPPORTED_RECORD_HASHES else None,
     )
+
+
+_ABSOLUTE_HTTP_PREFIXES = ("https://", "http://")
+
+
+def join_index_url(base_url: str, href: str) -> str:
+    """``urllib.parse.urljoin(base_url, href)`` for one link on an index page.
+
+    Nearly every file URL a real index serves is already absolute, and for
+    those ``urljoin`` still parses both URLs and rebuilds the result from the
+    parts -- two ``urlparse`` calls and an ``urlunparse`` per link, more than
+    a third of the cost of parsing a PyPI JSON page. For an absolute
+    ``http(s)`` URL that round-trip is the identity, except in the few shapes
+    where ``urlsplit`` would normalize or reject: an upper-case scheme,
+    whitespace or control characters (stripped), an empty netloc (resolved
+    against the base), a delimiter introducing an empty component -- a
+    trailing ``?``, ``#`` or ``;``, or ``?#``, ``;?``, ``;#`` (``urlunparse``
+    drops the empty part) -- or a bracketed IPv6 host (validated, and raised
+    on when malformed). Those, and every relative reference, still take the
+    real ``urljoin``; this only returns early when the answer is known to be
+    ``href`` itself.
+    """
+    if (
+        href.startswith(_ABSOLUTE_HTTP_PREFIXES)
+        and href.isascii()
+        and href.isprintable()
+        and href[-1] not in ";?#"
+        and "?#" not in href
+        and ";?" not in href
+        and ";#" not in href
+        and "[" not in href
+        and "]" not in href
+    ):
+        # A non-empty netloc is what makes ``urljoin`` ignore the base
+        # entirely; its first character follows the ``//`` of the prefix.
+        start = 8 if href[4] == "s" else 7
+        if href[start : start + 1] not in "/?#":
+            return href
+    return urllib.parse.urljoin(base_url, href)
 
 
 def ensure_trailing_slash(url: str) -> str:
