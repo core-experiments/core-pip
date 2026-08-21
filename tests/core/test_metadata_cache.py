@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from cpip.index.metadata_cache import WheelMetadataCache, metadata_identity
+from cpip.index.metadata_cache import NAME, WheelMetadataCache, metadata_identity
 
 
 def test_metadata_cache_round_trips_versioned_headers(tmp_path: Path) -> None:
@@ -23,7 +23,7 @@ def test_metadata_cache_round_trips_versioned_headers(tmp_path: Path) -> None:
 def test_metadata_cache_defers_database_creation_until_a_write(tmp_path: Path) -> None:
     """A cold cache that only misses must not pay to create the database."""
     cache_dir = tmp_path / "cache"
-    database = cache_dir / "metadata-v2.sqlite"
+    database = cache_dir / NAME
 
     cache = WheelMetadataCache(cache_dir)
     assert cache.get(("/wheel.whl", 1, 2)) is None
@@ -35,7 +35,7 @@ def test_metadata_cache_defers_database_creation_until_a_write(tmp_path: Path) -
 
 
 def test_metadata_cache_ignores_corrupt_snapshots(tmp_path: Path) -> None:
-    cache_path = tmp_path / "cache" / "metadata-v2.sqlite"
+    cache_path = tmp_path / "cache" / NAME
     cache_path.parent.mkdir()
     cache_path.write_bytes(b"not a sqlite database")
 

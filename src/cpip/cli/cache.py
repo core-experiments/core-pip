@@ -13,9 +13,16 @@ from cpip.cli.fast_install import TREE_CACHE_BUCKET
 from cpip.cli.parsers.cache import create_parser
 from cpip.core.appdirs import user_cache_dir
 from cpip.core.errors import CommandError
+from cpip.core.utils import CACHE_VERSION_TAG
 from cpip.index.artifact_cache import ARTIFACT_CACHE_BUCKET
+from cpip.index.candidate_metadata_cache import NAME as CANDIDATE_METADATA_NAME
+from cpip.index.metadata_cache import NAME as WHEEL_METADATA_NAME
+from cpip.index.release_facts_cache import NAME as RELEASE_FACTS_NAME
 from cpip.install.wheel_archive_cache import ARCHIVE_CACHE_BUCKET_FAMILY
 from cpip.install.wheel_install_plan_cache import RESOLUTION_CACHE_BUCKET_FAMILY
+from cpip.network.cache import HTTP_CACHE_BUCKET
+
+FAST_LOCK_PLAN_BUCKET = f"fast-lock-plan-{CACHE_VERSION_TAG}"
 
 
 class CacheManager:
@@ -23,31 +30,21 @@ class CacheManager:
 
     def __init__(self, cache_dir: str | None = None) -> None:
         self.cache_dir = os.path.normcase(cache_dir or user_cache_dir("cpip"))
-        self.http_dir = os.path.join(self.cache_dir, "http-v2")
+        self.http_dir = os.path.join(self.cache_dir, HTTP_CACHE_BUCKET)
         self.wheel_dir = os.path.join(self.cache_dir, "wheels")
-        # archive-v1 and resolution-v2 are interpreter-tagged (one bucket per
-        # interpreter/implementation, since they hold marshal-serialized
-        # data); glob every tagged variant rather than just the running
-        # interpreter's own, so purge clears caches left by other
-        # interpreters too. Also sweep the untagged family root itself, since
-        # cpip versions before tagging was introduced wrote directly there.
-        self.archive_dirs = [
-            os.path.join(self.cache_dir, ARCHIVE_CACHE_BUCKET_FAMILY),
-            *glob.glob(
-                os.path.join(self.cache_dir, f"{ARCHIVE_CACHE_BUCKET_FAMILY}-*"),
-            ),
-        ]
+        # The archive and resolution buckets are interpreter-tagged (one
+        # bucket per interpreter/implementation, since they hold
+        # marshal-serialized data); glob every tagged variant rather than
+        # just the running interpreter's own, so purge clears caches left by
+        # other interpreters too.
+        self.archive_dirs = glob.glob(
+            os.path.join(self.cache_dir, f"{ARCHIVE_CACHE_BUCKET_FAMILY}-*"),
+        )
         self.artifact_dir = os.path.join(self.cache_dir, ARTIFACT_CACHE_BUCKET)
         self.fast_install_tree_dir = os.path.join(self.cache_dir, TREE_CACHE_BUCKET)
-        self.resolution_dirs = [
-            os.path.join(self.cache_dir, RESOLUTION_CACHE_BUCKET_FAMILY),
-            *glob.glob(
-                os.path.join(self.cache_dir, f"{RESOLUTION_CACHE_BUCKET_FAMILY}-*"),
-            ),
-        ]
-        self.legacy_resolution_dir = os.path.join(
-            self.cache_dir,
-            "resolution-v1",
+        self.fast_lock_plan_dir = os.path.join(self.cache_dir, FAST_LOCK_PLAN_BUCKET)
+        self.resolution_dirs = glob.glob(
+            os.path.join(self.cache_dir, f"{RESOLUTION_CACHE_BUCKET_FAMILY}-*"),
         )
 
     def wheel_files(self) -> builtins.list[str]:
@@ -107,30 +104,22 @@ class CacheManager:
                     *self.archive_dirs,
                     self.artifact_dir,
                     self.fast_install_tree_dir,
+                    self.fast_lock_plan_dir,
                     *self.resolution_dirs,
-                    self.legacy_resolution_dir,
-                    os.path.join(self.cache_dir, "http"),
                 )
                 for path in self._files_under(root)
             ]
+            # Single-file caches: the per-interpreter fast-install snapshots
+            # and the SQLite/marshal stores (with SQLite's WAL sidecars).
             files.extend(
                 path
-                for version in (1, 2)
-                if os.path.isfile(
-                    path := os.path.join(
-                        self.cache_dir,
-                        f"fast-install-v{version}.marshal",
-                    ),
+                for pattern in (
+                    f"{FAST_INSTALL_SNAPSHOT_FAMILY}-*.marshal",
+                    f"{CANDIDATE_METADATA_NAME}*",
+                    f"{WHEEL_METADATA_NAME}*",
+                    RELEASE_FACTS_NAME,
                 )
-            )
-            files.extend(
-                path
-                for path in glob.glob(
-                    os.path.join(
-                        self.cache_dir,
-                        f"{FAST_INSTALL_SNAPSHOT_FAMILY}-*.marshal",
-                    ),
-                )
+                for path in glob.glob(os.path.join(self.cache_dir, pattern))
                 if os.path.isfile(path)
             )
         else:
@@ -168,11 +157,6 @@ class CacheManager:
                 os.unlink(path)
             except FileNotFoundError:
                 pass
-
-        selfcheck = os.path.join(self.cache_dir, "selfcheck.json")
-        if purge and os.path.isfile(selfcheck):
-            os.unlink(selfcheck)
-            print("Removed legacy selfcheck.json file")
 
         directories_removed = 0
         directories = [
@@ -226,7 +210,7 @@ def run_cache(args: list[str]) -> int:
 
         http_dir, wheel_dir, wheel_count = manager.info()
 
-        print(f"Package index page cache location (cpip v23.3+): {http_dir}")
+        print(f"Package index page cache location: {http_dir}")
 
         print(f"Locally built wheels location: {wheel_dir}")
 

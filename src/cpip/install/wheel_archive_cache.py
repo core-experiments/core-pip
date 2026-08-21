@@ -22,7 +22,7 @@ from contextlib import contextmanager
 from typing import TYPE_CHECKING, Generator
 
 from cpip.core.errors import InstallationError
-from cpip.core.utils import CACHE_INTERPRETER_TAG
+from cpip.core.utils import CACHE_INTERPRETER_TAG, CACHE_VERSION, CACHE_VERSION_TAG
 from cpip.core.wheel import validate_wheel
 from cpip.install.wheel_archive import (
     copy_member_with_metadata,
@@ -77,11 +77,11 @@ else:
 # ARCHIVE_CACHE_BUCKET_FAMILY names the pattern shared by every interpreter's
 # bucket, so a cache-wide purge can find and remove all of them, not only the
 # one the running interpreter would look in.
-ARCHIVE_CACHE_BUCKET_FAMILY = "archive-v1"
+ARCHIVE_CACHE_BUCKET_FAMILY = f"archive-{CACHE_VERSION_TAG}"
 
 ARCHIVE_CACHE_BUCKET = f"{ARCHIVE_CACHE_BUCKET_FAMILY}-{CACHE_INTERPRETER_TAG}"
 
-ARCHIVE_CACHE_FORMAT = 1
+ARCHIVE_CACHE_FORMAT = CACHE_VERSION
 
 _LOCK_WAIT_SECONDS = 30.0
 

@@ -2,16 +2,12 @@ from __future__ import annotations
 
 import hashlib
 import marshal
-import urllib.parse
 from pathlib import Path
 
 from cpip.core.versions import VERSION_WIRE_FORMAT, Version, is_version_wire
 from cpip.index.catalog_cache import (
-    LEGACY_PREFIX,
     SUMMARY_HEADER,
-    RECORD_WHEEL_IDENTITY,
     VERSION as CATALOG_VERSION,
-    V6_PREFIX,
     WHEEL_RECORD,
     CatalogChoices,
     cache_key,
@@ -23,7 +19,6 @@ from cpip.index.catalog_cache import (
     save_choices,
     save_links,
     summary_key,
-    wheel_file_from_record,
 )
 from cpip.index.links import Link
 from cpip.index.source_models import MetadataFile
@@ -141,43 +136,6 @@ def test_catalog_choices_are_scoped_to_generation(tmp_path: Path) -> None:
     )
 
 
-def test_v3_summary_is_recompiled_from_catalog(tmp_path: Path) -> None:
-    """A summary written by an older cpip lives under its own key and is
-    never read; the v4 summary is compiled from the text-only catalog."""
-    cache = SafeFileCache(str(tmp_path))
-    page_url = "https://example.test/simple/demo/"
-    links = [
-        Link.from_url(
-            f"https://files.example.test/demo-{version}-py3-none-any.whl",
-            source_url=page_url,
-        )
-        for version in ("2.0", "1.0")
-    ]
-    save_links(cache, page_url, links)
-    cache.delete(summary_key(page_url))
-    stale_groups = [
-        (
-            "demo",
-            version,
-            (0, (2, 0), None, None, None, None, version, (0, (2,), ())),
-            [],
-        )
-        for version in ("2.0", "1.0")
-    ]
-    body = marshal.dumps(("generation", stale_groups, False))
-    cache.set_atomic(
-        "cpip-index-summary-v3:" + page_url,
-        b"cpip-index-summary-v3\0" + hashlib.sha256(body).digest() + body,
-    )
-
-    summary = load_summary(cache, page_url)
-
-    assert summary is not None
-    assert [group[1] for group in summary[1]] == ["1.0", "2.0"]
-    assert all(is_version_wire(group[2]) for group in summary[1])
-    assert cache.get_atomic(summary_key(page_url)) is not None
-
-
 def test_summary_payload_carries_the_version_wire_format(tmp_path: Path) -> None:
     cache = SafeFileCache(str(tmp_path))
     page_url = "https://example.test/simple/demo/"
@@ -212,104 +170,6 @@ def test_catalog_cache_ignores_corrupt_entries(tmp_path: Path) -> None:
     cache.set_body(key, b"1")
 
     assert load_links(cache, "https://example.test/simple/demo/") is None
-
-
-def test_catalog_cache_migrates_v2_records_locally(tmp_path: Path) -> None:
-    cache = SafeFileCache(str(tmp_path))
-    page_url = "https://example.test/simple/demo/"
-    artifact_url = "https://files.example.test/demo-1.2.3-py3-none-any.whl"
-    parsed_url = urllib.parse.urlsplit(artifact_url)
-    legacy_record = (
-        artifact_url,
-        tuple(parsed_url),
-        page_url,
-        "demo-1.2.3-py3-none-any.whl",
-        {"sha256": "abc"},
-        ">=3.9",
-        "",
-        {"sha256": "def"},
-        None,
-    )
-    legacy_key = LEGACY_PREFIX + page_url
-    cache.set(
-        legacy_key,
-        marshal.dumps(("cpip-index-catalog", 2, [legacy_record])),
-    )
-    cache.set_body(legacy_key, b"1")
-
-    catalog = load_catalog(cache, page_url)
-
-    assert catalog is not None
-    assert [
-        (name, version, facts) for name, version, _artifacts, facts in catalog[0]
-    ] == [("demo", "1.2.3", [(WHEEL_RECORD, ">=3.9", "")])]
-    assert cache.get_atomic(cache_key(page_url)) is not None
-    loaded = load_links(cache, page_url)
-    assert loaded is not None
-    assert loaded[0].is_yanked
-
-
-def test_catalog_cache_migrates_v6_wheels_with_identity(tmp_path: Path) -> None:
-    cache = SafeFileCache(str(tmp_path))
-    page_url = "https://example.test/simple/demo/"
-    artifact_url = "https://files.example.test/demo-1.2.3-py3-none-any.whl"
-    v6_record = (
-        artifact_url,
-        "demo-1.2.3-py3-none-any.whl",
-        {"sha256": "abc"},
-        ">=3.9",
-        None,
-        {"sha256": "def"},
-        None,
-    )
-    v6_key = V6_PREFIX + page_url
-    cache.set(
-        v6_key,
-        marshal.dumps(
-            (
-                "cpip-index-catalog",
-                6,
-                [
-                    (
-                        "demo",
-                        "1.2.3",
-                        [(WHEEL_RECORD, v6_record)],
-                        [(WHEEL_RECORD, ">=3.9", None)],
-                    )
-                ],
-                [],
-            ),
-        ),
-    )
-    cache.set_body(v6_key, b"1")
-
-    catalog = load_catalog(cache, page_url)
-
-    assert catalog is not None
-    name, version, artifacts, facts = catalog[0][0]
-    assert (name, version) == ("demo", "1.2.3")
-    assert [kind for kind, _record in artifacts] == [WHEEL_RECORD]
-    assert facts == [(WHEEL_RECORD, ">=3.9", None)]
-    record = artifacts[0][1]
-    assert len(record) == 8
-    assert record[RECORD_WHEEL_IDENTITY] == (
-        "demo",
-        "1.2.3",
-        None,
-        (("py3", "none", "any"),),
-    )
-    assert cache.get_atomic(cache_key(page_url)) is not None
-    wheel = wheel_file_from_record(
-        record,
-        name="demo",
-        version=Version("1.2.3"),
-    )
-    assert wheel is not None
-    assert wheel.name == "demo"
-    assert str(wheel.version) == "1.2.3"
-    assert [(tag.interpreter, tag.abi, tag.platform) for tag in wheel.tags] == [
-        ("py3", "none", "any")
-    ]
 
 
 def test_catalog_with_an_unparseable_version_is_a_miss(tmp_path: Path) -> None:

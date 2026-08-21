@@ -8,6 +8,7 @@ import marshal
 import posixpath
 import urllib.parse
 
+from cpip.core.utils import CACHE_VERSION, CACHE_VERSION_TAG
 from cpip.core.versions import (
     InvalidVersion,
     VERSION_WIRE_FORMAT,
@@ -25,16 +26,14 @@ TYPE_CHECKING = False
 if TYPE_CHECKING:
     from typing import Any
 
-VERSION = 7
-PREFIX = "cpip-index-catalog-v7:"
-V6_PREFIX = "cpip-index-catalog-v6:"
-LEGACY_PREFIX = "cpip-index-catalog-v2:"
-SUMMARY_VERSION = 4
-SUMMARY_PREFIX = "cpip-index-summary-v4:"
-CHOICE_VERSION = 1
-CHOICE_PREFIX = "cpip-index-choice-v1:"
-SUMMARY_HEADER = b"cpip-index-summary-v4\0"
-CHOICE_HEADER = b"cpip-index-choice-v1\0"
+# Every key prefix and header carries the cache-wide version, so an entry
+# written under another version is never read (and never migrated).
+VERSION = CACHE_VERSION
+PREFIX = f"cpip-index-catalog-{CACHE_VERSION_TAG}:"
+SUMMARY_PREFIX = f"cpip-index-summary-{CACHE_VERSION_TAG}:"
+CHOICE_PREFIX = f"cpip-index-choice-{CACHE_VERSION_TAG}:"
+SUMMARY_HEADER = f"cpip-index-summary-{CACHE_VERSION_TAG}\0".encode("ascii")
+CHOICE_HEADER = f"cpip-index-choice-{CACHE_VERSION_TAG}\0".encode("ascii")
 
 WHEEL_RECORD = 1
 SDIST_RECORD = 2
@@ -152,13 +151,7 @@ def _load_catalog_uncached(
         return None
     raw = get_cache_entry(cache, cache_key(url))
     if raw is None:
-        migrated = migrate_v6_catalog(cache, url)
-        if migrated is not None:
-            return migrated, None
-        legacy = migrate_legacy_catalog(cache, url)
-        if legacy is not None:
-            save_catalog(cache, url, legacy)
-        return None if legacy is None else (legacy, None)
+        return None
     try:
         payload = marshal.loads(raw)
         if (
@@ -190,8 +183,9 @@ def load_summary(cache: Any, url: str) -> CatalogSummary | None:
         summary = decode_summary(raw)
         if summary is not None:
             return summary
-    # No v4 summary (a first run, or one written by an older cpip under its
-    # own key): compile it from the catalog, which is text-only and stable.
+    # No summary under the current key (a first run, or one written by
+    # another cpip version under its own key): compile it from the catalog,
+    # which is text-only and stable.
     pending = _pending_catalogs(cache)
     catalog = pending.pop(url, None) if pending is not None else None
     catalog_raw: bytes | None = None
@@ -243,56 +237,27 @@ def load_choices(
         cache,
         choice_key(url, target_key, allow_binary, allow_source),
     )
-    if raw is None:
+    if raw is None or not raw.startswith(CHOICE_HEADER):
         return {}
-    if raw.startswith(CHOICE_HEADER):
-        payload = decode_checked_payload(raw, CHOICE_HEADER)
-        if (
-            not isinstance(payload, tuple)
-            or len(payload) != 2
-            or payload[0] != generation
-            or not isinstance(payload[1], dict)
-        ):
-            return {}
-        choices = payload[1]
-        embed_summary_choices(
-            cache,
-            url,
-            generation,
-            target_key,
-            allow_binary,
-            allow_source,
-            choices,  # ty:ignore[invalid-argument-type]
-        )
-        return choices  # ty:ignore[invalid-return-type]
-    try:
-        payload = marshal.loads(raw)
-    except (EOFError, TypeError, ValueError):
-        return {}
+    payload = decode_checked_payload(raw, CHOICE_HEADER)
     if (
         not isinstance(payload, tuple)
-        or len(payload) != 4
-        or payload[0] != "cpip-index-choice"
-        or payload[1] != CHOICE_VERSION
-        or payload[2] != generation
-        or not isinstance(payload[3], dict)
-        or not all(
-            isinstance(version, str) and valid_choice(choice)
-            for version, choice in payload[3].items()
-        )
+        or len(payload) != 2
+        or payload[0] != generation
+        or not isinstance(payload[1], dict)
     ):
         return {}
-    choices = payload[3]
-    save_choices(
+    choices = payload[1]
+    embed_summary_choices(
         cache,
         url,
         generation,
         target_key,
         allow_binary,
         allow_source,
-        choices,
+        choices,  # ty:ignore[invalid-argument-type]
     )
-    return choices
+    return choices  # ty:ignore[invalid-return-type]
 
 
 def save_choices(
@@ -433,16 +398,6 @@ def valid_fact(value: object) -> bool:
         and isinstance(value[0], int)
         and (value[1] is None or isinstance(value[1], str))
         and (value[2] is None or isinstance(value[2], str))
-    )
-
-
-def valid_choice(value: object) -> bool:
-    return value is None or (
-        isinstance(value, tuple)
-        and len(value) == 3
-        and valid_record(value[0])
-        and isinstance(value[1], int)
-        and (value[2] is None or isinstance(value[2], int))
     )
 
 
@@ -606,160 +561,6 @@ def get_cache_entry(cache: Any, key: str) -> bytes | None:
         if setter is not None:
             setter(key, value)
     return value
-
-
-def migrate_legacy_catalog(cache: Any, url: str) -> CatalogData | None:
-    """Compile the v2 parsed-link cache without fetching or reparsing the page."""
-    raw = get_cache_entry(cache, LEGACY_PREFIX + url)
-    if raw is None:
-        return None
-    try:
-        payload = marshal.loads(raw)
-    except (EOFError, TypeError, ValueError):
-        return None
-    if (
-        not isinstance(payload, tuple)
-        or len(payload) != 3
-        or payload[0] != "cpip-index-catalog"
-        or payload[1] != 2
-        or not isinstance(payload[2], list)
-    ):
-        return None
-    grouped: dict[tuple[str, str], list[CatalogArtifact]] = {}
-    unparsed: list[CatalogRecord] = []
-    for legacy_record in payload[2]:
-        migrated = migrate_legacy_record(legacy_record)
-        if migrated is None:
-            continue
-        record, filename = migrated
-        identity = artifact_identity_from_filename(filename)
-        if identity is None:
-            unparsed.append(record)
-            continue
-        kind, name, version = identity
-        grouped.setdefault((name, version), []).append((kind, record))
-    return (
-        compile_groups(grouped),
-        unparsed,
-    )
-
-
-def migrate_v6_catalog(cache: Any, url: str) -> CatalogData | None:
-    """Upgrade a v6 catalog by embedding parsed wheel identities once."""
-    raw = get_cache_entry(cache, V6_PREFIX + url)
-    if raw is None:
-        return None
-    try:
-        payload = marshal.loads(raw)
-    except (EOFError, TypeError, ValueError):
-        return None
-    if (
-        not isinstance(payload, tuple)
-        or len(payload) != 4
-        or payload[0] != "cpip-index-catalog"
-        or payload[1] != 6
-        or not isinstance(payload[2], list)
-        or not isinstance(payload[3], list)
-    ):
-        return None
-    groups: list[CatalogGroup] = []
-    for group in payload[2]:
-        if not isinstance(group, tuple) or len(group) != 4:
-            return None
-        name, version_text, artifacts, facts = group
-        if not isinstance(artifacts, list):
-            return None
-        migrated_artifacts: list[CatalogArtifact] = []
-        for kind, record in artifacts:
-            if kind == WHEEL_RECORD:
-                migrated = migrate_v6_record(record)
-                if migrated is None:
-                    return None
-                record = migrated
-            migrated_artifacts.append((kind, record))
-        groups.append((name, version_text, migrated_artifacts, facts))
-    unparsed: list[CatalogRecord] = []
-    for record in payload[3]:
-        if not isinstance(record, tuple) or len(record) != 7:
-            return None
-        migrated = migrate_v6_record(record)
-        if migrated is None:
-            return None
-        unparsed.append(migrated)
-    catalog = (groups, unparsed)
-    if not all(valid_group(group) for group in groups) or not all(
-        valid_record(record) for record in unparsed
-    ):
-        return None
-    save_catalog(cache, url, catalog)
-    return catalog
-
-
-def migrate_v6_record(record: tuple[object, ...]) -> CatalogRecord | None:
-    """Append a wheel's parsed identity to a v6 catalog record."""
-    filename = record_filename(record)
-    if filename is None or not filename.endswith(".whl"):
-        return record + (None,)
-    parsed_wheel = parse_wheel_file(filename)
-    return record + (wheel_identity(parsed_wheel),)
-
-
-def record_filename(record: tuple[object, ...]) -> str | None:
-    """Recover an artifact filename from a catalog record without parsing."""
-    text = record[1]
-    if isinstance(text, str) and text.endswith(".whl"):
-        return text
-    url = record[0]
-    if not isinstance(url, str):
-        return None
-    return urllib.parse.unquote(urllib.parse.urlsplit(url).path).rsplit("/", 1)[-1]
-
-
-def migrate_legacy_record(value: object) -> tuple[CatalogRecord, str] | None:
-    if not isinstance(value, tuple) or len(value) != 9:
-        return None
-    parsed_url = value[1]
-    if (
-        not isinstance(value[0], str)
-        or not isinstance(parsed_url, tuple)
-        or len(parsed_url) != 5
-        or not isinstance(parsed_url[2], str)
-        or not isinstance(value[3], str)
-    ):
-        return None
-    filename = posixpath.basename(urllib.parse.unquote(parsed_url[2]).rstrip("/"))
-    return (
-        (
-            value[0],
-            value[3],
-            value[4],
-            value[5],
-            value[6],
-            value[7],
-            value[8],
-            wheel_identity(parse_wheel_file(filename)),
-        ),
-        filename,
-    )
-
-
-def artifact_identity_from_filename(
-    filename: str,
-    *,
-    kind: ArtifactKind | None = None,
-) -> tuple[int, str, str] | None:
-    if kind is None:
-        kind = Link.artifact_kind_from_filename(filename)
-    if kind is ArtifactKind.WHEEL:
-        parsed = parse_wheel_file(filename)
-        if parsed is not None:
-            return WHEEL_RECORD, parsed.name, str(parsed.version)
-    elif kind is ArtifactKind.SDIST:
-        parsed_identity = project_version_from_filename(filename)
-        if parsed_identity is not None:
-            name, version = parsed_identity
-            return SDIST_RECORD, name, str(version)
-    return None
 
 
 def artifact_identity(

@@ -28,6 +28,7 @@ import re
 
 from cpip.core.caches import register_table
 from cpip.core.names import NORMALIZE_RE
+from cpip.core.utils import CACHE_VERSION
 
 TYPE_CHECKING = False
 
@@ -270,9 +271,9 @@ class Version(tuple):
         return cls(state[0])
 
 
-VERSION_WIRE_FORMAT = 1
-"""Bumped whenever :meth:`Version.to_wire`'s shape changes; stored in every
-payload that embeds wire records so a reader can reject the wrong shape."""
+VERSION_WIRE_FORMAT = CACHE_VERSION
+"""Stored in every payload that embeds :meth:`Version.to_wire` records so a
+reader can reject the wrong shape; follows the cache-wide version."""
 
 
 def is_version_wire(value: object) -> bool:
