@@ -599,3 +599,156 @@ class TestChecksumHelpers:
         field = (0o200).to_bytes(1, "big") + (12_345_678_901).to_bytes(11, "big")
 
         assert tar_reader._nti(field) == 12_345_678_901
+
+
+def _octal_fields(rng: random.Random, count: int) -> list[bytes]:
+    fields: list[bytes] = []
+    for _ in range(count):
+        width = rng.choice((8, 12))
+        kind = rng.random()
+        if kind < 0.55:
+            value = rng.randrange(0, 8 ** (width - 2))
+            digits = ("%o" % value).encode()
+            pad = rng.choice((b"\x00", b" ", b"\x00 ", b" \x00", b""))
+            lead = rng.choice((b"", b" ", b"  ", b"0" * (width - len(digits) - 2)))
+            field = (lead + digits + pad)[:width]
+            field = field.ljust(width, rng.choice((b"\x00", b" ")))
+        elif kind < 0.65:
+            field = rng.choice((b"\x00", b" ")) * width
+        elif kind < 0.75:
+            field = bytes([rng.choice((0o200, 0o377))]) + rng.randbytes(width - 1)
+        elif kind < 0.85:
+            field = b"644\x00" + rng.randbytes(width - 4)
+        else:
+            field = rng.randbytes(width)
+        fields.append(field)
+    return fields
+
+
+def test_nti_matches_tarfile_nti() -> None:
+    rng = random.Random(2026_08_20)
+    for field in _octal_fields(rng, 5000):
+        try:
+            expected: object = tarfile.nti(field)  # ty:ignore[unresolved-attribute]
+        except tarfile.HeaderError:
+            expected = "error"
+        try:
+            actual: object = tar_reader._nti(field)
+        except tar_reader._NotFastCompatible:
+            actual = "error"
+        assert actual == expected, field
+
+
+def test_nts_matches_tarfile_nts() -> None:
+    rng = random.Random(7)
+    samples = [
+        b"pkg/file.txt\x00\x00\x00",
+        b"\x00garbage",
+        b"no-terminator",
+        "café".encode() + b"\x00",
+        b"\xff\xfe broken utf8\x00",
+        b"",
+    ]
+    samples.extend(rng.randbytes(rng.randrange(0, 40)) for _ in range(2000))
+    for field in samples:
+        expected = tarfile.nts(field, "utf-8", "surrogateescape")  # ty:ignore[unresolved-attribute]
+        assert tar_reader._nts(field) == expected, field
+
+
+def test_checksum_ok_matches_tarfile_calc_chksums() -> None:
+    rng = random.Random(11)
+    for _ in range(2000):
+        buf = rng.randbytes(tar_reader.BLOCKSIZE)
+        unsigned, signed = tarfile.calc_chksums(buf)  # ty:ignore[unresolved-attribute]
+        assert tar_reader._checksum_ok(buf, unsigned)
+        assert tar_reader._checksum_ok(buf, signed)
+        other = rng.randrange(0, 1 << 20)
+        assert tar_reader._checksum_ok(buf, other) == (other in (unsigned, signed))
+
+
+def test_parse_header_matches_tarfile_frombuf() -> None:
+    rng = random.Random(3)
+    names = [
+        "pkg-1.0/PKG-INFO",
+        "pkg-1.0/pkg/nested/deep.py",
+        "a" * 99,
+        "d" * 60 + "/" + "f" * 90,
+        "pkg-1.0/unicode-éè.txt",
+        "pkg-1.0/dir/",
+    ]
+    for _ in range(300):
+        depth = rng.randrange(1, 6)
+        names.append(
+            "/".join(
+                "".join(rng.choice("abcdefgh-_.") for _ in range(rng.randrange(1, 30)))
+                for _ in range(depth)
+            ),
+        )
+    for name in names:
+        info = tarfile.TarInfo(name=name)
+        info.size = rng.randrange(0, 1 << 20)
+        info.mtime = rng.randrange(0, 1 << 31)
+        info.mode = rng.choice((0o644, 0o755, 0o600, 0o777))
+        if name.endswith("/"):
+            info.type = tarfile.DIRTYPE
+            info.size = 0
+        buf = info.tobuf(tarfile.USTAR_FORMAT, "utf-8", "surrogateescape")
+        assert len(buf) == tar_reader.BLOCKSIZE
+        parsed = tar_reader._parse_header(buf)
+        assert parsed is not None
+        expected = tarfile.TarInfo.frombuf(buf, "utf-8", "surrogateescape")
+        parsed_name, typeflag, mode, size, mtime = parsed
+        # frombuf already strips a directory's trailing slash, as _parse_header does.
+        assert parsed_name == expected.name
+        assert typeflag == expected.type
+        assert (mode, size, mtime) == (expected.mode, expected.size, expected.mtime)
+
+
+class TestDirectoryCache:
+    def test_odd_names_match_real_tarfile(self, tmp_path: Path) -> None:
+        archive_path = tmp_path / "odd.tar.gz"
+        members = {
+            "pkg-1.0/a/one.txt": b"1",
+            "pkg-1.0/b/two.txt": b"2",
+            "pkg-1.0/a/three.txt": b"3",
+            "pkg-1.0/a//four.txt": b"4",
+            "pkg-1.0/./five.txt": b"5",
+            "pkg-1.0/a/b/c/d/six.txt": b"6",
+            "pkg-1.0/a/b/c/seven.txt": b"7",
+            "pkg-1.0/a/...": b"dots",
+            "pkg-1.0/a/.hidden": b"h",
+            "pkg-1.0/eight.txt": b"8",
+        }
+        _write_tar(archive_path, members, format=tarfile.USTAR_FORMAT)
+        _assert_matches_real_tarfile(tmp_path, archive_path)
+
+    def test_directory_level_escape_is_rejected(self, tmp_path: Path) -> None:
+        from cpip.core.errors import InstallationError
+
+        archive_path = tmp_path / "escape.tar"
+        with archive_path.open("wb") as fp:
+            _write_raw_member(fp, "pkg-1.0/ok.txt", b"ok")
+            _write_raw_member(fp, "pkg-1.0/sub/../../../escaped.txt", b"no")
+            _write_eof_marker(fp)
+        dest = tmp_path / "dest"
+        dest.mkdir()
+        with pytest.raises(
+            InstallationError, match=r"escaped\.txt.*outside the destination"
+        ):
+            tar_reader.fast_untar(str(archive_path), str(dest), "r")
+        assert not (tmp_path / "escaped.txt").exists()
+
+    def test_trailing_dot_segments_take_the_per_member_path(
+        self, tmp_path: Path
+    ) -> None:
+        archive_path = tmp_path / "dots.tar"
+        with archive_path.open("wb") as fp:
+            _write_raw_member(fp, "pkg-1.0/a/file.txt", b"a")
+            _write_raw_member(fp, "pkg-1.0/a/.", b"", typeflag=tarfile.DIRTYPE)
+            _write_raw_member(fp, "pkg-1.0/a/..", b"", typeflag=tarfile.DIRTYPE)
+            _write_eof_marker(fp)
+        dest = tmp_path / "dest"
+        dest.mkdir()
+        names = tar_reader.fast_untar(str(archive_path), str(dest), "r")
+        assert names == ["pkg-1.0/a/file.txt", "pkg-1.0/a/.", "pkg-1.0/a/.."]
+        assert (dest / "pkg-1.0" / "a" / "file.txt").read_bytes() == b"a"

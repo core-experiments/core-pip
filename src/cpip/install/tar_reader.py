@@ -36,6 +36,7 @@ from __future__ import annotations
 import gzip
 import os
 import shutil
+import struct
 import sys
 
 from cpip.core.errors import InstallationError
@@ -59,6 +60,11 @@ _SUPPORTED_TYPES = frozenset((_REGTYPE, _AREGTYPE, _DIRTYPE))
 
 _FAST_MODES = frozenset(("r:gz", "r"))
 
+# The ustar header's fixed-width fields, unpacked in one call instead of a
+# slice per field: name, mode, uid, gid, size, mtime, chksum, typeflag,
+# linkname, magic, version, uname, gname, devmajor, devminor, prefix.
+_HEADER = struct.Struct("100s8s8s8s12s12s8s1s100s6s2s32s32s8s8s155s")
+
 
 class _NotFastCompatible(Exception):
     """Internal signal: this archive is outside the fast path's coverage."""
@@ -79,15 +85,20 @@ def _nti(field: bytes) -> int:
 
         return n
 
-    text = field.split(b"\x00", 1)[0].strip()
+    # Up to the first NUL, as tarfile.nts() does; int() itself tolerates
+    # the surrounding spaces some writers pad with, so the common field
+    # costs one find, one slice and one conversion.
+    end = field.find(b"\x00")
 
-    if not text:
-        return 0
+    text = field if end < 0 else field[:end]
 
     try:
         return int(text, 8)
 
     except ValueError:
+        if not text.strip():
+            return 0
+
         raise _NotFastCompatible("invalid numeric header field") from None
 
 
@@ -95,7 +106,9 @@ def _nts(field: bytes) -> str:
     # Mirrors tarfile.nts() with this codebase's own tarfile.open(...,
     # encoding="utf-8") call -- errors="surrogateescape" is tarfile's
     # default and is never overridden there, so this never raises.
-    return field.split(b"\x00", 1)[0].decode("utf-8", "surrogateescape")
+    end = field.find(b"\x00")
+
+    return (field if end < 0 else field[:end]).decode("utf-8", "surrogateescape")
 
 
 def _checksum_ok(buf: bytes, expected: int) -> bool:
@@ -104,7 +117,9 @@ def _checksum_ok(buf: bytes, expected: int) -> bool:
     # unsigned and signed interpretations -- some tar writers (Sun, NeXT)
     # compute it with signed chars. bytes iterates as unsigned ints, so the
     # signed sum subtracts 256 from any byte with its high bit set.
-    unsigned = 256 + sum(buf[:148]) + sum(buf[156:BLOCKSIZE])
+    # One C-level pass over the whole block, minus the chksum field, instead
+    # of two slice copies summed separately.
+    unsigned = 256 + sum(buf) - sum(buf[148:156])
 
     if unsigned == expected:
         return True
@@ -129,25 +144,42 @@ def _parse_header(buf: bytes) -> tuple[str, bytes, int, int, int] | None:
     if buf.count(b"\x00") == BLOCKSIZE:
         return None
 
-    expected_chksum = _nti(buf[148:156])
+    (
+        name_field,
+        mode_field,
+        _,
+        _,
+        size_field,
+        mtime_field,
+        chksum_field,
+        typeflag,
+        _,
+        _,
+        _,
+        _,
+        _,
+        _,
+        _,
+        prefix_field,
+    ) = _HEADER.unpack_from(buf)
+
+    expected_chksum = _nti(chksum_field)
 
     if not _checksum_ok(buf, expected_chksum):
         raise _NotFastCompatible("bad checksum")
 
-    typeflag = buf[156:157]
-
     if typeflag not in _SUPPORTED_TYPES:
         raise _NotFastCompatible(f"unsupported typeflag {typeflag!r}")
 
-    name = _nts(buf[0:100])
+    name = _nts(name_field)
 
-    mode = _nti(buf[100:108])
+    mode = _nti(mode_field)
 
-    size = _nti(buf[124:136])
+    size = _nti(size_field)
 
-    mtime = _nti(buf[136:148])
+    mtime = _nti(mtime_field)
 
-    prefix = _nts(buf[345:500])
+    prefix = _nts(prefix_field)
 
     # Old V7 tar represents a directory as a regular file with a trailing
     # slash.
@@ -301,6 +333,13 @@ def fast_untar(filename: str, location: str, mode: str) -> list[str] | None:
 
     created_directories = {absolute_location}
 
+    # Members are overwhelmingly siblings, so the join, abspath, containment
+    # check and dirname are done once per archive directory and the bare
+    # name appended per member; a name whose last component is empty, "."
+    # or ".." keeps the original per-member path so nothing about its
+    # handling changes.
+    directories: dict[str, tuple[str, str]] = {}
+
     extracted_names: list[str] = []
 
     umask_mask = os.umask(0)
@@ -323,17 +362,50 @@ def fast_untar(filename: str, location: str, mode: str) -> list[str] | None:
 
             name, typeflag, member_mode, size, mtime = parsed
 
-            path = os.path.join(location, name)
+            directory, _, base = name.rpartition("/")
 
-            absolute_path = os.path.abspath(path)
+            if base and base != "." and base != "..":
+                entry = directories.get(directory)
 
-            if not (
-                absolute_path == absolute_location
-                or absolute_path.startswith(absolute_location + os.sep)
-            ):
-                raise InstallationError(
-                    f"{name!r} is outside the destination in {filename}",
-                )
+                if entry is None:
+                    directory_path = (
+                        os.path.join(location, directory) if directory else location
+                    )
+
+                    absolute_directory = os.path.abspath(directory_path)
+
+                    if not (
+                        absolute_directory == absolute_location
+                        or absolute_directory.startswith(absolute_location + os.sep)
+                    ):
+                        raise InstallationError(
+                            f"{name!r} is outside the destination in {filename}",
+                        )
+
+                    path_prefix = os.path.join(directory_path, "")
+
+                    entry = (path_prefix, os.path.dirname(path_prefix + base))
+
+                    directories[directory] = entry
+
+                path_prefix, parent = entry
+
+                path = path_prefix + base
+
+            else:
+                path = os.path.join(location, name)
+
+                absolute_path = os.path.abspath(path)
+
+                if not (
+                    absolute_path == absolute_location
+                    or absolute_path.startswith(absolute_location + os.sep)
+                ):
+                    raise InstallationError(
+                        f"{name!r} is outside the destination in {filename}",
+                    )
+
+                parent = os.path.dirname(path)
 
             extracted_names.append(name)
 
@@ -344,8 +416,6 @@ def fast_untar(filename: str, location: str, mode: str) -> list[str] | None:
                     created_directories.add(path)
 
                 continue
-
-            parent = os.path.dirname(path)
 
             if parent not in created_directories:
                 os.makedirs(parent, exist_ok=True)
