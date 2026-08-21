@@ -10,6 +10,7 @@ from cpip.index.catalog_cache import (
     LEGACY_PREFIX,
     SUMMARY_HEADER,
     RECORD_WHEEL_IDENTITY,
+    VERSION as CATALOG_VERSION,
     V6_PREFIX,
     WHEEL_RECORD,
     CatalogChoices,
@@ -309,3 +310,21 @@ def test_catalog_cache_migrates_v6_wheels_with_identity(tmp_path: Path) -> None:
     assert [(tag.interpreter, tag.abi, tag.platform) for tag in wheel.tags] == [
         ("py3", "none", "any")
     ]
+
+
+def test_catalog_with_an_unparseable_version_is_a_miss(tmp_path: Path) -> None:
+    """A semantically corrupt catalog must not raise out of load_summary."""
+    cache = SafeFileCache(str(tmp_path))
+    page_url = "https://example.test/simple/demo/"
+    record = (None,) * 8
+    groups = [
+        ("demo", "1.0", [(WHEEL_RECORD, record)], []),
+        ("demo", "not a version", [(WHEEL_RECORD, record)], []),
+    ]
+    cache.set_atomic(
+        cache_key(page_url),
+        marshal.dumps(("cpip-index-catalog", CATALOG_VERSION, groups, [])),
+    )
+
+    assert load_catalog(cache, page_url) is None
+    assert load_summary(cache, page_url) is None

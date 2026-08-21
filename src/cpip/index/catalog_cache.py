@@ -8,7 +8,12 @@ import marshal
 import posixpath
 import urllib.parse
 
-from cpip.core.versions import VERSION_WIRE_FORMAT, Version, is_version_wire
+from cpip.core.versions import (
+    InvalidVersion,
+    VERSION_WIRE_FORMAT,
+    Version,
+    is_version_wire,
+)
 from cpip.core.wheel import WheelFile, WheelTag, parse_wheel_file
 from cpip.index.datetime import parse_iso_datetime
 from cpip.index.directory_index import project_version_from_filename
@@ -349,12 +354,25 @@ def embed_summary_choices(
     )
 
 
+def valid_version_text(value: object) -> bool:
+    """A version string the summary can compile: a corrupt one is a miss,
+    not an exception out of load_summary. Version interns by text, so the
+    parse here is the one the summary needs anyway."""
+    if not isinstance(value, str):
+        return False
+    try:
+        Version(value)
+    except InvalidVersion:
+        return False
+    return True
+
+
 def valid_group(value: object) -> bool:
     return (
         isinstance(value, tuple)
         and len(value) == 4
         and isinstance(value[0], str)
-        and isinstance(value[1], str)
+        and valid_version_text(value[1])
         and isinstance(value[2], list)
         and isinstance(value[3], list)
         and all(
@@ -375,6 +393,7 @@ def valid_summary_group(value: object) -> bool:
         and isinstance(value[0], str)
         and isinstance(value[1], str)
         and is_version_wire(value[2])
+        and valid_version_text(value[2][0])  # ty:ignore[not-subscriptable]
         and isinstance(value[3], list)
         and all(valid_fact(fact) for fact in value[3])
     )

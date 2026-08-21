@@ -1134,7 +1134,7 @@ class CandidateProvider:
 
         if (
             catalog is None
-            and requirement.url is None
+            and not requirement.is_unnamed_direct
             and not self.find_links
             and self.session is not None
             and self.index_sources
@@ -1145,7 +1145,7 @@ class CandidateProvider:
 
         if (
             catalog is None
-            and requirement.url is None
+            and not requirement.is_unnamed_direct
             and self.prefetcher is not None
             and self.prefetcher.pending(catalog_key)
         ):
@@ -1154,7 +1154,7 @@ class CandidateProvider:
             catalog = self.package_catalog_cache.get(catalog_key)
 
         if (
-            requirement.url is None
+            not requirement.is_unnamed_direct
             and exact_version is not None
             and catalog is not None
         ):
@@ -1893,7 +1893,7 @@ class CandidateProvider:
         hashes = self.hashes_by_name.get(requirement.canonical_name)
 
         if (
-            requirement.url is not None
+            requirement.is_unnamed_direct
             or self.find_links
             or self.uploaded_prior_to is not None
             or (hashes is not None and hashes.allowed_internal)

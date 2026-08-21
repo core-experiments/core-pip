@@ -733,3 +733,18 @@ def test_install_rejects_entry_point_path_traversal(tmp_path: Path) -> None:
 
     with pytest.raises(InstallationError, match="outside the scripts directory"):
         install_wheel(wheel, prefix=str(prefix))
+
+
+def test_exact_install_plan_key_rejects_local_path_requirements() -> None:
+    """A local wheel path parses to a name and an exact version with no URL;
+    a plan keyed by name and version alone must not be shared with (or
+    borrowed from) the index artifact of the same release."""
+    from cpip.install.wheel_install_plan_cache import exact_install_plan_key
+
+    local = SimpleNamespace(req=parse_requirement("./demo-1.0-py3-none-any.whl"))
+    assert local.req.url is None
+    assert local.req.specifier.exact_version is not None
+    assert exact_install_plan_key((local,), ("test-context",)) is None
+
+    named = SimpleNamespace(req=parse_requirement("demo==1.0"))
+    assert exact_install_plan_key((named,), ("test-context",)) is not None

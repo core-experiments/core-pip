@@ -41,8 +41,12 @@ def _caches(module: types.ModuleType) -> Iterator[tuple[str, Any]]:
             yield f"{module.__name__}.{name}", value
         elif isinstance(value, type) and value.__module__ == module.__name__:
             for attribute, member in vars(value).items():
+                if attribute.startswith("__"):
+                    continue  # __annotations__, __dict__ and friends
                 inner = getattr(member, "__func__", member)
                 if hasattr(inner, "cache_info"):
+                    yield f"{module.__name__}.{name}.{attribute}", inner
+                elif isinstance(inner, (dict, set)):
                     yield f"{module.__name__}.{name}.{attribute}", inner
 
 
