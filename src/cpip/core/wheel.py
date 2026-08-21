@@ -431,6 +431,9 @@ logger = logging.getLogger(__name__)
 
 WHEEL_METADATA_CACHE_SIZE = 1024
 
+# Shared empty result for an absent multi-value header (never mutated).
+_NO_HEADERS: list[str] = []
+
 
 class WheelResolutionMetadata:
     __slots__ = (
@@ -769,13 +772,18 @@ def wheel_candidate(
                 if metadata_cache is not None and identity is not None:
                     metadata_cache.put(identity, headers)
 
+            # The header dict is keyed by casefolded names already; these are
+            # the same lookups without a casefold per call (five per
+            # candidate wheel examined).
+            header_get = headers.get
+
             def get_header(name: str) -> str | None:
-                values = headers.get(name.casefold())
+                values = header_get(name)
 
                 return values[0] if values else None
 
             def get_all_headers(name: str) -> list[str]:
-                return headers.get(name.casefold(), [])
+                return header_get(name, _NO_HEADERS)
 
         else:
             message = (
@@ -795,9 +803,9 @@ def wheel_candidate(
             def get_all_headers(name: str) -> list[str]:
                 return message.get_all(name, [])
 
-        metadata_name = get_header("Name") or name
+        metadata_name = get_header("name") or name
 
-        metadata_version = get_header("Version") or str(version)
+        metadata_version = get_header("version") or str(version)
 
         parsed_metadata_version = (
             version
@@ -813,14 +821,14 @@ def wheel_candidate(
             # resumption per Requires-Dist line where map iterates at the
             # C level with no intermediate frame or list at all.
             dependencies=tuple(
-                map(parse_requirement, get_all_headers("Requires-Dist")),
+                map(parse_requirement, get_all_headers("requires-dist")),
             ),
             provided_extras=frozenset(
                 stripped
-                for value in get_all_headers("Provides-Extra")
+                for value in get_all_headers("provides-extra")
                 if (stripped := value.strip())
             ),
-            requires_python=get_header("Requires-Python"),
+            requires_python=get_header("requires-python"),
         )
 
         if identity is not None:
