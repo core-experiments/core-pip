@@ -18,7 +18,6 @@ if TYPE_CHECKING:
 
 REQ_NAME_RE = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)")
 
-SPEC_RE = re.compile(r"(===|==|!=|~=|<=|>=|<|>)\s*([^,]+)")
 
 # frozenset(), unlike (), is not a singleton -- every call allocates. Most
 # requirements have no extras, so this constant is reused instead of paying
@@ -326,13 +325,40 @@ class SpecifierSet:
         if cached is not None:
             return cached
 
-        # A list comprehension, not a generator expression: this runs for
-        # every Requires-Dist line of every candidate examined during
-        # resolution, and a genexpr pays a generator-frame resumption per
-        # clause where the comprehension runs in one.
-        specifiers = tuple(
-            [Specifier(op, ver.strip()) for op, ver in SPEC_RE.findall(key)],
-        )
+        # Clauses are split on commas and read with string operations: this
+        # runs for every Requires-Dist line of every candidate examined
+        # during resolution, and the regex it replaces needed a second pass
+        # (a substitution) to confirm it had matched the whole text. Here a
+        # part that does not start with an operator is the error directly.
+        clauses: list[Specifier] = []
+        for part in key.split(","):
+            clause = part.strip()
+            if not clause:
+                continue
+            first = clause[0]
+            if first == "=":
+                operator = "===" if clause.startswith("===") else "=="
+                if operator == "==" and not clause.startswith("=="):
+                    raise ValueError(f"invalid version specifier: {value!r}")
+            elif first == "!":
+                if not clause.startswith("!="):
+                    raise ValueError(f"invalid version specifier: {value!r}")
+                operator = "!="
+            elif first == "~":
+                if not clause.startswith("~="):
+                    raise ValueError(f"invalid version specifier: {value!r}")
+                operator = "~="
+            elif first == "<":
+                operator = "<=" if clause.startswith("<=") else "<"
+            elif first == ">":
+                operator = ">=" if clause.startswith(">=") else ">"
+            else:
+                raise ValueError(f"invalid version specifier: {value!r}")
+            version = clause[len(operator) :].strip()
+            if not version:
+                raise ValueError(f"invalid version specifier: {value!r}")
+            clauses.append(Specifier(operator, version))
+        specifiers = tuple(clauses)
         if key and not specifiers:
             raise ValueError(f"invalid version specifier: {value!r}")
 
@@ -734,7 +760,9 @@ def parse_requirement(value: str) -> Requirement:
 
     extras: frozenset[str] = EMPTY_FROZENSET
 
-    if rest.startswith("["):
+    first = rest[:1]
+
+    if first == "[":
         end = rest.find("]")
 
         if end == -1:
@@ -746,30 +774,28 @@ def parse_requirement(value: str) -> Requirement:
 
         rest = rest[end + 1 :].strip()
 
+        first = rest[:1]
+
     url: str | None = None
 
-    if rest.startswith("@"):
+    if first == "@":
         url = rest[1:].strip()
 
         spec = ""
 
     else:
-        if rest.startswith("(") and rest.endswith(")"):
+        if first == "(" and rest.endswith(")"):
             rest = rest[1:-1].strip()
 
         spec = rest
 
-        if spec and ("[" in spec or "]" in spec or SPEC_RE.sub("", spec).strip(" ,")):
+        # SpecifierSet's clause parser rejects anything that is not an
+        # operator followed by a version; brackets are caught here so the
+        # error names the specifier rather than a malformed version.
+        if spec and ("[" in spec or "]" in spec):
             raise ValueError(f"invalid version specifier: {value!r}")
 
-    return Requirement(
-        name=name,
-        extras=extras,
-        specifier=SpecifierSet(spec),
-        url=url,
-        marker=marker,
-        raw=raw,
-    )
+    return Requirement(name, SpecifierSet(spec), extras, url, marker, raw)
 
 
 def canonicalize_requirement(value: str) -> str:
@@ -777,18 +803,17 @@ def canonicalize_requirement(value: str) -> str:
 
     requirement = parse_requirement(value.strip())
 
-    parts = [canonicalize_name(requirement.name)]
+    parts = [requirement.canonical_name]
 
     if requirement.extras:
-        parts.append(",".join(sorted(canonicalize_name(e) for e in requirement.extras)))
-
-        parts[-1] = f"[{parts[-1]}]"
+        # Extras were canonicalized when parsed.
+        parts.append(f"[{','.join(sorted(requirement.extras))}]")
 
     if requirement.url:
         parts.append(f" @ {requirement.url}")
 
     elif requirement.specifier:
-        parts.append(str(requirement.specifier))
+        parts.append(requirement.specifier.text)
 
     if requirement.marker:
         parts.append(f"; {requirement.marker}")
