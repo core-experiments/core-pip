@@ -17,4 +17,9 @@ NORMALIZE_RE = re.compile(r"[-_.]+")
 
 @memoized(4096)
 def canonicalize_name(name: str) -> str:
+    # Already canonical (lowercase, "-" the only separator, no runs): the
+    # common case for names read from an index or a wheel filename, and
+    # four C-level scans where the substitution is a regex pass.
+    if name.islower() and "_" not in name and "." not in name and "--" not in name:
+        return name
     return NORMALIZE_RE.sub("-", name).lower()

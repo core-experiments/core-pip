@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import random
+import re
 import pytest
 from cpip.core.packaging import (
     SpecifierSet,
@@ -620,3 +622,91 @@ def test_version_of_parses_text_and_passes_versions_through() -> None:
     # The check installed-distribution comparisons rely on.
     assert version_of("2.0.0") == Version("2.0.0")
     assert (Version("2.0.0") == "2.0.0") is False
+
+
+class TestSpecifierClauseGrammar:
+    """The string-based clause parser accepts and rejects exactly what the
+    regex grammar it replaced did, clause for clause."""
+
+    # The grammar it replaced, verbatim: one regex to find clauses and a
+    # substitution to check it had consumed the whole text.
+    SPEC_RE = re.compile(r"(===|==|!=|~=|<=|>=|<|>)\s*([^,]+)")
+
+    @classmethod
+    def _reference(cls, text: str) -> list[tuple[str, str]] | None:
+        spec = text.strip()
+        if spec and (
+            "[" in spec or "]" in spec or cls.SPEC_RE.sub("", spec).strip(" ,")
+        ):
+            return None
+        clauses = [(op, ver.strip()) for op, ver in cls.SPEC_RE.findall(spec)]
+        if spec and not clauses:
+            return None
+        # The grammar only split clauses; Specifier then validated each
+        # operand exactly as it does today.
+        for operator, version in clauses:
+            if operator == "===":
+                continue
+            wildcard = version.endswith(".*")
+            if wildcard and operator not in ("==", "!="):
+                return None
+            try:
+                Version(version[:-2] if wildcard else version)
+            except InvalidVersion:
+                return None
+        return clauses
+
+    @staticmethod
+    def _candidate(text: str) -> list[tuple[str, str]] | None:
+        try:
+            return [(s.operator, s.version) for s in SpecifierSet(text).specifiers]
+        except ValueError:
+            return None
+
+    def test_matches_the_regex_grammar(self) -> None:
+        rng = random.Random(20260821)
+        operators = (
+            "===",
+            "==",
+            "!=",
+            "~=",
+            "<=",
+            ">=",
+            "<",
+            ">",
+            "=",
+            "!",
+            "~",
+            "",
+            "x",
+        )
+        versions = ("1.0", "1.0.*", "2!1.0a1", "1.0 junk", "", " ", "1,0")
+        seps = (",", " , ", ",,", " ", ";")
+        texts = [
+            "",
+            " ",
+            ",",
+            ">=1.0",
+            " >= 1.0 , <2 ",
+            ">=1.0,,<2",
+            "foo>=1",
+            "= =1.0",
+            "==>1.0",
+            ">= ",
+            "===",
+            "==1.0[x]",
+            ">=1.0<2",
+            "~=1",
+            "<>1",
+            "=1.0",
+        ]
+        for _ in range(3000):
+            clauses = [
+                rng.choice(operators) + rng.choice(("", " ")) + rng.choice(versions)
+                for _ in range(rng.randint(1, 3))
+            ]
+            texts.append(rng.choice(("", " ")) + rng.choice(seps).join(clauses))
+        for text in texts:
+            if "[" in text or "]" in text:
+                continue  # brackets are rejected earlier, by parse_requirement
+            assert self._candidate(text) == self._reference(text), repr(text)
