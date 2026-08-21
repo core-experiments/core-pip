@@ -5,9 +5,9 @@ import re
 import sys
 import urllib.parse
 
-from cpip.core.caches import memoized, register_table
+from cpip.core.caches import bounded_put, memoized, register_table
 from cpip.core.names import canonicalize_name
-from cpip.core.versions import InvalidVersion, Version
+from cpip.core.versions import FINAL_SUFFIX, InvalidVersion, Version
 
 TYPE_CHECKING = False
 
@@ -62,69 +62,44 @@ def default_environment(extra: str | None = None) -> dict[str, str]:
 
 
 class Specifier:
-    __slots__ = ("_compatible_upper_bound", "_parsed_version", "operator", "version")
+    """One clause of a version specifier, frozen at construction.
+
+    ``parsed_version`` is the operand as a Version -- the prefix for a
+    wildcard clause, ``None`` only for ``===`` whose operand is arbitrary
+    text. ``contains`` implements PEP 440's per-operator rules, including
+    the ones plain ordering gets wrong: ``==``/``!=`` ignore the candidate's
+    local label unless the clause names one, ``<V`` excludes V's own
+    prereleases and ``>V`` excludes V's post-releases and local versions,
+    wildcards and ``~=`` match release segments rather than text.
+    """
+
+    __slots__ = ("is_wildcard", "operator", "parsed_version", "version")
+
+    # Declared because __init__ writes them through object.__setattr__,
+    # which no checker can follow back to an attribute.
+    operator: str
+    version: str
+    parsed_version: Version | None
+    is_wildcard: bool
 
     def __init__(self, operator: str, version: str) -> None:
-        self.operator = operator
-
-        self.version = version
-
-        self._parsed_version: Version | None = None
-
-        self._compatible_upper_bound: Version | None = None
-
-        if self.operator == "===":
+        wildcard = version.endswith(".*")
+        _write_operator(self, operator)
+        _write_version(self, version)
+        if operator == "===":
+            _write_is_wildcard(self, False)
+            _write_parsed_version(self, None)
             return
+        if wildcard and operator not in ("==", "!="):
+            raise InvalidVersion(version)
+        _write_is_wildcard(self, wildcard)
+        _write_parsed_version(self, Version(version[:-2] if wildcard else version))
 
-        validated = Version(self.version.rstrip(".*"))
+    def __setattr__(self, name: str, value: object) -> None:
+        raise AttributeError(f"Specifier is immutable (tried to set {name!r})")
 
-        if not self.version.endswith(".*"):
-            self._parsed_version = validated
-
-    @classmethod
-    def from_cache_state(cls, state: tuple[object, ...]) -> Specifier:
-        """Restore a previously validated specifier without reparsing its version."""
-
-        value = cls.__new__(cls)
-
-        value.operator = state[0]
-
-        value.version = state[1]
-
-        parsed_state = state[2]
-
-        value._parsed_version = (
-            None if parsed_state is None else Version.from_cache_state(parsed_state)
-        )
-
-        value._compatible_upper_bound = None
-
-        return value
-
-    def cache_state_internal(self) -> tuple[object, ...]:
-        return (
-            self.operator,
-            self.version,
-            None
-            if self._parsed_version is None
-            else self._parsed_version.cache_state_internal(),
-        )
-
-    @property
-    def parsed_version(self) -> Version:
-        if self._parsed_version is None:
-            self._parsed_version = Version(self.version)
-
-        return self._parsed_version
-
-    @property
-    def compatible_upper_bound(self) -> Version:
-        if self._compatible_upper_bound is None:
-            self._compatible_upper_bound = compatible_upper_bound_internal(
-                self.parsed_version,
-            )
-
-        return self._compatible_upper_bound
+    def __delattr__(self, name: str) -> None:
+        raise AttributeError(f"Specifier is immutable (tried to delete {name!r})")
 
     def __eq__(self, other: object) -> bool:
         return isinstance(other, Specifier) and (
@@ -135,143 +110,317 @@ class Specifier:
     def __hash__(self) -> int:
         return hash((self.operator, self.version))
 
+    def __str__(self) -> str:
+        return f"{self.operator}{self.version}"
+
+    def __repr__(self) -> str:
+        return f"<Specifier({self.operator!r}, {self.version!r})>"
+
     def contains(self, version: Version) -> bool:
-        if self.operator == "===":
-            return version.public == self.version
-
-        if self.operator in {"==", "!="} and self.version.endswith(".*"):
-            prefix = self.version[:-2]
-
-            matches = version.public == prefix or version.public.startswith(
-                prefix + ".",
-            )
-
-            return matches if self.operator == "==" else not matches
-
+        operator = self.operator
         other = self.parsed_version
 
-        if self.operator == "==":
-            return version == other
+        if other is None:  # ===
+            return version.public == self.version
 
-        if self.operator == "!=":
-            return version != other
+        if operator == "==":
+            if self.is_wildcard:
+                return _prefix_matches(version, other)
+            # A clause without a local label matches every local version
+            # of its release; one with a label matches exactly.
+            return version == other or (
+                bool(version[3]) and not other[3] and version[:3] == other[:3]
+            )
 
-        if self.operator == ">=":
+        if operator == "!=":
+            if self.is_wildcard:
+                return not _prefix_matches(version, other)
+            return version != other and not (
+                bool(version[3]) and not other[3] and version[:3] == other[:3]
+            )
+
+        if operator == ">=":
             return version >= other
 
-        if self.operator == "<=":
+        if operator == "<=":
             return version <= other
 
-        if self.operator == ">":
-            return version > other
+        if operator == ">":
+            if not version > other:
+                return False
+            suffix = version[2]
+            # Not a post-release of V itself (V with post/dev/local removed
+            # equals the candidate's) unless V is a post-release, and not a
+            # local version of V.
+            if suffix[2] == 1 and other[2][2] == 0:
+                pre_rank, pre_number = suffix[0], suffix[1]
+                base_suffix = (
+                    FINAL_SUFFIX
+                    if pre_rank == 3
+                    else (pre_rank, pre_number, 0, 0, 1, 0)
+                )
+                if other == (version[0], version[1], base_suffix, ()):
+                    return False
+            return not (version[3] and not other[3] and version[:3] == other[:3])
 
-        if self.operator == "<":
-            return version < other
+        if operator == "<":
+            if not version < other:
+                return False
+            # Not a prerelease of V itself -- anything from V.dev0 up --
+            # unless V is a prerelease.
+            if version.is_prerelease and not other.is_prerelease:
+                other_suffix = other[2]
+                earliest_suffix = (
+                    (-1, 0, 0, 0, 0, 0)
+                    if other_suffix == FINAL_SUFFIX
+                    else (3, 0, other_suffix[2], other_suffix[3], 0, 0)
+                )
+                if version >= (other[0], other[1], earliest_suffix, ()):
+                    return False
+            return True
 
-        if self.operator == "~=":
-            return version >= other and version < self.compatible_upper_bound
+        if operator == "~=":
+            return version >= other and _prefix_matches(version, other, compatible=True)
 
-        raise ValueError(f"unknown specifier operator: {self.operator}")
+        raise ValueError(f"unknown specifier operator: {operator}")
+
+
+# Frozen classes write their slots through the slot descriptors: a direct
+# descriptor call, unlike object.__setattr__, skips the attribute lookup.
+_write_operator = Specifier.__dict__["operator"].__set__
+_write_version = Specifier.__dict__["version"].__set__
+_write_is_wildcard = Specifier.__dict__["is_wildcard"].__set__
+_write_parsed_version = Specifier.__dict__["parsed_version"].__set__
+
+
+def _prefix_matches(
+    version: Version, prefix: Version, *, compatible: bool = False
+) -> bool:
+    """PEP 440 prefix matching: the candidate's epoch and leading release
+    segments equal the prefix's, zero-padded, ignoring its local label.
+
+    For ``~=`` the prefix is the operand's release minus its last segment --
+    the ``==X.Y.*`` half of the compatible-release clause. A single-segment
+    operand (which the reference grammar rejects) reads as ``==X.*``.
+    """
+    if version[0] != prefix[0]:
+        return False
+    release = prefix.release
+    if compatible:
+        release = release[:-1] or release
+    elif prefix[2] != FINAL_SUFFIX and version[2] != prefix[2]:
+        return False
+    width = len(release)
+    candidate = version.release
+    if len(candidate) < width:
+        candidate = candidate + (0,) * (width - len(candidate))
+    return candidate[:width] == release
 
 
 def compatible_upper_bound_internal(version: Version) -> Version:
+    """The exclusive upper bound ``~=version`` implies, epoch included."""
     release = list(version.release)
-
     if len(release) == 1:
         release[0] += 1
-
     else:
         release[-2] += 1
-
         release = release[:-1]
+    text = ".".join(str(part) for part in release)
+    return Version(f"{version[0]}!{text}" if version[0] else text)
 
-    return Version(".".join(str(part) for part in release))
+
+def _bounds_of(
+    specifiers: tuple[Specifier, ...],
+) -> tuple[tuple[Version, bool] | None, tuple[Version, bool] | None]:
+    """Conservative lower and upper bounds with inclusive flags.
+
+    Drops ``!=``, ``===`` and wildcards and reads ``~=`` as its half-open
+    interval; every one of those is a widening, which is what the callers
+    (interval intersection in the resolver, bisection over sorted catalog
+    summaries) need.
+    """
+    lower: tuple[Version, bool] | None = None
+    upper: tuple[Version, bool] | None = None
+
+    for specifier in specifiers:
+        operator = specifier.operator
+        parsed = specifier.parsed_version
+        if parsed is None or specifier.is_wildcard:
+            continue
+        if operator in ("==", ">=", ">", "~="):
+            inclusive = operator != ">"
+            if lower is None or parsed > lower[0]:
+                lower = (parsed, inclusive)
+            elif parsed == lower[0]:
+                lower = (parsed, lower[1] and inclusive)
+        if operator in ("==", "<=", "<", "~="):
+            bound = (
+                compatible_upper_bound_internal(parsed) if operator == "~=" else parsed
+            )
+            inclusive = operator in ("==", "<=")
+            if upper is None or bound < upper[0]:
+                upper = (bound, inclusive)
+            elif bound == upper[0]:
+                upper = (bound, upper[1] and inclusive)
+
+    return lower, upper
 
 
 _CONTAINS_CACHE_SIZE = 4096
 
+# One SpecifierSet per distinct text. Real metadata repeats the same handful
+# of specifier texts across thousands of Requires-Dist lines, and a set's
+# derived state and containment answers are then shared by every
+# requirement that names it. Unsynchronized like every table in
+# cpip.core.caches: two threads missing on one text build two equal sets
+# and one wins the slot.
+_SPECIFIER_SET_CACHE_SIZE = 4096
+_specifier_sets: dict[str, SpecifierSet] = register_table({})
+
 
 class SpecifierSet:
+    """A comma-separated list of clauses, frozen, interned by text.
+
+    ``SpecifierSet(text)`` returns the instance already built for that text
+    (whitespace-stripped) while it is in the table; ``SpecifierSet()`` is
+    the shared empty set. Everything derived from the clauses is computed
+    once here:
+
+    * ``text`` -- the canonical spelling (clauses joined by commas);
+    * ``bounds`` -- conservative ``(lower, upper)`` with inclusive flags;
+    * ``exact_version`` -- the one release a sole ``==`` clause names, or
+      None (a wildcard, ``===``, a range or several clauses name no unique
+      release);
+    * ``is_pinned`` -- some ``==``/``===`` clause without a wildcard, so
+      the set admits at most one release (the yank/hash policy question);
+    * ``explicitly_allows_prereleases`` -- some clause other than ``!=``
+      or ``===`` names a prerelease, which per PEP 440 opts the set in to
+      prereleases without the caller asking.
+    """
+
     __slots__ = (
-        "_bounds_cache",
-        "_contains_cache",
+        "_bounds",
+        "_contains",
+        "_contains_with_prereleases",
+        "_exact_version",
         "_explicitly_allows_prereleases",
+        "_is_pinned",
         "_text",
-        "raw",
         "specifiers",
     )
 
-    def __init__(self, value: str = ""):
-        self.raw = value.strip()
+    specifiers: tuple[Specifier, ...]
+    # Everything else is computed on first read and stored once; a set that
+    # is only ever asked "contains?" pays for nothing it does not use.
+    _text: str
+    _bounds: tuple[tuple[Version, bool] | None, tuple[Version, bool] | None]
+    _exact_version: Version | None
+    _is_pinned: bool
+    _explicitly_allows_prereleases: bool
+    _contains: dict[Version, bool]
+    _contains_with_prereleases: dict[Version, bool]
 
-        # A list comprehension, not a generator expression: this
-        # constructor runs for every Requires-Dist line of every candidate
-        # examined during resolution, and a genexpr pays a generator-frame
-        # resumption per specifier where the comprehension runs in one.
-        self.specifiers = tuple(
-            [Specifier(op, ver.strip()) for op, ver in SPEC_RE.findall(self.raw)],
+    def __new__(cls, value: str = "") -> SpecifierSet:
+        key = value.strip()
+        cached = _specifier_sets.get(key)
+        if cached is not None:
+            return cached
+
+        # A list comprehension, not a generator expression: this runs for
+        # every Requires-Dist line of every candidate examined during
+        # resolution, and a genexpr pays a generator-frame resumption per
+        # clause where the comprehension runs in one.
+        specifiers = tuple(
+            [Specifier(op, ver.strip()) for op, ver in SPEC_RE.findall(key)],
         )
-
-        if self.raw and not self.specifiers:
+        if key and not specifiers:
             raise ValueError(f"invalid version specifier: {value!r}")
 
-        self._text: str | None = None
-
-        self._explicitly_allows_prereleases: bool | None = None
-
-        self._contains_cache: dict[tuple[Version, bool], bool] = {}
-
-        self._bounds_cache: (
-            tuple[
-                tuple[Version, bool] | None,
-                tuple[Version, bool] | None,
-            ]
-            | None
-        ) = None
-
-    @classmethod
-    def from_cache_state(cls, state: tuple[object, ...]) -> SpecifierSet:
-        """Restore a previously validated set without rerunning its parser."""
-
-        value = cls.__new__(cls)
-
-        value.raw = state[0]
-
-        value.specifiers = tuple(
-            Specifier.from_cache_state(specifier_state)
-            for specifier_state in state[1]  # ty:ignore[not-iterable]
-        )
-
-        value._text = state[2]
-
-        value._explicitly_allows_prereleases = None
-
-        value._contains_cache = {}
-
-        value._bounds_cache = None
-
-        return value
-
-    def cache_state_internal(self) -> tuple[object, ...]:
-        return (
-            self.raw,
-            tuple(specifier.cache_state_internal() for specifier in self.specifiers),
-            self.text,
-        )
+        self = object.__new__(cls)
+        _write_specifiers(self, specifiers)
+        if len(_specifier_sets) >= _SPECIFIER_SET_CACHE_SIZE:
+            _specifier_sets.clear()
+        _specifier_sets[key] = self
+        return self
 
     @property
     def text(self) -> str:
-        text = self._text
+        """The canonical spelling: clauses joined by commas."""
+        try:
+            return self._text
+        except AttributeError:
+            text = ",".join([f"{s.operator}{s.version}" for s in self.specifiers])
+            object.__setattr__(self, "_text", text)
+            return text
 
-        if text is None:
-            text = ",".join(
-                f"{specifier.operator}{specifier.version}"
-                for specifier in self.specifiers
-            )
+    @property
+    def bounds(self) -> tuple[tuple[Version, bool] | None, tuple[Version, bool] | None]:
+        """Conservative ``(lower, upper)`` bounds with inclusive flags."""
+        try:
+            return self._bounds
+        except AttributeError:
+            bounds = _bounds_of(self.specifiers)
+            object.__setattr__(self, "_bounds", bounds)
+            return bounds
 
-            self._text = text
+    @property
+    def exact_version(self) -> Version | None:
+        """The one release a sole ``==`` clause names, or None: a wildcard,
+        ``===``, a range or several clauses name no unique release."""
+        try:
+            return self._exact_version
+        except AttributeError:
+            exact = None
+            if len(self.specifiers) == 1:
+                only = self.specifiers[0]
+                if only.operator == "==" and not only.is_wildcard:
+                    exact = only.parsed_version
+            object.__setattr__(self, "_exact_version", exact)
+            return exact
 
-        return text
+    @property
+    def is_pinned(self) -> bool:
+        """Some ``==``/``===`` clause without a wildcard: the set admits at
+        most one release (the yank and hash policy question)."""
+        try:
+            return self._is_pinned
+        except AttributeError:
+            pinned = False
+            for specifier in self.specifiers:
+                if specifier.operator in ("==", "===") and not specifier.is_wildcard:
+                    pinned = True
+                    break
+            object.__setattr__(self, "_is_pinned", pinned)
+            return pinned
+
+    @property
+    def explicitly_allows_prereleases(self) -> bool:
+        """Some clause other than ``!=``/``===`` names a prerelease, which
+        per PEP 440 opts the set in to prereleases without being asked."""
+        try:
+            return self._explicitly_allows_prereleases
+        except AttributeError:
+            allowed = False
+            for specifier in self.specifiers:
+                parsed = specifier.parsed_version
+                if (
+                    parsed is not None
+                    and specifier.operator != "!="
+                    and parsed.is_prerelease
+                ):
+                    allowed = True
+                    break
+            object.__setattr__(self, "_explicitly_allows_prereleases", allowed)
+            return allowed
+
+    def __setattr__(self, name: str, value: object) -> None:
+        raise AttributeError(f"SpecifierSet is immutable (tried to set {name!r})")
+
+    def __delattr__(self, name: str) -> None:
+        raise AttributeError(f"SpecifierSet is immutable (tried to delete {name!r})")
+
+    def __reduce__(self) -> tuple[Any, ...]:
+        return (SpecifierSet, (self.text,))
 
     def contains(
         self,
@@ -280,116 +429,45 @@ class SpecifierSet:
         allow_prereleases: bool = False,
     ) -> bool:
         parsed = version if isinstance(version, Version) else Version(version)
+        specifiers = self.specifiers
 
-        if not self.specifiers and not parsed.is_prerelease:
+        if not specifiers and not parsed.is_prerelease:
             return True
 
-        key = parsed, allow_prereleases
-
-        cached = self._contains_cache.get(key)
-
+        # Two caches keyed directly by Version rather than one keyed by
+        # (Version, bool): the lookup is the whole cost of a warm call.
+        # Bounded: instances live as long as the intern table keeps them,
+        # so a long-lived embedder checking ever-new versions against
+        # ">=1" must not grow this without limit.
+        try:
+            cache = (
+                self._contains_with_prereleases if allow_prereleases else self._contains
+            )
+        except AttributeError:
+            cache = {}
+            object.__setattr__(
+                self,
+                "_contains_with_prereleases" if allow_prereleases else "_contains",
+                cache,
+            )
+        cached = cache.get(parsed)
         if cached is not None:
             return cached
 
-        if parsed.is_prerelease and not allow_prereleases:
-            explicitly_allowed = self._explicitly_allows_prereleases
+        if (
+            parsed.is_prerelease
+            and not allow_prereleases
+            and not self.explicitly_allows_prereleases
+        ):
+            result = False
+        else:
+            result = True
+            for specifier in specifiers:
+                if not specifier.contains(parsed):
+                    result = False
+                    break
 
-            if explicitly_allowed is None:
-                explicitly_allowed = any(
-                    specifier.operator != "==="
-                    and not specifier.version.endswith(".*")
-                    and specifier.parsed_version.is_prerelease
-                    for specifier in self.specifiers
-                )
-
-                self._explicitly_allows_prereleases = explicitly_allowed
-
-            if not explicitly_allowed:
-                self._remember_contains(key, False)
-
-                return False
-
-        result = all(spec.contains(parsed) for spec in self.specifiers)
-
-        self._remember_contains(key, result)
-
-        return result
-
-    def _remember_contains(self, key: tuple[Version, bool], result: bool) -> None:
-        # Bounded: instances are shared per specifier text for the life of
-        # the process (see _interned_specifier_set), so a long-lived embedder
-        # checking ever-new versions against ">=1" must not grow this
-        # without limit. A sweep keeps the common case -- a few hundred
-        # versions per specifier -- fully cached.
-        # Unsynchronized like the other parse caches: concurrent misses can
-        # overshoot the bound by a few entries until the next sweep, and dict
-        # operations are atomic, so no answer is ever wrong or lost.
-        cache = self._contains_cache
-
-        if len(cache) >= _CONTAINS_CACHE_SIZE:
-            cache.clear()
-
-        cache[key] = result
-
-    def bounds(
-        self,
-    ) -> tuple[tuple[Version, bool] | None, tuple[Version, bool] | None]:
-        """Return conservative lower and upper bounds with inclusive flags."""
-
-        cached = self._bounds_cache
-
-        if cached is not None:
-            return cached
-
-        lower: tuple[Version, bool] | None = None
-
-        upper: tuple[Version, bool] | None = None
-
-        def tighten_lower(version: Version, inclusive: bool) -> None:
-            nonlocal lower
-
-            if lower is None or version > lower[0]:
-                lower = (version, inclusive)
-
-            elif version == lower[0]:
-                lower = (version, lower[1] and inclusive)
-
-        def tighten_upper(version: Version, inclusive: bool) -> None:
-            nonlocal upper
-
-            if upper is None or version < upper[0]:
-                upper = (version, inclusive)
-
-            elif version == upper[0]:
-                upper = (version, upper[1] and inclusive)
-
-        for specifier in self.specifiers:
-            if specifier.operator == "==" and not specifier.version.endswith(".*"):
-                tighten_lower(specifier.parsed_version, True)
-
-                tighten_upper(specifier.parsed_version, True)
-
-            elif specifier.operator == ">=":
-                tighten_lower(specifier.parsed_version, True)
-
-            elif specifier.operator == ">":
-                tighten_lower(specifier.parsed_version, False)
-
-            elif specifier.operator == "<=":
-                tighten_upper(specifier.parsed_version, True)
-
-            elif specifier.operator == "<":
-                tighten_upper(specifier.parsed_version, False)
-
-            elif specifier.operator == "~=":
-                tighten_lower(specifier.parsed_version, True)
-
-                tighten_upper(specifier.compatible_upper_bound, False)
-
-        result = lower, upper
-
-        self._bounds_cache = result
-
+        bounded_put(cache, parsed, result, _CONTAINS_CACHE_SIZE)
         return result
 
     def __bool__(self) -> bool:
@@ -398,17 +476,38 @@ class SpecifierSet:
     def __str__(self) -> str:
         return self.text
 
+    def __repr__(self) -> str:
+        return f"<SpecifierSet({self.text!r})>"
+
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, SpecifierSet):
             return NotImplemented
+        return self.specifiers == other.specifiers
 
-        return self.raw == other.raw
+    def __hash__(self) -> int:
+        return hash(self.specifiers)
+
+
+_write_specifiers = SpecifierSet.__dict__["specifiers"].__set__
+_write_is_pinned = SpecifierSet.__dict__["is_pinned"].__set__
+_write_exact_version = SpecifierSet.__dict__["exact_version"].__set__
+_write_contains = SpecifierSet.__dict__["_contains"].__set__
+_write_contains_with_prereleases = SpecifierSet.__dict__[
+    "_contains_with_prereleases"
+].__set__
 
 
 class Requirement:
+    """A parsed PEP 508 requirement, frozen.
+
+    Identity is ``(canonical_name, specifier, extras, url, marker)``; ``raw``
+    is provenance -- the text as read -- and two requirements that differ
+    only in spelling or whitespace are equal.
+    """
+
     __slots__ = (
-        "_canonical_name",
         "_is_unnamed_direct",
+        "canonical_name",
         "extras",
         "marker",
         "name",
@@ -416,6 +515,15 @@ class Requirement:
         "specifier",
         "url",
     )
+
+    name: str
+    canonical_name: str
+    specifier: SpecifierSet
+    extras: frozenset[str]
+    url: str | None
+    marker: str | None
+    raw: str
+    _is_unnamed_direct: bool
 
     def __init__(
         self,
@@ -426,93 +534,92 @@ class Requirement:
         marker: str | None = None,
         raw: str = "",
     ) -> None:
-        self.name = name
-
-        self.specifier = specifier
-
-        self.extras = extras
-
-        self.url = url
-
-        self.marker = marker
-
-        self.raw = raw
-
-        self._canonical_name: str | None = None
-
-        self._is_unnamed_direct: bool | None = None
-
-    @classmethod
-    @memoized(16384)
-    def from_cache_state(cls, state: tuple[object, ...]) -> Requirement:
-        """Restore a previously validated requirement without reparsing it."""
-
-        return cls(
-            name=state[0],  # ty:ignore[invalid-argument-type]
-            specifier=SpecifierSet.from_cache_state(state[1]),  # ty:ignore[invalid-argument-type]
-            extras=frozenset(state[2]),  # ty:ignore[invalid-argument-type]
-            url=state[3],  # ty:ignore[invalid-argument-type]
-            marker=state[4],  # ty:ignore[invalid-argument-type]
-            raw=state[5],  # ty:ignore[invalid-argument-type]
-        )
-
-    def cache_state_internal(self) -> tuple[object, ...]:
-        return (
-            self.name,
-            self.specifier.cache_state_internal(),
-            tuple(sorted(self.extras)),
-            self.url,
-            self.marker,
-            self.raw,
-        )
-
-    @property
-    def canonical_name(self) -> str:
-        if self._canonical_name is None:
-            self._canonical_name = canonicalize_name(self.name)
-
-        return self._canonical_name
+        _write_name(self, name)
+        _write_canonical_name(self, canonicalize_name(name))
+        _write_specifier(self, specifier)
+        _write_extras(self, extras)
+        _write_url(self, url)
+        _write_marker(self, marker)
+        _write_raw(self, raw)
 
     @property
     def is_unnamed_direct(self) -> bool:
         """Whether this requirement locates an artifact rather than naming one.
 
         A URL requirement or a bare local path has no metadata to trust until
-        the artifact is fetched, so callers that would otherwise reject on
-        name/version mismatch defer that check.  Every candidate link for a
-        package is evaluated against the same requirement, so this is cached
-        rather than recomputed per link.
+        the artifact is fetched, so callers that would otherwise reject on a
+        name/version mismatch defer that check. Computed on first read.
         """
-
-        cached = self._is_unnamed_direct
-
-        if cached is None:
-            cached = (
+        try:
+            return self._is_unnamed_direct
+        except AttributeError:
+            raw = self.raw
+            result = (
                 self.url is not None
-                or self.raw.startswith("file:")
-                or self.raw.startswith((".", "/", "~"))
-                or is_windows_path(self.raw)
+                or raw.startswith(("file:", ".", "/", "~"))
+                or is_windows_path(raw)
             )
+            object.__setattr__(self, "_is_unnamed_direct", result)
+            return result
 
-            self._is_unnamed_direct = cached
+    def __setattr__(self, name: str, value: object) -> None:
+        raise AttributeError(f"Requirement is immutable (tried to set {name!r})")
 
-        return cached
+    def __delattr__(self, name: str) -> None:
+        raise AttributeError(f"Requirement is immutable (tried to delete {name!r})")
+
+    @classmethod
+    def from_cache_state(cls, state: tuple[Any, ...]) -> Requirement:
+        """Restore a requirement from a cached record.
+
+        The record's own text is parsed when it has one (so the restored
+        requirement is the interned instance for that text); a field-built
+        requirement without text is rebuilt from its fields.
+        """
+        raw = state[5]
+        if raw:
+            try:
+                return parse_requirement(raw)
+            except ValueError:
+                pass
+        return cls(
+            name=state[0],
+            specifier=SpecifierSet(state[1][0]),
+            extras=frozenset(state[2]),
+            url=state[3],
+            marker=state[4],
+            raw=raw,
+        )
+
+    def cache_state_internal(self) -> tuple[object, ...]:
+        text = self.specifier.text
+        return (
+            self.name,
+            (text, (), text),
+            tuple(sorted(self.extras)),
+            self.url,
+            self.marker,
+            self.raw,
+        )
 
     def __eq__(self, other: object) -> bool:
         return isinstance(other, Requirement) and (
-            self.name,
+            self.canonical_name,
             self.specifier,
             self.extras,
             self.url,
             self.marker,
-            self.raw,
         ) == (
-            other.name,
+            other.canonical_name,
             other.specifier,
             other.extras,
             other.url,
             other.marker,
-            other.raw,
+        )
+
+    def __hash__(self) -> int:
+        return hash(
+            (self.canonical_name, self.specifier, self.extras, self.url, self.marker)
         )
 
     def copy_with(self, **changes: object) -> Requirement:
@@ -524,10 +631,8 @@ class Requirement:
             "marker": self.marker,
             "raw": self.raw,
         }
-
         values.update(changes)
-
-        return type(self)(**values)
+        return type(self)(**values)  # type: ignore[arg-type]
 
     def is_satisfied_by(
         self,
@@ -537,27 +642,32 @@ class Requirement:
     ) -> bool:
         if not self.specifier.specifiers:
             parsed = version if isinstance(version, Version) else Version(version)
-
             return allow_prereleases or not parsed.is_prerelease
-
         return self.specifier.contains(version, allow_prereleases=allow_prereleases)
 
     def __str__(self) -> str:
         parts = [self.name]
-
         if self.extras:
             parts.append("[" + ",".join(sorted(self.extras)) + "]")
-
         if self.url is not None:
             parts.append(" @ " + self.url)
-
         else:
             parts.append(str(self.specifier))
-
         if self.marker:
             parts.append("; " + self.marker.replace("'", '"'))
-
         return "".join(parts)
+
+    def __repr__(self) -> str:
+        return f"<Requirement({str(self)!r})>"
+
+
+_write_name = Requirement.__dict__["name"].__set__
+_write_canonical_name = Requirement.__dict__["canonical_name"].__set__
+_write_specifier = Requirement.__dict__["specifier"].__set__
+_write_extras = Requirement.__dict__["extras"].__set__
+_write_url = Requirement.__dict__["url"].__set__
+_write_marker = Requirement.__dict__["marker"].__set__
+_write_raw = Requirement.__dict__["raw"].__set__
 
 
 @memoized(16384)
@@ -676,42 +786,11 @@ def parse_requirement(value: str) -> Requirement:
     return Requirement(
         name=name,
         extras=extras,
-        specifier=_interned_specifier_set(spec),
+        specifier=SpecifierSet(spec),
         url=url,
         marker=marker,
         raw=raw,
     )
-
-
-# parse_requirement is cached on the whole requirement string, so
-# "leaf-0>=1.1.0" and "leaf-1>=1.1.0" each parsed their own
-# SpecifierSet(">=1.1.0") -- a Specifier and a Version per clause -- although
-# real metadata repeats the same handful of specifier texts across thousands
-# of Requires-Dist lines. SpecifierSet's only mutable state is memo caches
-# (text, contains, bounds, prerelease flag), so one instance per distinct
-# text can back every requirement that uses it, and those memo caches are
-# then shared as well. Bounded like the other parse caches: a sweep of
-# unique texts clears it rather than growing without limit.
-_SPECIFIER_SET_CACHE_SIZE = 4096
-_specifier_sets: dict[str, SpecifierSet] = register_table({})
-
-
-def _interned_specifier_set(spec: str) -> SpecifierSet:
-    # Unsynchronized: two threads missing on the same text build two equal
-    # SpecifierSets and one wins the slot -- the other requirement simply
-    # keeps its own instance, which is what every requirement had before
-    # interning. Sharing is an optimization here, never an invariant.
-    specifier_set = _specifier_sets.get(spec)
-
-    if specifier_set is None:
-        specifier_set = SpecifierSet(spec)
-
-        if len(_specifier_sets) >= _SPECIFIER_SET_CACHE_SIZE:
-            _specifier_sets.clear()
-
-        _specifier_sets[spec] = specifier_set
-
-    return specifier_set
 
 
 def canonicalize_requirement(value: str) -> str:
@@ -924,32 +1003,10 @@ def marker_and_clause_matches(
         if op == "not in" and actual in {part.strip() for part in expected.split(",")}:
             return False
 
-        if op in {"<", "<=", ">", ">="}:
-            try:
-                actual_v = Version(actual)
-
-                expected_v = Version(expected)
-
-                actual_cmp: Any = actual_v
-
-                expected_cmp: Any = expected_v
-
-            except InvalidVersion:
-                actual_cmp = actual
-
-                expected_cmp = expected
-
-            if op == "<" and not actual_cmp < expected_cmp:
-                return False
-
-            if op == "<=" and not actual_cmp <= expected_cmp:
-                return False
-
-            if op == ">" and not actual_cmp > expected_cmp:
-                return False
-
-            if op == ">=" and not actual_cmp >= expected_cmp:
-                return False
+        if op in {"<", "<=", ">", ">="} and not _compare_marker_values(
+            actual, op, expected
+        ):
+            return False
 
     return True
 
@@ -1002,34 +1059,23 @@ def extra_marker_clause_matches(op: str, expected: str, extras: set[str]) -> boo
 
         return all(extra not in expected_values for extra in extras)
 
-    return any(compare_extra(extra, op, expected) for extra in extras)
+    return any(_compare_marker_values(extra, op, expected) for extra in extras)
 
 
-def compare_extra(actual: str, op: str, expected: str) -> bool:
+def _compare_marker_values(actual: str, op: str, expected: str) -> bool:
+    """Order two marker operands as versions when both parse, else as text."""
     try:
-        actual_v = Version(actual)
-
-        expected_v = Version(expected)
-
-        actual_cmp: Any = actual_v
-
-        expected_cmp: Any = expected_v
-
+        left: Any = Version(actual)
+        right: Any = Version(expected)
     except InvalidVersion:
-        actual_cmp = actual
-
-        expected_cmp = expected
-
+        left = actual
+        right = expected
     if op == "<":
-        return actual_cmp < expected_cmp
-
+        return left < right
     if op == "<=":
-        return actual_cmp <= expected_cmp
-
+        return left <= right
     if op == ">":
-        return actual_cmp > expected_cmp
-
+        return left > right
     if op == ">=":
-        return actual_cmp >= expected_cmp
-
-    raise ValueError(f"unsupported extra marker operator: {op}")
+        return left >= right
+    raise ValueError(f"unsupported marker operator: {op}")

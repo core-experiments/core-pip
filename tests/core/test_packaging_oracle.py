@@ -221,12 +221,6 @@ def collect_divergences() -> list[Divergence]:
 
 # --- classification ---
 
-_WILDCARD_CLAUSE = re.compile(r"(?:==|!=)[^,]*\.\*")
-_EXCLUSIVE_CLAUSE = re.compile(r"(?:^|,)[<>](?!=)")
-_NOT_EQUAL_PRERELEASE = re.compile(
-    r"!=[^,]*(?:a|b|c|rc|alpha|beta|pre|preview|dev)", re.IGNORECASE
-)
-
 
 def _packaging_disagrees_with_its_normalised_self(d: Divergence) -> bool:
     if d.specifier is None or not d.observable.startswith("contains"):
@@ -256,54 +250,6 @@ KNOWN_DIVERGENCES: dict[str, Callable[[Divergence], bool]] = {
     # parsed release. cpip is right here.
     "packaging's ~= prefix is taken from the unnormalised operand": (
         _packaging_disagrees_with_its_normalised_self
-    ),
-    # cpip's ``~=`` upper bound is ``< next release``, which admits that
-    # release's own prereleases ("~=2.1" admits "3a1"); PEP 440's ``==2.*``
-    # half does not.
-    "~= admits prereleases of its upper bound": lambda d: (
-        d.observable.startswith("contains")
-        and d.specifier is not None
-        and "~=" in d.specifier
-        and d.ours is True
-        and d.theirs is False
-    ),
-    # cpip matches a wildcard against the candidate's normalised public text
-    # with the prefix as written, so "005.3.1.0.*" misses "5.3.1.0" and
-    # "0.*" misses "0b2"; PEP 440 matches release segments.
-    "wildcard prefix is compared as text": lambda d: (
-        d.observable.startswith("contains")
-        and d.specifier is not None
-        and bool(_WILDCARD_CLAUSE.search(d.specifier))
-    ),
-    # PEP 440: ``<V`` must not match prereleases of V and ``>V`` must not
-    # match post-releases (or local versions) of V unless V itself is one.
-    # cpip reads both as plain ordering, so "<1.0" admits "1.0rc1" and
-    # ">0.3" admits "0.3.post1".
-    "exclusive ordering ignores PEP 440's same-release exclusion": lambda d: (
-        d.observable.startswith("contains")
-        and d.specifier is not None
-        and bool(_EXCLUSIVE_CLAUSE.search(d.specifier))
-        and d.ours is True
-        and d.theirs is False
-    ),
-    # cpip's ``~=`` upper bound is built from the release alone, so an
-    # epoch in the operand is lost and "~=1!1.3" matches nothing.
-    "~= upper bound drops the epoch": lambda d: (
-        d.observable.startswith("contains")
-        and d.specifier is not None
-        and bool(re.search(r"~=\d+!", d.specifier))
-        and d.ours is False
-        and d.theirs is True
-    ),
-    # cpip counts a ``!=`` clause naming a prerelease as "explicitly allows
-    # prereleases"; packaging (and pip) does not -- excluding a prerelease is
-    # not opting in to them.
-    "!= prerelease clause opts in to prereleases": lambda d: (
-        d.observable == "contains(allow=False)"
-        and d.specifier is not None
-        and bool(_NOT_EQUAL_PRERELEASE.search(d.specifier))
-        and d.ours is True
-        and d.theirs is False
     ),
 }
 

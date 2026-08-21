@@ -41,7 +41,6 @@ from cpip.index.source_locations import (
     FindLinksSource,
     SimpleIndexSource,
     is_remote_source_location,
-    looks_like_path_requirement,
 )
 from cpip.index.source_models import (
     INSTALLABLE_ARTIFACT_KINDS,
@@ -81,10 +80,6 @@ CatalogSummaryGroup = tuple[
 ]
 
 CatalogSourceSummary = tuple[list[CatalogSummaryGroup], str, str]
-
-
-def is_unnamed_direct_requirement_internal(requirement: Requirement) -> bool:
-    return requirement.url is not None or looks_like_path_requirement(requirement.raw)
 
 
 class CandidateProvider:
@@ -292,7 +287,7 @@ class CandidateProvider:
         if locked is not None:
             return [locked]
 
-        if requirement.url is not None or looks_like_path_requirement(requirement.raw):
+        if requirement.is_unnamed_direct:
             if requirement.url is not None:
                 url = requirement.url
                 if url.startswith("file://"):
@@ -384,8 +379,7 @@ class CandidateProvider:
 
         if (
             requirement.canonical_name in self.locked_links
-            or requirement.url is not None
-            or looks_like_path_requirement(requirement.raw)
+            or requirement.is_unnamed_direct
         ):
             return tuple(self.collect_links(requirement))
 
@@ -454,12 +448,7 @@ class CandidateProvider:
         self,
         requirement: Requirement,
     ) -> tuple[CatalogSourceSummary, ...] | None:
-        if (
-            self.find_links
-            or requirement.url is not None
-            or looks_like_path_requirement(requirement.raw)
-            or not self.index_sources
-        ):
+        if self.find_links or requirement.is_unnamed_direct or not self.index_sources:
             return None
 
         cached_result = self.catalog_groups_cache.get(requirement.canonical_name)
@@ -1139,7 +1128,7 @@ class CandidateProvider:
 
         catalog_candidates: tuple[CandidateRecord, ...] | None = None
 
-        exact_version = self.exact_version_internal(requirement)
+        exact_version = requirement.specifier.exact_version
 
         catalog = self.package_catalog_cache.get(catalog_key)
 
@@ -1425,7 +1414,7 @@ class CandidateProvider:
 
                     continue
 
-                if not CandidateEvaluator.is_unnamed_direct_requirement(requirement):
+                if not requirement.is_unnamed_direct:
                     self.parsed_link_cache[link] = parsed
 
             if isinstance(parsed, InstallationCandidate):
@@ -1610,7 +1599,7 @@ class CandidateProvider:
 
             return low
 
-        lower, upper = requirement.specifier.bounds()
+        lower, upper = requirement.specifier.bounds
 
         start = 0
 
@@ -1793,12 +1782,7 @@ class CandidateProvider:
                 ]
 
             elif allow_prereleases is None:
-                explicitly_allowed = any(
-                    specifier.operator != "==="
-                    and not specifier.version.endswith(".*")
-                    and specifier.parsed_version.is_prerelease
-                    for specifier in requirement.specifier.specifiers
-                )
+                explicitly_allowed = requirement.specifier.explicitly_allows_prereleases
 
                 if not explicitly_allowed:
                     stable = [
@@ -1954,7 +1938,7 @@ class CandidateProvider:
         if catalog is None or catalog.records_by_version is None:
             return None
 
-        exact_version = self.exact_version_internal(requirement)
+        exact_version = requirement.specifier.exact_version
 
         if exact_version is not None:
             versions = (exact_version,)
@@ -2095,12 +2079,7 @@ class CandidateProvider:
                 ]
 
             elif allow_prereleases is None:
-                explicitly_allowed = any(
-                    specifier.operator != "==="
-                    and not specifier.version.endswith(".*")
-                    and specifier.parsed_version.is_prerelease
-                    for specifier in requirement.specifier.specifiers
-                )
+                explicitly_allowed = requirement.specifier.explicitly_allows_prereleases
 
                 if not explicitly_allowed:
                     stable = [
@@ -2336,7 +2315,7 @@ class CandidateProvider:
                 SDIST_RECORD if allow_source else 0
             )
 
-            unnamed_direct = is_unnamed_direct_requirement_internal(requirement)
+            unnamed_direct = requirement.is_unnamed_direct
 
             for groups, source_url, generation in cached_groups:
                 for name, version_text, version_state, facts in groups:
@@ -2471,7 +2450,7 @@ class CandidateProvider:
             if not isinstance(parsed, InstallationCandidate):
                 continue
 
-            if not is_unnamed_direct_requirement_internal(requirement) and (
+            if not requirement.is_unnamed_direct and (
                 parsed.canonical_name != requirement.canonical_name
             ):
                 continue
@@ -2737,7 +2716,7 @@ class CandidateProvider:
             else tuple(summary.version for summary in available)
         )
 
-        lower, upper = requirement.specifier.bounds()
+        lower, upper = requirement.specifier.bounds
 
         start = 0
 
@@ -2770,19 +2749,11 @@ class CandidateProvider:
 
         return result
 
-    @staticmethod
-    def exact_version_internal(requirement: Requirement) -> Version | None:
-        for specifier in requirement.specifier.specifiers:
-            if specifier.operator == "==" and not specifier.version.endswith(".*"):
-                return specifier.parsed_version
-
-        return None
-
     def allowed_formats_internal(self, requirement: Requirement) -> tuple[bool, bool]:
         if self.format_control is None:
             return True, True
 
-        if requirement.url is not None or requirement.raw.startswith((".", "/", "~")):
+        if requirement.is_unnamed_direct:
             return True, True
 
         return self.format_control.allowed_formats(requirement.name)

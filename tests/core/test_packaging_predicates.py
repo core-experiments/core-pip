@@ -6,13 +6,17 @@ implementation the codebase currently exposes for it. A refactor that gives
 each meaning a single canonical home swaps the candidate, never the oracle:
 the oracle is the behaviour, the candidate is the code under test.
 
-Three distinct meanings of "exact pin" exist and must stay distinct:
+Two distinct meanings of "exact pin" exist and must stay distinct:
 
 * ``names_exact_version`` -- *some* clause is ``==``/``===`` without a
-  wildcard (yank/hash policy: the set admits at most one release).
-* ``first_pinned_version`` -- the parsed version of the *first* ``==`` clause.
+  wildcard (yank/hash policy: the set admits at most one release); this is
+  ``SpecifierSet.is_pinned``.
 * ``sole_pinned_version`` -- the parsed version iff the set is exactly one
-  ``==`` clause without a wildcard.
+  ``==`` clause without a wildcard; this is ``SpecifierSet.exact_version``.
+
+A third, "the first ``==`` clause's version", used to pick the catalog
+release for a requirement; it folded into ``exact_version`` (a multi-clause
+pin now takes the general path).
 """
 
 from __future__ import annotations
@@ -29,12 +33,6 @@ from cpip.core.packaging import (
 )
 from cpip.core.versions import Version
 
-from cpip.index.candidate_evaluators import CandidateEvaluator
-from cpip.index.provider import (
-    CandidateProvider,
-    is_unnamed_direct_requirement_internal,
-)
-from cpip.resolution.nab_types import _exact_pin
 
 # --- oracles: verbatim copies of the implementations in use at freeze time ---
 
@@ -44,13 +42,6 @@ def _oracle_names_exact_version(requirement: Requirement) -> bool:
         spec.operator in {"==", "==="} and not spec.version.endswith(".*")
         for spec in requirement.specifier.specifiers
     )
-
-
-def _oracle_first_pinned_version(requirement: Requirement) -> Version | None:
-    for specifier in requirement.specifier.specifiers:
-        if specifier.operator == "==" and not specifier.version.endswith(".*"):
-            return specifier.parsed_version
-    return None
 
 
 def _oracle_sole_pinned_version(requirement: Requirement) -> Version | None:
@@ -64,10 +55,15 @@ def _oracle_sole_pinned_version(requirement: Requirement) -> Version | None:
 
 
 def _oracle_explicitly_allows_prereleases(specifier: SpecifierSet) -> bool:
+    # PEP 440 (and pip): a clause naming a prerelease opts the set in, except
+    # ``!=`` (excluding a prerelease is not asking for them) and ``===``; a
+    # wildcard's prefix counts. The pre-rewrite scan also counted ``!=`` and
+    # skipped wildcards; the packaging-library oracle pinned the difference.
     return any(
-        clause.operator != "==="
-        and not clause.version.endswith(".*")
-        and clause.parsed_version.is_prerelease
+        clause.operator not in ("===", "!=")
+        and Version(
+            clause.version[:-2] if clause.version.endswith(".*") else clause.version
+        ).is_prerelease
         for clause in specifier.specifiers
     )
 
@@ -81,42 +77,25 @@ def _oracle_is_unnamed_direct(requirement: Requirement) -> bool:
     )
 
 
-# --- candidates: what the codebase exposes for each meaning today ---
+# --- candidates: the canonical home of each meaning ---
 
 CANDIDATES: dict[
     str, tuple[Callable[[Requirement], object], Callable[[Requirement], object]]
 ] = {
     "names_exact_version": (
         _oracle_names_exact_version,
-        CandidateEvaluator.is_exact_pin,
+        lambda r: r.specifier.is_pinned,
     ),
-    "first_pinned_version": (
-        _oracle_first_pinned_version,
-        CandidateProvider.exact_version_internal,
+    "sole_pinned_version": (
+        _oracle_sole_pinned_version,
+        lambda r: r.specifier.exact_version,
     ),
-    "sole_pinned_version": (_oracle_sole_pinned_version, _exact_pin),
     "explicitly_allows_prereleases": (
-        lambda requirement: _oracle_explicitly_allows_prereleases(
-            requirement.specifier
-        ),
-        lambda requirement: _current_explicitly_allows_prereleases(
-            requirement.specifier
-        ),
+        lambda r: _oracle_explicitly_allows_prereleases(r.specifier),
+        lambda r: r.specifier.explicitly_allows_prereleases,
     ),
     "is_unnamed_direct": (_oracle_is_unnamed_direct, lambda r: r.is_unnamed_direct),
-    "is_unnamed_direct (provider)": (
-        _oracle_is_unnamed_direct,
-        is_unnamed_direct_requirement_internal,
-    ),
 }
-
-
-def _current_explicitly_allows_prereleases(specifier: SpecifierSet) -> bool:
-    """Today the scan is memoized privately inside SpecifierSet.contains, so
-    reach it the way a caller does -- ask about a prerelease with prereleases
-    disallowed, which forces the memo -- then read the memo."""
-    specifier.contains(Version("0.0.0.dev0"), allow_prereleases=False)
-    return bool(specifier._explicitly_allows_prereleases)
 
 
 # --- generators ---
@@ -208,11 +187,9 @@ def test_predicate_matches_its_oracle(meaning: str) -> None:
 def test_the_three_pin_meanings_are_distinct() -> None:
     multi = parse_requirement("pkg==1.0,<2")
     assert CANDIDATES["names_exact_version"][0](multi) is True
-    assert CANDIDATES["first_pinned_version"][0](multi) == Version("1.0")
     assert CANDIDATES["sole_pinned_version"][0](multi) is None
     arbitrary = parse_requirement("pkg===1.0")
     assert CANDIDATES["names_exact_version"][0](arbitrary) is True
-    assert CANDIDATES["first_pinned_version"][0](arbitrary) is None
     assert CANDIDATES["sole_pinned_version"][0](arbitrary) is None
     wildcard = parse_requirement("pkg==1.*")
     assert CANDIDATES["names_exact_version"][0](wildcard) is False

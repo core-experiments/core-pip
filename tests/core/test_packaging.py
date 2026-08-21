@@ -47,15 +47,14 @@ def test_standard_requirement_skips_url_parsing(
 
 
 def test_parse_requirement_reuses_immutable_result() -> None:
-    parse_requirement.cache_clear()
-
     first = parse_requirement("demo-pkg>=1")
     second = parse_requirement("demo-pkg>=1")
 
     assert second is first
-    cache = parse_requirement.cache_info()
-    assert cache.misses == 1
-    assert cache.hits == 1
+    with pytest.raises(AttributeError):
+        first.name = "other"  # type: ignore[misc]
+    with pytest.raises(AttributeError):
+        first.specifier.specifiers = ()  # type: ignore[misc]
 
 
 def test_requirement_cache_state_roundtrip() -> None:
@@ -143,13 +142,13 @@ def test_specifier_set_bounds(
     expected_lower: tuple[Version, bool] | None,
     expected_upper: tuple[Version, bool] | None,
 ) -> None:
-    assert SpecifierSet(specifier).bounds() == (expected_lower, expected_upper)
+    assert SpecifierSet(specifier).bounds == (expected_lower, expected_upper)
 
 
-def test_specifier_set_bounds_are_memoized() -> None:
-    specifier = SpecifierSet(">=1,<2")
-    first = specifier.bounds()
-    assert specifier.bounds() is first
+def test_specifier_set_bounds_is_computed_once() -> None:
+    specifier = SpecifierSet(">=1.0,<2")
+    assert specifier.bounds == ((Version("1.0"), True), (Version("2"), False))
+    assert specifier.bounds is specifier.bounds
 
 
 def test_empty_specifier_set_preserves_prerelease_filtering() -> None:
@@ -409,7 +408,10 @@ def _table_limits() -> dict[str, int]:
 
 
 def _contains_cache_size(specifier: SpecifierSet) -> int:
-    return len(specifier._contains_cache)
+    return max(
+        len(getattr(specifier, "_contains", ())),
+        len(getattr(specifier, "_contains_with_prereleases", ())),
+    )
 
 
 def test_parse_requirement_shares_specifier_sets_by_text() -> None:
@@ -467,3 +469,141 @@ def test_specifier_clauses_share_one_version_per_text() -> None:
     for index in range(limit + 5):
         parse_requirement(f"pkg-{index}>={index}.0")
     assert _table_sizes()["versions"] <= limit
+
+
+class TestFrozenInternedSpecifiers:
+    """Specifier, SpecifierSet and Requirement are frozen value types;
+    SpecifierSet and parse_requirement intern by text."""
+
+    def test_specifier_set_is_interned_and_hashable(self) -> None:
+        assert SpecifierSet(">=1.0,<2") is SpecifierSet(" >=1.0,<2 ")
+        assert SpecifierSet() is SpecifierSet("")
+        assert not SpecifierSet()
+        assert SpecifierSet(">=1.0, <2") == SpecifierSet(">=1.0,<2")
+        assert hash(SpecifierSet(">=1.0, <2")) == hash(SpecifierSet(">=1.0,<2"))
+        assert (
+            len({SpecifierSet(">=1"), SpecifierSet(">=1 "), SpecifierSet(">=2")}) == 2
+        )
+        assert str(SpecifierSet(">=1.0, <2")) == ">=1.0,<2"
+
+    def test_specifier_set_is_frozen(self) -> None:
+        specifier = SpecifierSet(">=1")
+        with pytest.raises(AttributeError):
+            specifier.specifiers = ()  # type: ignore[misc]
+        with pytest.raises(AttributeError):
+            specifier.specifiers[0].operator = "<"  # type: ignore[misc]
+        with pytest.raises(AttributeError):
+            del specifier.text
+
+    def test_requirement_equality_ignores_raw_and_name_spelling(self) -> None:
+        assert parse_requirement("Demo_Pkg>=1") == parse_requirement("demo-pkg >= 1")
+        assert hash(parse_requirement("Demo_Pkg>=1")) == hash(
+            parse_requirement("demo-pkg >= 1")
+        )
+        assert parse_requirement("pkg>=1") != parse_requirement(
+            "pkg>=1; python_version>'3'"
+        )
+        assert parse_requirement("pkg[a]>=1") != parse_requirement("pkg>=1")
+        assert parse_requirement("pkg>=1").raw != parse_requirement("pkg >= 1").raw
+
+    def test_requirement_is_frozen_and_eager(self) -> None:
+        requirement = parse_requirement("Demo_Pkg[x]>=1")
+        assert requirement.canonical_name == "demo-pkg"
+        assert requirement.is_unnamed_direct is False
+        assert parse_requirement("./local").is_unnamed_direct
+        with pytest.raises(AttributeError):
+            requirement.name = "other"  # type: ignore[misc]
+
+    def test_wildcard_keeps_its_parsed_prefix(self) -> None:
+        clause = SpecifierSet("==1.1.*").specifiers[0]
+        assert clause.is_wildcard
+        assert clause.parsed_version == Version("1.1")
+        assert SpecifierSet("==1.1.*").exact_version is None
+        with pytest.raises(InvalidVersion):
+            SpecifierSet(">=1.1.*")
+        with pytest.raises(InvalidVersion):
+            SpecifierSet("==1.0.")
+
+    def test_contains_caches_are_bounded_per_mode(self) -> None:
+        from cpip.core import packaging as packaging_module
+
+        shared = SpecifierSet(">=1")
+        limit = packaging_module._CONTAINS_CACHE_SIZE
+        for index in range(limit + 10):
+            shared.contains(Version(f"1.{index}"))
+            shared.contains(Version(f"1.{index}a1"), allow_prereleases=True)
+        assert _contains_cache_size(shared) <= limit
+        assert shared.contains(Version("1.0"))
+
+
+class TestPep440ContainmentRules:
+    """The per-operator rules plain ordering gets wrong, as the reference
+    implementation applies them."""
+
+    @pytest.mark.parametrize(
+        "specifier, version, expected",
+        [
+            # == / != ignore the candidate's local label unless the clause has one
+            ("==1.0", "1.0+local", True),
+            ("!=1.0", "1.0+local", False),
+            ("==1.0+local", "1.0", False),
+            ("==1.0+local", "1.0+local", True),
+            # wildcards match release segments, zero-padded, not text
+            ("==005.3.1.0.*", "5.3.1.0", True),
+            ("==0.*", "0b2", True),
+            ("==1.0.*", "1", True),
+            ("==1.1.*", "1.1a1", True),
+            ("==1.1.*", "1.10", False),
+            ("!=1.*", "1.5.post1", False),
+            ("==1!1.*", "1.0", False),
+            # <V excludes prereleases of V itself, from V.dev0 up
+            ("<1.0", "1.0rc1", False),
+            ("<1.0", "1.0.dev0", False),
+            ("<1.0", "0.9rc1", True),
+            ("<1.0rc2", "1.0rc1", True),
+            ("<1.0.post1", "1.0rc1", True),
+            ("<1.0.post1", "1.0.post1.dev0", False),
+            # >V excludes post-releases and local versions of V itself
+            (">0.3", "0.3.post1", False),
+            (">0.3", "0.3.post1.dev0", False),
+            (">0.3.post1", "0.3.post2", True),
+            (">0.3a1", "0.3.post1", True),
+            (">0.3", "0.3+local", False),
+            (">0.3", "0.4", True),
+            # ~= is >=V plus ==prefix.*, epoch kept, no prereleases of the bound
+            ("~=2.1", "3a1", False),
+            ("~=2.1", "2.9.dev0", True),
+            ("~=1!1.3", "1!1.3", True),
+            ("~=1!1.3", "1.3", False),
+            ("~=2.0001", "2.3.0.5", True),
+            ("~=1.2.0.0", "1.2.1.0a0", False),
+            ("~=1.4.5a4", "1.4.6", True),
+            ("~=2.2.post3", "2.3", True),
+            ("~=2", "2.9", True),
+            ("~=2", "3.0", False),
+        ],
+    )
+    def test_contains(self, specifier: str, version: str, expected: bool) -> None:
+        assert (
+            SpecifierSet(specifier).contains(version, allow_prereleases=True)
+            is expected
+        )
+
+    def test_not_equal_prerelease_clause_does_not_opt_in(self) -> None:
+        assert not SpecifierSet("!=1.0a1").explicitly_allows_prereleases
+        assert not SpecifierSet("!=1.0a1,>=0.5").contains("2.0b1")
+        assert SpecifierSet(">=1.0a1").explicitly_allows_prereleases
+        assert SpecifierSet("==1.0a1.*").explicitly_allows_prereleases
+        assert not SpecifierSet("===1.0a1").explicitly_allows_prereleases
+
+    def test_derived_attributes(self) -> None:
+        assert SpecifierSet("==1.0,<2").is_pinned
+        assert SpecifierSet("==1.0,<2").exact_version is None
+        assert SpecifierSet("===1.0").is_pinned
+        assert SpecifierSet("===1.0").exact_version is None
+        assert not SpecifierSet("==1.*").is_pinned
+        assert SpecifierSet("==1.0").exact_version == Version("1.0")
+        assert SpecifierSet("~=1!1.3").bounds == (
+            (Version("1!1.3"), True),
+            (Version("1!2"), False),
+        )

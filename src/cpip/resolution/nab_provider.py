@@ -16,17 +16,15 @@ from cpip.core.packaging import (
     marker_applies,
     parse_requirement,
 )
-from cpip.core.versions import Version
+from cpip.core.versions import Version, ZERO_VERSION
 from cpip.core.wheel import WheelCandidate
 from cpip.index.candidate_evaluators import CandidateEvaluator
 from cpip.index.provider import CandidateProvider
 from cpip.resolution.models import ResolutionConfig, canonical_url, url_name
 from cpip.resolution.nab_types import (
     _MIN_PINS_TO_DISAGREE,
-    _ZERO_VERSION,
     InstalledCandidate,
     _dependencies_or_none,
-    _exact_pin,
     _implied_range,
     _key,
     _RecordingRequirements,
@@ -44,7 +42,6 @@ if TYPE_CHECKING:
 
 # SpecifierSet's mutable state is all memo caches, so one empty instance can
 # stand in for every "any version" requirement.
-_EMPTY_SPECIFIERS = SpecifierSet()
 
 
 @dataclass
@@ -154,7 +151,7 @@ class NabProvider:
     ) -> tuple[Version, ...]:
         cache_key = (
             package,
-            requirement.specifier.raw,
+            requirement.specifier.text,
             tuple(sorted(requirement.extras)),
             requirement.url,
         )
@@ -260,7 +257,7 @@ class NabProvider:
             # URL requirement when materializing the selected candidate.
             candidate_requirement = url_constraints[0]
         if requirement.url is None and (
-            not CandidateEvaluator.is_exact_pin(requirement)
+            not requirement.specifier.is_pinned
             or not isinstance(self.provider, CandidateProvider)
         ):
             if not isinstance(self.provider, CandidateProvider):
@@ -276,7 +273,7 @@ class NabProvider:
                         requirement,
                         Requirement(
                             name=requirement.name,
-                            specifier=_EMPTY_SPECIFIERS,
+                            specifier=SpecifierSet(),
                             extras=requirement.extras,
                             marker=requirement.marker,
                             raw=requirement.raw,
@@ -505,7 +502,7 @@ class NabProvider:
             if dependency.url is not None:
                 # A direct URL is an artifact identity, not a version domain.
                 return False
-            pinned = _exact_pin(dependency)
+            pinned = dependency.specifier.exact_version
             if pinned is None:
                 return False
             pins.append((dependency, pinned))
@@ -723,7 +720,7 @@ class NabProvider:
         the resolver fall back to the next candidate.
         """
         declared_version = getattr(candidate, "version", None)
-        if declared_version is None or declared_version == _ZERO_VERSION:
+        if declared_version is None or declared_version == ZERO_VERSION:
             return False
 
         metadata_version = getattr(candidate, "metadata_version", None)
@@ -935,7 +932,7 @@ class NabProvider:
             # Keep exact dependency constraints in diagnostics even when no
             # matching artifact exists; a finite available-version range
             # would otherwise collapse to ``<empty>`` and hide ``==N``.
-            pinned = _exact_pin(dependency)
+            pinned = dependency.specifier.exact_version
             if pinned is not None:
                 dependencies[dependency_key] = Range.singleton(pinned)
             else:
