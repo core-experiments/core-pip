@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import io
+import os
 import random
 import struct
 import zipfile
@@ -459,3 +461,56 @@ class TestWheelArchiveFallback:
 
         finally:
             archive.file.close()
+
+
+class _CountingFileIO(io.FileIO):
+    """A real FileIO that records stream-level seeks and reads."""
+
+    def __init__(self, path: str) -> None:
+        super().__init__(path, "rb")
+        self.seeks = 0
+        self.reads = 0
+
+    def seek(self, *args, **kwargs):  # noqa: ANN002, ANN003, ANN202
+        self.seeks += 1
+        return super().seek(*args, **kwargs)
+
+    def read(self, *args, **kwargs):  # noqa: ANN002, ANN003, ANN202
+        self.reads += 1
+        return super().read(*args, **kwargs)
+
+
+def _write_counting_wheel(path: Path, members: int) -> dict[str, bytes]:
+    contents = {
+        f"pkg/file{index}.txt": f"payload {index}\n".encode()
+        for index in range(members)
+    }
+    contents["pkg-1.0.dist-info/METADATA"] = (
+        b"Metadata-Version: 2.1\nName: pkg\nVersion: 1.0\n"
+    )
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name, data in contents.items():
+            archive.writestr(name, data)
+    return contents
+
+
+@pytest.mark.skipif(not hasattr(os, "pread"), reason="positioned reads need os.pread")
+def test_file_descriptor_reads_use_positioned_reads(tmp_path: Path) -> None:
+    path = tmp_path / "pkg-1.0-py3-none-any.whl"
+    # Enough members that they sit outside the 64 KiB tail buffer.
+    contents = _write_counting_wheel(path, 3000)
+    file = _CountingFileIO(os.fspath(path))
+    archive = WheelArchive(file)
+    assert (file.seeks, file.reads) == (0, 0)
+    for name, data in contents.items():
+        assert archive.read(name) == data
+    assert (file.seeks, file.reads) == (0, 0)
+    file.close()
+
+
+def test_stream_sources_still_read_through_the_stream(tmp_path: Path) -> None:
+    path = tmp_path / "pkg-1.0-py3-none-any.whl"
+    contents = _write_counting_wheel(path, 50)
+    archive = WheelArchive(io.BytesIO(path.read_bytes()))
+    for name, data in contents.items():
+        assert archive.read(name) == data
