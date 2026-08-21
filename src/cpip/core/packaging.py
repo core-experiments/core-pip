@@ -487,7 +487,7 @@ class Specifier:
         if self.operator == "===":
             return
 
-        validated = Version(self.version.rstrip(".*"))
+        validated = _interned_version(self.version.rstrip(".*"))
 
         if not self.version.endswith(".*"):
             self._parsed_version = validated
@@ -600,6 +600,28 @@ def compatible_upper_bound_internal(version: Version) -> Version:
 
 
 _CONTAINS_CACHE_SIZE = 4096
+
+# Versions named by specifier clauses repeat across requirements ("==1.1.0"
+# and ">=1.1.0" in different lines name the same release), and Version is
+# immutable apart from memo fields, so one instance per text serves every
+# clause. Bounded like the other parse caches; an invalid text raises before
+# anything is stored.
+_VERSION_CACHE_SIZE = 4096
+_versions_by_text: dict[str, Version] = {}
+
+
+def _interned_version(text: str) -> Version:
+    version = _versions_by_text.get(text)
+
+    if version is None:
+        version = Version(text)
+
+        if len(_versions_by_text) >= _VERSION_CACHE_SIZE:
+            _versions_by_text.clear()
+
+        _versions_by_text[text] = version
+
+    return version
 
 
 class SpecifierSet:

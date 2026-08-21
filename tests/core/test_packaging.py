@@ -433,3 +433,25 @@ def test_shared_specifier_set_contains_cache_is_bounded() -> None:
     # Answers survive the sweep.
     assert shared.contains(Version("1.0"))
     assert not shared.contains(Version("0.1"))
+
+
+def test_specifier_clauses_share_one_version_per_text() -> None:
+    from cpip.core import packaging as packaging_module
+
+    packaging_module._versions_by_text.clear()
+    packaging_module._specifier_sets.clear()
+    parse_requirement.cache_clear()
+    pinned = parse_requirement("a==1.1.0").specifier.specifiers[0]
+    floor = parse_requirement("b>=1.1.0").specifier.specifiers[0]
+    assert pinned._parsed_version is floor._parsed_version
+    assert pinned._parsed_version == Version("1.1.0")
+    # Wildcards validate the prefix but keep no parsed version, as before.
+    wildcard = parse_requirement("c==1.1.*").specifier.specifiers[0]
+    assert wildcard._parsed_version is None
+    with pytest.raises(Exception, match="not-a-version"):
+        parse_requirement("d==not-a-version")
+    assert "not-a-version" not in packaging_module._versions_by_text
+    limit = packaging_module._VERSION_CACHE_SIZE
+    for index in range(limit + 5):
+        parse_requirement(f"pkg-{index}>={index}.0")
+    assert len(packaging_module._versions_by_text) <= limit
