@@ -96,6 +96,44 @@ class WheelMetadataCache(SqliteBackedCache):
         self.entries[identity] = value
         return value
 
+    def prefetch(self, identities: Iterable[MetadataIdentity]) -> None:
+        """Load the headers of many files in one query, so that the per-file
+        ``get_reference`` that follows reads memory, not the database."""
+        wanted = {identity for identity in identities if identity not in self.entries}
+        if not wanted:
+            return
+        paths = list({identity[0] for identity in wanted})
+        rows: list[tuple[str, int, int, bytes]] = []
+        with self.lock:
+            try:
+                conn = self._reader()
+                if conn is None:
+                    return
+                for start in range(0, len(paths), 500):
+                    chunk = paths[start : start + 500]
+                    rows.extend(
+                        conn.execute(
+                            "SELECT path, size, mtime, headers FROM metadata "
+                            f"WHERE path IN ({','.join('?' * len(chunk))})",
+                            chunk,
+                        ).fetchall(),
+                    )
+            except sqlite3.Error:
+                return
+        for path, size, mtime, blob in rows:
+            identity = (path, size, mtime)
+            if identity not in wanted:
+                continue
+            try:
+                value = marshal.loads(blob)
+            except Exception:
+                continue
+            if not self.valid_headers(value):
+                continue
+            if len(self.entries) >= _MAX_ENTRIES:
+                self.entries.pop(next(iter(self.entries)))
+            self.entries[identity] = value
+
     def put(self, identity: MetadataIdentity, headers: MetadataHeaders) -> None:
         if identity not in self.entries and len(self.entries) >= _MAX_ENTRIES:
             self.entries.pop(next(iter(self.entries)))

@@ -506,6 +506,15 @@ def prepare_install(args: list[str], parser: Any) -> PreparedInstall:
             )
 
     runtime = runtime_setup(args, options, INDEX_URL_OPTIONS)
+
+    if runtime.cache_dir is not None:
+        # The installed-state scan keeps parsed METADATA headers in the
+        # wheel metadata store, so a default install re-reads only the
+        # dist-info directories that changed since the last run.
+        from cpip.core.metadata import use_header_cache
+        from cpip.index.metadata_cache import get_wheel_metadata_cache
+
+        use_header_cache(get_wheel_metadata_cache(runtime.cache_dir))
     config = runtime.config
     explicit_index_url = runtime.explicit_index_url
     quiet = runtime.quiet

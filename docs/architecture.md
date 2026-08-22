@@ -164,7 +164,7 @@ directory without knowing the stores.
 | `index/catalog_cache.py` | entries in `http/` | parsed Simple API catalogs, release summaries (`Version.to_wire()`), target choices; checksum-validated, recompiled from the catalog on any failure |
 | `index/artifact_cache.py` | `artifacts/` | bodies by SHA-256 plus URL receipts |
 | `index/candidate_cache.py` | `wheels/` | wheels built from source |
-| `index/metadata_cache.py` | `metadata.sqlite` | parsed headers and SHA-256 of local wheel files by path, size, mtime |
+| `index/metadata_cache.py` | `metadata.sqlite` | parsed headers of local wheel files and of installed `METADATA` files, and SHA-256 of local wheels, by path, size, mtime |
 | `index/candidate_metadata_cache.py` | `candidate-metadata.sqlite` | dependency metadata reused during resolution |
 | `index/release_facts_cache.py` | `release-facts.marshal` | deterministic release rejection reasons |
 | `cli/fast.py` | `fast-lock-plan/` | rendered lock output |

@@ -21,8 +21,45 @@ TYPE_CHECKING = False
 if TYPE_CHECKING:
     import importlib.metadata
     from email.message import Message
+    from typing import Protocol
+
+    HeaderIdentity = tuple[str, int, int]
+
+    class HeaderCache(Protocol):
+        """What the installed-state scan asks of a persistent header store.
+
+        ``index/metadata_cache.py:WheelMetadataCache`` is the implementation;
+        the identity is that module's ``metadata_identity`` shape -- absolute
+        path, size, mtime in nanoseconds -- so one table serves both local
+        wheels and installed METADATA files.
+        """
+
+        def prefetch(self, identities: Iterable[HeaderIdentity]) -> None: ...
+
+        def get_reference(
+            self, identity: HeaderIdentity
+        ) -> dict[str, list[str]] | None: ...
+
+        def put(
+            self, identity: HeaderIdentity, headers: dict[str, list[str]]
+        ) -> None: ...
+
 
 stdlib_pkgs = {"python", "wsgiref", "argparse"}
+
+
+def _read_text_file(target: str) -> str | None:
+    try:
+        with open(target, encoding="utf-8") as file:
+            return file.read()
+
+    except (
+        FileNotFoundError,
+        IsADirectoryError,
+        NotADirectoryError,
+        PermissionError,
+    ):
+        return None
 
 
 def _read_raw_metadata_text(
@@ -51,17 +88,7 @@ def _read_raw_metadata_text(
         for filename in ("METADATA", "PKG-INFO", ""):
             target = base if not filename else os.path.join(base, filename)
 
-            try:
-                with open(target, encoding="utf-8") as file:
-                    text = file.read()
-
-            except (
-                FileNotFoundError,
-                IsADirectoryError,
-                NotADirectoryError,
-                PermissionError,
-            ):
-                continue
+            text = _read_text_file(target)
 
             if text:
                 return text
@@ -301,6 +328,35 @@ def _iter_raw_distributions(
                 yield PathDistribution(pathlib.Path(root, child))
 
 
+# The persistent store for parsed METADATA headers, if the command wired
+# one (cli/install does, with the wheel metadata cache): a default install
+# otherwise reads and parses every installed distribution's METADATA on
+# every run, ~0.1 ms each, just to learn names and versions that have not
+# changed since the last run. Keyed by the file's path, size and mtime, so a
+# replaced dist-info directory is always a miss.
+_header_cache: HeaderCache | None = None
+
+
+def use_header_cache(cache: HeaderCache | None) -> None:
+    global _header_cache
+
+    _header_cache = cache
+
+
+def _metadata_file_identity(base: str) -> HeaderIdentity | None:
+    """The header-cache key of ``<dist-info>/METADATA`` -- the same shape as
+    ``index/metadata_cache.py:metadata_identity`` -- or None without one."""
+    target = os.path.join(base, "METADATA")
+
+    try:
+        stat = os.stat(target)
+
+    except OSError:
+        return None
+
+    return (os.path.abspath(target), stat.st_size, stat.st_mtime_ns)
+
+
 def _iter_installed_distributions(
     paths: Iterable[str] | None = None,
     names: Collection[str] | None = None,
@@ -309,18 +365,54 @@ def _iter_installed_distributions(
         {canonicalize_name(name) for name in names} if names is not None else None
     )
 
-    for dist in _iter_raw_distributions(paths):
-        text = _read_raw_metadata_text(dist)
+    cache = _header_cache
 
-        if text is None:
-            continue
+    found: Iterable[RawDistribution] = _iter_raw_distributions(paths)
 
-        # Reading through parse_metadata_headers instead of dist.metadata
-        # avoids the full RFC822 email-parser cost for every installed
-        # distribution -- paid on every default (no --ignore-installed)
-        # resolve, for every package already in the environment, just to
-        # learn its name.
-        headers = parse_metadata_headers(text)
+    identities: dict[int, HeaderIdentity] = {}
+
+    if cache is not None:
+        found = list(found)
+
+        for dist in found:
+            path = getattr(dist, "_path", None)
+
+            if isinstance(path, pathlib.Path):
+                identity = _metadata_file_identity(str(path))
+
+                if identity is not None:
+                    identities[id(dist)] = identity
+
+        cache.prefetch(identities.values())
+
+    for dist in found:
+        headers = None
+
+        identity = identities.get(id(dist))
+
+        if identity is not None and cache is not None:
+            headers = cache.get_reference(identity)
+
+            if headers is None:
+                text = _read_text_file(identity[0])
+
+                if text:
+                    headers = parse_metadata_headers(text)
+
+                    cache.put(identity, headers)
+
+        if headers is None:
+            text = _read_raw_metadata_text(dist)
+
+            if text is None:
+                continue
+
+            # Reading through parse_metadata_headers instead of dist.metadata
+            # avoids the full RFC822 email-parser cost for every installed
+            # distribution -- paid on every default (no --ignore-installed)
+            # resolve, for every package already in the environment, just to
+            # learn its name.
+            headers = parse_metadata_headers(text)
 
         name = headers.get("name", [None])[0]
 

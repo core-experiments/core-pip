@@ -339,3 +339,59 @@ def test_warm_archive_preparation_real_wheels(
         return len(prepare_cached_wheels(candidates, warm_real_wheel_cache))
 
     assert benchmark(prepare_warm) == len(candidates)
+
+
+@pytest.fixture(scope="module")
+def installed_environment(tmp_path_factory: pytest.TempPathFactory) -> str:
+    """A site-packages with 200 installed distributions."""
+    root = tmp_path_factory.mktemp("site-packages")
+    for index in range(200):
+        dist_info = root / f"installed_pkg{index}-1.{index}.dist-info"
+        dist_info.mkdir()
+        dist_info.joinpath("METADATA").write_text(
+            "Metadata-Version: 2.1\n"
+            f"Name: installed-pkg{index}\n"
+            f"Version: 1.{index}\n"
+            "Requires-Dist: installed-pkg0>=1.0\n"
+            'Requires-Dist: installed-pkg1; extra == "extra"\n'
+            "Provides-Extra: extra\n"
+            "Summary: benchmark fixture\n"
+            "\n"
+            "A description body the header parser must skip.\n",
+            encoding="utf-8",
+        )
+    return str(root)
+
+
+def test_warm_installed_state_scan(
+    benchmark: BenchmarkFixture,
+    installed_environment: str,
+    tmp_path_factory: pytest.TempPathFactory,
+) -> None:
+    """The default install's scan of an unchanged environment: every
+    distribution's headers come from the persistent store after one
+    priming run, so the scan is a listing plus one stat per entry."""
+    from cpip.core.metadata import (
+        clear_installed_index,
+        installed_index,
+        use_header_cache,
+    )
+    from cpip.index.metadata_cache import get_wheel_metadata_cache
+
+    cache_dir = str(tmp_path_factory.mktemp("installed-cache"))
+    use_header_cache(get_wheel_metadata_cache(cache_dir))
+    try:
+        clear_installed_index()
+        assert len(installed_index([installed_environment])) == 200
+        flush_persistent_caches(cache_dir)
+        reset_caches()
+        use_header_cache(get_wheel_metadata_cache(cache_dir))
+
+        def scan_warm() -> int:
+            clear_installed_index()
+            return len(installed_index([installed_environment]))
+
+        assert benchmark(scan_warm) == 200
+    finally:
+        use_header_cache(None)
+        clear_installed_index()

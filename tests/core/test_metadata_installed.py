@@ -266,7 +266,11 @@ def _stdlib_view(paths: list[str]) -> list[tuple[str, str, str]]:
         if not text:
             continue
         found.append(
-            (dist.metadata["Name"], str(dist._path), str(dist.locate_file("")))
+            (
+                dist.metadata["Name"],
+                str(getattr(dist, "_path", None)),
+                str(dist.locate_file("")),
+            )
         )
     return sorted(found)
 
@@ -403,7 +407,7 @@ def test_path_distribution_answers_like_the_stdlib(tmp_path: Path) -> None:
         assert distribution.raw.read_text(name) == stdlib_dist.read_text(name), name
     with pytest.raises(FileNotFoundError):
         distribution.read_text("missing")
-    assert distribution.files() == sorted(str(f) for f in stdlib_dist.files)
+    assert distribution.files() == sorted(str(f) for f in stdlib_dist.files or ())
     assert distribution.metadata.get_all("Requires-Dist") == ["gadget>=1.0"]
     assert distribution.metadata["Name"] == "widget"
     assert str(distribution.raw.locate_file("")) == str(root)
@@ -427,3 +431,128 @@ def test_installed_distribution_keeps_a_legacy_version_as_text(tmp_path: Path) -
     assert found.raw_version == "1.0 beta"
     assert found.version is None
     assert found.version != Version("1.0")
+
+
+class _RecordingHeaderCache:
+    """An in-memory stand-in for the wheel metadata store's header side."""
+
+    def __init__(self) -> None:
+        self.entries: dict[tuple[str, int, int], dict[str, list[str]]] = {}
+        self.prefetched: list[list[tuple[str, int, int]]] = []
+        self.puts: list[tuple[str, int, int]] = []
+
+    def prefetch(self, identities) -> None:  # noqa: ANN001
+        self.prefetched.append(list(identities))
+
+    def get_reference(self, identity):  # noqa: ANN001, ANN202
+        return self.entries.get(identity)
+
+    def put(self, identity, headers) -> None:  # noqa: ANN001
+        self.puts.append(identity)
+        self.entries[identity] = headers
+
+
+@pytest.fixture
+def header_cache():  # noqa: ANN201
+    from cpip.core.metadata import clear_installed_index, use_header_cache
+
+    cache = _RecordingHeaderCache()
+    clear_installed_index()
+    use_header_cache(cache)
+    try:
+        yield cache
+    finally:
+        use_header_cache(None)
+        clear_installed_index()
+
+
+def test_header_cache_serves_unchanged_metadata_without_reading_it(
+    tmp_path: Path, header_cache: _RecordingHeaderCache
+) -> None:
+    import os
+
+    from cpip.index.metadata_cache import metadata_identity
+
+    root = tmp_path / "site-packages"
+    _write_dist_info(
+        root,
+        "widget-1.0.dist-info",
+        "Name: widget\nVersion: 1.0\nRequires-Dist: gadget>=1.0\n",
+    )
+    _write_dist_info(
+        root, "legacy-0.1.egg-info", "Name: legacy\nVersion: 0.1\n", filename="PKG-INFO"
+    )
+    metadata_file = root / "widget-1.0.dist-info" / "METADATA"
+
+    first = {d.name: d for d in iter_installed_distributions(paths=[str(root)])}
+    assert sorted(first) == ["legacy", "widget"]
+    # Only a METADATA file has an identity; PKG-INFO-only entries are read
+    # as before and never cached. The key is the wheel store's own shape.
+    identity = metadata_identity(metadata_file)
+    assert header_cache.puts == [identity]
+    assert header_cache.prefetched == [[identity]]
+    assert [str(dep) for dep in first["widget"].dependencies()] == ["gadget>=1.0"]
+
+    # Same size and mtime: the cached headers are trusted and the file is
+    # not read, so a same-size in-place rewrite is invisible (as documented
+    # for the in-process index).
+    stat = metadata_file.stat()
+    metadata_file.write_text("Name: widget\nVersion: 9.9\nRequires-Dist: gadget>=1.0\n")
+    os.utime(metadata_file, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+    second = {d.name: d for d in iter_installed_distributions(paths=[str(root)])}
+    assert second["widget"].raw_version == "1.0"
+    assert header_cache.puts == [identity]
+    assert [str(dep) for dep in second["widget"].dependencies()] == ["gadget>=1.0"]
+
+    # A different mtime is a different identity: read and cached afresh.
+    os.utime(metadata_file, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000))
+    third = {d.name: d for d in iter_installed_distributions(paths=[str(root)])}
+    assert third["widget"].raw_version == "9.9"
+    assert len(header_cache.puts) == 2
+    assert header_cache.puts[1] == metadata_identity(metadata_file)
+
+
+def test_header_cache_round_trips_through_the_wheel_metadata_store(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A second process finds the first one's headers on disk and reads no
+    METADATA file for an unchanged environment."""
+    from cpip.core.metadata import clear_installed_index, use_header_cache
+    from cpip.index.metadata_cache import WheelMetadataCache
+
+    root = tmp_path / "site-packages"
+    for index in range(5):
+        _write_dist_info(
+            root,
+            f"pkg{index}-1.{index}.dist-info",
+            f"Name: pkg{index}\nVersion: 1.{index}\nRequires-Dist: pkg0\n",
+        )
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir()
+
+    first_store = WheelMetadataCache(cache_dir)
+    use_header_cache(first_store)
+    try:
+        clear_installed_index()
+        first = iter_installed_distributions(paths=[str(root)])
+        assert len(first) == 5
+        first_store.flush()
+
+        second_store = WheelMetadataCache(cache_dir)
+        use_header_cache(second_store)
+        clear_installed_index()
+
+        def no_reads(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
+            raise AssertionError(f"METADATA read on a warm scan: {args[0]}")
+
+        monkeypatch.setattr("cpip.core.metadata._read_text_file", no_reads)
+        second = iter_installed_distributions(paths=[str(root)])
+    finally:
+        use_header_cache(None)
+        clear_installed_index()
+
+    assert [(d.name, d.raw_version) for d in second] == [
+        (d.name, d.raw_version) for d in first
+    ]
+    assert [str(dep) for dep in second[3].dependencies()] == ["pkg0"]
+    assert not second_store._pending_puts
