@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import importlib.metadata
 import os
 import pathlib
 import site
@@ -20,6 +19,7 @@ from .wheel_metadata import parse_metadata_headers
 TYPE_CHECKING = False
 
 if TYPE_CHECKING:
+    import importlib.metadata
     from email.message import Message
 
 stdlib_pkgs = {"python", "wsgiref", "argparse"}
@@ -192,6 +192,10 @@ def _iter_installed_distributions(
     canonical_names = (
         {canonicalize_name(name) for name in names} if names is not None else None
     )
+
+    # Deferred: importlib.metadata costs ~10 ms to import (email.message and
+    # friends), and an install that ignores the installed state never scans.
+    import importlib.metadata
 
     if paths is None:
         distributions = importlib.metadata.distributions()

@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import os
 import urllib.parse
-from html.parser import HTMLParser
 from typing import Any, Callable
 
 from cpip.index.artifacts import ArtifactLocator
@@ -101,7 +100,7 @@ class IndexPageParser:
         )
 
     def links_from_html(self, body: str, url: str) -> list[Link]:
-        parser = LinkParser(url, self.link_factory)
+        parser = link_parser_class()(url, self.link_factory)
         parser.feed(body)
         return parser.links
 
@@ -147,48 +146,77 @@ class IndexPageParser:
         return links
 
 
-class LinkParser(HTMLParser):
-    def __init__(self, page_url: str, link_factory: LinkFactory) -> None:
-        super().__init__(convert_charrefs=True)
-        self.page_url = page_url
-        # Every link on the page resolves against this same base -- computed
-        # once here instead of once per <a> tag in handle_endtag.
-        self.base_url_internal = ensure_trailing_slash(page_url)
-        self.link_factory = link_factory
-        self.links: list[Link] = []
-        self.current_internal: dict[str, str | None] | None = None
-        self.text_internal: list[str] = []
+_LINK_PARSER: type | None = None
 
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        # HTMLParser already lowercases tag names before calling this.
-        if tag != "a":
-            return
-        # HTMLParser already lowercases attribute names before calling this.
-        self.current_internal = dict(attrs)
-        self.text_internal = []
 
-    def handle_data(self, data: str) -> None:
-        if self.current_internal is not None:
-            self.text_internal.append(data)
+def link_parser_class() -> type:
+    """The HTML link parser, built on first use.
 
-    def handle_endtag(self, tag: str) -> None:
-        # HTMLParser already lowercases tag names before calling this.
-        if tag != "a" or self.current_internal is None:
-            return
-        href = self.current_internal.get("href")
-        if href:
-            self.links.append(
-                self.link_factory(
-                    join_index_url(self.base_url_internal, href),
-                    source_url=self.page_url,
-                    text="".join(self.text_internal).strip(),
-                    requires_python=self.current_internal.get("data-requires-python"),
-                    yanked_reason=self.current_internal.get("data-yanked"),
-                    metadata_file=metadata_file_from_attrs(self.current_internal),
-                ),
-            )
-        self.current_internal = None
-        self.text_internal = []
+    html.parser is imported only here: a JSON Simple API response or a
+    find-links directory never needs it, and importing it costs more than
+    parsing a small page.
+    """
+    global _LINK_PARSER
+    if _LINK_PARSER is not None:
+        return _LINK_PARSER
+
+    from html.parser import HTMLParser
+
+    class LinkParser(HTMLParser):
+        def __init__(self, page_url: str, link_factory: LinkFactory) -> None:
+            super().__init__(convert_charrefs=True)
+            self.page_url = page_url
+            # Every link on the page resolves against this same base -- computed
+            # once here instead of once per <a> tag in handle_endtag.
+            self.base_url_internal = ensure_trailing_slash(page_url)
+            self.link_factory = link_factory
+            self.links: list[Link] = []
+            self.current_internal: dict[str, str | None] | None = None
+            self.text_internal: list[str] = []
+
+        def handle_starttag(
+            self, tag: str, attrs: list[tuple[str, str | None]]
+        ) -> None:
+            # HTMLParser already lowercases tag names before calling this.
+            if tag != "a":
+                return
+            # HTMLParser already lowercases attribute names before calling this.
+            self.current_internal = dict(attrs)
+            self.text_internal = []
+
+        def handle_data(self, data: str) -> None:
+            if self.current_internal is not None:
+                self.text_internal.append(data)
+
+        def handle_endtag(self, tag: str) -> None:
+            # HTMLParser already lowercases tag names before calling this.
+            if tag != "a" or self.current_internal is None:
+                return
+            href = self.current_internal.get("href")
+            if href:
+                self.links.append(
+                    self.link_factory(
+                        join_index_url(self.base_url_internal, href),
+                        source_url=self.page_url,
+                        text="".join(self.text_internal).strip(),
+                        requires_python=self.current_internal.get(
+                            "data-requires-python"
+                        ),
+                        yanked_reason=self.current_internal.get("data-yanked"),
+                        metadata_file=metadata_file_from_attrs(self.current_internal),
+                    ),
+                )
+            self.current_internal = None
+            self.text_internal = []
+
+    _LINK_PARSER = LinkParser
+    return LinkParser
+
+
+def __getattr__(name: str) -> object:
+    if name == "LinkParser":
+        return link_parser_class()
+    raise AttributeError(name)
 
 
 def metadata_file_from_attrs(attrs: dict[str, str | None]) -> MetadataFile | None:

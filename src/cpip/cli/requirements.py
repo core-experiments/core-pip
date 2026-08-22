@@ -7,12 +7,8 @@ import os
 import sys
 import threading
 
-try:
-    import tomllib
-except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility
-    from cpip._vendor import tomli as tomllib
 
-from cpip.build.build_backend import prepare_project_metadata
+from cpip.cli.dependency_groups import toml_module
 from cpip.core.errors import InstallationError
 from cpip.core.format_control import FormatControl
 from cpip.core.packaging import SpecifierSet, canonicalize_name, parse_requirement
@@ -295,6 +291,8 @@ def build_options_from_requirements(
 
 
 def requirements_from_script(path: str) -> list[str]:
+    tomllib = toml_module()
+
     try:
         with open(path, encoding="utf-8") as file:
             source = file.read()
@@ -665,6 +663,9 @@ def bundle_install_requirements(
             source_path = os.path.realpath(raw_path)
 
             try:
+                # Deferred: only a source requirement builds metadata.
+                from cpip.build.build_backend import prepare_project_metadata
+
                 metadata = prepare_project_metadata(
                     source_path,
                     build_isolation=False,
@@ -803,6 +804,8 @@ def bundle_install_requirements(
 
         if item.req is not None and item.local_file_path is not None:
             source_path = os.path.realpath(item.local_file_path)
+
+            from cpip.build.build_backend import prepare_project_metadata
 
             try:
                 source_version = str(

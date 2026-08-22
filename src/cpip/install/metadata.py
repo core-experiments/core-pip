@@ -7,7 +7,6 @@ import os
 import shutil
 import sys
 
-from cpip.build.build_backend import BackendSpec, prepare_project_metadata
 from cpip.build.metadata import InstalledMetadataDistribution, MetadataDistribution
 from cpip.core.direct_url import ArchiveInfo, DirectUrl, DirInfo, VcsInfo
 from cpip.core.errors import BuildError, CommandError, InstallationError
@@ -230,6 +229,8 @@ def prepare_editable_source(
 
     if prepare_metadata:
         try:
+            from cpip.build.build_backend import BackendSpec, prepare_project_metadata
+
             metadata = prepare_project_metadata(
                 source_path,
                 editable=True,
@@ -237,6 +238,11 @@ def prepare_editable_source(
             )
         except BuildError as exc:
             if "build_editable" in str(exc):
+                from cpip.build.build_backend import (
+                    BackendSpec,
+                    prepare_project_metadata,
+                )
+
                 backend_spec = BackendSpec.from_project(source_path)
                 if (
                     backend_spec is not None
@@ -253,6 +259,11 @@ def prepare_editable_source(
                 "Cannot import 'setuptools.build_meta'" in str(exc)
                 or "pyproject.toml" in project_files
             ):
+                from cpip.build.build_backend import (
+                    BackendSpec,
+                    prepare_project_metadata,
+                )
+
                 metadata = prepare_project_metadata(
                     source_path,
                     editable=True,

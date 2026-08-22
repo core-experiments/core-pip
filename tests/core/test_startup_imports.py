@@ -4,7 +4,7 @@ import json
 import sys
 from pathlib import Path
 
-from import_harness import ROOT, imported_modules, run_cpip
+from import_harness import ROOT, baseline_modules, imported_modules, run_cpip
 
 if sys.version_info >= (3, 11):
     import tomllib
@@ -135,4 +135,47 @@ def test_fast_local_install_stays_import_light(tmp_path: Path) -> None:
     assert "cpip.cli.fast_install" in modules
     assert not (modules & FAST_INSTALL_FORBIDDEN), sorted(
         modules & FAST_INSTALL_FORBIDDEN
+    )
+
+
+# Modules a local wheelhouse install on the normal path (no --no-compile, so
+# the fast path declines) must not import: each serves a shape this install
+# does not have -- installed-state scans, HTML index pages, --group files,
+# source builds -- and they cost ~20 ms together.
+NORMAL_INSTALL_FORBIDDEN = frozenset(
+    {
+        "importlib.metadata",
+        "html.parser",
+        "tomllib",
+        "cpip._vendor.tomli",
+        "cpip.build.build_backend",
+    },
+)
+
+
+def test_normal_local_install_stays_import_light(tmp_path: Path) -> None:
+    import shutil
+
+    wheelhouse = tmp_path / "wheelhouse"
+    wheelhouse.mkdir()
+    shutil.copy2(SIMPLEWHEEL, wheelhouse / SIMPLEWHEEL.name)
+    target = tmp_path / "target"
+    args = [
+        "install",
+        "--no-index",
+        "--ignore-installed",
+        "--target",
+        str(target),
+        "--find-links",
+        str(wheelhouse),
+        "simplewheel==2.0",
+    ]
+    env = {"CPIP_CACHE_DIR": str(tmp_path / "cache")}
+
+    modules = imported_modules(args, cwd=tmp_path, env=env) - baseline_modules()
+
+    assert next(target.glob("simplewheel-2.0.dist-info"), None) is not None
+    assert "cpip.cli.install" in modules
+    assert not (modules & NORMAL_INSTALL_FORBIDDEN), sorted(
+        modules & NORMAL_INSTALL_FORBIDDEN
     )
