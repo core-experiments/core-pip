@@ -6,14 +6,8 @@ import logging
 import os
 import sys
 
-import cpip.cli.fast_install as fast_install
 from cpip.build.build import build_editable_from_source
 from cpip.build.metadata import InstalledDistributionStore
-from cpip.build.query import (
-    check_package_set,
-    installed_dependencies_by_name,
-    package_set_from_dependencies,
-)
 from cpip.cli.config import SourceConfig, load_source_config
 from cpip.cli.dependency_groups import group_items, parse_dependency_groups
 from cpip.cli.parsers.install import create_parser
@@ -828,6 +822,14 @@ def install_candidate(
 
 
 def warn_about_install_conflicts(changed_names: set[str]) -> None:
+    # Deferred: the dependency-graph helpers only when an install changed
+    # something and conflict warnings are wanted.
+    from cpip.build.query import (
+        check_package_set,
+        installed_dependencies_by_name,
+        package_set_from_dependencies,
+    )
+
     distributions = InstalledDistributionStore().iter(skip=CPIP_DISTRIBUTION_NAMES)
     distributions_by_name = {dist.canonical_name: dist for dist in distributions}
     dependencies_by_name = installed_dependencies_by_name(distributions)
@@ -1552,6 +1554,10 @@ def run_install(args: list[str]) -> int:
                         for candidate in plan.candidates
                     )
                 ):
+                    # Deferred: the pure-wheel hybrid installer only on the
+                    # empty-target route that uses it.
+                    import cpip.cli.fast_install as fast_install
+
                     hybrid_installed = fast_install.install_resolved_pure_wheels(
                         plan.candidates,
                         execution.options.target,
