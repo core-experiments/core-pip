@@ -88,12 +88,11 @@ INSTALL_WORKERS = 4
 ArchiveEntry = tuple[str, str, str, int]
 
 
+_HEX_DIGITS = "0123456789abcdefABCDEF"
+
+
 def valid_sha256(value: object) -> bool:
-    return (
-        isinstance(value, str)
-        and len(value) == 64
-        and all(character in "0123456789abcdefABCDEF" for character in value)
-    )
+    return isinstance(value, str) and len(value) == 64 and not value.strip(_HEX_DIGITS)
 
 
 class CachedWheelArchive:
