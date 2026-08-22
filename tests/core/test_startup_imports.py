@@ -184,6 +184,9 @@ NORMAL_INSTALL_FORBIDDEN = frozenset(
     {
         "dataclasses",
         "importlib.metadata",
+        "cpip.resolution.files.parser",
+        "cpip.vcs.versioncontrol",
+        "cpip.core.subprocess",
         "html.parser",
         "tomllib",
         "cpip._vendor.tomli",

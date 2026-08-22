@@ -20,7 +20,6 @@ from cpip.index.links import Link
 from cpip.index.source_locations import resolve_source_location
 from cpip.network.cache import http_cache_path
 from cpip.network.http import NetworkSession
-from cpip.resolution.files import parse_requirements
 from cpip.resolution.input_requirements import install_req_from_line
 
 RELEASE_OPTIONS = frozenset(("pre", "all-releases"))
@@ -501,6 +500,9 @@ def collect_requirements(
     for filename in requirement_files or []:
         assert session is not None
 
+        # Deferred: the requirements-file parser only when a file is given.
+        from cpip.resolution.files import parse_requirements
+
         for item in parse_requirements(
             filename,
             session,
@@ -556,6 +558,9 @@ def collect_requirements(
 
     for filename in constraint_files or []:
         assert session is not None
+
+        # Deferred: the requirements-file parser only when a file is given.
+        from cpip.resolution.files import parse_requirements
 
         for item in parse_requirements(
             filename,
