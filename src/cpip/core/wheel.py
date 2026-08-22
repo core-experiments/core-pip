@@ -1,15 +1,10 @@
 from __future__ import annotations
 
-import logging
 import os
 import re
 import sys
 import sysconfig
-import zipfile
-from collections.abc import Collection, Mapping
-from email.parser import Parser as EmailParser
-from typing import TYPE_CHECKING, Protocol
-
+from collections.abc import Callable, Collection, Mapping
 from functools import lru_cache
 
 from .caches import bounded_put, memoized, register_table
@@ -22,9 +17,72 @@ from .wheel_metadata import (
     parse_metadata_member,
 )
 
+TYPE_CHECKING = False
+
 if TYPE_CHECKING:
+    import zipfile
+    from email.parser import Parser as EmailParser
     from email.message import Message
-    from typing import IO, NoReturn
+    from typing import IO, NoReturn, Protocol
+
+    # Structural types used only in annotations: typing stays off the
+    # paths (check, list, show) that import this module for its parsers.
+    class ZipEntryInfo(Protocol):
+        """The subset of ``zipfile.ZipInfo`` these functions read.
+
+        Satisfied structurally by both ``zipfile.ZipInfo`` and lighter adapters
+        over faster archive readers, so this module never needs to know such an
+        adapter exists. Declared as read-only properties (rather than plain
+        attributes) so an immutable adapter -- e.g. a ``NamedTuple`` -- also
+        satisfies it: a plain attribute requires write support too, which a
+        read-only field doesn't have.
+        """
+
+        @property
+        def CRC(self) -> int: ...
+
+        @property
+        def compress_type(self) -> int: ...
+
+        @property
+        def external_attr(self) -> int: ...
+
+        @property
+        def compress_size(self) -> int: ...
+
+        @property
+        def file_size(self) -> int: ...
+
+        @property
+        def header_offset(self) -> int: ...
+
+    class ZipArchiveSource(Protocol):
+        """The subset of ``zipfile.ZipFile`` these functions read from."""
+
+        @property
+        def NameToInfo(self) -> Mapping[str, ZipEntryInfo]: ...
+
+        def getinfo(self, name: str) -> ZipEntryInfo: ...
+
+        def read(self, name: str) -> bytes: ...
+
+        def namelist(self) -> list[str]: ...
+
+        def open(self, name: str) -> IO[bytes]: ...
+
+    class MetadataCache(Protocol):
+        """Minimal cache contract needed by wheel parsing."""
+
+        def get_reference(
+            self,
+            identity: tuple[str, int, int],
+        ) -> dict[str, list[str]] | None: ...
+
+        def put(
+            self,
+            identity: tuple[str, int, int],
+            headers: dict[str, list[str]],
+        ) -> None: ...
 
 
 class PureWheelCandidate:
@@ -42,51 +100,6 @@ class PureWheelCandidate:
     path: str
 
 
-class ZipEntryInfo(Protocol):
-    """The subset of ``zipfile.ZipInfo`` these functions read.
-
-    Satisfied structurally by both ``zipfile.ZipInfo`` and lighter adapters
-    over faster archive readers, so this module never needs to know such an
-    adapter exists. Declared as read-only properties (rather than plain
-    attributes) so an immutable adapter -- e.g. a ``NamedTuple`` -- also
-    satisfies it: a plain attribute requires write support too, which a
-    read-only field doesn't have.
-    """
-
-    @property
-    def CRC(self) -> int: ...
-
-    @property
-    def compress_type(self) -> int: ...
-
-    @property
-    def external_attr(self) -> int: ...
-
-    @property
-    def compress_size(self) -> int: ...
-
-    @property
-    def file_size(self) -> int: ...
-
-    @property
-    def header_offset(self) -> int: ...
-
-
-class ZipArchiveSource(Protocol):
-    """The subset of ``zipfile.ZipFile`` these functions read from."""
-
-    @property
-    def NameToInfo(self) -> Mapping[str, ZipEntryInfo]: ...
-
-    def getinfo(self, name: str) -> ZipEntryInfo: ...
-
-    def read(self, name: str) -> bytes: ...
-
-    def namelist(self) -> list[str]: ...
-
-    def open(self, name: str) -> IO[bytes]: ...
-
-
 MACOS_COMPATIBLE_ARCHES = {
     "x86_64": frozenset(("x86_64", "intel", "universal")),
     "i386": frozenset(("i386", "intel", "universal")),
@@ -100,29 +113,49 @@ MACOS_COMPATIBLE_ARCHES = {
 }
 
 
-class MetadataCache(Protocol):
-    """Minimal cache contract needed by wheel parsing."""
-
-    def get_reference(
-        self,
-        identity: tuple[str, int, int],
-    ) -> dict[str, list[str]] | None: ...
-
-    def put(
-        self,
-        identity: tuple[str, int, int],
-        headers: dict[str, list[str]],
-    ) -> None: ...
-
-
 def Parser() -> EmailParser:
-    """Lazily construct the legacy email parser."""
+    """Lazily construct the legacy email parser.
+
+    The import is deferred as well: ``email.parser`` costs more to import
+    than everything the local fast install path runs, and that path never
+    parses a METADATA file this way.
+    """
+
+    from email.parser import Parser as EmailParser
 
     return EmailParser()
 
 
+_UNRESOLVED = object()
+
+
+class LazyWheelLayout:
+    """A wheel layout computed on first use.
+
+    The resolver already holds a local wheel's metadata, and a warm install
+    finds its unpacked tree in the archive cache, so the layout -- which
+    costs opening the wheel and parsing its directory -- is only needed by
+    the paths that extract or copy members. The computed value is memoized
+    on this object, so copies of the candidate share one read.
+    """
+
+    __slots__ = ("_compute", "_value")
+
+    def __init__(self, compute: Callable[[], object | None]) -> None:
+        self._compute: Callable[[], object | None] | None = compute
+        self._value: object = _UNRESOLVED
+
+    def resolve(self) -> object | None:
+        if self._value is _UNRESOLVED:
+            assert self._compute is not None
+            self._value = self._compute()
+            self._compute = None
+        return self._value
+
+
 class WheelCandidate(PureWheelCandidate):
     __slots__ = (
+        "_wheel_layout",
         "dependencies",
         "from_cache",
         "name",
@@ -134,7 +167,6 @@ class WheelCandidate(PureWheelCandidate):
         "source_url",
         "source_vcs",
         "version",
-        "wheel_layout",
         "yanked_reason",
     )
 
@@ -178,7 +210,39 @@ class WheelCandidate(PureWheelCandidate):
 
         self.yanked_reason = yanked_reason
 
-        self.wheel_layout = wheel_layout
+        self._wheel_layout = wheel_layout
+
+    @property
+    def wheel_layout(self) -> object | None:
+        """The layout, computing a :class:`LazyWheelLayout` on first access."""
+
+        layout = self._wheel_layout
+
+        if isinstance(layout, LazyWheelLayout):
+            layout = layout.resolve()
+
+            self._wheel_layout = layout
+
+        return layout
+
+    @wheel_layout.setter
+    def wheel_layout(self, value: object | None) -> None:
+        self._wheel_layout = value
+
+    @property
+    def stored_wheel_layout(self) -> object | None:
+        """The layout as stored -- possibly still a :class:`LazyWheelLayout`
+        -- for a caller rebuilding the candidate without reading the wheel."""
+
+        return self._wheel_layout
+
+    @property
+    def wheel_layout_if_loaded(self) -> object | None:
+        """The layout only if it is already known; never reads the wheel."""
+
+        layout = self._wheel_layout
+
+        return None if isinstance(layout, LazyWheelLayout) else layout
 
     def __eq__(self, other: object) -> bool:
         return isinstance(other, WheelCandidate) and all(
@@ -187,6 +251,10 @@ class WheelCandidate(PureWheelCandidate):
 
     def copy_with(self, **changes: object) -> WheelCandidate:
         values = {name: getattr(self, name) for name in self.__slots__}
+
+        # The stored layout travels as it is: a lazy one stays lazy and the
+        # copy shares its eventual read.
+        values["wheel_layout"] = values.pop("_wheel_layout")
 
         values.update(changes)
 
@@ -425,8 +493,6 @@ class TargetContext:
 
 
 VERSION_COMPATIBLE = (1, 0)
-
-logger = logging.getLogger(__name__)
 
 
 WHEEL_METADATA_CACHE_SIZE = 1024
@@ -902,6 +968,8 @@ def read_core_metadata_headers(
 
 
 def read_metadata_message(path: str):
+    import zipfile
+
     with zipfile.ZipFile(path) as archive:
         return read_metadata_message_internal(archive, path)
 
@@ -1016,6 +1084,8 @@ def wheel_dist_info_dir(source: ZipArchiveSource, name: str) -> str:
 
 
 def read_wheel_archive_member(source: ZipArchiveSource, path: str) -> bytes:
+    import zipfile
+
     try:
         return source.read(path)
 
@@ -1088,7 +1158,11 @@ def check_compatibility(version: tuple[int, ...], name: str) -> None:
         )
 
     if version > VERSION_COMPATIBLE:
-        logger.warning(
+        # The module's only use of logging; importing it here keeps the
+        # logging machinery off the local fast install path.
+        import logging
+
+        logging.getLogger(__name__).warning(
             "Installing from a newer Wheel-Version (%s)",
             ".".join(map(str, version)),
         )
@@ -1167,6 +1241,8 @@ def wheel_candidate_from_path(
     identity match here means we can skip both without losing any structural
     validation that wasn't already going to happen again downstream.
     """
+    import zipfile
+
     requested_extras = frozenset(extras or ())
 
     if not include_layout:

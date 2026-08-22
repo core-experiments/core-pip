@@ -679,6 +679,12 @@ class Git(VersionControl):
 
         """
 
+        # A .git directory right here makes ``location`` the repository
+        # root, which is what ``rev-parse --git-dir`` would report after a
+        # spawn; a .git *file* (worktree, submodule) still needs git.
+        if os.path.isdir(os.path.join(location, ".git")):
+            return None
+
         # find the repo root
 
         git_dir = cls.run_command(

@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import json
 import string
-from collections.abc import Collection, Iterable, Iterator, Mapping
-from typing import Any, NamedTuple, Protocol
+from collections import namedtuple
+from collections.abc import Callable, Collection, Iterable, Iterator, Mapping
 
 from cpip.core.cpip_version import CPIP_DISTRIBUTION_NAMES
-from cpip.core.light_metadata import LightDistributionStore
+from cpip.core.light_metadata import LightDistributionStore, parse_metadata_text
 from cpip.core.packaging import (
     Requirement,
     canonicalize_name,
@@ -20,59 +20,67 @@ from cpip.core.versions import Version
 TYPE_CHECKING = False
 
 if TYPE_CHECKING:
+    # typing is imported only by the type checker: the structural type and
+    # the alias below are annotations, and typing is ~1 ms of import on
+    # every show/check/list/inspect run.
+    from typing import Any, NamedTuple, Protocol
+
     from cpip.core.wheel import WheelTag
 
-LatestInfo = Mapping[str, tuple[Any, str]]
+    LatestInfo = Mapping[str, tuple[Any, str]]
+
+    class DistributionLike(Protocol):
+        """The subset of InstalledMetadataDistribution/LightDistribution this module uses.
+
+        A structural type rather than a shared base class: check/show/inspect/
+        freeze read installed metadata through the lightweight, importlib.metadata
+        -free LightDistribution, while list's slower path still uses the richer
+        InstalledMetadataDistribution. The functions below don't care which one
+        they get, only that it has this shape.
+        """
+
+        @property
+        def canonical_name(self) -> str: ...
+
+        @property
+        def raw_name(self) -> str: ...
+
+        @property
+        def raw_version(self) -> str: ...
+
+        @property
+        def location(self) -> str: ...
+
+        @property
+        def metadata(self) -> Any: ...
+
+        @property
+        def version(self) -> Version: ...
+
+        @property
+        def metadata_version(self) -> str | None: ...
+
+        @property
+        def editable(self) -> bool: ...
+
+        @property
+        def editable_project_location(self) -> str | None: ...
+
+        @property
+        def installer(self) -> str: ...
+
+        def iter_dependencies(
+            self, extras: tuple[str, ...] = ()
+        ) -> list[Requirement]: ...
+
+        def iter_raw_dependencies(self) -> list[str]: ...
+
+        def read_text(self, path: str) -> str: ...
+
+        def iter_declared_entries(self) -> list[str]: ...
+
+
 PackageSet = dict[str, "PackageDetails"]
-
-
-class DistributionLike(Protocol):
-    """The subset of InstalledMetadataDistribution/LightDistribution this module uses.
-
-    A structural type rather than a shared base class: check/show/inspect/
-    freeze read installed metadata through the lightweight, importlib.metadata
-    -free LightDistribution, while list's slower path still uses the richer
-    InstalledMetadataDistribution. The functions below don't care which one
-    they get, only that it has this shape.
-    """
-
-    @property
-    def canonical_name(self) -> str: ...
-
-    @property
-    def raw_name(self) -> str: ...
-
-    @property
-    def raw_version(self) -> str: ...
-
-    @property
-    def location(self) -> str: ...
-
-    @property
-    def metadata(self) -> Any: ...
-
-    @property
-    def version(self) -> Version: ...
-
-    @property
-    def metadata_version(self) -> str | None: ...
-
-    @property
-    def editable(self) -> bool: ...
-
-    @property
-    def editable_project_location(self) -> str | None: ...
-
-    @property
-    def installer(self) -> str: ...
-
-    def iter_dependencies(self, extras: tuple[str, ...] = ()) -> list[Requirement]: ...
-
-    def iter_raw_dependencies(self) -> list[str]: ...
-
-    def read_text(self, path: str) -> str: ...
-
-    def iter_declared_entries(self) -> list[str]: ...
 
 
 def normalize_project_url_label(label: str) -> str:
@@ -81,13 +89,28 @@ def normalize_project_url_label(label: str) -> str:
     return label.translate(str.maketrans("", "", chars_to_remove)).lower()
 
 
-class InstalledPackageInfo(NamedTuple):
-    distribution: DistributionLike
-    requires: list[str]
-    required_by: list[str]
-    entry_points: list[str]
-    files: list[str] | None
-    homepage: str
+if TYPE_CHECKING:
+
+    class InstalledPackageInfo(NamedTuple):
+        distribution: DistributionLike
+        requires: list[str]
+        required_by: list[str]
+        entry_points: list[str]
+        files: list[str] | None
+        homepage: str
+
+else:
+    InstalledPackageInfo = namedtuple(
+        "InstalledPackageInfo",
+        [
+            "distribution",
+            "requires",
+            "required_by",
+            "entry_points",
+            "files",
+            "homepage",
+        ],
+    )
 
 
 def _dependent_index(
@@ -228,7 +251,6 @@ def format_list_columns(
     latest: LatestInfo | None = None,
 ) -> tuple[list[list[str]], list[str]]:
     """Build rows and headers for the columns list format."""
-    from email.parser import Parser
 
     header = ["Package", "Version"]
 
@@ -243,7 +265,9 @@ def format_list_columns(
         except FileNotFoundError:
             build_tags.append(None)
         else:
-            build_tags.append(Parser().parsestr(wheel_text).get("Build"))
+            # The same first-value read email.parser would give, without
+            # importing the email package for one header per WHEEL file.
+            build_tags.append(parse_metadata_text(wheel_text).get("Build"))
 
     if any(build_tags):
         header.append("Build")
@@ -475,12 +499,16 @@ def metadata_errors(
 
 def unsupported_distributions(
     distributions: Iterable[DistributionLike],
-    supported_tags: Iterable[WheelTag],
+    supported_tags: Callable[[], Iterable[WheelTag]],
 ) -> list[DistributionLike]:
-    """Return distributions whose wheel tags are unsupported."""
-    from cpip.core.wheel import WheelTag, wheel_tag_rank
+    """Return distributions whose wheel tags are unsupported.
 
-    supported = tuple(supported_tags)
+    ``supported_tags`` is called at most once, and only for a distribution
+    whose WHEEL carries a tag other than ``py3-none-any``: that tag is in
+    every Python 3 interpreter's supported set, so a wheel listing it ranks
+    without computing the set (and without importing the tag machinery).
+    """
+    supported: tuple[WheelTag, ...] | None = None
     result = []
     for dist in distributions:
         try:
@@ -493,8 +521,15 @@ def unsupported_distributions(
                 continue
             parts = line.split(":", 1)[1].strip().split("-")
             if len(parts) == 3:
-                tags.append(WheelTag(*parts))
-        if tags and wheel_tag_rank(tuple(tags), supported) is None:
+                tags.append(tuple(parts))
+        if not tags or ("py3", "none", "any") in tags:
+            continue
+        from cpip.core.wheel import WheelTag, wheel_tag_rank
+
+        if supported is None:
+            supported = tuple(supported_tags())
+        wheel_tags = tuple(WheelTag(*parts) for parts in tags)
+        if wheel_tag_rank(wheel_tags, supported) is None:
             result.append(dist)
     return result
 

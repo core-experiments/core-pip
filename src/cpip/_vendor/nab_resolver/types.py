@@ -14,7 +14,18 @@ from __future__ import annotations
 import enum
 from typing import Generic, Protocol, TypeVar
 
-from cpip._vendor.typing_extensions import Self, override
+try:
+    from typing import override
+except ImportError:  # pragma: no cover - Python < 3.12
+    from cpip._vendor.typing_extensions import override
+
+TYPE_CHECKING = False
+
+if TYPE_CHECKING:
+    try:
+        from typing import Self
+    except ImportError:  # pragma: no cover - Python < 3.11
+        from cpip._vendor.typing_extensions import Self
 
 __all__ = [
     "Incompatibility",

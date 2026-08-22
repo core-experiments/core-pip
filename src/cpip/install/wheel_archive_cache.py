@@ -14,10 +14,8 @@ import io
 import marshal
 import os
 import shutil
-import tempfile
 import time
-import zipfile
-from concurrent.futures import ThreadPoolExecutor
+from collections.abc import Iterable
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Generator
 
@@ -31,6 +29,7 @@ from cpip.install.wheel_archive import (
 )
 
 if TYPE_CHECKING:
+    import zipfile
     from typing import Protocol, TypeVar
 
     from cpip.core.direct_url import DirectUrl
@@ -87,12 +86,21 @@ INSTALL_WORKERS = 4
 ArchiveEntry = tuple[str, str, str, int]
 
 
+_HEX_DIGITS = "0123456789abcdefABCDEF"
+
+
+def loaded_layout(candidate: WheelInstallCandidate) -> object | None:
+    """The candidate's layout if it is already known, without reading the
+    wheel; a lazily computed layout reads as not yet known."""
+    loaded = getattr(candidate, "wheel_layout_if_loaded", _UNKNOWN)
+    return candidate.wheel_layout if loaded is _UNKNOWN else loaded
+
+
+_UNKNOWN = object()
+
+
 def valid_sha256(value: object) -> bool:
-    return (
-        isinstance(value, str)
-        and len(value) == 64
-        and all(character in "0123456789abcdefABCDEF" for character in value)
-    )
+    return isinstance(value, str) and len(value) == 64 and not value.strip(_HEX_DIGITS)
 
 
 class CachedWheelArchive:
@@ -114,7 +122,8 @@ class CachedWheelArchive:
         self.entries = entries
 
 
-def wheel_digest(candidate: WheelInstallCandidate) -> str:
+def supplied_wheel_digest(candidate: WheelInstallCandidate) -> str | None:
+    """The SHA-256 the candidate's source vouched for, if any."""
     supplied = (
         (candidate.source_hashes or {}).get("sha256")
         if candidate.source_kind in {None, "wheel"}
@@ -124,13 +133,74 @@ def wheel_digest(candidate: WheelInstallCandidate) -> str:
     if isinstance(supplied, str) and valid_sha256(supplied):
         return supplied.lower()
 
+    return None
+
+
+def prefetch_wheel_digests(
+    candidates: Iterable[WheelInstallCandidate],
+    cache_dir: str,
+) -> None:
+    """One database read for the recorded digests of a whole batch."""
+    # Deferred: the metadata store (and sqlite3) only for wheels without a
+    # supplied hash.
+    from cpip.index.metadata_cache import get_wheel_metadata_cache, metadata_identity
+
+    identities = [
+        identity
+        for candidate in candidates
+        if supplied_wheel_digest(candidate) is None
+        and (identity := metadata_identity(candidate.path)) is not None
+    ]
+
+    if identities:
+        get_wheel_metadata_cache(cache_dir).prefetch_digests(identities)
+
+
+def wheel_digest(candidate: WheelInstallCandidate, cache_dir: str | None = None) -> str:
+    """The wheel's SHA-256: as supplied by its source, else as recorded for
+    this exact file (path, size, mtime) in the metadata cache, else hashed.
+
+    A wheel from a local wheelhouse carries no index-supplied hash, so every
+    install used to read it in full to find its archive entry; the digest is
+    now hashed once per file and reused while the file is unchanged.
+    """
+    supplied = supplied_wheel_digest(candidate)
+
+    if supplied is not None:
+        return supplied
+
+    cache = None
+
+    identity = None
+
+    if cache_dir is not None:
+        from cpip.index.metadata_cache import (
+            get_wheel_metadata_cache,
+            metadata_identity,
+        )
+
+        identity = metadata_identity(candidate.path)
+
+        if identity is not None:
+            cache = get_wheel_metadata_cache(cache_dir)
+
+            recorded = cache.get_digest(identity)
+
+            if recorded is not None:
+                return recorded
+
     digest = hashlib.sha256()
 
     with open(candidate.path, "rb") as file:
         while chunk := file.read(1024 * 1024):
             digest.update(chunk)
 
-    return digest.hexdigest()
+    result = digest.hexdigest()
+
+    if cache is not None and identity is not None:
+        cache.put_digest(identity, result)
+
+    return result
 
 
 def archive_entry_root(cache_dir: str, digest: str) -> str:
@@ -271,6 +341,9 @@ def _extract_archive(
 ) -> CachedWheelArchive:
     shard = os.path.dirname(entry_root)
 
+    # Deferred: tempfile only when a wheel is actually extracted.
+    import tempfile
+
     temporary = tempfile.mkdtemp(prefix=f".{digest[:12]}-", dir=shard)
 
     tree = os.path.join(temporary, "tree")
@@ -278,8 +351,11 @@ def _extract_archive(
     os.mkdir(tree)
 
     try:
+        # Deferred: zipfile only when a wheel is actually extracted.
+        import zipfile
+
         with zipfile.ZipFile(candidate.path) as archive:
-            layout = candidate.wheel_layout
+            layout = loaded_layout(candidate)
 
             if isinstance(layout, tuple) and layout and isinstance(layout[0], str):
                 dist_info = layout[0]
@@ -379,12 +455,12 @@ def prepare_cached_wheel(
     candidate: WheelInstallCandidate,
     cache_dir: str,
 ) -> CachedWheelArchive:
-    layout = candidate.wheel_layout
+    layout = loaded_layout(candidate)
 
     if isinstance(layout, CachedWheelArchive):
         return layout
 
-    digest = wheel_digest(candidate)
+    digest = wheel_digest(candidate, cache_dir)
 
     entry_root = archive_entry_root(cache_dir, digest)
 
@@ -412,10 +488,16 @@ def prepare_cached_wheels(
     candidates: tuple[WheelInstallCandidate, ...],
     cache_dir: str,
 ) -> tuple[CachedWheelArchive, ...]:
+    prefetch_wheel_digests(candidates, cache_dir)
+
     if len(candidates) < INSTALL_WORKERS:
         return tuple(
             prepare_cached_wheel(candidate, cache_dir) for candidate in candidates
         )
+
+    # Deferred: concurrent.futures drags in logging and more, and the pure-wheel
+    # fast path imports this module without ever starting a pool.
+    from concurrent.futures import ThreadPoolExecutor
 
     with ThreadPoolExecutor(
         max_workers=min(INSTALL_WORKERS, len(candidates)),

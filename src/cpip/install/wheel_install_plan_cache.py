@@ -11,10 +11,8 @@ than re-hashes, an existing tree's contents against the recorded entries.
 from __future__ import annotations
 
 import hashlib
-import json
 import marshal
 import os
-import tempfile
 import time
 from types import MappingProxyType
 
@@ -30,7 +28,11 @@ from cpip.install.wheel_archive_cache import (
     valid_sha256,
     wheel_digest,
 )
-from cpip.resolution.models import ResolutionResult
+
+TYPE_CHECKING = False
+
+if TYPE_CHECKING:
+    from cpip.resolution.models import ResolutionResult
 
 # Every caller today already folds interpreter/platform identity into the
 # key's context tuple (see cli/install.py:cached_remote_plan_key and
@@ -162,6 +164,9 @@ def _exact_install_plan_key(
     if not normalized:
         return None
 
+    # Deferred: json only when a receipt key is built.
+    import json
+
     payload = json.dumps(
         (tuple(sorted(normalized)), context),
         ensure_ascii=True,
@@ -193,7 +198,7 @@ def save_cached_install_plan(
             if candidate.source_kind != "wheel":
                 return False
 
-            digest = wheel_digest(candidate)
+            digest = wheel_digest(candidate, cache_dir)
 
             archive = load_archive(archive_entry_root(cache_dir, digest), digest)
 
@@ -241,6 +246,9 @@ def save_cached_install_plan(
         directory = os.path.dirname(path)
 
         os.makedirs(directory, exist_ok=True)
+
+        # Deferred: tempfile only when a receipt is written.
+        import tempfile
 
         descriptor, temporary = tempfile.mkstemp(prefix=f".{key[:12]}-", dir=directory)
 
@@ -403,6 +411,10 @@ def load_cached_install_plan(
                 selected_dependency.version,
             ):
                 return None
+
+    # Deferred: resolution.models is imported only when a receipt is actually
+    # loaded, not by every path that can prepare an archive.
+    from cpip.resolution.models import ResolutionResult
 
     return ResolutionResult(
         candidates=tuple(candidates),

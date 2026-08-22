@@ -7,10 +7,11 @@ import json
 import logging
 import os
 
+from cpip.core.appdirs import WHEEL_CACHE_BUCKET
+
 logger = logging.getLogger(__name__)
 
 
-WHEEL_CACHE_BUCKET = "wheels"
 """Directory under the cache directory holding wheels built from source."""
 
 

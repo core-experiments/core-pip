@@ -25,7 +25,7 @@ class CandidateMetadataCache(SqliteBackedCache):
 
     __slots__ = ("_pending_deletes", "_pending_puts", "decoded", "entries")
 
-    SCHEMA = "CREATE TABLE IF NOT EXISTS candidate_metadata (key TEXT PRIMARY KEY, value BLOB)"
+    SCHEMA = "CREATE TABLE IF NOT EXISTS candidate_metadata (key TEXT PRIMARY KEY, value BLOB);"
 
     def __init__(self, cache_dir: str | os.PathLike[str]) -> None:
         super().__init__(os.path.join(os.fspath(cache_dir), NAME))
@@ -196,6 +196,5 @@ def get_candidate_metadata_cache(
     key = os.path.abspath(os.fspath(cache_dir))
     cache = INSTANCES.get(key)
     if cache is None:
-        cache = CandidateMetadataCache(key)
-        INSTANCES[key] = cache
+        cache = INSTANCES.setdefault(key, CandidateMetadataCache(key))
     return cache

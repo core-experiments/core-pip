@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import urllib.parse
 
 DIRECT_URL_METADATA_NAME = "direct_url.json"
@@ -200,6 +199,8 @@ class DirectUrl:
 
     @classmethod
     def from_json(cls, value: str) -> DirectUrl:
+        import json
+
         return cls.from_dict(json.loads(value))
 
     def to_dict(self) -> dict[str, object]:
@@ -257,6 +258,8 @@ class DirectUrl:
         return data
 
     def to_json(self) -> str:
+        import json
+
         return json.dumps(self.to_dict_compat(), sort_keys=True)
 
     def as_pep440_direct_reference(self, name: str) -> str:

@@ -72,6 +72,5 @@ def get_release_facts_cache(
     key = os.path.abspath(os.fspath(cache_dir))
     cache = INSTANCES.get(key)
     if cache is None:
-        cache = ReleaseFactsCache(key)
-        INSTANCES[key] = cache
+        cache = INSTANCES.setdefault(key, ReleaseFactsCache(key))
     return cache

@@ -28,8 +28,13 @@ lookup is a cache miss, never a wrong answer.
 from __future__ import annotations
 
 from collections.abc import Callable
+
 from functools import lru_cache
-from typing import Any
+
+TYPE_CHECKING = False
+
+if TYPE_CHECKING:
+    from typing import Any
 
 _CLEARERS: list[Callable[[], None]] = []
 

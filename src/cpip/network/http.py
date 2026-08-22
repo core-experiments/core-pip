@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import base64
-import email.message
-import email.utils
 import enum
 import io
 import json
@@ -31,6 +29,7 @@ from cpip.network.exceptions import (
 TYPE_CHECKING = False
 
 if TYPE_CHECKING:
+    import email.message
     from collections.abc import Iterator, Mapping, Sequence
     from typing import Any
 
@@ -628,6 +627,10 @@ class NetworkSession:
 
             return None
 
+        # Deferred: email.message only when a cached response is actually
+        # reconstructed, never on a cache-disabled or cache-miss request.
+        import email.message
+
         response_headers = email.message.Message()
 
         for name, value in headers.items():
@@ -713,6 +716,8 @@ class NetworkSession:
         request: HttpRequest,
         metadata: dict[str, Any],
     ) -> HttpResponse:
+        import email.message
+
         self.fresh_cached_response_cache.pop(request.url, None)
 
         headers = metadata.get("headers", {})
@@ -757,6 +762,8 @@ class NetworkSession:
     def cache_expiry(
         headers: Mapping[str, str] | email.message.Message,
     ) -> float | None:
+        import email.utils
+
         cache_control = headers.get("Cache-Control", "")
 
         for directive in cache_control.split(","):
@@ -896,6 +903,8 @@ class NetworkSession:
 
     @staticmethod
     def open_file(request: HttpRequest) -> HttpResponse:
+        import email.message
+
         try:
             with open(url_to_path(request.url), "rb") as file:
                 body = file.read()

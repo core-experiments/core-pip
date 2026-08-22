@@ -21,7 +21,7 @@ from benchmark_support import flush_persistent_caches, reset_caches
 from cpip.cli.fast_install import FastInstallMetadataCache, resolve_simple_wheelhouse
 from cpip.core.packaging import parse_requirement
 from cpip.core.urls import path_to_url
-from cpip.core.wheel import parse_wheel_file
+from cpip.core.wheel import parse_wheel_file, wheel_candidate
 from cpip.index.catalog_cache import save_links
 from cpip.index.links import Link
 from cpip.index.provider import CandidateProvider
@@ -175,6 +175,44 @@ def test_warm_archive_install(
     assert benchmark(install_warm) > 10
 
 
+def test_warm_archive_install_compiled(
+    benchmark: BenchmarkFixture,
+    graph_wheelhouse: Path,
+    warm_cache_dir: str,
+    tmp_path: Path,
+) -> None:
+    """The same cached install with bytecode compilation on -- what a default
+    `cpip install` takes -- compiling each wheel in the staged tree."""
+    candidates = tuple(
+        materialize_candidates(
+            resolve_graph(graph_wheelhouse, warm_cache_dir).candidates
+        ),
+    )
+    requests = tuple((candidate.path, True, None) for candidate in candidates)
+    counter = itertools.count()
+
+    def install_compiled() -> int:
+        reset_caches()
+        for candidate in candidates:
+            candidate.wheel_layout = None
+        target = InstallTarget.from_options(
+            ROOT,
+            target=str(tmp_path / f"compiled-{next(counter)}"),
+        )
+        installed = install_wheels_from_archive_cache(
+            requests,
+            candidates,
+            target=target,
+            cache_dir=warm_cache_dir,
+            report=False,
+            pycompile=True,
+        )
+        assert installed is not None
+        return len(installed)
+
+    assert benchmark(install_compiled) > 10
+
+
 def test_warm_fast_install_snapshot(
     benchmark: BenchmarkFixture,
     graph_wheelhouse: Path,
@@ -263,3 +301,97 @@ def test_warm_index_catalog_resolve(
         return len(resolve_index(session, cache_dir).candidates)
 
     assert benchmark(resolve_warm) > 10
+
+
+REAL_WHEELS = Path(__file__).resolve().parents[1] / "cli" / "data" / "common_wheels"
+
+
+@pytest.fixture(scope="module")
+def warm_real_wheel_cache(tmp_path_factory: pytest.TempPathFactory) -> str:
+    """A cache directory holding the unpacked trees of the repository's real
+    wheels (~56 MB across 13 files) after one preparation, flushed."""
+    cache_dir = str(tmp_path_factory.mktemp("warm-real-wheels"))
+    candidates = tuple(
+        wheel_candidate(str(wheel)) for wheel in sorted(REAL_WHEELS.glob("*.whl"))
+    )
+    assert len(candidates) > 5
+    prepare_cached_wheels(candidates, cache_dir)
+    flush_persistent_caches(cache_dir)
+    reset_caches()
+    return cache_dir
+
+
+def test_warm_archive_preparation_real_wheels(
+    benchmark: BenchmarkFixture,
+    warm_real_wheel_cache: str,
+) -> None:
+    """Preparing real-sized local wheels whose trees already exist. A local
+    wheel carries no index-supplied hash, so finding its archive entry is
+    where a warm install pays for the wheel's size."""
+    candidates = tuple(
+        wheel_candidate(str(wheel)) for wheel in sorted(REAL_WHEELS.glob("*.whl"))
+    )
+
+    def prepare_warm() -> int:
+        reset_caches()
+        for candidate in candidates:
+            candidate.wheel_layout = None
+        return len(prepare_cached_wheels(candidates, warm_real_wheel_cache))
+
+    assert benchmark(prepare_warm) == len(candidates)
+
+
+@pytest.fixture(scope="module")
+def installed_environment(tmp_path_factory: pytest.TempPathFactory) -> str:
+    """A site-packages with 200 installed distributions."""
+    root = tmp_path_factory.mktemp("site-packages")
+    for index in range(200):
+        dist_info = root / f"installed_pkg{index}-1.{index}.dist-info"
+        dist_info.mkdir()
+        dist_info.joinpath("METADATA").write_text(
+            "Metadata-Version: 2.1\n"
+            f"Name: installed-pkg{index}\n"
+            f"Version: 1.{index}\n"
+            "Requires-Dist: installed-pkg0>=1.0\n"
+            'Requires-Dist: installed-pkg1; extra == "extra"\n'
+            "Provides-Extra: extra\n"
+            "Summary: benchmark fixture\n"
+            "\n"
+            "A description body the header parser must skip.\n",
+            encoding="utf-8",
+        )
+    return str(root)
+
+
+def test_warm_installed_state_scan(
+    benchmark: BenchmarkFixture,
+    installed_environment: str,
+    tmp_path_factory: pytest.TempPathFactory,
+) -> None:
+    """The default install's scan of an unchanged environment: every
+    distribution's headers come from the persistent store after one
+    priming run, so the scan is a listing plus one stat per entry."""
+    from cpip.core.metadata import (
+        clear_installed_index,
+        installed_index,
+        use_header_cache,
+    )
+    from cpip.index.metadata_cache import get_wheel_metadata_cache
+
+    cache_dir = str(tmp_path_factory.mktemp("installed-cache"))
+    use_header_cache(get_wheel_metadata_cache(cache_dir))
+    try:
+        clear_installed_index()
+        assert len(installed_index([installed_environment])) == 200
+        flush_persistent_caches(cache_dir)
+        reset_caches()
+        use_header_cache(get_wheel_metadata_cache(cache_dir))
+
+        def scan_warm() -> int:
+            clear_installed_index()
+            return len(installed_index([installed_environment]))
+
+        assert benchmark(scan_warm) == 200
+    finally:
+        use_header_cache(None)
+        clear_installed_index()

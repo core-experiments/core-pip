@@ -7,7 +7,6 @@ import os
 import shutil
 import sys
 
-from cpip.build.build_backend import BackendSpec, prepare_project_metadata
 from cpip.build.metadata import InstalledMetadataDistribution, MetadataDistribution
 from cpip.core.direct_url import ArchiveInfo, DirectUrl, DirInfo, VcsInfo
 from cpip.core.errors import BuildError, CommandError, InstallationError
@@ -23,7 +22,6 @@ from cpip.core.utils import CURRENT_PYTHON_VERSION_FULL
 from cpip.index.artifacts import ArtifactLocator
 from cpip.index.links import Link
 from cpip.resolution.input_requirements import install_req_from_editable
-from cpip.vcs.versioncontrol import vcs
 
 TYPE_CHECKING = False
 
@@ -144,6 +142,10 @@ def direct_url_from_link(
     link_is_in_wheel_cache: bool = False,
 ) -> DirectUrl:
     if link.is_vcs:
+        # Deferred: the VCS backends (and their subprocess support) only for
+        # a VCS link.
+        from cpip.vcs.versioncontrol import vcs
+
         vcs_backend = vcs.get_backend_for_scheme(link.scheme)
         assert vcs_backend
         url, requested_revision, _ = vcs_backend.get_url_rev_and_auth(
@@ -230,6 +232,8 @@ def prepare_editable_source(
 
     if prepare_metadata:
         try:
+            from cpip.build.build_backend import BackendSpec, prepare_project_metadata
+
             metadata = prepare_project_metadata(
                 source_path,
                 editable=True,
@@ -237,6 +241,11 @@ def prepare_editable_source(
             )
         except BuildError as exc:
             if "build_editable" in str(exc):
+                from cpip.build.build_backend import (
+                    BackendSpec,
+                    prepare_project_metadata,
+                )
+
                 backend_spec = BackendSpec.from_project(source_path)
                 if (
                     backend_spec is not None
@@ -253,6 +262,11 @@ def prepare_editable_source(
                 "Cannot import 'setuptools.build_meta'" in str(exc)
                 or "pyproject.toml" in project_files
             ):
+                from cpip.build.build_backend import (
+                    BackendSpec,
+                    prepare_project_metadata,
+                )
+
                 metadata = prepare_project_metadata(
                     source_path,
                     editable=True,

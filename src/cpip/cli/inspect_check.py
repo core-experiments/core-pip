@@ -15,7 +15,7 @@ def run_check(args: list[str]) -> int:
     import sys
 
     from cpip.build import query
-    from cpip.core import cpip_version, light_metadata, packaging, target_python
+    from cpip.core import cpip_version, light_metadata, packaging
 
     distributions = light_metadata.LightDistributionStore().iter(
         skip=cpip_version.CPIP_DISTRIBUTION_NAMES
@@ -31,11 +31,16 @@ def run_check(args: list[str]) -> int:
             print(line, file=sys.stderr)
         return 1
 
+    def supported_tags():  # noqa: ANN202
+        # Deferred: the tag machinery (core.wheel, sysconfig, platform) only
+        # for an environment holding a wheel that is not py3-none-any.
+        from cpip.core import target_python
+
+        return target_python.get_supported()
+
     unsupported = [
         f"{dist.raw_name} {dist.raw_version} is not supported on this platform"
-        for dist in query.unsupported_distributions(
-            distributions, target_python.get_supported()
-        )
+        for dist in query.unsupported_distributions(distributions, supported_tags)
     ]
 
     missing, conflicting = query.check_package_set(package_set)

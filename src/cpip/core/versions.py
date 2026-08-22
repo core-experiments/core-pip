@@ -270,6 +270,9 @@ class Version(tuple):
         return cls(state[0])
 
 
+_INT_ONLY = {int}
+
+
 def is_version_wire(value: object) -> bool:
     """Whether ``value`` has the exact shape of a :meth:`Version.to_wire` record."""
     if not isinstance(value, tuple) or len(value) != 3:
@@ -277,7 +280,7 @@ def is_version_wire(value: object) -> bool:
     public, release, key = value
     if not isinstance(public, str) or not isinstance(release, tuple) or not release:
         return False
-    if not all(type(part) is int for part in release):
+    if set(map(type, release)) != _INT_ONLY:
         return False
     if not isinstance(key, tuple) or len(key) != 4:
         return False
@@ -292,7 +295,7 @@ def is_version_wire(value: object) -> bool:
     if (
         not isinstance(suffix, tuple)
         or len(suffix) != 6
-        or not all(type(part) is int for part in suffix)
+        or set(map(type, suffix)) != _INT_ONLY
     ):
         return False
     return isinstance(local, tuple)

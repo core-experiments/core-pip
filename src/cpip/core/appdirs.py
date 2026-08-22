@@ -21,6 +21,17 @@ def user_cache_dir(appname: str) -> str:
     return os.path.join(home, ".cache", appname)
 
 
+# Bucket names under the versioned cache directory that the CLI needs to
+# name without importing the stores that fill them.
+HTTP_CACHE_BUCKET = "http"
+WHEEL_CACHE_BUCKET = "wheels"
+
+
+def http_cache_path(cache_dir: str) -> str:
+    """The HTTP page cache directory under cache directory ``cache_dir``."""
+    return os.path.join(cache_dir, HTTP_CACHE_BUCKET)
+
+
 def cache_root(explicit: str | None = None) -> str:
     """The user-facing cache root: explicit, then ``CPIP_CACHE_DIR``, then default."""
 

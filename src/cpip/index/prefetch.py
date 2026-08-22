@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 from collections.abc import Hashable
-from concurrent.futures import Future, ThreadPoolExecutor
 from threading import RLock
 from typing import Callable, Generic, TypeVar
+
+TYPE_CHECKING = False
+
+if TYPE_CHECKING:
+    from concurrent.futures import Future
 
 T = TypeVar("T")
 V = TypeVar("V")
@@ -41,6 +45,8 @@ class Prefetcher(Generic[T, V]):
     """Submit each keyed task once and consume it deterministically."""
 
     def __init__(self, loader: Callable[[V], T], max_workers: int) -> None:
+        from concurrent.futures import ThreadPoolExecutor
+
         self.loader = loader
         self.executor = ThreadPoolExecutor(max_workers=max_workers)
         self.futures: dict[Hashable, Future[T]] = {}

@@ -28,6 +28,7 @@ from cpip.core.versions import Version, ZERO_VERSION
 from cpip.core.temp_dir import remove_temp_directory
 from cpip.core.urls import path_to_url
 from cpip.core.wheel import (
+    LazyWheelLayout,
     WheelCandidate,
     validate_wheel_with_metadata,
     wheel_candidate,
@@ -1230,6 +1231,62 @@ class CandidateMaterializer:
 
             return None
 
+    def candidate_from_loaded_metadata(
+        self,
+        candidate: CandidateRecord,
+        path: str,
+    ) -> WheelCandidate | None:
+        """A local wheel's concrete candidate without reopening the wheel.
+
+        The resolver loaded this record's metadata (for the same extras) to
+        decide on it; the concrete candidate repeats it. What the install
+        may still need from the file -- its layout -- is computed only when
+        a consumer asks, which a warm install whose tree is in the archive
+        cache never does.
+        """
+
+        loader = candidate.metadata_loader
+
+        if loader is None:
+            return None
+
+        try:
+            metadata = loader.load()
+
+        except Exception:  # noqa: BLE001 - the full path reports the error
+            return None
+
+        return WheelCandidate(
+            name=metadata.name,
+            version=metadata.version,
+            path=path,
+            dependencies=metadata.dependencies,
+            provided_extras=metadata.provided_extras,
+            requires_python=metadata.requires_python,
+            wheel_layout=LazyWheelLayout(lambda: self.wheel_layout_for(path)),
+        )
+
+    @staticmethod
+    def wheel_layout_for(path: str) -> object | None:
+        """Read a wheel's layout the way eager materialization does."""
+
+        try:
+            with _open_resolver_wheel_archive(path) as archive:
+                dist_info_dir, wheel_metadata_text = validate_wheel_with_metadata(
+                    archive,
+                    os.path.basename(os.fspath(path))[:-4].split("-", 1)[0],
+                )
+
+                return wheel_candidate(
+                    path,
+                    archive=archive,
+                    dist_info_dir=dist_info_dir,
+                    wheel_metadata_text=wheel_metadata_text,
+                ).wheel_layout
+
+        except (OSError, UnsupportedWheel, InstallationError):
+            return None
+
     def iter_materialize(
         self,
         requirement: Requirement,
@@ -1368,6 +1425,15 @@ class CandidateMaterializer:
 
                     built = self.wheel_candidates.get(cache_key)
 
+                    if built is None and candidate.link.is_file:
+                        built = self.candidate_from_loaded_metadata(
+                            candidate,
+                            path,
+                        )
+
+                        if built is not None:
+                            self.wheel_candidates[cache_key] = built
+
                     if built is None:
                         # The same fast reader the resolver used for this
                         # wheel's metadata: zipfile.ZipFile would build a
@@ -1446,8 +1512,9 @@ class CandidateMaterializer:
                 provided_extras=built.provided_extras,
                 requires_python=built.requires_python or candidate.link.requires_python,
                 # The layout is what lets open_wheel_archive read this wheel
-                # again without another central-directory scan.
-                wheel_layout=built.wheel_layout,
+                # again without another central-directory scan; carried as
+                # stored so a lazy one stays unread here.
+                wheel_layout=built.stored_wheel_layout,
                 source_url=candidate.link.url,
                 source_hashes=cache_hashes
                 if cache_hashes is not None

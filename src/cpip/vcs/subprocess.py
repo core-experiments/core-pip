@@ -2,25 +2,27 @@ from __future__ import annotations
 
 import logging
 import os
-import subprocess as subprocess_internal
-from collections.abc import Iterable, Mapping
-from typing import Any, Literal, Protocol
+from collections.abc import Iterable, Mapping, Sequence
 
 from cpip.core.errors import InstallationError
-from cpip.core.subprocess import CommandArgs, command_args_to_argv
+from cpip.core.subprocess import CommandArg, CommandArgs, command_args_to_argv
 
 from .support import HiddenText
 
+TYPE_CHECKING = False
 
-class SpinnerInterface(Protocol):
-    def spin(self) -> None: ...
-    def finish(self, final_status: str) -> None: ...
+if TYPE_CHECKING:
+    from typing import Any, Literal, Protocol
+
+    class SpinnerInterface(Protocol):
+        def spin(self) -> None: ...
+        def finish(self, final_status: str) -> None: ...
 
 
 logger = logging.getLogger("cpip.vcs.subprocess")
 
 
-def make_command(*args: str | HiddenText | CommandArgs) -> CommandArgs:
+def make_command(*args: str | HiddenText | Sequence[CommandArg]) -> CommandArgs:
     result: CommandArgs = []
     for arg in args:
         result.extend(arg if isinstance(arg, list) else [arg])
@@ -41,6 +43,8 @@ def call_subprocess(
     *,
     command_desc: str,
 ) -> str:
+    import subprocess as subprocess_internal
+
     env = os.environ.copy()
     if extra_environ:
         env.update({key: str(value) for key, value in extra_environ.items()})

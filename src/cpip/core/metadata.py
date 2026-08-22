@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import importlib.metadata
 import os
 import pathlib
 import site
@@ -20,13 +19,51 @@ from .wheel_metadata import parse_metadata_headers
 TYPE_CHECKING = False
 
 if TYPE_CHECKING:
+    import importlib.metadata
     from email.message import Message
+    from typing import Protocol
+
+    HeaderIdentity = tuple[str, int, int]
+
+    class HeaderCache(Protocol):
+        """What the installed-state scan asks of a persistent header store.
+
+        ``index/metadata_cache.py:WheelMetadataCache`` is the implementation;
+        the identity is that module's ``metadata_identity`` shape -- absolute
+        path, size, mtime in nanoseconds -- so one table serves both local
+        wheels and installed METADATA files.
+        """
+
+        def prefetch(self, identities: Iterable[HeaderIdentity]) -> None: ...
+
+        def get_reference(
+            self, identity: HeaderIdentity
+        ) -> dict[str, list[str]] | None: ...
+
+        def put(
+            self, identity: HeaderIdentity, headers: dict[str, list[str]]
+        ) -> None: ...
+
 
 stdlib_pkgs = {"python", "wsgiref", "argparse"}
 
 
+def _read_text_file(target: str) -> str | None:
+    try:
+        with open(target, encoding="utf-8") as file:
+            return file.read()
+
+    except (
+        FileNotFoundError,
+        IsADirectoryError,
+        NotADirectoryError,
+        PermissionError,
+    ):
+        return None
+
+
 def _read_raw_metadata_text(
-    raw: importlib.metadata.Distribution,
+    raw: RawDistribution,
 ) -> str | None:
     """Read the metadata file text through the same fallback chain as
     ``importlib.metadata.Distribution.metadata``: ``METADATA``, then
@@ -51,17 +88,7 @@ def _read_raw_metadata_text(
         for filename in ("METADATA", "PKG-INFO", ""):
             target = base if not filename else os.path.join(base, filename)
 
-            try:
-                with open(target, encoding="utf-8") as file:
-                    text = file.read()
-
-            except (
-                FileNotFoundError,
-                IsADirectoryError,
-                NotADirectoryError,
-                PermissionError,
-            ):
-                continue
+            text = _read_text_file(target)
 
             if text:
                 return text
@@ -69,6 +96,61 @@ def _read_raw_metadata_text(
         return None
 
     return raw.read_text("METADATA") or raw.read_text("PKG-INFO") or raw.read_text("")
+
+
+class PathDistribution:
+    """A ``*.dist-info`` or ``*.egg-info`` entry found under a search path.
+
+    The cheap stand-in for ``importlib.metadata.PathDistribution``, answering
+    the same ``_path``, ``read_text`` and ``locate_file`` that cpip reads
+    itself; the parsed ``metadata`` message and ``files`` are delegated to
+    the real one, built on first use, so they behave identically while the
+    commands that never touch them skip that module's import.
+    """
+
+    __slots__ = ("_path", "_stdlib")
+
+    def __init__(self, path: pathlib.Path) -> None:
+        self._path = path
+
+        self._stdlib: importlib.metadata.PathDistribution | None = None
+
+    def read_text(self, filename: str) -> str | None:
+        try:
+            return self._path.joinpath(filename).read_text(encoding="utf-8")
+
+        except (
+            FileNotFoundError,
+            IsADirectoryError,
+            KeyError,
+            NotADirectoryError,
+            PermissionError,
+        ):
+            return None
+
+    def locate_file(self, path: str | os.PathLike[str]) -> pathlib.Path:
+        return self._path.parent / path
+
+    @property
+    def stdlib(self) -> importlib.metadata.PathDistribution:
+        if self._stdlib is None:
+            import importlib.metadata
+
+            self._stdlib = importlib.metadata.PathDistribution(self._path)
+
+        return self._stdlib
+
+    @property
+    def metadata(self) -> importlib.metadata.PackageMetadata:
+        return self.stdlib.metadata
+
+    @property
+    def files(self) -> list[importlib.metadata.PackagePath] | None:
+        return self.stdlib.files
+
+
+if TYPE_CHECKING:
+    RawDistribution = importlib.metadata.Distribution | PathDistribution
 
 
 class InstalledDistribution:
@@ -96,7 +178,7 @@ class InstalledDistribution:
         version: str,
         location: str,
         metadata_location: str | None,
-        raw: importlib.metadata.Distribution,
+        raw: RawDistribution,
     ) -> None:
         self.name = name
 
@@ -122,7 +204,7 @@ class InstalledDistribution:
 
     metadata_location: str | None
 
-    raw: importlib.metadata.Distribution
+    raw: RawDistribution
 
     @property
     def canonical_name(self) -> str:
@@ -185,6 +267,96 @@ def user_lib_path() -> str:
     return site.getusersitepackages()
 
 
+_INFO_SUFFIXES = (".dist-info", ".egg-info")
+
+
+def _iter_raw_distributions(
+    paths: Iterable[str] | None,
+) -> Iterable[RawDistribution]:
+    """Every metadata entry ``importlib.metadata.distributions`` would find.
+
+    That function costs ~12 ms to import (``inspect``, ``email`` and
+    friends), paid by every default install just to list ``*.dist-info``
+    directories. A plain directory root is listed here the way the stdlib's
+    ``FastPath``/``Lookup`` list it -- case-insensitive suffix match on the
+    child name, no other filter -- and every other shape keeps going through
+    the stdlib so its answer is unchanged: a root that is a file (a zip or
+    egg on ``sys.path``), a ``*.egg`` directory (whose ``EGG-INFO`` child
+    counts too), and a default scan while any other finder on
+    ``sys.meta_path`` offers ``find_distributions``.
+    """
+
+    if paths is None:
+        from importlib.machinery import PathFinder
+
+        if any(
+            finder is not PathFinder and hasattr(finder, "find_distributions")
+            for finder in sys.meta_path
+        ):
+            import importlib.metadata
+
+            yield from importlib.metadata.distributions()
+
+            return
+
+        roots = [os.fspath(entry) for entry in sys.path]
+
+    else:
+        roots = [os.fspath(path) for path in paths]
+
+    for root in roots:
+        try:
+            children = os.listdir(root or ".")
+
+        except OSError:
+            if os.path.isfile(root):
+                import importlib.metadata
+
+                yield from importlib.metadata.distributions(path=[root])
+
+            continue
+
+        if os.path.basename(root).lower().endswith(".egg"):
+            import importlib.metadata
+
+            yield from importlib.metadata.distributions(path=[root])
+
+            continue
+
+        for child in children:
+            if child.lower().endswith(_INFO_SUFFIXES):
+                yield PathDistribution(pathlib.Path(root, child))
+
+
+# The persistent store for parsed METADATA headers, if the command wired
+# one (cli/install does, with the wheel metadata cache): a default install
+# otherwise reads and parses every installed distribution's METADATA on
+# every run, ~0.1 ms each, just to learn names and versions that have not
+# changed since the last run. Keyed by the file's path, size and mtime, so a
+# replaced dist-info directory is always a miss.
+_header_cache: HeaderCache | None = None
+
+
+def use_header_cache(cache: HeaderCache | None) -> None:
+    global _header_cache
+
+    _header_cache = cache
+
+
+def _metadata_file_identity(base: str) -> HeaderIdentity | None:
+    """The header-cache key of ``<dist-info>/METADATA`` -- the same shape as
+    ``index/metadata_cache.py:metadata_identity`` -- or None without one."""
+    target = os.path.join(base, "METADATA")
+
+    try:
+        stat = os.stat(target)
+
+    except OSError:
+        return None
+
+    return (os.path.abspath(target), stat.st_size, stat.st_mtime_ns)
+
+
 def _iter_installed_distributions(
     paths: Iterable[str] | None = None,
     names: Collection[str] | None = None,
@@ -193,26 +365,54 @@ def _iter_installed_distributions(
         {canonicalize_name(name) for name in names} if names is not None else None
     )
 
-    if paths is None:
-        distributions = importlib.metadata.distributions()
+    cache = _header_cache
 
-    else:
-        distribution_paths = [os.fspath(path) for path in paths]
+    found: Iterable[RawDistribution] = _iter_raw_distributions(paths)
 
-        distributions = importlib.metadata.distributions(path=distribution_paths)
+    identities: dict[int, HeaderIdentity] = {}
 
-    for dist in distributions:
-        text = _read_raw_metadata_text(dist)
+    if cache is not None:
+        found = list(found)
 
-        if text is None:
-            continue
+        for dist in found:
+            path = getattr(dist, "_path", None)
 
-        # Reading through parse_metadata_headers instead of dist.metadata
-        # avoids the full RFC822 email-parser cost for every installed
-        # distribution -- paid on every default (no --ignore-installed)
-        # resolve, for every package already in the environment, just to
-        # learn its name.
-        headers = parse_metadata_headers(text)
+            if isinstance(path, pathlib.Path):
+                identity = _metadata_file_identity(str(path))
+
+                if identity is not None:
+                    identities[id(dist)] = identity
+
+        cache.prefetch(identities.values())
+
+    for dist in found:
+        headers = None
+
+        identity = identities.get(id(dist))
+
+        if identity is not None and cache is not None:
+            headers = cache.get_reference(identity)
+
+            if headers is None:
+                text = _read_text_file(identity[0])
+
+                if text:
+                    headers = parse_metadata_headers(text)
+
+                    cache.put(identity, headers)
+
+        if headers is None:
+            text = _read_raw_metadata_text(dist)
+
+            if text is None:
+                continue
+
+            # Reading through parse_metadata_headers instead of dist.metadata
+            # avoids the full RFC822 email-parser cost for every installed
+            # distribution -- paid on every default (no --ignore-installed)
+            # resolve, for every package already in the environment, just to
+            # learn its name.
+            headers = parse_metadata_headers(text)
 
         name = headers.get("name", [None])[0]
 

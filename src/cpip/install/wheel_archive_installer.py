@@ -9,12 +9,11 @@ them into a real target directory.
 from __future__ import annotations
 
 import csv
+import functools
 import errno
 import io
 import os
 import shutil
-import tempfile
-from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING
 
 from cpip.core.errors import InstallationError
@@ -115,7 +114,13 @@ def _eligible_target(target: InstallTarget, cache_dir: str) -> str | None:
     return root
 
 
+@functools.lru_cache(maxsize=65536)
 def _mapped_parts(relative: str) -> tuple[str, ...]:
+    """Where a wheel member lands in the target, as path parts.
+
+    A pure function of the member path, memoized: the same members recur
+    across the plan, the staged tree and the RECORD of every install.
+    """
     parts = validate_member_parts(relative)
 
     if not parts:
@@ -141,6 +146,23 @@ def _mapped_parts(relative: str) -> tuple[str, ...]:
 
 def _normalized_destination(parts: tuple[str, ...]) -> tuple[str, ...]:
     return tuple(os.path.normcase(part) for part in parts)
+
+
+def _compiled_parts(mapped: tuple[str, ...]) -> tuple[str, ...] | None:
+    """Where byte-compiling ``mapped`` lands its ``.pyc``, as path parts, or
+    ``None`` when ``_compile_members`` would not compile this member.
+
+    Uses the interpreter's own ``cache_from_source`` so the reserved and
+    preflighted path is exactly the one ``compileall`` writes.
+    """
+    if not mapped[-1].endswith(".py") or mapped[0] in {"bin", "Scripts"}:
+        return None
+
+    import importlib.util
+
+    compiled = importlib.util.cache_from_source("/".join(mapped))
+
+    return tuple(compiled.split("/"))
 
 
 def _reserve_destination(
@@ -190,6 +212,8 @@ def _build_plans(
     requests: tuple[WheelRequest, ...],
     candidates: tuple[WheelInstallCandidate, ...],
     archives: tuple[CachedWheelArchive, ...],
+    *,
+    pycompile: bool = False,
 ) -> tuple[_WheelInstallPlan, ...]:
     trie = _DestinationNode()
 
@@ -199,12 +223,15 @@ def _build_plans(
         zip(requests, candidates, archives, strict=True),
     ):
         for entry in archive.entries:
-            _reserve_destination(
-                trie,
-                _mapped_parts(entry[0]),
-                owner,
-                candidate,
-            )
+            mapped = _mapped_parts(entry[0])
+
+            _reserve_destination(trie, mapped, owner, candidate)
+
+            # A generated .pyc shares the trie so a wheel that also ships it
+            # as a member, or a second wheel producing the same path, is
+            # rejected here rather than overwritten during finalization.
+            if pycompile and (compiled := _compiled_parts(mapped)) is not None:
+                _reserve_destination(trie, compiled, owner, candidate)
 
         scripts = entry_point_scripts(
             os.path.join(archive.tree, archive.dist_info, "entry_points.txt"),
@@ -271,7 +298,8 @@ def _relocate_data(stage: str, archive: CachedWheelArchive) -> None:
     data_roots = {
         parts[0]
         for relative, _, _, _ in archive.entries
-        if (parts := validate_member_parts(relative)) and parts[0].endswith(".data")
+        if relative.partition("/")[0].endswith(".data")
+        and (parts := validate_member_parts(relative))
     }
 
     for data_root in data_roots:
@@ -292,7 +320,10 @@ def _relocate_data(stage: str, archive: CachedWheelArchive) -> None:
             shutil.rmtree(root)
 
 
-def _write_new_file(path: str, contents: bytes) -> None:
+def _write_new_file(path: str, contents: bytes) -> tuple[str, str]:
+    """Write ``contents`` as a new regular file; returns its RECORD row's
+    hash and size, computed from the bytes in hand rather than read back."""
+
     try:
         if os.path.isdir(path) and not os.path.islink(path):
             shutil.rmtree(path)
@@ -308,8 +339,16 @@ def _write_new_file(path: str, contents: bytes) -> None:
     with open(path, "wb") as file:
         file.write(contents)
 
+    return record_metadata_internal(contents)
 
-def _rewrite_metadata(path: str, candidate: WheelInstallCandidate) -> bool:
+
+def _rewrite_metadata(
+    path: str,
+    candidate: WheelInstallCandidate,
+) -> tuple[str, str] | None:
+    """Normalize METADATA's Name; returns the rewritten file's RECORD hash
+    and size, or ``None`` when the file was already normalized."""
+
     with open(path, "rb") as file:
         contents = file.read()
 
@@ -331,9 +370,9 @@ def _rewrite_metadata(path: str, candidate: WheelInstallCandidate) -> bool:
         with open(path, "wb") as file:
             file.write(rewritten)
 
-        return True
+        return record_metadata_internal(rewritten)
 
-    return False
+    return None
 
 
 def _file_metadata(path: str) -> tuple[str, str]:
@@ -341,11 +380,48 @@ def _file_metadata(path: str) -> tuple[str, str]:
         return record_metadata_internal(file.read())
 
 
+def _compile_members(
+    stage: str,
+    archive: CachedWheelArchive,
+) -> list[tuple[str, str, str]]:
+    """Byte-compile the wheel's ``.py`` members in the staged tree and return
+    their ``.pyc`` RECORD rows, the way the transactional route records them.
+
+    Scripts under ``bin``/``Scripts`` are not modules and are left alone.
+    """
+
+    # Deferred: compileall (and importlib.util) are needed only here.
+    import compileall
+    import importlib.util
+
+    rows: list[tuple[str, str, str]] = []
+
+    for relative, _, _, _ in archive.entries:
+        mapped = _mapped_parts(relative)
+
+        if not mapped[-1].endswith(".py") or mapped[0] in {"bin", "Scripts"}:
+            continue
+
+        path = os.path.join(stage, "/".join(mapped))
+
+        if not compileall.compile_file(path, force=True, quiet=1):
+            continue
+
+        compiled = importlib.util.cache_from_source(path)
+
+        compiled_relative = os.path.relpath(compiled, stage).replace(os.sep, "/")
+
+        rows.append((compiled_relative, *_file_metadata(compiled)))
+
+    return rows
+
+
 def _finalize_wheel(
     stage: str,
     plan: _WheelInstallPlan,
     *,
     script_executable: str | None,
+    pycompile: bool = False,
 ) -> None:
     archive = plan.archive
 
@@ -362,12 +438,17 @@ def _finalize_wheel(
     script_members: set[str] = set()
 
     for relative, _, _, _ in archive.entries:
+        # Only a ``<name>.data/scripts/...`` member can be a script; every
+        # entry was validated when the archive was extracted.
+        if "/scripts/" not in relative:
+            continue
+
         parts = validate_member_parts(relative)
 
         if len(parts) >= 3 and parts[0].endswith(".data") and parts[1] == "scripts":
             mapped = _mapped_parts(relative)
 
-            path = os.path.join(stage, *mapped)
+            path = os.path.join(stage, "/".join(mapped))
 
             rewrite_shebang(path, script_executable)
 
@@ -379,22 +460,24 @@ def _finalize_wheel(
 
     direct_url = os.path.join(dist_info_root, "direct_url.json")
 
-    _write_new_file(installer, b"cpip\n")
+    installer_metadata = _write_new_file(installer, b"cpip\n")
 
-    if plan.requested:
-        _write_new_file(requested, b"")
+    requested_metadata = _write_new_file(requested, b"") if plan.requested else None
 
-    else:
+    if not plan.requested:
         try:
             os.unlink(requested)
 
         except FileNotFoundError:
             pass
 
-    if plan.direct_url is not None:
+    direct_url_metadata = (
         _write_new_file(direct_url, plan.direct_url.to_json().encode("utf-8"))
+        if plan.direct_url is not None
+        else None
+    )
 
-    else:
+    if plan.direct_url is None:
         try:
             os.unlink(direct_url)
 
@@ -425,6 +508,9 @@ def _finalize_wheel(
     generated_paths: list[str] = []
 
     if plan.scripts:
+        # Deferred: tempfile only when this route installs.
+        import tempfile
+
         with tempfile.TemporaryDirectory(prefix=".cpip-scripts-", dir=stage) as temp:
             generated = generate_entry_point_files(
                 plan.scripts,
@@ -440,6 +526,8 @@ def _finalize_wheel(
                 os.rename(source, destination)
 
                 generated_paths.append(destination)
+
+    compiled_rows = _compile_members(stage, archive) if pycompile else ()
 
     managed = {
         f"{dist_info}/INSTALLER",
@@ -467,27 +555,22 @@ def _finalize_wheel(
 
             continue
 
-        path = os.path.join(stage, *mapped)
+        path = os.path.join(stage, installed_relative)
 
-        if (
-            installed_relative == f"{dist_info}/METADATA" and metadata_rewritten
-        ) or installed_relative in script_members:
+        if installed_relative == f"{dist_info}/METADATA" and metadata_rewritten:
+            digest, size = metadata_rewritten
+
+        elif installed_relative in script_members:
             digest, size = _file_metadata(path)
 
         rows.append((installed_relative, digest, size))
 
-    installer_metadata = _file_metadata(installer)
-
     rows.append((f"{dist_info}/INSTALLER", *installer_metadata))
 
-    if plan.requested:
-        requested_metadata = _file_metadata(requested)
-
+    if requested_metadata is not None:
         rows.append((f"{dist_info}/REQUESTED", *requested_metadata))
 
-    if plan.direct_url is not None:
-        direct_url_metadata = _file_metadata(direct_url)
-
+    if direct_url_metadata is not None:
         rows.append((f"{dist_info}/direct_url.json", *direct_url_metadata))
 
     for path in generated_paths:
@@ -505,6 +588,8 @@ def _finalize_wheel(
             ),
         )
 
+    rows.extend(compiled_rows)
+
     rows.sort()
 
     record = io.StringIO(newline="")
@@ -517,11 +602,21 @@ def _finalize_wheel(
     )
 
 
-def _plan_destinations(root: str, plan: _WheelInstallPlan) -> set[str]:
-    destinations = {
-        os.path.join(root, *_mapped_parts(relative))
-        for relative, _, _, _ in plan.archive.entries
-    }
+def _plan_destinations(
+    root: str, plan: _WheelInstallPlan, *, pycompile: bool = False
+) -> set[str]:
+    destinations: set[str] = set()
+
+    for relative, _, _, _ in plan.archive.entries:
+        mapped = _mapped_parts(relative)
+
+        destinations.add(os.path.join(root, "/".join(mapped)))
+
+        # The preflight must see the generated .pyc too, so an unowned file
+        # already at that path declines this route rather than being
+        # overwritten in the clone after the check has passed.
+        if pycompile and (compiled := _compiled_parts(mapped)) is not None:
+            destinations.add(os.path.join(root, "/".join(compiled)))
 
     scripts_root = os.path.join(root, "Scripts" if os.name == "nt" else "bin")
 
@@ -600,6 +695,7 @@ def install_wheels_from_archive_cache(
     force: bool = False,
     preserve_existing: bool = False,
     report: bool = True,
+    pycompile: bool = False,
 ) -> tuple[InstallCandidate, ...] | None:
     """Install into a self-contained target from unpacked archives.
 
@@ -621,11 +717,14 @@ def install_wheels_from_archive_cache(
     except OSError:
         return None
 
-    plans = _build_plans(requests, candidates, archives)
+    plans = _build_plans(requests, candidates, archives, pycompile=pycompile)
 
     parent = os.path.dirname(root)
 
     os.makedirs(parent, exist_ok=True)
+
+    # Deferred: tempfile only when this route installs.
+    import tempfile
 
     staging_parent = tempfile.mkdtemp(prefix=".cpip-install-", dir=parent)
 
@@ -695,7 +794,7 @@ def install_wheels_from_archive_cache(
                     if (normalized := _internal_comparison_path(path))
                 )
 
-                destinations = _plan_destinations(root, plan)
+                destinations = _plan_destinations(root, plan, pycompile=pycompile)
 
                 destinations_by_plan[plan] = destinations
 
@@ -724,7 +823,7 @@ def install_wheels_from_archive_cache(
                 destinations = destinations_by_plan.get(plan)
 
                 if destinations is None:
-                    destinations = _plan_destinations(root, plan)
+                    destinations = _plan_destinations(root, plan, pycompile=pycompile)
 
                 for destination in destinations:
                     if (
@@ -749,6 +848,10 @@ def install_wheels_from_archive_cache(
         active_archives = tuple(plan.archive for plan in active_plans)
 
         if len(archives) >= 4 or len(plans) >= 4:
+            # Deferred: concurrent.futures drags in logging and more, and the pure-wheel
+            # fast path imports this module without ever starting a pool.
+            from concurrent.futures import ThreadPoolExecutor
+
             pool = ThreadPoolExecutor(
                 max_workers=min(
                     INSTALL_WORKERS,
@@ -784,6 +887,7 @@ def install_wheels_from_archive_cache(
                     stage,
                     plan,
                     script_executable=script_executable,
+                    pycompile=pycompile,
                 )
 
             tuple(pool.map(finalize, active_plans))
@@ -794,6 +898,7 @@ def install_wheels_from_archive_cache(
                     stage,
                     plan,
                     script_executable=script_executable,
+                    pycompile=pycompile,
                 )
 
         if os.path.lexists(root) != root_existed:

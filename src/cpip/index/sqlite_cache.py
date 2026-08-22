@@ -37,7 +37,7 @@ class SqliteBackedCache:
     __slots__ = ("_db_exists", "conn", "dirty", "lock", "path")
 
     SCHEMA = ""
-    """``CREATE TABLE IF NOT EXISTS ...`` for this cache's table."""
+    """``CREATE TABLE IF NOT EXISTS ...;`` for each of this cache's tables."""
 
     def __init__(self, path: str) -> None:
         self.path = path
@@ -84,7 +84,7 @@ class SqliteBackedCache:
         conn = sqlite3.connect(self.path, check_same_thread=False)
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA busy_timeout=5000")
-        conn.execute(self.SCHEMA)
+        conn.executescript(self.SCHEMA)
         return conn
 
     def flush(self) -> None:

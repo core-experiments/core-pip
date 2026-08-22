@@ -322,3 +322,33 @@ def test_project_wheel_dependencies_marker_filtering() -> None:
     assert [
         r.name for r in project_wheel_dependencies(marked, None, frozenset({"fast"}))
     ] == ["a", "b", "d"]
+
+
+def test_lazy_wheel_layout_is_read_once_and_shared_by_copies() -> None:
+    from cpip.core.versions import Version
+    from cpip.core.wheel import LazyWheelLayout, WheelCandidate
+
+    reads: list[None] = []
+
+    def compute() -> tuple[str, ...]:
+        reads.append(None)
+        return ("demo-1.0.dist-info", (), True)
+
+    candidate = WheelCandidate(
+        name="demo",
+        version=Version("1.0"),
+        path="/wheels/demo-1.0-py3-none-any.whl",
+        dependencies=(),
+        wheel_layout=LazyWheelLayout(compute),
+    )
+    copy = candidate.copy_with(source_kind="wheel")
+
+    assert candidate.wheel_layout_if_loaded is None
+    assert reads == []
+    assert copy.wheel_layout == ("demo-1.0.dist-info", (), True)
+    assert candidate.wheel_layout == ("demo-1.0.dist-info", (), True)
+    assert reads == [None]
+    assert candidate.wheel_layout_if_loaded == ("demo-1.0.dist-info", (), True)
+
+    candidate.wheel_layout = None
+    assert candidate.wheel_layout is None

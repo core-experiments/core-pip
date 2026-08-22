@@ -4,11 +4,14 @@ import locale
 import logging
 import os
 import shlex
-import subprocess
 from os import PathLike
-from typing import cast
 
 from .errors import DiagnosticCpipError
+
+TYPE_CHECKING = False
+
+if TYPE_CHECKING:
+    from typing import Any
 
 VERBOSE = 15
 logging.addLevelName(VERBOSE, "VERBOSE")
@@ -46,13 +49,20 @@ def format_command_args(args: CommandArgs) -> str:
 
 def command_args_to_argv(
     args: CommandArgs,
-) -> list[str | bytes | PathLike[str] | PathLike[bytes]]:
-    return [
-        cast(
-            "str | bytes | PathLike[str] | PathLike[bytes]", getattr(arg, "secret", arg)
-        )
-        for arg in args
-    ]
+) -> list[str | bytes | PathLike[Any]]:
+    return [_argv_item(arg) for arg in args]
+
+
+def _argv_item(arg: CommandArg) -> str | bytes | PathLike[Any]:
+    # A HiddenText argument exposes its real value as ``secret``.
+    secret = getattr(arg, "secret", None)
+    if isinstance(secret, str):
+        return secret
+    if isinstance(arg, (str, bytes, PathLike)):
+        return arg
+    raise TypeError(
+        f"expected str, bytes or os.PathLike object, not {type(arg).__name__}"
+    )
 
 
 def decode_output(data: bytes) -> str:
@@ -70,6 +80,9 @@ def call_subprocess(
     cwd: str | None = None,
     extra_environ: dict[str, str] | None = None,
 ) -> str:
+    # Deferred: the stdlib module is needed only when a process is run.
+    import subprocess
+
     log_level = logging.INFO if show_stdout else VERBOSE
     subprocess_logger.log(log_level, "Running command %s", format_command_args(cmd))
     command = command_args_to_argv(cmd)

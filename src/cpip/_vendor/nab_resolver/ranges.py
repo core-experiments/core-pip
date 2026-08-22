@@ -14,7 +14,10 @@ from __future__ import annotations
 
 from typing import Any, Generic, TypeAlias
 
-from cpip._vendor.typing_extensions import override
+try:
+    from typing import override
+except ImportError:  # pragma: no cover - Python < 3.12
+    from cpip._vendor.typing_extensions import override
 
 from .types import RangeRelation, VersionType
 

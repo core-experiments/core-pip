@@ -32,7 +32,9 @@ cli.entrypoint:main
   |      +--> cli.fast_install:run_cached_remote   missing target + exact remote pins, warm receipt
   |      +--> cli.fast_install:run_local_fallback  non-empty local target, --no-index wheelhouse
   |      +--> cli.fast_install:run                 empty target, --no-index wheelhouse
-  |      `--> run_list
+  |      +--> run_satisfied_install                 plain names, all already installed
+  |      +--> run_list                             no index options; sys.path or --path
+  |      `--> run_freeze                           no -r/--user; no editables unless excluded
   +--> execution context, logging, temp dir (per CommandSpec flags)
   +--> cli.fast:run_install_after_startup / run_lock_after_startup
   `--> run_command -> CommandSpec.load_runner
@@ -52,7 +54,10 @@ Rules:
   own name normalization, requirement parsing, METADATA scanning and minimal
   wheelhouse resolver so a declined command pays only for the token tests. That
   duplication is deliberate; do not consolidate it into the shared
-  implementations.
+  implementations. The modules the fast install path does import keep their
+  rarely-run dependencies (`email.parser`, `importlib.resources`,
+  `concurrent.futures`, `resolution.models`) behind function-level imports;
+  `tests/core/test_startup_imports.py` pins what that path may load.
 
 Shared concerns inside `cli` have one owner each; extend the owner rather than
 re-deriving locally:
@@ -161,7 +166,7 @@ directory without knowing the stores.
 | `index/catalog_cache.py` | entries in `http/` | parsed Simple API catalogs, release summaries (`Version.to_wire()`), target choices; checksum-validated, recompiled from the catalog on any failure |
 | `index/artifact_cache.py` | `artifacts/` | bodies by SHA-256 plus URL receipts |
 | `index/candidate_cache.py` | `wheels/` | wheels built from source |
-| `index/metadata_cache.py` | `metadata.sqlite` | parsed local wheel headers by path, size, mtime |
+| `index/metadata_cache.py` | `metadata.sqlite` | parsed headers of local wheel files and of installed `METADATA` files, and SHA-256 of local wheels, by path, size, mtime |
 | `index/candidate_metadata_cache.py` | `candidate-metadata.sqlite` | dependency metadata reused during resolution |
 | `index/release_facts_cache.py` | `release-facts.marshal` | deterministic release rejection reasons |
 | `cli/fast.py` | `fast-lock-plan/` | rendered lock output |

@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 import sys
 import tempfile
 from contextlib import contextmanager
@@ -84,6 +83,8 @@ class BuildBackendHookCaller:
         yield
 
     def _call(self, hook: str, **kwargs: Any) -> Any:
+        import subprocess
+
         with tempfile.TemporaryDirectory(prefix="cpip-pep517-") as directory:
             input_path = os.path.join(directory, "input.json")
             output_path = os.path.join(directory, "output.json")

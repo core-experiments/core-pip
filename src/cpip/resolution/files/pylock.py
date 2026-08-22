@@ -2,16 +2,12 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import os
 import posixpath
 import re
 import urllib.parse
-
-try:
-    import tomllib
-
-except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility
-    from cpip._vendor import tomli as tomllib
 
 
 from cpip.core.errors import InstallationError
@@ -22,6 +18,22 @@ from cpip.core.urls import path_to_url
 from cpip.core.utils import CURRENT_PYTHON_VERSION_FULL
 from cpip.core.wheel import parse_wheel_filename
 from cpip.resolution.files.models import ParsedRequirement
+
+
+def _toml_module() -> Any:
+    """The TOML parser, imported on first use: only a pylock input needs it."""
+    try:
+        import tomllib
+    except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility
+        from cpip._vendor import tomli as tomllib
+    return tomllib
+
+
+def __getattr__(name: str) -> Any:
+    if name == "tomllib":
+        return _toml_module()
+    raise AttributeError(name)
+
 
 TYPE_CHECKING = False
 
@@ -60,6 +72,8 @@ def parse_pylock(
     *,
     provider: RequirementSource | None,
 ) -> list[ParsedRequirement]:
+    tomllib = _toml_module()
+
     try:
         lock = tomllib.loads(content)
 
