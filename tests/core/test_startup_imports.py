@@ -305,8 +305,40 @@ def test_normal_local_install_stays_import_light(tmp_path: Path) -> None:
 # The list fast path reads dist-info directories and prints; it must not
 # import the typing machinery, the install fast path or the packaging core.
 FAST_LIST_FORBIDDEN = frozenset(
-    {"typing", "cpip.cli.fast_install", "cpip.core.packaging"}
+    {
+        "typing",
+        "cpip.cli.fast_install",
+        "cpip.core.packaging",
+        "cpip.cli.list",
+        "cpip.build.query",
+        "cpip.core.metadata",
+        "argparse",
+    }
 )
+
+
+def test_plain_list_stays_import_light(tmp_path: Path) -> None:
+    """``cpip list`` with no options is the fast path over sys.path."""
+    import os
+
+    from import_harness import SRC, import_snapshot
+
+    site = tmp_path / "site"
+    dist_info = site / "demo_pkg-1.2.dist-info"
+    dist_info.mkdir(parents=True)
+    dist_info.joinpath("METADATA").write_text(
+        "Metadata-Version: 2.1\nName: demo-pkg\nVersion: 1.2\n",
+        encoding="utf-8",
+    )
+    env = {"PYTHONPATH": f"{site}{os.pathsep}{SRC}"}
+
+    snapshot = import_snapshot(["list"], cwd=tmp_path, env=env)
+    import re
+
+    assert re.search(r"^demo-pkg +1\.2$", snapshot.stdout, re.M), snapshot.describe()
+    assert not (set(snapshot.modules) & FAST_LIST_FORBIDDEN), sorted(
+        set(snapshot.modules) & FAST_LIST_FORBIDDEN
+    )
 
 
 def test_fast_list_stays_import_light(tmp_path: Path) -> None:

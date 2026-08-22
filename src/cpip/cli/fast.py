@@ -124,6 +124,8 @@ def extend_requirements(
 
 FORMATS = frozenset(("columns", "json", "freeze"))
 LIST_VALUE_OPTIONS = ("--path", "--format", "--exclude")
+STDLIB_NAMES = frozenset(("python", "wsgiref", "argparse"))
+"""``core.light_metadata.stdlib_pkgs``, which ``list`` always skips."""
 
 
 class ListOptions:
@@ -160,117 +162,287 @@ def parse_list_arguments(args: list[str]) -> ListOptions | None:
         else:
             return None
         index += 1
-    if not options.paths:
-        return None
+    if "pip" in options.excludes:
+        from cpip.core.cpip_version import CPIP_DISTRIBUTION_NAMES
+
+        options.excludes.update(
+            canonicalize_name(name) for name in CPIP_DISTRIBUTION_NAMES
+        )
     return options
 
 
-def parse_metadata(path: str) -> dict[str, str] | None:
-    metadata_path = os.path.join(path, "METADATA")
+def _read_headers(path: str) -> dict[str, str] | None:
+    """First value of every header in an RFC 822-style metadata file, the
+    way ``parse_metadata_headers`` reads it; None when unreadable or empty."""
     try:
-        with open(metadata_path, encoding="utf-8") as file:
-            lines = file.read().splitlines()
+        with open(path, encoding="utf-8") as file:
+            text = file.read()
     except OSError:
         return None
-    result: dict[str, str] = {}
-    for line in lines:
+    if not text:
+        return None
+    headers: dict[str, str] = {}
+    last = None
+    for line in text.splitlines():
         if not line:
             break
-        key, separator, value = line.partition(":")
-        if separator:
-            result[key.lower()] = value.strip()
-    if not result.get("name") or not result.get("version"):
-        return None
-    return result
-
-
-def iter_distributions(paths: list[str]) -> list[dict[str, str]]:
-    result: list[dict[str, str]] = []
-    for root in paths:
-        try:
-            with os.scandir(root) as entries:
-                entry_names = [
-                    entry.name
-                    for entry in entries
-                    if entry.is_dir()
-                    and (
-                        entry.name.endswith(".dist-info")
-                        or entry.name.endswith(".egg-info")
-                    )
-                ]
-        except OSError:
+        if line[0] in " \t":
+            if last is not None:
+                headers[last] += "\n" + line
             continue
-        for name in sorted(entry_names):
-            metadata = parse_metadata(os.path.join(root, name))
-            if metadata is None:
+        key, separator, value = line.partition(":")
+        if not separator:
+            break
+        last = key.strip().lower()
+        headers.setdefault(last, value.strip())
+    return headers
+
+
+def _info_headers(path: str) -> dict[str, str] | None:
+    """Headers of one dist-info/egg-info entry, read the way the
+    installed-state scan reads it: METADATA, then PKG-INFO, then the entry
+    itself for a flat egg-info file. None for an entry without a name and
+    version, which the scan skips."""
+    for filename in ("METADATA", "PKG-INFO", ""):
+        headers = _read_headers(os.path.join(path, filename) if filename else path)
+        if headers is None:
+            continue
+        if headers.get("name") and headers.get("version"):
+            return headers
+        return None
+    return None
+
+
+class InstalledEntry:
+    """One ``*.dist-info``/``*.egg-info`` entry a directory listing found."""
+
+    __slots__ = ("headers", "info_path", "location", "name", "root")
+
+    def __init__(self, root: str, child: str, headers: dict[str, str]) -> None:
+        self.root = root
+        self.info_path = os.path.join(root, child)
+        self.headers = headers
+        self.name = canonicalize_name(headers["name"])
+        # What ``Distribution.locate_file("")`` answers: the parent of the
+        # entry as pathlib renders it.
+        self.location = os.path.normpath(root) if root else "."
+
+
+def scan_installed(
+    roots: list[str], names: set[str] | None = None
+) -> list[InstalledEntry] | None:
+    """Every entry the installed-state scan would report under ``roots``, in
+    its order: roots in sequence, directory listing order within a root.
+
+    None means the answer is not this cheap and the full scan must decide:
+    a root that is a file (a zip or egg on sys.path), a ``*.egg`` directory,
+    a root spelled with ``..`` (whose location pathlib renders differently),
+    or -- with ``names`` -- two entries for one requested name in one root.
+    With ``names``, only those names are read; entries are matched on the
+    directory name (PEP 427) and confirmed against the Name header.
+    """
+    found: list[InstalledEntry] = []
+    for root in roots:
+        root = os.fspath(root)
+        if ".." in root.split(os.sep):
+            return None
+        try:
+            children = os.listdir(root or ".")
+        except OSError:
+            if os.path.isfile(root):
+                return None
+            continue
+        if os.path.basename(root).lower().endswith(".egg"):
+            return None
+        seen: set[str] = set()
+        for child in children:
+            low = child.lower()
+            if low.endswith(".dist-info"):
+                stem = child[:-10]
+            elif low.endswith(".egg-info"):
+                stem = child[:-9]
+            else:
                 continue
-            metadata["location"] = root
-            result.append(metadata)
-    return result
+            if names is not None:
+                name = canonicalize_name(stem.partition("-")[0])
+                if name not in names:
+                    continue
+                if name in seen:
+                    return None
+                seen.add(name)
+            headers = _info_headers(os.path.join(root, child))
+            if headers is None:
+                continue
+            entry = InstalledEntry(root, child, headers)
+            if names is not None and entry.name not in names:
+                continue
+            found.append(entry)
+    return found
+
+
+def _other_distribution_finders() -> bool:
+    from importlib.machinery import PathFinder
+
+    return any(
+        finder is not PathFinder and hasattr(finder, "find_distributions")
+        for finder in sys.meta_path
+    )
+
+
+def canonical_release(value: str) -> bool:
+    """Whether ``Version(value)`` renders back as ``value``: dotted integers
+    without leading zeros, the one spelling that needs no normalization."""
+    parts = value.split(".")
+    return all(
+        part.isdigit() and part.isascii() and str(int(part)) == part for part in parts
+    )
 
 
 def json_string(value: str) -> str:
-    replacements = {
-        '"': '\\"',
-        "\\": "\\\\",
-        "\b": "\\b",
-        "\f": "\\f",
-        "\n": "\\n",
-        "\r": "\\r",
-        "\t": "\\t",
-    }
+    """``json.dumps(value)``: ASCII output with the same escapes."""
     parts = ['"']
     for char in value:
-        replacement = replacements.get(char)
-        if replacement is not None:
-            parts.append(replacement)
-        elif ord(char) < 0x20:
-            parts.append(f"\\u{ord(char):04x}")
+        code = ord(char)
+        if char == '"':
+            parts.append('\\"')
+        elif char == "\\":
+            parts.append("\\\\")
+        elif char == "\n":
+            parts.append("\\n")
+        elif char == "\r":
+            parts.append("\\r")
+        elif char == "\t":
+            parts.append("\\t")
+        elif char == "\b":
+            parts.append("\\b")
+        elif char == "\f":
+            parts.append("\\f")
+        elif code < 0x20 or code > 0x7E:
+            if code > 0xFFFF:
+                code -= 0x10000
+                parts.append(
+                    f"\\u{0xD800 | (code >> 10):04x}\\u{0xDC00 | (code & 0x3FF):04x}"
+                )
+            else:
+                parts.append(f"\\u{code:04x}")
         else:
             parts.append(char)
     parts.append('"')
     return "".join(parts)
 
 
-def render_json(distributions: list[dict[str, str]], verbose: bool) -> str:
-    if not distributions:
-        return "[]"
-    items = []
-    for distribution in distributions:
-        fields = [
-            f'"name": {json_string(distribution["name"])}',
-            f'"version": {json_string(distribution["version"])}',
-        ]
-        if verbose:
-            fields.append(f'"location": {json_string(distribution["location"])}')
-        items.append("{" + ", ".join(fields) + "}")
-    return "[" + ", ".join(items) + "]"
+def _editable_location(entry: InstalledEntry) -> str | None:
+    """``editable_project_location`` for an entry with a direct_url.json."""
+    from cpip.core.direct_url import DirectUrl
+    from cpip.core.urls import url_to_path
+
+    try:
+        with open(
+            os.path.join(entry.info_path, "direct_url.json"), encoding="utf-8"
+        ) as file:
+            direct_url = DirectUrl.from_json(file.read())
+    except (OSError, ValueError):
+        return None
+    if direct_url.is_local_editable():
+        return url_to_path(direct_url.url)
+    return None
+
+
+def _installer(entry: InstalledEntry) -> str:
+    try:
+        with open(os.path.join(entry.info_path, "INSTALLER"), encoding="utf-8") as file:
+            return next(
+                (line.strip() for line in file.read().splitlines() if line.strip()), ""
+            )
+    except OSError:
+        return ""
 
 
 def run_list(args: list[str]) -> int | None:
+    """``cpip list`` over the interpreter's own search path or ``--path``
+    directories, rendered as the normal path renders it."""
     options = parse_list_arguments(args)
     if options is None:
         return None
-    distributions = [
-        distribution
-        for distribution in iter_distributions(options.paths)
-        if canonicalize_name(distribution["name"]) not in options.excludes
+    if options.paths:
+        roots = options.paths
+    else:
+        if os.environ.get("CPIP_TARGET_PREFIX") or _other_distribution_finders():
+            return None
+        roots = [os.fspath(entry) for entry in sys.path]
+    entries = scan_installed(roots)
+    if entries is None:
+        return None
+    entries = [
+        entry
+        for entry in entries
+        if entry.name not in STDLIB_NAMES and entry.name not in options.excludes
     ]
-    distributions.sort(key=lambda item: canonicalize_name(item["name"]))
+    entries.sort(key=lambda entry: entry.name)
+
+    # Only a direct_url.json can make an entry editable here; an egg-info
+    # entry's egg-link lookup is the normal path's.
+    if any(entry.info_path.lower().endswith(".egg-info") for entry in entries):
+        return None
+    editable: dict[int, str | None] = {}
+    for entry in entries:
+        if os.path.exists(os.path.join(entry.info_path, "direct_url.json")):
+            editable[id(entry)] = _editable_location(entry)
+
+    verbose = options.verbose > 0
+    if options.format in ("json", "freeze"):
+        # These formats print the parsed version, which for any other
+        # spelling is the full parser's rendering.
+        if not all(canonical_release(entry.headers["version"]) for entry in entries):
+            return None
 
     if options.format == "json":
-        print(render_json(distributions, options.verbose > 0))
-        return 0
-    if options.format == "freeze":
-        for distribution in distributions:
-            print(f"{distribution['name']}=={distribution['version']}")
+        items = []
+        for entry in entries:
+            fields = [
+                f'"name": {json_string(entry.headers["name"])}',
+                f'"version": {json_string(entry.headers["version"])}',
+            ]
+            if verbose:
+                fields.append(f'"location": {json_string(entry.location)}')
+                fields.append(f'"installer": {json_string(_installer(entry))}')
+            location = editable.get(id(entry))
+            if location:
+                fields.append(f'"editable_project_location": {json_string(location)}')
+            items.append("{" + ", ".join(fields) + "}")
+        print("[" + ", ".join(items) + "]")
         return 0
 
-    rows = [["Package", "Version"]]
-    rows.extend(
-        [distribution["name"], distribution["version"]]
-        for distribution in distributions
-    )
+    if options.format == "freeze":
+        for entry in entries:
+            line = f"{entry.headers['name']}=={entry.headers['version']}"
+            if verbose:
+                line = f"{line} ({entry.location})"
+            print(line)
+        return 0
+
+    build_tags = []
+    for entry in entries:
+        wheel = _read_headers(os.path.join(entry.info_path, "WHEEL"))
+        build_tags.append(wheel.get("build") if wheel else None)
+    header = ["Package", "Version"]
+    if any(build_tags):
+        header.append("Build")
+    has_editables = any(editable.values())
+    if has_editables:
+        header.append("Editable project location")
+    if verbose:
+        header.extend(("Location", "Installer"))
+    rows = [header]
+    for index, entry in enumerate(entries):
+        row = [entry.headers["name"], entry.headers["version"]]
+        if any(build_tags):
+            row.append(build_tags[index] or "")
+        if has_editables:
+            row.append(editable.get(id(entry)) or "")
+        if verbose:
+            row.extend((entry.location, _installer(entry)))
+        rows.append(row)
     widths = [
         max(len(str(row[i])) if i < len(row) else 0 for row in rows)
         for i in range(len(rows[0]))
@@ -652,90 +824,18 @@ def parse_satisfied_arguments(args: list[str]) -> SatisfiedOptions | None:
     return options
 
 
-def _metadata_name_version(path: str) -> tuple[str, str] | None:
-    """Name and Version of one dist-info/egg-info entry, read the way the
-    installed-state scan reads it: METADATA, then PKG-INFO, then the entry
-    itself for a flat egg-info file."""
-    for filename in ("METADATA", "PKG-INFO", ""):
-        target = os.path.join(path, filename) if filename else path
-        try:
-            with open(target, encoding="utf-8") as file:
-                text = file.read()
-        except OSError:
-            continue
-        if not text:
-            continue
-        headers: dict[str, str] = {}
-        last = None
-        for line in text.splitlines():
-            if not line:
-                break
-            if line[0] in " \t":
-                if last is not None:
-                    headers[last] += "\n" + line
-                continue
-            key, separator, value = line.partition(":")
-            if not separator:
-                break
-            last = key.strip().lower()
-            headers.setdefault(last, value.strip())
-        name = headers.get("name")
-        version = headers.get("version")
-        if not name or not version:
-            return None
-        return name, version
-    return None
-
-
 def installed_versions(names: set[str]) -> dict[str, str] | None:
     """The installed version of each requested canonical name, found the way
     the installed-state scan finds it: sys.path in order, the first
-    distribution of a name wins. None means the answer is not this cheap --
-    a zip or egg on sys.path, another distribution finder, or two entries for
-    one name in one directory -- and the full scan must decide.
-
-    Entries are matched on their directory name, which PEP 427 ties to the
-    distribution's name; the Name header is still checked before use.
-    """
-    from importlib.machinery import PathFinder
-
-    if any(
-        finder is not PathFinder and hasattr(finder, "find_distributions")
-        for finder in sys.meta_path
-    ):
+    distribution of a name wins; None when the full scan must decide."""
+    if _other_distribution_finders():
+        return None
+    entries = scan_installed([os.fspath(entry) for entry in sys.path], names)
+    if entries is None:
         return None
     found: dict[str, str] = {}
-    for root in sys.path:
-        root = os.fspath(root)
-        try:
-            children = os.listdir(root or ".")
-        except OSError:
-            if os.path.isfile(root):
-                return None
-            continue
-        if os.path.basename(root).lower().endswith(".egg"):
-            return None
-        seen: set[str] = set()
-        for child in children:
-            low = child.lower()
-            if low.endswith(".dist-info"):
-                stem = child[:-10]
-            elif low.endswith(".egg-info"):
-                stem = child[:-9]
-            else:
-                continue
-            name = canonicalize_name(stem.partition("-")[0])
-            if name not in names:
-                continue
-            if name in seen:
-                return None
-            seen.add(name)
-            if name in found:
-                continue
-            header = _metadata_name_version(os.path.join(root, child))
-            if header is None or canonicalize_name(header[0]) != name:
-                continue
-            found[name] = header[1]
+    for entry in entries:
+        found.setdefault(entry.name, entry.headers["version"])
     return found
 
 
