@@ -6,7 +6,6 @@ import io
 import os
 import stat
 import sys
-import zipfile
 
 from cpip.core.errors import InstallationError
 
@@ -86,6 +85,9 @@ def write_windows_script(path: str, script: str, *, gui: bool) -> None:
     from importlib.resources import files
 
     launcher = (files("cpip._vendor.launchers") / launcher_name).read_bytes()
+
+    # Deferred: zipfile only for a Windows launcher.
+    import zipfile
 
     archive = io.BytesIO()
 
@@ -209,6 +211,8 @@ def script_matches(
     path: str,
     scripts: dict[str, tuple[str, bool]],
 ) -> bool:
+    import zipfile
+
     path_text = os.fspath(path)
 
     basename = os.path.basename(path_text)

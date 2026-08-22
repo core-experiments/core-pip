@@ -4,7 +4,6 @@ import os
 import re
 import sys
 import sysconfig
-import zipfile
 from collections.abc import Collection, Mapping
 from typing import TYPE_CHECKING, Protocol
 
@@ -21,6 +20,7 @@ from .wheel_metadata import (
 )
 
 if TYPE_CHECKING:
+    import zipfile
     from email.parser import Parser as EmailParser
     from email.message import Message
     from typing import IO, NoReturn
@@ -906,6 +906,8 @@ def read_core_metadata_headers(
 
 
 def read_metadata_message(path: str):
+    import zipfile
+
     with zipfile.ZipFile(path) as archive:
         return read_metadata_message_internal(archive, path)
 
@@ -1020,6 +1022,8 @@ def wheel_dist_info_dir(source: ZipArchiveSource, name: str) -> str:
 
 
 def read_wheel_archive_member(source: ZipArchiveSource, path: str) -> bytes:
+    import zipfile
+
     try:
         return source.read(path)
 
@@ -1175,6 +1179,8 @@ def wheel_candidate_from_path(
     identity match here means we can skip both without losing any structural
     validation that wasn't already going to happen again downstream.
     """
+    import zipfile
+
     requested_extras = frozenset(extras or ())
 
     if not include_layout:

@@ -14,7 +14,6 @@ import errno
 import io
 import os
 import shutil
-import tempfile
 from typing import TYPE_CHECKING
 
 from cpip.core.errors import InstallationError
@@ -487,6 +486,9 @@ def _finalize_wheel(
     generated_paths: list[str] = []
 
     if plan.scripts:
+        # Deferred: tempfile only when this route installs.
+        import tempfile
+
         with tempfile.TemporaryDirectory(prefix=".cpip-scripts-", dir=stage) as temp:
             generated = generate_entry_point_files(
                 plan.scripts,
@@ -688,6 +690,9 @@ def install_wheels_from_archive_cache(
     parent = os.path.dirname(root)
 
     os.makedirs(parent, exist_ok=True)
+
+    # Deferred: tempfile only when this route installs.
+    import tempfile
 
     staging_parent = tempfile.mkdtemp(prefix=".cpip-install-", dir=parent)
 

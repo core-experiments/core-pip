@@ -19,7 +19,6 @@ import marshal
 import os
 import stat
 import sys
-import tempfile
 from collections.abc import Iterable, Sequence
 
 from cpip.cli.fast import consume_option, extend_requirements
@@ -366,6 +365,9 @@ class FastInstallMetadataCache:
             shard = os.path.dirname(entry)
             try:
                 os.makedirs(shard, exist_ok=True)
+                # Deferred: tempfile (and shutil behind it) only when a tree is published.
+                import tempfile
+
                 temporary = tempfile.mkdtemp(prefix=f".{tree_key[:12]}-", dir=shard)
             except OSError:
                 return

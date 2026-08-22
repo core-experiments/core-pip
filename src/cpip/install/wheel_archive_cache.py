@@ -14,9 +14,7 @@ import io
 import marshal
 import os
 import shutil
-import tempfile
 import time
-import zipfile
 from collections.abc import Iterable
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Generator
@@ -24,7 +22,6 @@ from typing import TYPE_CHECKING, Generator
 from cpip.core.errors import InstallationError
 from cpip.core.utils import CACHE_INTERPRETER_TAG
 from cpip.core.wheel import validate_wheel
-from cpip.index.metadata_cache import get_wheel_metadata_cache, metadata_identity
 from cpip.install.wheel_archive import (
     copy_member_with_metadata,
     validate_member_parts,
@@ -32,6 +29,7 @@ from cpip.install.wheel_archive import (
 )
 
 if TYPE_CHECKING:
+    import zipfile
     from typing import Protocol, TypeVar
 
     from cpip.core.direct_url import DirectUrl
@@ -133,6 +131,10 @@ def prefetch_wheel_digests(
     cache_dir: str,
 ) -> None:
     """One database read for the recorded digests of a whole batch."""
+    # Deferred: the metadata store (and sqlite3) only for wheels without a
+    # supplied hash.
+    from cpip.index.metadata_cache import get_wheel_metadata_cache, metadata_identity
+
     identities = [
         identity
         for candidate in candidates
@@ -162,6 +164,11 @@ def wheel_digest(candidate: WheelInstallCandidate, cache_dir: str | None = None)
     identity = None
 
     if cache_dir is not None:
+        from cpip.index.metadata_cache import (
+            get_wheel_metadata_cache,
+            metadata_identity,
+        )
+
         identity = metadata_identity(candidate.path)
 
         if identity is not None:
@@ -324,6 +331,9 @@ def _extract_archive(
 ) -> CachedWheelArchive:
     shard = os.path.dirname(entry_root)
 
+    # Deferred: tempfile only when a wheel is actually extracted.
+    import tempfile
+
     temporary = tempfile.mkdtemp(prefix=f".{digest[:12]}-", dir=shard)
 
     tree = os.path.join(temporary, "tree")
@@ -331,6 +341,9 @@ def _extract_archive(
     os.mkdir(tree)
 
     try:
+        # Deferred: zipfile only when a wheel is actually extracted.
+        import zipfile
+
         with zipfile.ZipFile(candidate.path) as archive:
             layout = candidate.wheel_layout
 

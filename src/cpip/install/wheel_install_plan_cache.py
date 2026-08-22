@@ -11,10 +11,8 @@ than re-hashes, an existing tree's contents against the recorded entries.
 from __future__ import annotations
 
 import hashlib
-import json
 import marshal
 import os
-import tempfile
 import time
 from types import MappingProxyType
 
@@ -166,6 +164,9 @@ def _exact_install_plan_key(
     if not normalized:
         return None
 
+    # Deferred: json only when a receipt key is built.
+    import json
+
     payload = json.dumps(
         (tuple(sorted(normalized)), context),
         ensure_ascii=True,
@@ -245,6 +246,9 @@ def save_cached_install_plan(
         directory = os.path.dirname(path)
 
         os.makedirs(directory, exist_ok=True)
+
+        # Deferred: tempfile only when a receipt is written.
+        import tempfile
 
         descriptor, temporary = tempfile.mkstemp(prefix=f".{key[:12]}-", dir=directory)
 
