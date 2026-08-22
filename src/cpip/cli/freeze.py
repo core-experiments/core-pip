@@ -9,7 +9,6 @@ import re
 import site
 import sys
 from collections.abc import Generator, Iterable
-from typing import NamedTuple
 
 from cpip.cli.parsers.freeze import create_parser
 from cpip.core.cpip_version import CPIP_DISTRIBUTION_NAMES
@@ -27,10 +26,16 @@ logger = logging.getLogger(__name__)
 VALID_NAME = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$")
 
 
-class EditableInfo(NamedTuple):
-    requirement: str
+if TYPE_CHECKING:
+    from typing import NamedTuple
 
-    comments: list[str]
+    class EditableInfo(NamedTuple):
+        requirement: str
+
+        comments: list[str]
+
+else:
+    EditableInfo = collections.namedtuple("EditableInfo", ["requirement", "comments"])
 
 
 def freeze(

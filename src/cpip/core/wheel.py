@@ -5,8 +5,6 @@ import re
 import sys
 import sysconfig
 from collections.abc import Callable, Collection, Mapping
-from typing import TYPE_CHECKING, Protocol
-
 from functools import lru_cache
 
 from .caches import bounded_put, memoized, register_table
@@ -19,11 +17,72 @@ from .wheel_metadata import (
     parse_metadata_member,
 )
 
+TYPE_CHECKING = False
+
 if TYPE_CHECKING:
     import zipfile
     from email.parser import Parser as EmailParser
     from email.message import Message
-    from typing import IO, NoReturn
+    from typing import IO, NoReturn, Protocol
+
+    # Structural types used only in annotations: typing stays off the
+    # paths (check, list, show) that import this module for its parsers.
+    class ZipEntryInfo(Protocol):
+        """The subset of ``zipfile.ZipInfo`` these functions read.
+
+        Satisfied structurally by both ``zipfile.ZipInfo`` and lighter adapters
+        over faster archive readers, so this module never needs to know such an
+        adapter exists. Declared as read-only properties (rather than plain
+        attributes) so an immutable adapter -- e.g. a ``NamedTuple`` -- also
+        satisfies it: a plain attribute requires write support too, which a
+        read-only field doesn't have.
+        """
+
+        @property
+        def CRC(self) -> int: ...
+
+        @property
+        def compress_type(self) -> int: ...
+
+        @property
+        def external_attr(self) -> int: ...
+
+        @property
+        def compress_size(self) -> int: ...
+
+        @property
+        def file_size(self) -> int: ...
+
+        @property
+        def header_offset(self) -> int: ...
+
+    class ZipArchiveSource(Protocol):
+        """The subset of ``zipfile.ZipFile`` these functions read from."""
+
+        @property
+        def NameToInfo(self) -> Mapping[str, ZipEntryInfo]: ...
+
+        def getinfo(self, name: str) -> ZipEntryInfo: ...
+
+        def read(self, name: str) -> bytes: ...
+
+        def namelist(self) -> list[str]: ...
+
+        def open(self, name: str) -> IO[bytes]: ...
+
+    class MetadataCache(Protocol):
+        """Minimal cache contract needed by wheel parsing."""
+
+        def get_reference(
+            self,
+            identity: tuple[str, int, int],
+        ) -> dict[str, list[str]] | None: ...
+
+        def put(
+            self,
+            identity: tuple[str, int, int],
+            headers: dict[str, list[str]],
+        ) -> None: ...
 
 
 class PureWheelCandidate:
@@ -41,51 +100,6 @@ class PureWheelCandidate:
     path: str
 
 
-class ZipEntryInfo(Protocol):
-    """The subset of ``zipfile.ZipInfo`` these functions read.
-
-    Satisfied structurally by both ``zipfile.ZipInfo`` and lighter adapters
-    over faster archive readers, so this module never needs to know such an
-    adapter exists. Declared as read-only properties (rather than plain
-    attributes) so an immutable adapter -- e.g. a ``NamedTuple`` -- also
-    satisfies it: a plain attribute requires write support too, which a
-    read-only field doesn't have.
-    """
-
-    @property
-    def CRC(self) -> int: ...
-
-    @property
-    def compress_type(self) -> int: ...
-
-    @property
-    def external_attr(self) -> int: ...
-
-    @property
-    def compress_size(self) -> int: ...
-
-    @property
-    def file_size(self) -> int: ...
-
-    @property
-    def header_offset(self) -> int: ...
-
-
-class ZipArchiveSource(Protocol):
-    """The subset of ``zipfile.ZipFile`` these functions read from."""
-
-    @property
-    def NameToInfo(self) -> Mapping[str, ZipEntryInfo]: ...
-
-    def getinfo(self, name: str) -> ZipEntryInfo: ...
-
-    def read(self, name: str) -> bytes: ...
-
-    def namelist(self) -> list[str]: ...
-
-    def open(self, name: str) -> IO[bytes]: ...
-
-
 MACOS_COMPATIBLE_ARCHES = {
     "x86_64": frozenset(("x86_64", "intel", "universal")),
     "i386": frozenset(("i386", "intel", "universal")),
@@ -97,21 +111,6 @@ MACOS_COMPATIBLE_ARCHES = {
     "universal": frozenset(("universal",)),
     "universal2": frozenset(("universal2",)),
 }
-
-
-class MetadataCache(Protocol):
-    """Minimal cache contract needed by wheel parsing."""
-
-    def get_reference(
-        self,
-        identity: tuple[str, int, int],
-    ) -> dict[str, list[str]] | None: ...
-
-    def put(
-        self,
-        identity: tuple[str, int, int],
-        headers: dict[str, list[str]],
-    ) -> None: ...
 
 
 def Parser() -> EmailParser:

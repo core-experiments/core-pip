@@ -5,9 +5,13 @@ import logging
 import os
 import shlex
 from os import PathLike
-from typing import cast
 
 from .errors import DiagnosticCpipError
+
+TYPE_CHECKING = False
+
+if TYPE_CHECKING:
+    from typing import Any
 
 VERBOSE = 15
 logging.addLevelName(VERBOSE, "VERBOSE")
@@ -45,13 +49,20 @@ def format_command_args(args: CommandArgs) -> str:
 
 def command_args_to_argv(
     args: CommandArgs,
-) -> list[str | bytes | PathLike[str] | PathLike[bytes]]:
-    return [
-        cast(
-            "str | bytes | PathLike[str] | PathLike[bytes]", getattr(arg, "secret", arg)
-        )
-        for arg in args
-    ]
+) -> list[str | bytes | PathLike[Any]]:
+    return [_argv_item(arg) for arg in args]
+
+
+def _argv_item(arg: CommandArg) -> str | bytes | PathLike[Any]:
+    # A HiddenText argument exposes its real value as ``secret``.
+    secret = getattr(arg, "secret", None)
+    if isinstance(secret, str):
+        return secret
+    if isinstance(arg, (str, bytes, PathLike)):
+        return arg
+    raise TypeError(
+        f"expected str, bytes or os.PathLike object, not {type(arg).__name__}"
+    )
 
 
 def decode_output(data: bytes) -> str:

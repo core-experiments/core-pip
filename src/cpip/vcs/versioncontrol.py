@@ -8,22 +8,13 @@ import shutil
 import sys
 import urllib.parse
 from collections.abc import Iterable, Iterator, Mapping
-from typing import (
-    Any,
-    Literal,
-    cast,
-)
 
 from cpip.core.errors import InstallationError
 from cpip.core.subprocess import CommandArgs, format_command_args
 from cpip.core.utils import AuthInfo, display_path
 
 from .errors import BadCommand
-from .subprocess import (
-    SpinnerInterface,
-    call_subprocess,
-    make_command,
-)
+from .subprocess import call_subprocess, make_command
 from .support import (
     HiddenText,
     ask_path_exists,
@@ -31,6 +22,14 @@ from .support import (
     hide_value,
     is_installable_dir,
 )
+
+TYPE_CHECKING = False
+
+if TYPE_CHECKING:
+    from typing import Any, Literal
+
+    from .subprocess import SpinnerInterface
+
 
 logger = logging.getLogger(__name__)
 
@@ -314,13 +313,24 @@ class VersionControl:
             {repository_url}@{revision}#egg={project_name}
 
         """
-        repo_url = cls.get_remote_url(repo_dir)
+        # Three independent questions, each usually one spawn of the VCS
+        # command (a few milliseconds of waiting apiece): ask them at once
+        # and wait once. Results are read in the original order, so a
+        # missing remote still wins over any later failure.
+        from concurrent.futures import ThreadPoolExecutor
+
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            url_future = pool.submit(cls.get_remote_url, repo_dir)
+            revision_future = pool.submit(cls.get_requirement_revision, repo_dir)
+            subdir_future = pool.submit(cls.get_subdirectory, repo_dir)
+
+            repo_url = url_future.result()
+            revision = revision_future.result()
+            subdir = subdir_future.result()
 
         if cls.should_add_vcs_url_prefix(repo_url):
             repo_url = f"{cls.name}+{repo_url}"
 
-        revision = cls.get_requirement_revision(repo_dir)
-        subdir = cls.get_subdirectory(repo_dir)
         req = make_vcs_requirement_url(repo_url, revision, project_name, subdir=subdir)
 
         return req
@@ -654,7 +664,7 @@ class VersionControl:
         This is simply a wrapper around call_subprocess that adds the VCS
         command name, and checks that the VCS is available
         """
-        cmd = make_command(cls.name, cast("CommandArgs", cmd))
+        cmd = make_command(cls.name, cmd)
         if command_desc is None:
             command_desc = format_command_args(cmd)
         try:

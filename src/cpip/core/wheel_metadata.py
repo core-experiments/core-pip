@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable
-from typing import TypeAlias
 
-MetadataHeaders: TypeAlias = dict[str, list[str]]
+MetadataHeaders = dict[str, list[str]]
 
 RESOLUTION_METADATA_HEADERS = frozenset(
     {"name", "version", "requires-dist", "provides-extra", "requires-python"},

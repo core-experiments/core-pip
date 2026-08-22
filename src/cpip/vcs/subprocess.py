@@ -2,24 +2,27 @@ from __future__ import annotations
 
 import logging
 import os
-from collections.abc import Iterable, Mapping
-from typing import Any, Literal, Protocol
+from collections.abc import Iterable, Mapping, Sequence
 
 from cpip.core.errors import InstallationError
-from cpip.core.subprocess import CommandArgs, command_args_to_argv
+from cpip.core.subprocess import CommandArg, CommandArgs, command_args_to_argv
 
 from .support import HiddenText
 
+TYPE_CHECKING = False
 
-class SpinnerInterface(Protocol):
-    def spin(self) -> None: ...
-    def finish(self, final_status: str) -> None: ...
+if TYPE_CHECKING:
+    from typing import Any, Literal, Protocol
+
+    class SpinnerInterface(Protocol):
+        def spin(self) -> None: ...
+        def finish(self, final_status: str) -> None: ...
 
 
 logger = logging.getLogger("cpip.vcs.subprocess")
 
 
-def make_command(*args: str | HiddenText | CommandArgs) -> CommandArgs:
+def make_command(*args: str | HiddenText | Sequence[CommandArg]) -> CommandArgs:
     result: CommandArgs = []
     for arg in args:
         result.extend(arg if isinstance(arg, list) else [arg])
