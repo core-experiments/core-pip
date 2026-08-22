@@ -35,6 +35,7 @@ if str(_BENCHMARKS) not in sys.path:  # pragma: no cover - import side effect
     sys.path.insert(0, str(_BENCHMARKS))
 
 from benchmark_support import (  # noqa: E402
+    make_dependency_graph,
     make_wheel,
     make_wrong_package_graph,
     reset_caches,
@@ -296,3 +297,43 @@ def test_finite_range_matches_a_union_of_singletons() -> None:
             NabProvider._finite_range(versions)._intervals
             == by_union(versions)._intervals
         )
+
+
+def test_forward_check_queries_releases_by_exact_pin(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The check reads one catalog entry per release it inspects.
+
+    Asking the provider for a package by name re-evaluates every link and
+    materializes every release -- the work the resolver's own requirement
+    already paid for. The resolver's own version lookup queries each package
+    by name once (a root twice: once when added, once when decided); the
+    check must not add a second name-only query per package on top of it.
+    """
+    wheelhouse = tmp_path / "wheelhouse"
+    wheelhouse.mkdir()
+    make_dependency_graph(wheelhouse)
+    queried: list[str] = []
+    releases: list[tuple[str, Version]] = []
+    original = CandidateProvider.find_candidates
+    original_release = CandidateProvider.release_candidates
+
+    def recording(self: CandidateProvider, requirement, **kwargs):  # type: ignore[no-untyped-def]
+        queried.append(requirement.specifier.text)
+        return original(self, requirement, **kwargs)
+
+    def recording_release(self: CandidateProvider, requirement, version):  # type: ignore[no-untyped-def]
+        releases.append((requirement.canonical_name, version))
+        return original_release(self, requirement, version)
+
+    monkeypatch.setattr(CandidateProvider, "find_candidates", recording)
+    monkeypatch.setattr(CandidateProvider, "release_candidates", recording_release)
+
+    selected = resolve(wheelhouse, ["application"])
+    assert selected is not None
+
+    unconstrained = [text for text in queried if not text]
+    assert len(unconstrained) <= len(selected) + 1, queried
+    assert releases, "the forward check inspected no release"
+    assert len(releases) == len(set(releases)), "a release was read twice"
