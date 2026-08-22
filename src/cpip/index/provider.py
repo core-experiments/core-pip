@@ -1564,15 +1564,15 @@ class CandidateProvider:
                 ).get_applicable_candidates(accepted),
             )
 
-        if len(accepted) > 1:
-            accepted.sort(
-                key=lambda candidate: candidate.sort_key(
-                    prefer_binary=self.prefer_binary,
-                ),
-                reverse=True,
-            )
+        if len(accepted) < 2:
+            return tuple(accepted)
 
-        return tuple(accepted)
+        accepted.sort(
+            key=lambda candidate: candidate.sort_key(prefer_binary=self.prefer_binary),
+            reverse=True,
+        )
+
+        return self.prefer_unique_candidates(accepted)
 
     def applicable_candidate_records(
         self,
@@ -1661,17 +1661,24 @@ class CandidateProvider:
             if matching and len(matching) != len(accepted):
                 accepted = matching
 
-        accepted = tuple(self.deduplicate_candidates(list(accepted)))
+        return self.prefer_unique_candidates(accepted)
 
-        preferred = self.best_accepted_candidates(accepted)
+    def prefer_unique_candidates(
+        self,
+        accepted: Sequence[CandidateRecord],
+    ) -> tuple[CandidateRecord, ...]:
+        """The records a query returns: equivalent artifacts collapsed, the
+        preferred artifact of each slot first, the rest in their sorted order."""
+
+        unique = tuple(self.deduplicate_candidates(list(accepted)))
+
+        preferred = self.best_accepted_candidates(unique)
 
         preferred_set = set(preferred)
 
-        ordered = preferred + tuple(
-            candidate for candidate in accepted if candidate not in preferred_set
+        return preferred + tuple(
+            candidate for candidate in unique if candidate not in preferred_set
         )
-
-        return ordered
 
     @staticmethod
     def catalog_summary_bounds(

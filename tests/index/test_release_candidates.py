@@ -3,6 +3,7 @@ query answers for a ``==`` pin on that release, for every release."""
 
 from __future__ import annotations
 
+import shutil
 import sys
 from pathlib import Path
 
@@ -89,3 +90,47 @@ def test_release_candidates_decline_without_a_catalog(tmp_path: Path) -> None:
         )
         is None
     )
+
+
+def test_release_candidates_collapse_equivalent_artifacts(tmp_path: Path) -> None:
+    """A wheel reachable through two find-links entries is one record, the
+    way the full query returns it -- not an ambiguous release."""
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    first.mkdir()
+    second.mkdir()
+    wheel = make_wheel(first, "demo", "1.0.0")
+    shutil.copy2(wheel, second / wheel.name)
+    reset_caches()
+    provider = CandidateProvider.from_options(
+        find_links=[str(first), str(second)],
+        no_index=True,
+    )
+
+    assert _assert_matches_full_query(provider, "demo") == 1
+    records = provider.release_candidates(
+        parse_requirement("demo"),
+        parse_requirement("demo==1.0.0").specifier.exact_version,
+    )
+    assert records is not None
+    assert len(records) == 1
+
+
+def test_release_candidates_keep_distinct_builds_in_preferred_order(
+    tmp_path: Path,
+) -> None:
+    """Two different compatible builds of one release stay two records,
+    ordered as the full query orders them."""
+    wheelhouse = tmp_path / "wheelhouse"
+    wheelhouse.mkdir()
+    wheel = make_wheel(wheelhouse, "demo", "1.0.0")
+    shutil.copy2(wheel, wheelhouse / "demo-1.0.0-1-py3-none-any.whl")
+    provider = _provider(wheelhouse)
+
+    assert _assert_matches_full_query(provider, "demo") == 1
+    records = provider.release_candidates(
+        parse_requirement("demo"),
+        parse_requirement("demo==1.0.0").specifier.exact_version,
+    )
+    assert records is not None
+    assert len(records) == 2
