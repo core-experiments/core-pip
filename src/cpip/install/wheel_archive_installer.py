@@ -292,7 +292,10 @@ def _relocate_data(stage: str, archive: CachedWheelArchive) -> None:
             shutil.rmtree(root)
 
 
-def _write_new_file(path: str, contents: bytes) -> None:
+def _write_new_file(path: str, contents: bytes) -> tuple[str, str]:
+    """Write ``contents`` as a new regular file; returns its RECORD row's
+    hash and size, computed from the bytes in hand rather than read back."""
+
     try:
         if os.path.isdir(path) and not os.path.islink(path):
             shutil.rmtree(path)
@@ -308,8 +311,16 @@ def _write_new_file(path: str, contents: bytes) -> None:
     with open(path, "wb") as file:
         file.write(contents)
 
+    return record_metadata_internal(contents)
 
-def _rewrite_metadata(path: str, candidate: WheelInstallCandidate) -> bool:
+
+def _rewrite_metadata(
+    path: str,
+    candidate: WheelInstallCandidate,
+) -> tuple[str, str] | None:
+    """Normalize METADATA's Name; returns the rewritten file's RECORD hash
+    and size, or ``None`` when the file was already normalized."""
+
     with open(path, "rb") as file:
         contents = file.read()
 
@@ -331,9 +342,9 @@ def _rewrite_metadata(path: str, candidate: WheelInstallCandidate) -> bool:
         with open(path, "wb") as file:
             file.write(rewritten)
 
-        return True
+        return record_metadata_internal(rewritten)
 
-    return False
+    return None
 
 
 def _file_metadata(path: str) -> tuple[str, str]:
@@ -362,6 +373,11 @@ def _finalize_wheel(
     script_members: set[str] = set()
 
     for relative, _, _, _ in archive.entries:
+        # Only a ``<name>.data/scripts/...`` member can be a script; every
+        # entry was validated when the archive was extracted.
+        if "/scripts/" not in relative:
+            continue
+
         parts = validate_member_parts(relative)
 
         if len(parts) >= 3 and parts[0].endswith(".data") and parts[1] == "scripts":
@@ -379,22 +395,24 @@ def _finalize_wheel(
 
     direct_url = os.path.join(dist_info_root, "direct_url.json")
 
-    _write_new_file(installer, b"cpip\n")
+    installer_metadata = _write_new_file(installer, b"cpip\n")
 
-    if plan.requested:
-        _write_new_file(requested, b"")
+    requested_metadata = _write_new_file(requested, b"") if plan.requested else None
 
-    else:
+    if not plan.requested:
         try:
             os.unlink(requested)
 
         except FileNotFoundError:
             pass
 
-    if plan.direct_url is not None:
+    direct_url_metadata = (
         _write_new_file(direct_url, plan.direct_url.to_json().encode("utf-8"))
+        if plan.direct_url is not None
+        else None
+    )
 
-    else:
+    if plan.direct_url is None:
         try:
             os.unlink(direct_url)
 
@@ -469,25 +487,20 @@ def _finalize_wheel(
 
         path = os.path.join(stage, *mapped)
 
-        if (
-            installed_relative == f"{dist_info}/METADATA" and metadata_rewritten
-        ) or installed_relative in script_members:
+        if installed_relative == f"{dist_info}/METADATA" and metadata_rewritten:
+            digest, size = metadata_rewritten
+
+        elif installed_relative in script_members:
             digest, size = _file_metadata(path)
 
         rows.append((installed_relative, digest, size))
 
-    installer_metadata = _file_metadata(installer)
-
     rows.append((f"{dist_info}/INSTALLER", *installer_metadata))
 
-    if plan.requested:
-        requested_metadata = _file_metadata(requested)
-
+    if requested_metadata is not None:
         rows.append((f"{dist_info}/REQUESTED", *requested_metadata))
 
-    if plan.direct_url is not None:
-        direct_url_metadata = _file_metadata(direct_url)
-
+    if direct_url_metadata is not None:
         rows.append((f"{dist_info}/direct_url.json", *direct_url_metadata))
 
     for path in generated_paths:

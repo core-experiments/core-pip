@@ -30,7 +30,7 @@ def test_rewrite_metadata_normalizes_mismatched_name(tmp_path: Path) -> None:
 
     rewritten = _rewrite_metadata(str(path), candidate)
 
-    assert rewritten is True
+    assert rewritten is not None
     assert "Name: owner-demo\n" in path.read_text()
 
 
@@ -41,7 +41,7 @@ def test_rewrite_metadata_normalizes_digit_containing_name(tmp_path: Path) -> No
 
     rewritten = _rewrite_metadata(str(path), candidate)
 
-    assert rewritten is True
+    assert rewritten is not None
     assert "Name: numpy2\n" in path.read_text()
 
 
@@ -53,7 +53,7 @@ def test_rewrite_metadata_is_noop_when_already_normalized(tmp_path: Path) -> Non
 
     rewritten = _rewrite_metadata(str(path), candidate)
 
-    assert rewritten is False
+    assert rewritten is None
     assert path.read_text() == original
 
 
@@ -174,3 +174,63 @@ def test_prevalidated_candidates_still_reject_colliding_console_scripts(
             target=install_target,
             cache_dir=str(cache_dir),
         )
+
+
+def test_record_rows_match_the_files_on_disk(tmp_path: Path) -> None:
+    """Rows whose hash is computed from the bytes written (INSTALLER,
+    REQUESTED, a rewritten METADATA) must agree with the files themselves."""
+    import base64
+    import csv
+
+    cache_dir = tmp_path / "cache"
+    wheel = _make_wheel(tmp_path, "Mixed_Case", shared_module="mixed_case.py")
+    (candidate,) = _prevalidated_candidates_for(tmp_path, cache_dir, wheel)
+    target = tmp_path / "target"
+    install_target = InstallTarget.from_options("mixed-case", target=str(target))
+
+    installed = install_wheels_from_archive_cache(
+        [(wheel, True, None)],
+        (candidate,),
+        target=install_target,
+        cache_dir=str(cache_dir),
+    )
+    assert installed is not None
+
+    dist_info = next(target.glob("*.dist-info"))
+    rows = list(csv.reader((dist_info / "RECORD").read_text().splitlines()))
+    checked = 0
+    for relative, digest, size in rows:
+        if not digest:
+            continue
+        path = target / relative
+        data = path.read_bytes()
+        expected = base64.urlsafe_b64encode(hashlib.sha256(data).digest())
+        assert digest == f"sha256={expected.rstrip(b'=').decode('ascii')}", relative
+        assert size == str(len(data)), relative
+        checked += 1
+    assert {row[0].rsplit("/", 1)[-1] for row in rows} >= {
+        "INSTALLER",
+        "REQUESTED",
+        "METADATA",
+        "RECORD",
+    }
+    assert checked >= 3
+
+
+def _prevalidated_candidates_for(
+    tmp_path: Path,
+    cache_dir: Path,
+    *wheels: Path,
+) -> tuple[object, ...]:
+    candidates = tuple(
+        wheel_candidate(wheel).copy_with(
+            source_hashes={"sha256": hashlib.sha256(wheel.read_bytes()).hexdigest()},
+            source_kind="wheel",
+        )
+        for wheel in wheels
+    )
+    archives = prepare_cached_wheels(candidates, str(cache_dir))
+    return tuple(
+        candidate.copy_with(wheel_layout=archive)
+        for candidate, archive in zip(candidates, archives, strict=True)
+    )
