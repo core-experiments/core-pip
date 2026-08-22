@@ -653,7 +653,6 @@ def cached_remote_plan_key(
         options.no_cache_dir
         or options.target is None
         or not options.ignore_installed
-        or not options.no_compile
         or options.dry_run
         or options.report
         or options.user

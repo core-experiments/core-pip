@@ -234,3 +234,68 @@ def _prevalidated_candidates_for(
         candidate.copy_with(wheel_layout=archive)
         for candidate, archive in zip(candidates, archives, strict=True)
     )
+
+
+def test_archive_route_compiles_bytecode_and_records_it(tmp_path: Path) -> None:
+    """With compilation on, the clone route writes the .pyc files and lists
+    them in RECORD with real hashes, like the transactional route does."""
+    import base64
+    import csv
+
+    cache_dir = tmp_path / "cache"
+    wheel = _make_wheel(tmp_path, "pkg_compiled", shared_module="compiled_mod.py")
+    (candidate,) = _prevalidated_candidates_for(tmp_path, cache_dir, wheel)
+    target = tmp_path / "target"
+    install_target = InstallTarget.from_options("pkg-compiled", target=str(target))
+
+    installed = install_wheels_from_archive_cache(
+        [(wheel, True, None)],
+        (candidate,),
+        target=install_target,
+        cache_dir=str(cache_dir),
+        pycompile=True,
+    )
+    assert installed is not None
+
+    compiled = sorted(p.relative_to(target).as_posix() for p in target.rglob("*.pyc"))
+    assert compiled, "no bytecode was written"
+    assert all("__pycache__/" in path for path in compiled)
+
+    dist_info = next(target.glob("*.dist-info"))
+    rows = {
+        row[0]: row[1:]
+        for row in csv.reader((dist_info / "RECORD").read_text().splitlines())
+    }
+    for path in compiled:
+        digest, size = rows[path]
+        data = (target / path).read_bytes()
+        expected = base64.urlsafe_b64encode(hashlib.sha256(data).digest())
+        assert digest == f"sha256={expected.rstrip(b'=').decode('ascii')}"
+        assert size == str(len(data))
+
+
+def test_transactional_install_with_compilation_takes_the_clone_route(
+    tmp_path: Path,
+) -> None:
+    from cpip.install.wheel_archive_cache import ARCHIVE_CACHE_BUCKET
+    from cpip.install.wheel_transaction import install_wheels_transactionally
+
+    cache_dir = tmp_path / "cache"
+    wheel = _make_wheel(tmp_path, "pkg_default", shared_module="default_mod.py")
+    candidate = wheel_candidate(wheel).copy_with(
+        source_hashes={"sha256": hashlib.sha256(wheel.read_bytes()).hexdigest()},
+        source_kind="wheel",
+    )
+    target = tmp_path / "target"
+
+    install_wheels_transactionally(
+        [(wheel, True, None)],
+        target=InstallTarget.from_options("pkg-default", target=str(target)),
+        pycompile=True,
+        lookup_existing=False,
+        candidates=[candidate],
+        cache_dir=str(cache_dir),
+    )
+
+    assert (cache_dir / ARCHIVE_CACHE_BUCKET).is_dir(), "the clone route was not used"
+    assert list(target.rglob("*.pyc")), "bytecode was not compiled"

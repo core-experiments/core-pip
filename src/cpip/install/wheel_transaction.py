@@ -755,13 +755,11 @@ def install_wheels_transactionally(
     )
     if len(planned_candidates) != len(requests):
         raise ValueError("candidate count does not match wheel request count")
-    if (
-        cache_dir is not None
-        and not pycompile
-        and all(
-            candidate.source_kind in {None, "wheel"} for candidate in planned_candidates
-        )
+    if cache_dir is not None and all(
+        candidate.source_kind in {None, "wheel"} for candidate in planned_candidates
     ):
+        # The clone route compiles bytecode in the staged tree itself, so a
+        # default install (compilation on) takes it too.
         cached_result = install_wheels_from_archive_cache(
             requests,
             planned_candidates,
@@ -770,6 +768,7 @@ def install_wheels_transactionally(
             script_executable=script_executable,
             force=force,
             preserve_existing=preserve_existing,
+            pycompile=pycompile,
         )
         if cached_result is not None:
             return cached_result

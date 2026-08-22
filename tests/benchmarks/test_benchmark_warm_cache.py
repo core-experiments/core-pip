@@ -175,6 +175,44 @@ def test_warm_archive_install(
     assert benchmark(install_warm) > 10
 
 
+def test_warm_archive_install_compiled(
+    benchmark: BenchmarkFixture,
+    graph_wheelhouse: Path,
+    warm_cache_dir: str,
+    tmp_path: Path,
+) -> None:
+    """The same cached install with bytecode compilation on -- what a default
+    `cpip install` takes -- compiling each wheel in the staged tree."""
+    candidates = tuple(
+        materialize_candidates(
+            resolve_graph(graph_wheelhouse, warm_cache_dir).candidates
+        ),
+    )
+    requests = tuple((candidate.path, True, None) for candidate in candidates)
+    counter = itertools.count()
+
+    def install_compiled() -> int:
+        reset_caches()
+        for candidate in candidates:
+            candidate.wheel_layout = None
+        target = InstallTarget.from_options(
+            ROOT,
+            target=str(tmp_path / f"compiled-{next(counter)}"),
+        )
+        installed = install_wheels_from_archive_cache(
+            requests,
+            candidates,
+            target=target,
+            cache_dir=warm_cache_dir,
+            report=False,
+            pycompile=True,
+        )
+        assert installed is not None
+        return len(installed)
+
+    assert benchmark(install_compiled) > 10
+
+
 def test_warm_fast_install_snapshot(
     benchmark: BenchmarkFixture,
     graph_wheelhouse: Path,

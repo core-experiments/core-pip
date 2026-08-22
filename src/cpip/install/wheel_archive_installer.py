@@ -359,11 +359,48 @@ def _file_metadata(path: str) -> tuple[str, str]:
         return record_metadata_internal(file.read())
 
 
+def _compile_members(
+    stage: str,
+    archive: CachedWheelArchive,
+) -> list[tuple[str, str, str]]:
+    """Byte-compile the wheel's ``.py`` members in the staged tree and return
+    their ``.pyc`` RECORD rows, the way the transactional route records them.
+
+    Scripts under ``bin``/``Scripts`` are not modules and are left alone.
+    """
+
+    # Deferred: compileall (and importlib.util) are needed only here.
+    import compileall
+    import importlib.util
+
+    rows: list[tuple[str, str, str]] = []
+
+    for relative, _, _, _ in archive.entries:
+        mapped = _mapped_parts(relative)
+
+        if not mapped[-1].endswith(".py") or mapped[0] in {"bin", "Scripts"}:
+            continue
+
+        path = os.path.join(stage, "/".join(mapped))
+
+        if not compileall.compile_file(path, force=True, quiet=1):
+            continue
+
+        compiled = importlib.util.cache_from_source(path)
+
+        compiled_relative = os.path.relpath(compiled, stage).replace(os.sep, "/")
+
+        rows.append((compiled_relative, *_file_metadata(compiled)))
+
+    return rows
+
+
 def _finalize_wheel(
     stage: str,
     plan: _WheelInstallPlan,
     *,
     script_executable: str | None,
+    pycompile: bool = False,
 ) -> None:
     archive = plan.archive
 
@@ -466,6 +503,8 @@ def _finalize_wheel(
 
                 generated_paths.append(destination)
 
+    compiled_rows = _compile_members(stage, archive) if pycompile else ()
+
     managed = {
         f"{dist_info}/INSTALLER",
         f"{dist_info}/REQUESTED",
@@ -524,6 +563,8 @@ def _finalize_wheel(
                 *generated_metadata,
             ),
         )
+
+    rows.extend(compiled_rows)
 
     rows.sort()
 
@@ -620,6 +661,7 @@ def install_wheels_from_archive_cache(
     force: bool = False,
     preserve_existing: bool = False,
     report: bool = True,
+    pycompile: bool = False,
 ) -> tuple[InstallCandidate, ...] | None:
     """Install into a self-contained target from unpacked archives.
 
@@ -808,6 +850,7 @@ def install_wheels_from_archive_cache(
                     stage,
                     plan,
                     script_executable=script_executable,
+                    pycompile=pycompile,
                 )
 
             tuple(pool.map(finalize, active_plans))
@@ -818,6 +861,7 @@ def install_wheels_from_archive_cache(
                     stage,
                     plan,
                     script_executable=script_executable,
+                    pycompile=pycompile,
                 )
 
         if os.path.lexists(root) != root_existed:
