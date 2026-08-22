@@ -6,6 +6,7 @@ from __future__ import annotations
 import marshal
 import os
 import sqlite3
+from collections.abc import Iterable
 from typing import TypeAlias
 
 from cpip.index.sqlite_cache import SqliteBackedCache
@@ -127,6 +128,35 @@ class WheelMetadataCache(SqliteBackedCache):
         self.digests[identity] = row[0]
         return row[0]
 
+    def prefetch_digests(self, identities: Iterable[MetadataIdentity]) -> None:
+        """Load the recorded digests of many files in one query, so that the
+        per-file ``get_digest`` that follows reads memory, not the database."""
+        wanted = {identity for identity in identities if identity not in self.digests}
+        if not wanted:
+            return
+        paths = list({identity[0] for identity in wanted})
+        rows: list[tuple[str, int, int, str]] = []
+        with self.lock:
+            try:
+                conn = self._reader()
+                if conn is None:
+                    return
+                for start in range(0, len(paths), 500):
+                    chunk = paths[start : start + 500]
+                    rows.extend(
+                        conn.execute(
+                            "SELECT path, size, mtime, sha256 FROM digests "
+                            f"WHERE path IN ({','.join('?' * len(chunk))})",
+                            chunk,
+                        ).fetchall(),
+                    )
+            except sqlite3.Error:
+                return
+        for path, size, mtime, digest in rows:
+            identity = (path, size, mtime)
+            if identity in wanted and isinstance(digest, str) and len(digest) == 64:
+                self.digests[identity] = digest
+
     def put_digest(self, identity: MetadataIdentity, digest: str) -> None:
         self.digests[identity] = digest
         self._pending_digests[identity] = digest
@@ -173,6 +203,8 @@ def get_wheel_metadata_cache(
     key = os.path.abspath(os.fspath(cache_dir))
     cache = _CACHE_INSTANCES.get(key)
     if cache is None:
-        cache = WheelMetadataCache(key)
-        _CACHE_INSTANCES[key] = cache
+        # Threads preparing a batch may all ask at once; setdefault is one
+        # atomic step, so a loser's instance is dropped before it holds any
+        # entry that would otherwise never be flushed.
+        cache = _CACHE_INSTANCES.setdefault(key, WheelMetadataCache(key))
     return cache

@@ -78,3 +78,53 @@ def test_metadata_cache_round_trips_the_file_digest(tmp_path: Path) -> None:
     restored = WheelMetadataCache(tmp_path / "cache")
     assert restored.get_digest(identity) == digest
     assert restored.get(identity) is None
+
+
+def test_metadata_cache_prefetches_digests_in_one_query(tmp_path: Path) -> None:
+    cache_dir = tmp_path / "cache"
+    identities = []
+    for index in range(3):
+        artifact = tmp_path / f"demo-{index}.whl"
+        artifact.write_bytes(b"wheel" * (index + 1))
+        identity = metadata_identity(artifact)
+        assert identity is not None
+        identities.append(identity)
+    cache = WheelMetadataCache(cache_dir)
+    for index, identity in enumerate(identities):
+        cache.put_digest(identity, f"{index:02x}" * 32)
+    cache.flush()
+
+    restored = WheelMetadataCache(cache_dir)
+    stale = (identities[0][0], identities[0][1], identities[0][2] + 1)
+    restored.prefetch_digests([*identities, stale])
+
+    assert restored.digests == {
+        identity: f"{index:02x}" * 32 for index, identity in enumerate(identities)
+    }
+    assert restored.get_digest(stale) is None
+
+
+def test_one_cache_instance_per_directory_across_threads(tmp_path: Path) -> None:
+    """Threads preparing a batch must share one instance, or the entries
+    put through a losing instance are never flushed."""
+    import threading
+
+    from cpip.index import metadata_cache
+
+    metadata_cache._CACHE_INSTANCES.clear()
+    cache_dir = str(tmp_path / "cache")
+    seen: list[WheelMetadataCache] = []
+    barrier = threading.Barrier(8)
+
+    def acquire() -> None:
+        barrier.wait()
+        seen.append(metadata_cache.get_wheel_metadata_cache(cache_dir))
+
+    threads = [threading.Thread(target=acquire) for _ in range(8)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert len({id(cache) for cache in seen}) == 1
+    assert seen[0] is metadata_cache.get_wheel_metadata_cache(cache_dir)

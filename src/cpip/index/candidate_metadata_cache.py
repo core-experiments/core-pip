@@ -196,6 +196,5 @@ def get_candidate_metadata_cache(
     key = os.path.abspath(os.fspath(cache_dir))
     cache = INSTANCES.get(key)
     if cache is None:
-        cache = CandidateMetadataCache(key)
-        INSTANCES[key] = cache
+        cache = INSTANCES.setdefault(key, CandidateMetadataCache(key))
     return cache
