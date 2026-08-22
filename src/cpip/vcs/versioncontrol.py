@@ -224,6 +224,18 @@ class VcsSupport:
         at the given directory.
         """
         self._ensure_builtin_backends_loaded()
+        # The innermost root wins below, and no root can be deeper than
+        # ``location`` itself: a backend whose marker directory sits right
+        # in ``location`` is the answer without asking the others -- each
+        # of which would otherwise spawn its command (``hg root``,
+        # ``bzr root``, ``svn info``) just to learn it owns nothing here.
+        found = None
+        for vcs_backend in self.registry_internal.values():
+            if vcs_backend.is_repository_directory(location):
+                found = vcs_backend
+        if found is not None:
+            logger.debug("Determine that %s uses VCS: %s", location, found.name)
+            return found
         vcs_backends = {}
         for vcs_backend in self.registry_internal.values():
             repo_path = vcs_backend.get_repository_root(location)

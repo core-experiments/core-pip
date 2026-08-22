@@ -9,10 +9,13 @@ import os
 import sys
 
 from cpip.cli.parsers.cache import create_parser
-from cpip.core.appdirs import cache_root, versioned_cache_dir
+from cpip.core.appdirs import (
+    WHEEL_CACHE_BUCKET,
+    cache_root,
+    http_cache_path,
+    versioned_cache_dir,
+)
 from cpip.core.errors import CommandError
-from cpip.index.cache import WHEEL_CACHE_BUCKET
-from cpip.network.cache import http_cache_path
 
 
 def _match_expression(pattern: str) -> str:

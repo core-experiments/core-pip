@@ -10,8 +10,8 @@ from cpip_test_support import CpipTestEnvironment, TestCpipResult
 
 from cpip.cli.fast_install import TREE_CACHE_BUCKET
 from cpip.core.appdirs import versioned_cache_dir
-from cpip.index.cache import WHEEL_CACHE_BUCKET
-from cpip.network.cache import http_cache_path
+from cpip.core.appdirs import WHEEL_CACHE_BUCKET
+from cpip.core.appdirs import http_cache_path
 
 
 @pytest.fixture

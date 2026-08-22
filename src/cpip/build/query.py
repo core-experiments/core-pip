@@ -8,7 +8,7 @@ from collections.abc import Collection, Iterable, Iterator, Mapping
 from typing import Any, NamedTuple, Protocol
 
 from cpip.core.cpip_version import CPIP_DISTRIBUTION_NAMES
-from cpip.core.light_metadata import LightDistributionStore
+from cpip.core.light_metadata import LightDistributionStore, parse_metadata_text
 from cpip.core.packaging import (
     Requirement,
     canonicalize_name,
@@ -228,7 +228,6 @@ def format_list_columns(
     latest: LatestInfo | None = None,
 ) -> tuple[list[list[str]], list[str]]:
     """Build rows and headers for the columns list format."""
-    from email.parser import Parser
 
     header = ["Package", "Version"]
 
@@ -243,7 +242,9 @@ def format_list_columns(
         except FileNotFoundError:
             build_tags.append(None)
         else:
-            build_tags.append(Parser().parsestr(wheel_text).get("Build"))
+            # The same first-value read email.parser would give, without
+            # importing the email package for one header per WHEEL file.
+            build_tags.append(parse_metadata_text(wheel_text).get("Build"))
 
     if any(build_tags):
         header.append("Build")

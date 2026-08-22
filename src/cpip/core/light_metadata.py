@@ -61,7 +61,8 @@ class LightMetadata:
         return self._payload
 
 
-def _parse_metadata_text(text: str) -> LightMetadata:
+def parse_metadata_text(text: str) -> LightMetadata:
+    """Parse RFC 822-style metadata text (METADATA, WHEEL, PKG-INFO)."""
     # Walk the raw text (not str.splitlines()) so the body slice below keeps
     # whatever trailing newline the source had, matching
     # email.message.Message.get_payload() exactly.
@@ -104,7 +105,7 @@ def _read_metadata_file(info_location: str) -> LightMetadata | None:
                 text = file.read()
         except OSError:
             return None
-        metadata = _parse_metadata_text(text)
+        metadata = parse_metadata_text(text)
         if metadata.get("Name") and metadata.get("Version"):
             return metadata
         return None
@@ -121,7 +122,7 @@ def _read_metadata_file(info_location: str) -> LightMetadata | None:
                 text = file.read()
         except OSError:
             continue
-        metadata = _parse_metadata_text(text)
+        metadata = parse_metadata_text(text)
         if metadata.get("Name") and metadata.get("Version"):
             return metadata
     return None

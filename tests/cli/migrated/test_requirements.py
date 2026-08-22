@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 
 from cpip.cli.requirements import collect_requirements
-from cpip.network.cache import http_cache_path
+from cpip.core.appdirs import http_cache_path
 
 
 def test_collect_requirements_uses_http_cache_directory(tmp_path: Path) -> None:

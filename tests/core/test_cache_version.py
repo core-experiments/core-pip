@@ -24,7 +24,7 @@ from cpip.index import (
     release_facts_cache,
 )
 from cpip.install import wheel_archive_cache, wheel_install_plan_cache
-from cpip.network.cache import HTTP_CACHE_BUCKET
+from cpip.core.appdirs import HTTP_CACHE_BUCKET
 
 STORAGE_NAMES = (
     HTTP_CACHE_BUCKET,

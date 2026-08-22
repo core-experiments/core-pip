@@ -7,7 +7,8 @@ import pytest
 from cpip.core.errors import HashMismatch
 from cpip.index.artifacts import ArtifactLocator
 from cpip.index.artifact_cache import ARTIFACT_CACHE_BUCKET
-from cpip.network.cache import SafeFileCache, http_cache_path
+from cpip.network.cache import SafeFileCache
+from cpip.core.appdirs import http_cache_path
 
 
 class FakeResponse:

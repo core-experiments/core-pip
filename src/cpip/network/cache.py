@@ -14,13 +14,7 @@ from cpip.platform.filesystem import (
     replace,
 )
 
-HTTP_CACHE_BUCKET = "http"
 """Directory under the cache directory holding the HTTP page cache."""
-
-
-def http_cache_path(cache_dir: str) -> str:
-    """The HTTP page cache directory under cache directory ``cache_dir``."""
-    return os.path.join(cache_dir, HTTP_CACHE_BUCKET)
 
 
 TYPE_CHECKING = False

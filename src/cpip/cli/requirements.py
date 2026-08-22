@@ -18,7 +18,7 @@ from cpip.core.wheel import parse_wheel_file, supported_wheel_tags, wheel_tag_ra
 from cpip.index.config import DEFAULT_INDEX_URL
 from cpip.index.links import Link
 from cpip.index.source_locations import resolve_source_location
-from cpip.network.cache import http_cache_path
+from cpip.core.appdirs import http_cache_path
 from cpip.network.http import NetworkSession
 from cpip.resolution.input_requirements import install_req_from_line
 
