@@ -413,6 +413,7 @@ class FastCandidate(PureWheelCandidate):
 
     __slots__ = (
         "archive_members",
+        "archive_modes",
         "canonical_name",
         "dependencies",
         "from_cache",
@@ -444,6 +445,7 @@ class FastCandidate(PureWheelCandidate):
         self.path = path
 
         self.archive_members: dict[str, tuple[int, int, int, int, int]] | None = None
+        self.archive_modes: dict[str, int] | None = None
 
         self.dependencies = dependencies
 
@@ -837,6 +839,7 @@ def wheel_metadata(
             names = archive.namelist()
 
             candidate.archive_members = archive.members
+            candidate.archive_modes = archive.modes
 
             metadata_members = [
                 name for name in names if name.endswith(".dist-info/METADATA")
@@ -1067,10 +1070,17 @@ def install_resolved_pure_wheels(
     for candidate in candidates:
         try:
             with open(os.fspath(candidate.path), "rb") as wheel_file:
-                archive = WheelArchive(
-                    wheel_file,
-                    members=getattr(candidate, "archive_members", None),
-                )
+                # Members pre-read by the resolver come with their modes;
+                # a member table without modes would leave archive.modes
+                # empty, so read the directory again instead.
+                members = getattr(candidate, "archive_members", None)
+
+                modes = getattr(candidate, "archive_modes", None)
+
+                if modes is None:
+                    members = None
+
+                archive = WheelArchive(wheel_file, members=members, modes=modes)
 
                 archive_names = archive.namelist()
 

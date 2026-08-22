@@ -63,3 +63,38 @@ def test_populated_shipped_record_is_kept_verbatim(tmp_path: Path) -> None:
     written = install(tmp_path, shipped)
 
     assert written.read_text() == shipped
+
+
+def test_cold_resolve_installs_with_pre_read_members(tmp_path: Path) -> None:
+    """The resolver hands the installer the member table it already read;
+    the modes must travel with it, or the install crashes looking them up."""
+    import os
+    import sys
+
+    from cpip.cli.fast_install import (
+        install_resolved_pure_wheels,
+        resolve_simple_wheelhouse,
+    )
+
+    _BENCHMARKS = Path(__file__).resolve().parents[1] / "benchmarks"
+    if str(_BENCHMARKS) not in sys.path:
+        sys.path.insert(0, str(_BENCHMARKS))
+    from benchmark_support import make_wheel
+
+    wheelhouse = tmp_path / "wheelhouse"
+    wheelhouse.mkdir()
+    make_wheel(wheelhouse, "demo", "1.0.0", payload_files=2)
+    candidates = resolve_simple_wheelhouse([str(wheelhouse)], ["demo"], None)
+    assert candidates is not None
+    assert candidates[0].archive_members is not None
+
+    target = tmp_path / "target"
+    assert install_resolved_pure_wheels(candidates, str(target), {"demo"}) is True
+
+    installed = sorted(
+        p.relative_to(target).as_posix() for p in target.rglob("*") if p.is_file()
+    )
+    assert any(name.endswith(".dist-info/RECORD") for name in installed)
+    assert os.path.isfile(target / "demo" / "__init__.py") or any(
+        name.startswith("demo") for name in installed
+    )
