@@ -155,7 +155,8 @@ NORMAL_INSTALL_FORBIDDEN = frozenset(
         "cpip.build.build_backend",
         "email.message",
         "configparser",
-        "subprocess",
+        # Not subprocess: cpip's own wrappers defer it, but the stdlib's
+        # platform module imports it on Python 3.10.
     },
 )
 
