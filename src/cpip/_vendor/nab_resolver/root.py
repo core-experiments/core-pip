@@ -7,7 +7,10 @@ time (which would create a cycle).
 
 from __future__ import annotations
 
-from cpip._vendor.typing_extensions import override
+try:
+    from typing import override
+except ImportError:  # pragma: no cover - Python < 3.12
+    from cpip._vendor.typing_extensions import override
 
 __all__ = [
     "ROOT",
