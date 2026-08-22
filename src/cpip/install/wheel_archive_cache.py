@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Generator
 from cpip.core.errors import InstallationError
 from cpip.core.utils import CACHE_INTERPRETER_TAG
 from cpip.core.wheel import validate_wheel
+from cpip.index.metadata_cache import get_wheel_metadata_cache, metadata_identity
 from cpip.install.wheel_archive import (
     copy_member_with_metadata,
     validate_member_parts,
@@ -114,7 +115,14 @@ class CachedWheelArchive:
         self.entries = entries
 
 
-def wheel_digest(candidate: WheelInstallCandidate) -> str:
+def wheel_digest(candidate: WheelInstallCandidate, cache_dir: str | None = None) -> str:
+    """The wheel's SHA-256: as supplied by its source, else as recorded for
+    this exact file (path, size, mtime) in the metadata cache, else hashed.
+
+    A wheel from a local wheelhouse carries no index-supplied hash, so every
+    install used to read it in full to find its archive entry; the digest is
+    now hashed once per file and reused while the file is unchanged.
+    """
     supplied = (
         (candidate.source_hashes or {}).get("sha256")
         if candidate.source_kind in {None, "wheel"}
@@ -124,13 +132,33 @@ def wheel_digest(candidate: WheelInstallCandidate) -> str:
     if isinstance(supplied, str) and valid_sha256(supplied):
         return supplied.lower()
 
+    cache = None
+
+    identity = None
+
+    if cache_dir is not None:
+        identity = metadata_identity(candidate.path)
+
+        if identity is not None:
+            cache = get_wheel_metadata_cache(cache_dir)
+
+            recorded = cache.get_digest(identity)
+
+            if recorded is not None:
+                return recorded
+
     digest = hashlib.sha256()
 
     with open(candidate.path, "rb") as file:
         while chunk := file.read(1024 * 1024):
             digest.update(chunk)
 
-    return digest.hexdigest()
+    result = digest.hexdigest()
+
+    if cache is not None and identity is not None:
+        cache.put_digest(identity, result)
+
+    return result
 
 
 def archive_entry_root(cache_dir: str, digest: str) -> str:
@@ -384,7 +412,7 @@ def prepare_cached_wheel(
     if isinstance(layout, CachedWheelArchive):
         return layout
 
-    digest = wheel_digest(candidate)
+    digest = wheel_digest(candidate, cache_dir)
 
     entry_root = archive_entry_root(cache_dir, digest)
 

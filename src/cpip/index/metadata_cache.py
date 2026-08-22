@@ -1,4 +1,5 @@
-"""Small, versioned persistent cache for parsed wheel metadata headers."""
+"""Persistent cache of what a local wheel file yields: its parsed metadata
+headers and its SHA-256, both keyed by the file's path, size and mtime."""
 
 from __future__ import annotations
 
@@ -20,17 +21,22 @@ _CACHE_INSTANCES: dict[str, WheelMetadataCache] = {}
 class WheelMetadataCache(SqliteBackedCache):
     """Process-local metadata cache backed by an incremental SQLite database."""
 
-    __slots__ = ("_pending_puts", "entries")
+    __slots__ = ("_pending_digests", "_pending_puts", "digests", "entries")
 
     def __init__(self, cache_dir: str | os.PathLike[str]) -> None:
         super().__init__(os.path.join(os.fspath(cache_dir), NAME))
         self.entries: dict[MetadataIdentity, MetadataHeaders] = {}
+        self.digests: dict[MetadataIdentity, str] = {}
         self._pending_puts: dict[MetadataIdentity, MetadataHeaders] = {}
+        self._pending_digests: dict[MetadataIdentity, str] = {}
 
     SCHEMA = (
         "CREATE TABLE IF NOT EXISTS metadata ("
         "path TEXT, size INTEGER, mtime INTEGER, headers BLOB, "
-        "PRIMARY KEY (path, size, mtime))"
+        "PRIMARY KEY (path, size, mtime));"
+        "CREATE TABLE IF NOT EXISTS digests ("
+        "path TEXT, size INTEGER, mtime INTEGER, sha256 TEXT, "
+        "PRIMARY KEY (path, size, mtime));"
     )
 
     @staticmethod
@@ -97,19 +103,58 @@ class WheelMetadataCache(SqliteBackedCache):
         self._pending_puts[identity] = copied
         self.dirty = True
 
+    def get_digest(self, identity: MetadataIdentity) -> str | None:
+        """The SHA-256 recorded for a file, or ``None`` when it was never hashed."""
+        digest = self.digests.get(identity)
+        if digest is not None:
+            return digest
+        with self.lock:
+            try:
+                conn = self._reader()
+                row = (
+                    None
+                    if conn is None
+                    else conn.execute(
+                        "SELECT sha256 FROM digests "
+                        "WHERE path = ? AND size = ? AND mtime = ?",
+                        identity,
+                    ).fetchone()
+                )
+            except sqlite3.Error:
+                return None
+        if row is None or not isinstance(row[0], str) or len(row[0]) != 64:
+            return None
+        self.digests[identity] = row[0]
+        return row[0]
+
+    def put_digest(self, identity: MetadataIdentity, digest: str) -> None:
+        self.digests[identity] = digest
+        self._pending_digests[identity] = digest
+        self.dirty = True
+
     def _flush_pending(self, conn: sqlite3.Connection) -> None:
-        # Batch insert/replace dirty entries
-        items = [
-            (identity[0], identity[1], identity[2], marshal.dumps(headers))
-            for identity, headers in self._pending_puts.items()
-        ]
-        conn.executemany(
-            "INSERT OR REPLACE INTO metadata (path, size, mtime, headers) VALUES (?, ?, ?, ?)",
-            items,
-        )
+        if self._pending_puts:
+            conn.executemany(
+                "INSERT OR REPLACE INTO metadata (path, size, mtime, headers) "
+                "VALUES (?, ?, ?, ?)",
+                [
+                    (identity[0], identity[1], identity[2], marshal.dumps(headers))
+                    for identity, headers in self._pending_puts.items()
+                ],
+            )
+        if self._pending_digests:
+            conn.executemany(
+                "INSERT OR REPLACE INTO digests (path, size, mtime, sha256) "
+                "VALUES (?, ?, ?, ?)",
+                [
+                    (identity[0], identity[1], identity[2], digest)
+                    for identity, digest in self._pending_digests.items()
+                ],
+            )
 
     def _clear_pending(self) -> None:
         self._pending_puts.clear()
+        self._pending_digests.clear()
 
 
 def metadata_identity(path: str | os.PathLike[str]) -> MetadataIdentity | None:

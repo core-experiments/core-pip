@@ -193,7 +193,7 @@ def save_cached_install_plan(
             if candidate.source_kind != "wheel":
                 return False
 
-            digest = wheel_digest(candidate)
+            digest = wheel_digest(candidate, cache_dir)
 
             archive = load_archive(archive_entry_root(cache_dir, digest), digest)
 

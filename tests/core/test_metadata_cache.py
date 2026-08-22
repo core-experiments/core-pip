@@ -61,3 +61,20 @@ def test_metadata_cache_identity_changes_when_artifact_changes(tmp_path: Path) -
     second = metadata_identity(artifact)
     assert second is not None
     assert first != second
+
+
+def test_metadata_cache_round_trips_the_file_digest(tmp_path: Path) -> None:
+    artifact = tmp_path / "demo.whl"
+    artifact.write_bytes(b"wheel")
+    identity = metadata_identity(artifact)
+    assert identity is not None
+    digest = "ab" * 32
+
+    cache = WheelMetadataCache(tmp_path / "cache")
+    assert cache.get_digest(identity) is None
+    cache.put_digest(identity, digest)
+    cache.flush()
+
+    restored = WheelMetadataCache(tmp_path / "cache")
+    assert restored.get_digest(identity) == digest
+    assert restored.get(identity) is None

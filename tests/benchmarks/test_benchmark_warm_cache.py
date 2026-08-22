@@ -21,7 +21,7 @@ from benchmark_support import flush_persistent_caches, reset_caches
 from cpip.cli.fast_install import FastInstallMetadataCache, resolve_simple_wheelhouse
 from cpip.core.packaging import parse_requirement
 from cpip.core.urls import path_to_url
-from cpip.core.wheel import parse_wheel_file
+from cpip.core.wheel import parse_wheel_file, wheel_candidate
 from cpip.index.catalog_cache import save_links
 from cpip.index.links import Link
 from cpip.index.provider import CandidateProvider
@@ -263,3 +263,41 @@ def test_warm_index_catalog_resolve(
         return len(resolve_index(session, cache_dir).candidates)
 
     assert benchmark(resolve_warm) > 10
+
+
+REAL_WHEELS = Path(__file__).resolve().parents[1] / "cli" / "data" / "common_wheels"
+
+
+@pytest.fixture(scope="module")
+def warm_real_wheel_cache(tmp_path_factory: pytest.TempPathFactory) -> str:
+    """A cache directory holding the unpacked trees of the repository's real
+    wheels (~56 MB across 13 files) after one preparation, flushed."""
+    cache_dir = str(tmp_path_factory.mktemp("warm-real-wheels"))
+    candidates = tuple(
+        wheel_candidate(str(wheel)) for wheel in sorted(REAL_WHEELS.glob("*.whl"))
+    )
+    assert len(candidates) > 5
+    prepare_cached_wheels(candidates, cache_dir)
+    flush_persistent_caches(cache_dir)
+    reset_caches()
+    return cache_dir
+
+
+def test_warm_archive_preparation_real_wheels(
+    benchmark: BenchmarkFixture,
+    warm_real_wheel_cache: str,
+) -> None:
+    """Preparing real-sized local wheels whose trees already exist. A local
+    wheel carries no index-supplied hash, so finding its archive entry is
+    where a warm install pays for the wheel's size."""
+    candidates = tuple(
+        wheel_candidate(str(wheel)) for wheel in sorted(REAL_WHEELS.glob("*.whl"))
+    )
+
+    def prepare_warm() -> int:
+        reset_caches()
+        for candidate in candidates:
+            candidate.wheel_layout = None
+        return len(prepare_cached_wheels(candidates, warm_real_wheel_cache))
+
+    assert benchmark(prepare_warm) == len(candidates)
