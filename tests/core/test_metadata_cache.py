@@ -128,3 +128,43 @@ def test_one_cache_instance_per_directory_across_threads(tmp_path: Path) -> None
 
     assert len({id(cache) for cache in seen}) == 1
     assert seen[0] is metadata_cache.get_wheel_metadata_cache(cache_dir)
+
+
+def test_metadata_cache_rejects_malformed_persisted_digests(tmp_path: Path) -> None:
+    """A stored value that is 64 characters but not hexadecimal is a miss in
+    both read paths, so the archive cache is never keyed on a non-hash."""
+    import sqlite3
+
+    cache_dir = tmp_path / "cache"
+    good = tmp_path / "good.whl"
+    bad = tmp_path / "bad.whl"
+    good.write_bytes(b"good")
+    bad.write_bytes(b"bad")
+    good_identity = metadata_identity(good)
+    bad_identity = metadata_identity(bad)
+    assert good_identity is not None
+    assert bad_identity is not None
+
+    cache = WheelMetadataCache(cache_dir)
+    cache.put_digest(good_identity, "cd" * 32)
+    cache.flush()
+
+    # Plant a 64-character non-hex value directly, as on-disk corruption would.
+    with sqlite3.connect(cache_dir / NAME) as connection:
+        connection.execute(
+            "INSERT OR REPLACE INTO digests (path, size, mtime, sha256) "
+            "VALUES (?, ?, ?, ?)",
+            (*bad_identity, "z" * 64),
+        )
+        connection.commit()
+
+    # get_digest: the corrupt row is a miss; the valid one is returned.
+    reader = WheelMetadataCache(cache_dir)
+    assert reader.get_digest(bad_identity) is None
+    assert reader.get_digest(good_identity) == "cd" * 32
+
+    # prefetch_digests: same, and the corrupt value is not memoized.
+    prefetcher = WheelMetadataCache(cache_dir)
+    prefetcher.prefetch_digests([good_identity, bad_identity])
+    assert prefetcher.digests == {good_identity: "cd" * 32}
+    assert prefetcher.get_digest(bad_identity) is None
