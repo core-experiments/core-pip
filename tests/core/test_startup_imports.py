@@ -143,6 +143,39 @@ def test_fast_local_install_stays_import_light(tmp_path: Path) -> None:
     )
 
 
+def test_default_install_scans_installed_state_without_importlib_metadata(
+    tmp_path: Path,
+) -> None:
+    """Without --ignore-installed the install lists the target's (and the
+    interpreter's) dist-info directories itself; importlib.metadata is only
+    for roots and finders a directory listing cannot answer."""
+    import shutil
+
+    wheelhouse = tmp_path / "wheelhouse"
+    wheelhouse.mkdir()
+    shutil.copy2(SIMPLEWHEEL, wheelhouse / SIMPLEWHEEL.name)
+    target = tmp_path / "target"
+    args = [
+        "install",
+        "--no-index",
+        "--target",
+        str(target),
+        "--find-links",
+        str(wheelhouse),
+        "simplewheel==2.0",
+    ]
+    env = {"CPIP_CACHE_DIR": str(tmp_path / "cache")}
+
+    first = imported_modules(args, cwd=tmp_path, env=env) - baseline_modules()
+    assert next(target.glob("simplewheel-2.0.dist-info"), None) is not None
+    # The second run finds simplewheel already installed in the target.
+    second = imported_modules(args, cwd=tmp_path, env=env) - baseline_modules()
+
+    for modules in (first, second):
+        assert "cpip.cli.install" in modules
+        assert "importlib.metadata" not in modules
+
+
 # Modules a local wheelhouse install on the normal path (no --no-compile, so
 # the fast path declines) must not import: each serves a shape this install
 # does not have -- installed-state scans, HTML index pages, --group files,

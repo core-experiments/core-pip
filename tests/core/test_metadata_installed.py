@@ -227,20 +227,19 @@ def test_default_and_explicit_scans_are_cached_separately(
     """``paths=None`` consults every metadata finder; an explicit list equal to
     sys.path consults only the path finder. Neither order may let one answer
     stand in for the other."""
-    import importlib.metadata
     import sys
 
     from cpip.core import metadata as metadata_module
 
     metadata_module.clear_installed_index()
     calls: list[object] = []
-    real = importlib.metadata.distributions
+    real = metadata_module._iter_raw_distributions
 
-    def recording(**kwargs):  # noqa: ANN003, ANN202
-        calls.append(kwargs.get("path", "<default>"))
-        return real(**kwargs)
+    def recording(paths):  # noqa: ANN001, ANN202
+        calls.append("<default>" if paths is None else list(paths))
+        return real(paths)
 
-    monkeypatch.setattr(importlib.metadata, "distributions", recording)
+    monkeypatch.setattr(metadata_module, "_iter_raw_distributions", recording)
     explicit = list(sys.path)
     for order in ((None, explicit), (explicit, None)):
         metadata_module.clear_installed_index()
@@ -254,6 +253,160 @@ def test_default_and_explicit_scans_are_cached_separately(
         for paths in order:
             metadata_module.find_installed("not-installed-anywhere", paths)
         assert len(calls) == 2
+
+
+def _stdlib_view(paths: list[str]) -> list[tuple[str, str, str]]:
+    """(name, metadata path, location) for every entry the stdlib finds
+    that carries metadata -- the same filter cpip applies."""
+    found = []
+    for dist in importlib.metadata.distributions(path=paths):
+        text = dist.read_text("METADATA") or dist.read_text("PKG-INFO")
+        if not text:
+            text = dist.read_text("")
+        if not text:
+            continue
+        found.append(
+            (dist.metadata["Name"], str(dist._path), str(dist.locate_file("")))
+        )
+    return sorted(found)
+
+
+def _cpip_view(paths: list[str]) -> list[tuple[str, str, str]]:
+    return sorted(
+        (dist.name, str(dist.metadata_location), dist.location)
+        for dist in iter_installed_distributions(paths=paths)
+    )
+
+
+def _populate_mixed_root(root: Path) -> None:
+    _write_dist_info(root, "demo-1.0.dist-info", "Name: demo\nVersion: 1.0\n")
+    _write_dist_info(
+        root, "Up-3.0.DIST-INFO", "Name: Up\nVersion: 3.0\n"
+    )  # suffix match is case-insensitive
+    _write_dist_info(
+        root, "legacy-0.1.egg-info", "Name: legacy\nVersion: 0.1\n", filename="PKG-INFO"
+    )
+    (root / "flat-2.0.egg-info").write_text("Name: flat\nVersion: 2.0\n")
+    (root / "empty-4.0.dist-info").mkdir()  # no metadata file: skipped by both
+    (root / "notes.txt").write_text("not a distribution\n")
+    (root / "package").mkdir()
+
+
+def test_directory_scan_matches_stdlib_for_every_root_spelling(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The direct listing reports exactly the stdlib's entries, metadata
+    paths and locations, however the root is spelled."""
+    root = tmp_path / "site-packages"
+    root.mkdir()
+    _populate_mixed_root(root)
+
+    for spelling in (
+        str(root),
+        f"{root}/",
+        f"{root}/./",
+        str(root.relative_to(tmp_path)),
+    ):
+        monkeypatch.chdir(tmp_path)
+        view = _cpip_view([spelling])
+        assert view == _stdlib_view([spelling]), spelling
+        assert sorted(name for name, _, _ in view) == ["Up", "demo", "flat", "legacy"]
+
+    # "" is the current directory, as for the stdlib (and `python -m`).
+    monkeypatch.chdir(root)
+    assert _cpip_view([""]) == _stdlib_view([""])
+    assert len(_cpip_view([""])) == 4
+    assert _cpip_view(["."]) == _stdlib_view(["."])
+
+
+def test_directory_scan_skips_roots_the_stdlib_skips(tmp_path: Path) -> None:
+    plain_file = tmp_path / "plain.txt"
+    plain_file.write_text("x")
+    for root in (str(tmp_path / "missing"), str(plain_file)):
+        assert _cpip_view([root]) == []
+        assert _stdlib_view([root]) == []
+
+
+def test_zip_and_egg_roots_still_go_through_the_stdlib(tmp_path: Path) -> None:
+    import zipfile
+
+    archive = tmp_path / "bundle.zip"
+    with zipfile.ZipFile(archive, "w") as zf:
+        zf.writestr("zipped-5.0.dist-info/METADATA", "Name: zipped\nVersion: 5.0\n")
+    egg = tmp_path / "legacy-6.0.egg"
+    _write_dist_info(
+        egg, "EGG-INFO", "Name: legacy\nVersion: 6.0\n", filename="PKG-INFO"
+    )
+    _write_dist_info(egg, "inner-7.0.dist-info", "Name: inner\nVersion: 7.0\n")
+
+    for root in (str(archive), str(egg)):
+        view = _cpip_view([root])
+        assert view == _stdlib_view([root]), root
+        assert view, root
+    assert [name for name, _, _ in _cpip_view([str(archive)])] == ["zipped"]
+    assert sorted(name for name, _, _ in _cpip_view([str(egg)])) == ["inner", "legacy"]
+
+
+def test_default_scan_honours_other_distribution_finders(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A finder on sys.meta_path that offers find_distributions (a custom
+    importer) keeps the default scan on the stdlib so its entries are seen."""
+    import sys
+
+    from cpip.core.metadata import clear_installed_index, find_installed
+
+    private = tmp_path / "private"
+    _write_dist_info(
+        private, "finder_only-1.0.dist-info", "Name: finder-only\nVersion: 1.0\n"
+    )
+
+    class PrivateFinder:
+        @staticmethod
+        def find_distributions(context=None):  # noqa: ANN001, ANN205
+            yield importlib.metadata.PathDistribution(
+                private / "finder_only-1.0.dist-info"
+            )
+
+    clear_installed_index()
+    try:
+        assert find_installed("finder-only") is None
+        monkeypatch.setattr(sys, "meta_path", [PrivateFinder(), *sys.meta_path])
+        clear_installed_index()
+        found = find_installed("finder-only")
+        assert found is not None
+        assert found.raw_version == "1.0"
+        # An explicit path list consults only the path finder, as before.
+        assert find_installed("finder-only", [str(tmp_path)]) is None
+    finally:
+        clear_installed_index()
+
+
+def test_path_distribution_answers_like_the_stdlib(tmp_path: Path) -> None:
+    root = tmp_path / "site-packages"
+    _write_dist_info(
+        root,
+        "widget-1.2.3.dist-info",
+        "Name: widget\nVersion: 1.2.3\nRequires-Dist: gadget>=1.0\n",
+    )
+    dist_info = root / "widget-1.2.3.dist-info"
+    (dist_info / "RECORD").write_text(
+        "widget/__init__.py,,\nwidget-1.2.3.dist-info/RECORD,,\n"
+    )
+    (dist_info / "top_level.txt").write_text("widget\n")
+    (dist_info / "sub").mkdir()
+
+    [distribution] = iter_installed_distributions(paths=[str(root)])
+    stdlib_dist = importlib.metadata.PathDistribution(dist_info)
+
+    for name in ("RECORD", "top_level.txt", "METADATA", "missing", "sub"):
+        assert distribution.raw.read_text(name) == stdlib_dist.read_text(name), name
+    with pytest.raises(FileNotFoundError):
+        distribution.read_text("missing")
+    assert distribution.files() == sorted(str(f) for f in stdlib_dist.files)
+    assert distribution.metadata.get_all("Requires-Dist") == ["gadget>=1.0"]
+    assert distribution.metadata["Name"] == "widget"
+    assert str(distribution.raw.locate_file("")) == str(root)
 
 
 def test_installed_distribution_keeps_a_legacy_version_as_text(tmp_path: Path) -> None:

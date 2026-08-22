@@ -26,7 +26,7 @@ stdlib_pkgs = {"python", "wsgiref", "argparse"}
 
 
 def _read_raw_metadata_text(
-    raw: importlib.metadata.Distribution,
+    raw: RawDistribution,
 ) -> str | None:
     """Read the metadata file text through the same fallback chain as
     ``importlib.metadata.Distribution.metadata``: ``METADATA``, then
@@ -71,6 +71,61 @@ def _read_raw_metadata_text(
     return raw.read_text("METADATA") or raw.read_text("PKG-INFO") or raw.read_text("")
 
 
+class PathDistribution:
+    """A ``*.dist-info`` or ``*.egg-info`` entry found under a search path.
+
+    The cheap stand-in for ``importlib.metadata.PathDistribution``, answering
+    the same ``_path``, ``read_text`` and ``locate_file`` that cpip reads
+    itself; the parsed ``metadata`` message and ``files`` are delegated to
+    the real one, built on first use, so they behave identically while the
+    commands that never touch them skip that module's import.
+    """
+
+    __slots__ = ("_path", "_stdlib")
+
+    def __init__(self, path: pathlib.Path) -> None:
+        self._path = path
+
+        self._stdlib: importlib.metadata.PathDistribution | None = None
+
+    def read_text(self, filename: str) -> str | None:
+        try:
+            return self._path.joinpath(filename).read_text(encoding="utf-8")
+
+        except (
+            FileNotFoundError,
+            IsADirectoryError,
+            KeyError,
+            NotADirectoryError,
+            PermissionError,
+        ):
+            return None
+
+    def locate_file(self, path: str | os.PathLike[str]) -> pathlib.Path:
+        return self._path.parent / path
+
+    @property
+    def stdlib(self) -> importlib.metadata.PathDistribution:
+        if self._stdlib is None:
+            import importlib.metadata
+
+            self._stdlib = importlib.metadata.PathDistribution(self._path)
+
+        return self._stdlib
+
+    @property
+    def metadata(self) -> importlib.metadata.PackageMetadata:
+        return self.stdlib.metadata
+
+    @property
+    def files(self) -> list[importlib.metadata.PackagePath] | None:
+        return self.stdlib.files
+
+
+if TYPE_CHECKING:
+    RawDistribution = importlib.metadata.Distribution | PathDistribution
+
+
 class InstalledDistribution:
     """An installed distribution as found on disk.
 
@@ -96,7 +151,7 @@ class InstalledDistribution:
         version: str,
         location: str,
         metadata_location: str | None,
-        raw: importlib.metadata.Distribution,
+        raw: RawDistribution,
     ) -> None:
         self.name = name
 
@@ -122,7 +177,7 @@ class InstalledDistribution:
 
     metadata_location: str | None
 
-    raw: importlib.metadata.Distribution
+    raw: RawDistribution
 
     @property
     def canonical_name(self) -> str:
@@ -185,6 +240,67 @@ def user_lib_path() -> str:
     return site.getusersitepackages()
 
 
+_INFO_SUFFIXES = (".dist-info", ".egg-info")
+
+
+def _iter_raw_distributions(
+    paths: Iterable[str] | None,
+) -> Iterable[RawDistribution]:
+    """Every metadata entry ``importlib.metadata.distributions`` would find.
+
+    That function costs ~12 ms to import (``inspect``, ``email`` and
+    friends), paid by every default install just to list ``*.dist-info``
+    directories. A plain directory root is listed here the way the stdlib's
+    ``FastPath``/``Lookup`` list it -- case-insensitive suffix match on the
+    child name, no other filter -- and every other shape keeps going through
+    the stdlib so its answer is unchanged: a root that is a file (a zip or
+    egg on ``sys.path``), a ``*.egg`` directory (whose ``EGG-INFO`` child
+    counts too), and a default scan while any other finder on
+    ``sys.meta_path`` offers ``find_distributions``.
+    """
+
+    if paths is None:
+        from importlib.machinery import PathFinder
+
+        if any(
+            finder is not PathFinder and hasattr(finder, "find_distributions")
+            for finder in sys.meta_path
+        ):
+            import importlib.metadata
+
+            yield from importlib.metadata.distributions()
+
+            return
+
+        roots = [os.fspath(entry) for entry in sys.path]
+
+    else:
+        roots = [os.fspath(path) for path in paths]
+
+    for root in roots:
+        try:
+            children = os.listdir(root or ".")
+
+        except OSError:
+            if os.path.isfile(root):
+                import importlib.metadata
+
+                yield from importlib.metadata.distributions(path=[root])
+
+            continue
+
+        if os.path.basename(root).lower().endswith(".egg"):
+            import importlib.metadata
+
+            yield from importlib.metadata.distributions(path=[root])
+
+            continue
+
+        for child in children:
+            if child.lower().endswith(_INFO_SUFFIXES):
+                yield PathDistribution(pathlib.Path(root, child))
+
+
 def _iter_installed_distributions(
     paths: Iterable[str] | None = None,
     names: Collection[str] | None = None,
@@ -193,19 +309,7 @@ def _iter_installed_distributions(
         {canonicalize_name(name) for name in names} if names is not None else None
     )
 
-    # Deferred: importlib.metadata costs ~10 ms to import (email.message and
-    # friends), and an install that ignores the installed state never scans.
-    import importlib.metadata
-
-    if paths is None:
-        distributions = importlib.metadata.distributions()
-
-    else:
-        distribution_paths = [os.fspath(path) for path in paths]
-
-        distributions = importlib.metadata.distributions(path=distribution_paths)
-
-    for dist in distributions:
+    for dist in _iter_raw_distributions(paths):
         text = _read_raw_metadata_text(dist)
 
         if text is None:
