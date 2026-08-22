@@ -506,13 +506,16 @@ def run_before_startup(args: list[str]) -> tuple[int | None, bool]:
     if command != "install":
         return None, False
 
-    import cpip.cli.fast_install as install
-
+    # Decide from the tokens alone which shape, if any, applies before
+    # importing cli.fast_install: that import is the one real cost here, and
+    # an install that matches no shape must not pay it.
     if (
         "--quiet" in options
         and "--no-index" not in options
         and _has_all(options, REMOTE_EXACT_OPTIONS)
     ):
+        import cpip.cli.fast_install as install
+
         return install.run_cached_remote(options), False
 
     if (
@@ -520,9 +523,13 @@ def run_before_startup(args: list[str]) -> tuple[int | None, bool]:
         and "--ignore-installed" not in options
         and _has_all(options, LOCAL_UPGRADE_OPTIONS)
     ):
+        import cpip.cli.fast_install as install
+
         return install.run_local_fallback(options), True
 
     if _has_all(options, LOCAL_WHEELHOUSE_OPTIONS):
+        import cpip.cli.fast_install as install
+
         status = install.run(options)
         if status is not None:
             return status, True
@@ -536,9 +543,16 @@ def run_install_after_startup(args: list[str]) -> int | None:
     if not args or args[0] != "install":
         return None
 
+    options = args[1:]
+
+    # install.run accepts exactly this shape; an install outside it must not
+    # pay for importing cli.fast_install.
+    if not _has_all(options, LOCAL_WHEELHOUSE_OPTIONS):
+        return None
+
     import cpip.cli.fast_install as install
 
-    return install.run(args[1:])
+    return install.run(options)
 
 
 def run_lock_after_startup(args: list[str]) -> int | None:
