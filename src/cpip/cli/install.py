@@ -883,6 +883,7 @@ def report_nothing_installed(
     for requirement in outcome.satisfied_requirements:
         if requirement not in outcome.reported_satisfied and not execution.quiet:
             print(f"Requirement already satisfied: {requirement}")
+            outcome.reported_satisfied.add(requirement)
 
     for requirement in execution.bundle.requirements:
         item = install_req_from_line(requirement)

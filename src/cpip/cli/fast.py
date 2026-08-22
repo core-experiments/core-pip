@@ -33,6 +33,35 @@ LOCAL_WHEELHOUSE_OPTIONS = (
 LOCAL_UPGRADE_OPTIONS = ("--no-index", "--upgrade", "--no-compile", "--target")
 LOCAL_INSTALL_OPTIONS = ("--no-index", "--no-compile", "--target")
 
+# The already-satisfied shape: plain requirement names, every one of them
+# installed in a version its specifier accepts, nothing to install.
+SATISFIED_FLAGS = frozenset(
+    (
+        "--no-index",
+        "--pre",
+        "--dry-run",
+        "--no-deps",
+        "--no-compile",
+        "--no-cache-dir",
+        "-q",
+        "--quiet",
+        "--disable-cpip-version-check",
+        "--no-input",
+        "--no-warn-conflicts",
+        "--no-warn-script-location",
+    )
+)
+SATISFIED_VALUE_OPTIONS = (
+    "-f",
+    "--find-links",
+    "-i",
+    "--index-url",
+    "--extra-index-url",
+    "--cache-dir",
+    "--trusted-host",
+)
+_PLAIN_OPERATORS = ("===", "~=", "!=", "==", ">=", "<=", ">", "<")
+
 
 def option_value(args: list[str], index: int) -> str | None:
     """Return a following option value, or ``None`` for an invalid option."""
@@ -535,7 +564,223 @@ def run_before_startup(args: list[str]) -> tuple[int | None, bool]:
             return status, True
         return install.run_local_fallback(options), True
 
-    return None, False
+    return run_satisfied_install(options), False
+
+
+class SatisfiedOptions:
+    __slots__ = ("find_links", "quiet", "requirements")
+
+    def __init__(self) -> None:
+        self.requirements: list[tuple[str, str, str, tuple[int, ...] | None]] = []
+        self.find_links: list[str] = []
+        self.quiet = False
+
+
+def release_key(value: str) -> tuple[int, ...] | None:
+    """A release-only version as a comparable tuple, or None for any other.
+
+    Only dotted integers qualify, so PEP 440 ordering is plain tuple
+    ordering once trailing zeros are dropped; anything with a pre-, post-,
+    dev- or local segment, or an epoch, stays with the full parser.
+    """
+    parts = value.split(".")
+    if not all(part.isdigit() and part.isascii() for part in parts):
+        return None
+    result = [int(part) for part in parts]
+    while len(result) > 1 and result[-1] == 0:
+        result.pop()
+    return tuple(result)
+
+
+def parse_plain_requirement(
+    token: str,
+) -> tuple[str, str, str, tuple[int, ...] | None] | None:
+    """``(raw, canonical name, operator, version key)`` for ``name`` or
+    ``name<op>release``; None for any other requirement shape (extras,
+    markers, URLs, paths, several specifiers, wildcards, ``~=``/``!=``)."""
+    raw = token.strip()
+    if not raw or raw[0] in "-.":
+        return None
+    name, operator, version = raw, "", ""
+    for candidate in _PLAIN_OPERATORS:
+        if candidate in raw:
+            if candidate in ("===", "~=", "!="):
+                return None
+            name, _, version = raw.partition(candidate)
+            operator = candidate
+            break
+    name = name.strip()
+    if (
+        not name
+        or not name.isascii()
+        or not name[0].isalnum()
+        or not name[-1].isalnum()
+        or not name.replace("-", "").replace("_", "").replace(".", "").isalnum()
+    ):
+        return None
+    key = None
+    if operator:
+        key = release_key(version.strip())
+        if key is None:
+            return None
+    return raw, canonicalize_name(name), operator, key
+
+
+def parse_satisfied_arguments(args: list[str]) -> SatisfiedOptions | None:
+    options = SatisfiedOptions()
+    index = 0
+    while index < len(args):
+        consumed = consume_option(args, index, SATISFIED_VALUE_OPTIONS)
+        if consumed is not None:
+            name, value, index = consumed
+            if name in ("-f", "--find-links"):
+                options.find_links.append(value)
+            continue
+        token = args[index]
+        if token in SATISFIED_FLAGS:
+            options.quiet = options.quiet or token in ("-q", "--quiet")
+        elif token.startswith("-"):
+            return None
+        else:
+            requirement = parse_plain_requirement(token)
+            if requirement is None:
+                return None
+            options.requirements.append(requirement)
+        index += 1
+    if not options.requirements:
+        return None
+    return options
+
+
+def _metadata_name_version(path: str) -> tuple[str, str] | None:
+    """Name and Version of one dist-info/egg-info entry, read the way the
+    installed-state scan reads it: METADATA, then PKG-INFO, then the entry
+    itself for a flat egg-info file."""
+    for filename in ("METADATA", "PKG-INFO", ""):
+        target = os.path.join(path, filename) if filename else path
+        try:
+            with open(target, encoding="utf-8") as file:
+                text = file.read()
+        except OSError:
+            continue
+        if not text:
+            continue
+        headers: dict[str, str] = {}
+        last = None
+        for line in text.splitlines():
+            if not line:
+                break
+            if line[0] in " \t":
+                if last is not None:
+                    headers[last] += "\n" + line
+                continue
+            key, separator, value = line.partition(":")
+            if not separator:
+                break
+            last = key.strip().lower()
+            headers.setdefault(last, value.strip())
+        name = headers.get("name")
+        version = headers.get("version")
+        if not name or not version:
+            return None
+        return name, version
+    return None
+
+
+def installed_versions(names: set[str]) -> dict[str, str] | None:
+    """The installed version of each requested canonical name, found the way
+    the installed-state scan finds it: sys.path in order, the first
+    distribution of a name wins. None means the answer is not this cheap --
+    a zip or egg on sys.path, another distribution finder, or two entries for
+    one name in one directory -- and the full scan must decide.
+
+    Entries are matched on their directory name, which PEP 427 ties to the
+    distribution's name; the Name header is still checked before use.
+    """
+    from importlib.machinery import PathFinder
+
+    if any(
+        finder is not PathFinder and hasattr(finder, "find_distributions")
+        for finder in sys.meta_path
+    ):
+        return None
+    found: dict[str, str] = {}
+    for root in sys.path:
+        root = os.fspath(root)
+        try:
+            children = os.listdir(root or ".")
+        except OSError:
+            if os.path.isfile(root):
+                return None
+            continue
+        if os.path.basename(root).lower().endswith(".egg"):
+            return None
+        seen: set[str] = set()
+        for child in children:
+            low = child.lower()
+            if low.endswith(".dist-info"):
+                stem = child[:-10]
+            elif low.endswith(".egg-info"):
+                stem = child[:-9]
+            else:
+                continue
+            name = canonicalize_name(stem.partition("-")[0])
+            if name not in names:
+                continue
+            if name in seen:
+                return None
+            seen.add(name)
+            if name in found:
+                continue
+            header = _metadata_name_version(os.path.join(root, child))
+            if header is None or canonicalize_name(header[0]) != name:
+                continue
+            found[name] = header[1]
+    return found
+
+
+def run_satisfied_install(args: list[str]) -> int | None:
+    """Report plain requirements that are all already installed, as the
+    normal path would, without loading it."""
+    options = parse_satisfied_arguments(args)
+    if options is None:
+        return None
+    # A redirected target interpreter or resolver debugging changes what the
+    # normal path does and prints.
+    if os.environ.get("CPIP_TARGET_PREFIX") or os.environ.get("CPIP_RESOLVER_DEBUG"):
+        return None
+    versions = installed_versions({item[1] for item in options.requirements})
+    if versions is None:
+        return None
+    for _, name, operator, wanted in options.requirements:
+        installed = versions.get(name)
+        if installed is None:
+            return None
+        key = release_key(installed)
+        if key is None:
+            return None
+        if not operator:
+            continue
+        if wanted is None or not (
+            (operator == "==" and key == wanted)
+            or (operator == ">=" and key >= wanted)
+            or (operator == "<=" and key <= wanted)
+            or (operator == ">" and key > wanted)
+            or (operator == "<" and key < wanted)
+        ):
+            return None
+    # Configured find-links join the "Looking in links" line; leave that
+    # rendering to the normal path.
+    from cpip.cli.config import load_source_config
+
+    if load_source_config("install").find_links:
+        return None
+    if not options.quiet:
+        if options.find_links:
+            print(f"Looking in links: {', '.join(options.find_links)}")
+        for raw, _, _, _ in options.requirements:
+            print(f"Requirement already satisfied: {raw}")
+    return 0
 
 
 def run_install_after_startup(args: list[str]) -> int | None:

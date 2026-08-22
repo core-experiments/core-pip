@@ -176,6 +176,81 @@ def test_default_install_scans_installed_state_without_importlib_metadata(
         assert "importlib.metadata" not in modules
 
 
+SATISFIED_INSTALL_FORBIDDEN = frozenset(
+    {
+        "cpip.cli.install",
+        "cpip.cli.fast_install",
+        "cpip.cli.requirements",
+        "cpip.index.provider",
+        "cpip.resolution.api",
+        "logging",
+        "argparse",
+        "sqlite3",
+        "json",
+    },
+)
+
+
+def test_already_satisfied_install_answers_before_startup(tmp_path: Path) -> None:
+    """``cpip install <name>`` for names already installed in a release
+    version is answered by the pre-startup recognizer: the same lines the
+    normal path prints, without loading it."""
+    import os
+    import shutil
+
+    from import_harness import SRC, import_snapshot
+
+    wheelhouse = tmp_path / "wheelhouse"
+    wheelhouse.mkdir()
+    shutil.copy2(SIMPLEWHEEL, wheelhouse / SIMPLEWHEEL.name)
+    site = tmp_path / "site"
+    imported_modules(
+        [
+            "install",
+            "-q",
+            "--no-index",
+            "--target",
+            str(site),
+            "--find-links",
+            str(wheelhouse),
+            "simplewheel==2.0",
+        ],
+        cwd=tmp_path,
+        env={"CPIP_CACHE_DIR": str(tmp_path / "cache")},
+    )
+    assert next(site.glob("simplewheel-2.0.dist-info"), None) is not None
+
+    env = {
+        "CPIP_CACHE_DIR": str(tmp_path / "cache"),
+        "PYTHONPATH": f"{site}{os.pathsep}{SRC}",
+    }
+    snapshot = import_snapshot(
+        ["install", "--find-links", str(wheelhouse), "simplewheel", "simplewheel>=1"],
+        cwd=tmp_path,
+        env=env,
+    )
+    assert snapshot.returncode == 0, snapshot.describe()
+    assert snapshot.stdout == (
+        f"Looking in links: {wheelhouse}\n"
+        "Requirement already satisfied: simplewheel\n"
+        "Requirement already satisfied: simplewheel>=1\n"
+    ), snapshot.describe()
+    assert not (set(snapshot.modules) & SATISFIED_INSTALL_FORBIDDEN), sorted(
+        set(snapshot.modules) & SATISFIED_INSTALL_FORBIDDEN
+    )
+
+    # A specifier the installed version does not meet is the normal path's.
+    snapshot = import_snapshot(
+        ["install", "--no-index", "--find-links", str(wheelhouse), "simplewheel>=3"],
+        cwd=tmp_path,
+        env=env,
+    )
+    assert "Could not find a version that satisfies" in snapshot.stderr, (
+        snapshot.describe()
+    )
+    assert "cpip.cli.install" in snapshot.modules
+
+
 # Modules a local wheelhouse install on the normal path (no --no-compile, so
 # the fast path declines) must not import: each serves a shape this install
 # does not have -- installed-state scans, HTML index pages, --group files,
