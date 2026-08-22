@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-import logging
 import os
 import re
 import sys
 import sysconfig
 import zipfile
 from collections.abc import Collection, Mapping
-from email.parser import Parser as EmailParser
 from typing import TYPE_CHECKING, Protocol
 
 from functools import lru_cache
@@ -23,6 +21,7 @@ from .wheel_metadata import (
 )
 
 if TYPE_CHECKING:
+    from email.parser import Parser as EmailParser
     from email.message import Message
     from typing import IO, NoReturn
 
@@ -116,7 +115,14 @@ class MetadataCache(Protocol):
 
 
 def Parser() -> EmailParser:
-    """Lazily construct the legacy email parser."""
+    """Lazily construct the legacy email parser.
+
+    The import is deferred as well: ``email.parser`` costs more to import
+    than everything the local fast install path runs, and that path never
+    parses a METADATA file this way.
+    """
+
+    from email.parser import Parser as EmailParser
 
     return EmailParser()
 
@@ -425,8 +431,6 @@ class TargetContext:
 
 
 VERSION_COMPATIBLE = (1, 0)
-
-logger = logging.getLogger(__name__)
 
 
 WHEEL_METADATA_CACHE_SIZE = 1024
@@ -1088,7 +1092,11 @@ def check_compatibility(version: tuple[int, ...], name: str) -> None:
         )
 
     if version > VERSION_COMPATIBLE:
-        logger.warning(
+        # The module's only use of logging; importing it here keeps the
+        # logging machinery off the local fast install path.
+        import logging
+
+        logging.getLogger(__name__).warning(
             "Installing from a newer Wheel-Version (%s)",
             ".".join(map(str, version)),
         )

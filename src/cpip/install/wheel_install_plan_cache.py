@@ -30,7 +30,11 @@ from cpip.install.wheel_archive_cache import (
     valid_sha256,
     wheel_digest,
 )
-from cpip.resolution.models import ResolutionResult
+
+TYPE_CHECKING = False
+
+if TYPE_CHECKING:
+    from cpip.resolution.models import ResolutionResult
 
 # Every caller today already folds interpreter/platform identity into the
 # key's context tuple (see cli/install.py:cached_remote_plan_key and
@@ -403,6 +407,10 @@ def load_cached_install_plan(
                 selected_dependency.version,
             ):
                 return None
+
+    # Deferred: resolution.models is imported only when a receipt is actually
+    # loaded, not by every path that can prepare an archive.
+    from cpip.resolution.models import ResolutionResult
 
     return ResolutionResult(
         candidates=tuple(candidates),

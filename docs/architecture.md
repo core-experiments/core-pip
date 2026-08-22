@@ -52,7 +52,10 @@ Rules:
   own name normalization, requirement parsing, METADATA scanning and minimal
   wheelhouse resolver so a declined command pays only for the token tests. That
   duplication is deliberate; do not consolidate it into the shared
-  implementations.
+  implementations. The modules the fast install path does import keep their
+  rarely-run dependencies (`email.parser`, `importlib.resources`,
+  `concurrent.futures`, `resolution.models`) behind function-level imports;
+  `tests/core/test_startup_imports.py` pins what that path may load.
 
 Shared concerns inside `cli` have one owner each; extend the owner rather than
 re-deriving locally:

@@ -7,7 +7,6 @@ import os
 import stat
 import sys
 import zipfile
-from importlib.resources import files
 
 from cpip.core.errors import InstallationError
 
@@ -81,6 +80,10 @@ def write_windows_script(path: str, script: str, *, gui: bool) -> None:
     bits = "64" if sys.maxsize > 2**32 else "32"
 
     launcher_name = f"{'w' if gui else 't'}{bits}{suffix}.exe"
+
+    # Deferred: importlib.resources pulls in inspect, and only a Windows
+    # launcher needs it.
+    from importlib.resources import files
 
     launcher = (files("cpip._vendor.launchers") / launcher_name).read_bytes()
 

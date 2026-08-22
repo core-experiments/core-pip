@@ -18,7 +18,6 @@ import tempfile
 import time
 import zipfile
 from collections.abc import Iterable
-from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Generator
 
@@ -472,6 +471,10 @@ def prepare_cached_wheels(
         return tuple(
             prepare_cached_wheel(candidate, cache_dir) for candidate in candidates
         )
+
+    # Deferred: concurrent.futures drags in logging and more, and the pure-wheel
+    # fast path imports this module without ever starting a pool.
+    from concurrent.futures import ThreadPoolExecutor
 
     with ThreadPoolExecutor(
         max_workers=min(INSTALL_WORKERS, len(candidates)),

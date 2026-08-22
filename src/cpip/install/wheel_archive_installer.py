@@ -15,7 +15,6 @@ import io
 import os
 import shutil
 import tempfile
-from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING
 
 from cpip.core.errors import InstallationError
@@ -770,6 +769,10 @@ def install_wheels_from_archive_cache(
         active_archives = tuple(plan.archive for plan in active_plans)
 
         if len(archives) >= 4 or len(plans) >= 4:
+            # Deferred: concurrent.futures drags in logging and more, and the pure-wheel
+            # fast path imports this module without ever starting a pool.
+            from concurrent.futures import ThreadPoolExecutor
+
             pool = ThreadPoolExecutor(
                 max_workers=min(
                     INSTALL_WORKERS,

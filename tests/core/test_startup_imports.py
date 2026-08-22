@@ -4,7 +4,7 @@ import json
 import sys
 from pathlib import Path
 
-from import_harness import ROOT, run_cpip
+from import_harness import ROOT, imported_modules, run_cpip
 
 if sys.version_info >= (3, 11):
     import tomllib
@@ -87,3 +87,52 @@ def test_fast_lock_produces_output_on_cache_hit(tmp_path: Path) -> None:
     assert first.returncode == 0
     assert second.returncode == 0
     assert output.is_file()
+
+
+# Modules the local fast install path must not import: each is several
+# milliseconds of interpreter work the path never uses, and together they
+# were a third of its startup cost.
+FAST_INSTALL_FORBIDDEN = frozenset(
+    {
+        "email.parser",
+        "importlib.resources",
+        "inspect",
+        "logging",
+        "cpip.resolution.models",
+        "cpip.resolution.api",
+        "cpip.index.provider",
+        "cpip.cli.install",
+        "cpip.cli.requirements",
+    },
+)
+
+
+def test_fast_local_install_stays_import_light(tmp_path: Path) -> None:
+    import shutil
+
+    # A wheelhouse holding only wheels: the narrow resolver declines a
+    # directory with anything else in it, and then the normal path would run.
+    wheelhouse = tmp_path / "wheelhouse"
+    wheelhouse.mkdir()
+    shutil.copy2(SIMPLEWHEEL, wheelhouse / SIMPLEWHEEL.name)
+    target = tmp_path / "target"
+    args = [
+        "install",
+        "--no-index",
+        "--ignore-installed",
+        "--no-compile",
+        "--target",
+        str(target),
+        "--find-links",
+        str(wheelhouse),
+        "simplewheel==2.0",
+    ]
+    env = {"CPIP_CACHE_DIR": str(tmp_path / "cache")}
+
+    modules = imported_modules(args, cwd=tmp_path, env=env)
+
+    assert next(target.glob("simplewheel-2.0.dist-info"), None) is not None
+    assert "cpip.cli.fast_install" in modules
+    assert not (modules & FAST_INSTALL_FORBIDDEN), sorted(
+        modules & FAST_INSTALL_FORBIDDEN
+    )
