@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import os
 import sys
-import sysconfig
 
 from cpip.core.errors import ConfigurationError
 from cpip.index.config import DEFAULT_INDEX_URL
@@ -128,18 +127,11 @@ def config_locations() -> list[ConfigLocation]:
         # ``sys.prefix``.  The executable's environment is the one whose
         # site-level cpip.conf should apply.
         prefix = executable_prefix
-    purelib = os.path.normpath(
-        sysconfig.get_path("purelib", vars={"base": prefix, "platbase": prefix}),
-    )
-    site_path = os.path.join(prefix, CONFIG_BASENAME)
-    parent = os.path.dirname(purelib)
-    while parent and parent != os.path.dirname(parent):
-        candidate = os.path.join(parent, CONFIG_BASENAME)
-        if parent == prefix:
-            site_path = candidate
-            break
-        parent = os.path.dirname(parent)
-    locations.append(ConfigLocation("site", site_path))
+    # The site file lives directly under the prefix. (An earlier version
+    # walked up from sysconfig's purelib looking for the prefix, which can
+    # only ever land on this same path -- and cost every config load the
+    # sysconfig and threading imports.)
+    locations.append(ConfigLocation("site", os.path.join(prefix, CONFIG_BASENAME)))
     if env_config:
         locations.append(ConfigLocation("env", os.path.expanduser(env_config)))
     return locations
