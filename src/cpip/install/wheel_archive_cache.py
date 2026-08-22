@@ -89,6 +89,16 @@ ArchiveEntry = tuple[str, str, str, int]
 _HEX_DIGITS = "0123456789abcdefABCDEF"
 
 
+def loaded_layout(candidate: WheelInstallCandidate) -> object | None:
+    """The candidate's layout if it is already known, without reading the
+    wheel; a lazily computed layout reads as not yet known."""
+    loaded = getattr(candidate, "wheel_layout_if_loaded", _UNKNOWN)
+    return candidate.wheel_layout if loaded is _UNKNOWN else loaded
+
+
+_UNKNOWN = object()
+
+
 def valid_sha256(value: object) -> bool:
     return isinstance(value, str) and len(value) == 64 and not value.strip(_HEX_DIGITS)
 
@@ -345,7 +355,7 @@ def _extract_archive(
         import zipfile
 
         with zipfile.ZipFile(candidate.path) as archive:
-            layout = candidate.wheel_layout
+            layout = loaded_layout(candidate)
 
             if isinstance(layout, tuple) and layout and isinstance(layout[0], str):
                 dist_info = layout[0]
@@ -445,7 +455,7 @@ def prepare_cached_wheel(
     candidate: WheelInstallCandidate,
     cache_dir: str,
 ) -> CachedWheelArchive:
-    layout = candidate.wheel_layout
+    layout = loaded_layout(candidate)
 
     if isinstance(layout, CachedWheelArchive):
         return layout

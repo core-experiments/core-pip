@@ -1448,7 +1448,7 @@ def run_install(args: list[str]) -> int:
                 hybrid_installed = False
                 target_is_empty = target_library_is_empty(batch_target)
                 prepared_archives = all(
-                    isinstance(candidate.wheel_layout, CachedWheelArchive)
+                    isinstance(candidate.wheel_layout_if_loaded, CachedWheelArchive)
                     for candidate in plan.candidates
                 )
 
