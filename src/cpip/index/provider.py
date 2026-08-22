@@ -1475,6 +1475,105 @@ class CandidateProvider:
 
         return selection
 
+    def release_candidates(
+        self,
+        requirement: Requirement,
+        version: Version,
+    ) -> tuple[CandidateRecord, ...] | None:
+        """Accepted records for one release, without scanning the others.
+
+        ``evaluate_links`` answers a requirement: it selects every matching
+        release and evaluates each of its artifacts. A caller that walks
+        releases one at a time -- the resolver's forward check -- would pay
+        that whole scan once per release. This reads the release straight
+        out of the package catalog and evaluates only its artifacts, under
+        the policy ``applicable_candidate_records`` applies. ``None`` means
+        the package has no catalog or needs a filter only the full query
+        implements (an upload cutoff, required hashes), so the caller falls
+        back to it.
+        """
+
+        if requirement.url is not None or requirement.is_unnamed_direct:
+            return None
+
+        if self.uploaded_prior_to is not None:
+            return None
+
+        hashes = self.hashes_by_name.get(requirement.canonical_name)
+
+        if hashes is not None and hashes.allowed_internal:
+            return None
+
+        allow_binary, allow_source = self.allowed_formats_internal(requirement)
+
+        catalog_key = (requirement.canonical_name, allow_binary, allow_source)
+
+        catalog = self.package_catalog_cache.get(catalog_key)
+
+        if catalog is None:
+            self.available_versions(requirement)
+
+            catalog = self.package_catalog_cache.get(catalog_key)
+
+            if catalog is None:
+                return None
+
+        accepted: list[CandidateRecord] = []
+
+        if catalog.records_by_version is not None:
+            for item in self.candidate_records_from_catalog(
+                catalog_key,
+                catalog,
+                (version,),
+                primary_only=True,
+            ):
+                result = self.evaluate_catalog_candidate(
+                    item,
+                    requirement,
+                    allow_yanked=self.allow_yanked,
+                    allow_binary=allow_binary,
+                    allow_source=allow_source,
+                )
+
+                if isinstance(result, CandidateRecord):
+                    accepted.append(result)
+
+        else:
+            for item in catalog.candidates_by_version.get(version, ()):
+                result = CandidateEvaluator.evaluate_parsed_link(
+                    item.link,
+                    item,
+                    requirement,
+                    allow_yanked=self.allow_yanked,
+                    allow_binary=allow_binary,
+                    allow_source=allow_source,
+                )
+
+                if isinstance(result, CandidateRecord):
+                    accepted.append(result)
+
+        if accepted and version.is_prerelease:
+            accepted = list(
+                CandidateEvaluator.create(
+                    requirement.name,
+                    release_control=self.release_control,
+                    prefer_binary=self.prefer_binary,
+                    specifier=requirement.specifier,
+                    target=self.target,
+                    hashes=None,
+                ).get_applicable_candidates(accepted),
+            )
+
+        if len(accepted) > 1:
+            accepted.sort(
+                key=lambda candidate: candidate.sort_key(
+                    prefer_binary=self.prefer_binary,
+                ),
+                reverse=True,
+            )
+
+        return tuple(accepted)
+
     def applicable_candidate_records(
         self,
         requirement: Requirement,

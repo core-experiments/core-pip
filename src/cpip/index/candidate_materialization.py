@@ -737,15 +737,7 @@ class CandidateMaterializer:
                 if identity in invalid_versions:
                     continue
 
-                negative_key = self.negative_fact_key(candidate)
-
-                if (
-                    self.persistent_release_facts_cache is not None
-                    and self.persistent_release_facts_cache.get(negative_key)
-                    is not None
-                ):
-                    self.invalid_links.add(candidate.link.url)
-
+                if self.release_is_invalid(candidate):
                     invalid_versions.add(identity)
 
                     continue
@@ -753,6 +745,38 @@ class CandidateMaterializer:
                 yield LazyWheelCandidate(candidate, requirement, self)
 
         return CandidateStream(generate())
+
+    def materialize_one(
+        self,
+        requirement: Requirement,
+        record: CandidateRecord,
+    ) -> WheelCandidate | None:
+        """One record as the lazy candidate :meth:`materialize` would yield.
+
+        For a caller that already holds the single record it wants -- the
+        resolver's forward check reading one release -- without the stream,
+        the prefetch decision and the generator a whole selection needs.
+        ``None`` when the release is known to be invalid.
+        """
+
+        candidate = self.prepare_record(requirement, record)
+
+        if self.release_is_invalid(candidate):
+            return None
+
+        return LazyWheelCandidate(candidate, requirement, self)
+
+    def release_is_invalid(self, candidate: CandidateRecord) -> bool:
+        """Whether the release was recorded as unusable by an earlier run."""
+
+        cache = self.persistent_release_facts_cache
+
+        if cache is None or cache.get(self.negative_fact_key(candidate)) is None:
+            return False
+
+        self.invalid_links.add(candidate.link.url)
+
+        return True
 
     def negative_fact_key(self, candidate: CandidateRecord) -> tuple[str, str, str]:
         return (

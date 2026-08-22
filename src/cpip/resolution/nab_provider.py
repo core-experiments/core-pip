@@ -32,6 +32,8 @@ from cpip.resolution.nab_types import (
 
 TYPE_CHECKING = False
 
+_MISSING = object()
+
 if TYPE_CHECKING:
     from contextlib import AbstractContextManager
 
@@ -79,7 +81,8 @@ class NabProvider:
         # package's active extras, which widen as extras are merged, so those
         # are part of its key.
         self._preflight_cache: dict[tuple[str, Version, tuple[str, ...]], bool] = {}
-        self._catalog_candidate_cache: dict[str, dict[Version, object | None]] = {}
+        self._catalog_candidate_cache: dict[tuple[str, Version], object | None] = {}
+        self._catalog_by_version_cache: dict[str, dict[Version, object | None]] = {}
         self._dependency_cache: dict[
             tuple[str, Version, tuple[str, ...]], Mapping[str, Range[Version]]
         ] = {}
@@ -544,18 +547,49 @@ class NabProvider:
 
         Ambiguity is not a rejection: more than one artifact for a release
         means the choice belongs to the resolver's own evaluation.
+
+        One release at a time: the provider reads the release's artifacts
+        out of the package catalog, and only the one release inspected is
+        materialized. Querying the package by name instead re-evaluated
+        every link and materialized every release a second time, beside the
+        evaluation the resolver's own requirement already paid for.
         """
-        return self._catalog_by_version(package).get(version)
+        key = (package, version)
+        cached = self._catalog_candidate_cache.get(key, _MISSING)
+        if cached is not _MISSING:
+            return cached
+
+        requirement = parse_requirement(package)
+        try:
+            records = self.provider.release_candidates(requirement, version)
+        except Exception:
+            # Metadata that will not load is the resolver's problem to report.
+            records = ()
+
+        if records is None:
+            candidate = self._catalog_by_version(package).get(version)
+        elif len(records) != 1:
+            candidate = None
+        else:
+            try:
+                candidate = self.provider.get_materializer_internal().materialize_one(
+                    requirement,
+                    records[0],
+                )
+            except Exception:
+                candidate = None
+
+        self._catalog_candidate_cache[key] = candidate
+        return candidate
 
     def _catalog_by_version(self, package: str) -> dict[Version, object | None]:
-        """Index a package's catalog entries by release, in one query.
+        """Index every release of a package the provider has no catalog for.
 
-        Asking per release would run the whole candidate pipeline once per
-        version, which is the same quadratic shape the forward check exists to
-        avoid.  Candidate objects are cheap -- only reading ``dependencies``
-        loads metadata -- so building the whole index costs one query.
+        The fallback behind :meth:`_catalog_candidate`: one full query per
+        package, materializing every release, for the cases the per-release
+        read declines (a direct URL, an upload cutoff, required hashes).
         """
-        cached = self._catalog_candidate_cache.get(package)
+        cached = self._catalog_by_version_cache.get(package)
         if cached is not None:
             return cached
 
@@ -571,7 +605,7 @@ class NabProvider:
             # A release with more than one artifact is ambiguous here.
             index[version] = None if version in index else candidate
 
-        self._catalog_candidate_cache[package] = index
+        self._catalog_by_version_cache[package] = index
         return index
 
     def _retry_including_yanked(
