@@ -3,7 +3,6 @@ from __future__ import annotations
 import sys
 from collections.abc import Mapping
 from contextlib import nullcontext
-from dataclasses import dataclass
 from urllib.parse import urlsplit
 
 from cpip._vendor.nab_resolver.ranges import Range
@@ -46,12 +45,13 @@ if TYPE_CHECKING:
 # stand in for every "any version" requirement.
 
 
-@dataclass
 class NabProvider:
     """Native NAB provider backed by cpip candidate discovery."""
 
-    provider: CandidateProvider
-    context: ResolutionConfig
+    def __init__(self, provider: CandidateProvider, context: ResolutionConfig) -> None:
+        self.provider = provider
+        self.context = context
+        self.__post_init__()
 
     def __post_init__(self) -> None:
         self.allow_prereleases = self.context.allow_prereleases

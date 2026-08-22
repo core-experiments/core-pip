@@ -94,6 +94,7 @@ def test_fast_lock_produces_output_on_cache_hit(tmp_path: Path) -> None:
 # were a third of its startup cost.
 FAST_INSTALL_FORBIDDEN = frozenset(
     {
+        "dataclasses",
         "email.parser",
         "importlib.resources",
         "inspect",
@@ -148,6 +149,7 @@ def test_fast_local_install_stays_import_light(tmp_path: Path) -> None:
 # source builds -- and they cost ~20 ms together.
 NORMAL_INSTALL_FORBIDDEN = frozenset(
     {
+        "dataclasses",
         "importlib.metadata",
         "html.parser",
         "tomllib",
