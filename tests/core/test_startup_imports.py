@@ -186,3 +186,30 @@ def test_normal_local_install_stays_import_light(tmp_path: Path) -> None:
     assert not (modules & NORMAL_INSTALL_FORBIDDEN), sorted(
         modules & NORMAL_INSTALL_FORBIDDEN
     )
+
+
+# The list fast path reads dist-info directories and prints; it must not
+# import the typing machinery, the install fast path or the packaging core.
+FAST_LIST_FORBIDDEN = frozenset(
+    {"typing", "cpip.cli.fast_install", "cpip.core.packaging"}
+)
+
+
+def test_fast_list_stays_import_light(tmp_path: Path) -> None:
+    dist_info = tmp_path / "demo_pkg-1.2.dist-info"
+    dist_info.mkdir()
+    dist_info.joinpath("METADATA").write_text(
+        "Metadata-Version: 2.1\nName: demo-pkg\nVersion: 1.2\n",
+        encoding="utf-8",
+    )
+
+    modules = (
+        imported_modules(
+            ["list", "--format=json", "--path", str(tmp_path)],
+            cwd=tmp_path,
+        )
+        - baseline_modules()
+    )
+
+    assert "cpip.cli.fast" in modules
+    assert not (modules & FAST_LIST_FORBIDDEN), sorted(modules & FAST_LIST_FORBIDDEN)
