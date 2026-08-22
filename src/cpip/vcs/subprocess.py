@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 import os
-import subprocess as subprocess_internal
 from collections.abc import Iterable, Mapping
 from typing import Any, Literal, Protocol
 
@@ -41,6 +40,8 @@ def call_subprocess(
     *,
     command_desc: str,
 ) -> str:
+    import subprocess as subprocess_internal
+
     env = os.environ.copy()
     if extra_environ:
         env.update({key: str(value) for key, value in extra_environ.items()})

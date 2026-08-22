@@ -1275,7 +1275,10 @@ def run_install(args: list[str]) -> int:
             if plan.metrics.get("nab_conflicts", 0) >= 13:
                 print("This could take a while. press Ctrl + C to cancel.")
 
-        if not execution.quiet:
+        # The "already satisfied" lines describe the environment's installed
+        # state, which --ignore-installed tells this install to disregard --
+        # and finding it means scanning every installed distribution.
+        if not execution.quiet and not execution.options.ignore_installed:
             for candidate in plan.candidates:
                 for dependency in candidate.dependencies:
                     installed_dependency = find_installed(dependency.name)

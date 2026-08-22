@@ -153,6 +153,9 @@ NORMAL_INSTALL_FORBIDDEN = frozenset(
         "tomllib",
         "cpip._vendor.tomli",
         "cpip.build.build_backend",
+        "email.message",
+        "configparser",
+        "subprocess",
     },
 )
 

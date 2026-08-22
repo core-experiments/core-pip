@@ -4,7 +4,6 @@ import locale
 import logging
 import os
 import shlex
-import subprocess
 from os import PathLike
 from typing import cast
 
@@ -70,6 +69,9 @@ def call_subprocess(
     cwd: str | None = None,
     extra_environ: dict[str, str] | None = None,
 ) -> str:
+    # Deferred: the stdlib module is needed only when a process is run.
+    import subprocess
+
     log_level = logging.INFO if show_stdout else VERBOSE
     subprocess_logger.log(log_level, "Running command %s", format_command_args(cmd))
     command = command_args_to_argv(cmd)

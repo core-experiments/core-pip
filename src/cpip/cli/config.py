@@ -14,7 +14,6 @@ Keep this module import-light: the install fast path loads it on startup.
 
 from __future__ import annotations
 
-import configparser
 import os
 import sys
 import sysconfig
@@ -25,6 +24,8 @@ from cpip.index.config import DEFAULT_INDEX_URL
 TYPE_CHECKING = False
 
 if TYPE_CHECKING:
+    import configparser
+
     # Annotation only: argparse is a measurable import on the fast path.
     import argparse
 
@@ -33,9 +34,30 @@ NO_INDEX_VALUES = frozenset(("1", "true", "yes", "on"))
 CONFIG_BASENAME = "cpip.conf" if os.name != "nt" else "cpip.ini"
 
 
-class RawConfigParser_internal(configparser.RawConfigParser):
-    def optionxform(self, optionstr: str) -> str:
-        return optionstr
+_PARSER_CLASS: type | None = None
+
+
+def raw_config_parser_class() -> type:
+    """The config parser subclass, built on first use: configparser is
+    imported only when a configuration file is actually read."""
+    global _PARSER_CLASS
+    if _PARSER_CLASS is not None:
+        return _PARSER_CLASS
+
+    import configparser
+
+    class RawConfigParser_internal(configparser.RawConfigParser):
+        def optionxform(self, optionstr: str) -> str:
+            return optionstr
+
+    _PARSER_CLASS = RawConfigParser_internal
+    return RawConfigParser_internal
+
+
+def __getattr__(name: str) -> object:
+    if name == "RawConfigParser_internal":
+        return raw_config_parser_class()
+    raise AttributeError(name)
 
 
 class ConfigLocation:
@@ -48,25 +70,35 @@ class ConfigLocation:
 
 class ConfigurationStore:
     def __init__(self) -> None:
-        self.parser_internal = new_parser()
+        self.parser_internal: configparser.RawConfigParser | None = None
 
     def load(self) -> None:
+        paths = [
+            os.fspath(location.path)
+            for location in config_locations()
+            if os.path.isfile(os.fspath(location.path))
+        ]
+        if not paths:
+            # No configuration file: no parser, and configparser stays
+            # unimported on this command.
+            return
+
+        import configparser
+
         self.parser_internal = new_parser()
-        for location in config_locations():
-            if os.path.isfile(os.fspath(location.path)):
-                try:
-                    self.parser_internal.read(
-                        os.fspath(location.path),
-                        encoding="utf-8",
-                    )
-                except configparser.Error as exc:
-                    raise ConfigurationError(str(exc)) from exc
+        for path in paths:
+            try:
+                self.parser_internal.read(path, encoding="utf-8")
+            except configparser.Error as exc:
+                raise ConfigurationError(str(exc)) from exc
 
     def get(self, key: str) -> str:
         section, option = split_key(key)
-        for candidate in option_spellings(option):
-            if self.parser_internal.has_option(section, candidate):
-                return self.parser_internal.get(section, candidate)
+        parser = self.parser_internal
+        if parser is not None:
+            for candidate in option_spellings(option):
+                if parser.has_option(section, candidate):
+                    return parser.get(section, candidate)
         raise ConfigurationError(f"No such key - {key}")
 
     def get_optional(self, key: str) -> str | None:
@@ -133,8 +165,8 @@ def option_spellings(option: str) -> tuple[str, ...]:
     return (dotted, underscored)
 
 
-def new_parser() -> RawConfigParser_internal:
-    return RawConfigParser_internal()
+def new_parser() -> configparser.RawConfigParser:
+    return raw_config_parser_class()()
 
 
 def user_config_path() -> str:
