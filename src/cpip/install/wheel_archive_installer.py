@@ -9,6 +9,7 @@ them into a real target directory.
 from __future__ import annotations
 
 import csv
+import functools
 import errno
 import io
 import os
@@ -115,7 +116,13 @@ def _eligible_target(target: InstallTarget, cache_dir: str) -> str | None:
     return root
 
 
+@functools.lru_cache(maxsize=65536)
 def _mapped_parts(relative: str) -> tuple[str, ...]:
+    """Where a wheel member lands in the target, as path parts.
+
+    A pure function of the member path, memoized: the same members recur
+    across the plan, the staged tree and the RECORD of every install.
+    """
     parts = validate_member_parts(relative)
 
     if not parts:
@@ -271,7 +278,8 @@ def _relocate_data(stage: str, archive: CachedWheelArchive) -> None:
     data_roots = {
         parts[0]
         for relative, _, _, _ in archive.entries
-        if (parts := validate_member_parts(relative)) and parts[0].endswith(".data")
+        if relative.partition("/")[0].endswith(".data")
+        and (parts := validate_member_parts(relative))
     }
 
     for data_root in data_roots:
@@ -383,7 +391,7 @@ def _finalize_wheel(
         if len(parts) >= 3 and parts[0].endswith(".data") and parts[1] == "scripts":
             mapped = _mapped_parts(relative)
 
-            path = os.path.join(stage, *mapped)
+            path = os.path.join(stage, "/".join(mapped))
 
             rewrite_shebang(path, script_executable)
 
@@ -485,7 +493,7 @@ def _finalize_wheel(
 
             continue
 
-        path = os.path.join(stage, *mapped)
+        path = os.path.join(stage, installed_relative)
 
         if installed_relative == f"{dist_info}/METADATA" and metadata_rewritten:
             digest, size = metadata_rewritten
@@ -532,7 +540,7 @@ def _finalize_wheel(
 
 def _plan_destinations(root: str, plan: _WheelInstallPlan) -> set[str]:
     destinations = {
-        os.path.join(root, *_mapped_parts(relative))
+        os.path.join(root, "/".join(_mapped_parts(relative)))
         for relative, _, _, _ in plan.archive.entries
     }
 

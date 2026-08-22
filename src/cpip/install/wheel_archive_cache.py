@@ -17,6 +17,7 @@ import shutil
 import tempfile
 import time
 import zipfile
+from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Generator
@@ -114,14 +115,8 @@ class CachedWheelArchive:
         self.entries = entries
 
 
-def wheel_digest(candidate: WheelInstallCandidate, cache_dir: str | None = None) -> str:
-    """The wheel's SHA-256: as supplied by its source, else as recorded for
-    this exact file (path, size, mtime) in the metadata cache, else hashed.
-
-    A wheel from a local wheelhouse carries no index-supplied hash, so every
-    install used to read it in full to find its archive entry; the digest is
-    now hashed once per file and reused while the file is unchanged.
-    """
+def supplied_wheel_digest(candidate: WheelInstallCandidate) -> str | None:
+    """The SHA-256 the candidate's source vouched for, if any."""
     supplied = (
         (candidate.source_hashes or {}).get("sha256")
         if candidate.source_kind in {None, "wheel"}
@@ -130,6 +125,38 @@ def wheel_digest(candidate: WheelInstallCandidate, cache_dir: str | None = None)
 
     if isinstance(supplied, str) and valid_sha256(supplied):
         return supplied.lower()
+
+    return None
+
+
+def prefetch_wheel_digests(
+    candidates: Iterable[WheelInstallCandidate],
+    cache_dir: str,
+) -> None:
+    """One database read for the recorded digests of a whole batch."""
+    identities = [
+        identity
+        for candidate in candidates
+        if supplied_wheel_digest(candidate) is None
+        and (identity := metadata_identity(candidate.path)) is not None
+    ]
+
+    if identities:
+        get_wheel_metadata_cache(cache_dir).prefetch_digests(identities)
+
+
+def wheel_digest(candidate: WheelInstallCandidate, cache_dir: str | None = None) -> str:
+    """The wheel's SHA-256: as supplied by its source, else as recorded for
+    this exact file (path, size, mtime) in the metadata cache, else hashed.
+
+    A wheel from a local wheelhouse carries no index-supplied hash, so every
+    install used to read it in full to find its archive entry; the digest is
+    now hashed once per file and reused while the file is unchanged.
+    """
+    supplied = supplied_wheel_digest(candidate)
+
+    if supplied is not None:
+        return supplied
 
     cache = None
 
@@ -439,6 +466,8 @@ def prepare_cached_wheels(
     candidates: tuple[WheelInstallCandidate, ...],
     cache_dir: str,
 ) -> tuple[CachedWheelArchive, ...]:
+    prefetch_wheel_digests(candidates, cache_dir)
+
     if len(candidates) < INSTALL_WORKERS:
         return tuple(
             prepare_cached_wheel(candidate, cache_dir) for candidate in candidates
