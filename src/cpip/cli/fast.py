@@ -458,6 +458,151 @@ def run_list(args: list[str]) -> int | None:
     return 0
 
 
+FREEZE_FLAGS = frozenset(("--all", "--exclude-editable"))
+FREEZE_VALUE_OPTIONS = ("--exclude", "--path")
+
+
+class FreezeOptions:
+    __slots__ = ("all", "exclude_editable", "excludes", "paths")
+
+    def __init__(self) -> None:
+        self.paths: list[str] = []
+        self.excludes: set[str] = set()
+        self.all = False
+        self.exclude_editable = False
+
+
+def parse_freeze_arguments(args: list[str]) -> FreezeOptions | None:
+    options = FreezeOptions()
+    index = 0
+    while index < len(args):
+        consumed = consume_option(args, index, FREEZE_VALUE_OPTIONS)
+        if consumed is not None:
+            name, value, index = consumed
+            if name == "--path":
+                options.paths.append(os.path.normpath(value))
+            else:
+                options.excludes.add(canonicalize_name(value))
+            continue
+        token = args[index]
+        if token == "--all":
+            options.all = True
+        elif token == "--exclude-editable":
+            options.exclude_editable = True
+        else:
+            return None
+        index += 1
+    if "cpip" in options.excludes:
+        from cpip.core.cpip_version import CPIP_DISTRIBUTION_NAMES
+
+        options.excludes.update(
+            canonicalize_name(name) for name in CPIP_DISTRIBUTION_NAMES
+        )
+    return options
+
+
+def _valid_project_name(name: str) -> bool:
+    """``cli.freeze.VALID_NAME``: alphanumerics, dots, underscores and
+    hyphens, starting and ending with an alphanumeric."""
+    return (
+        name.isascii()
+        and name[:1].isalnum()
+        and name[-1:].isalnum()
+        and name.replace(".", "").replace("_", "").replace("-", "").isalnum()
+    )
+
+
+def run_freeze(args: list[str]) -> int | None:
+    """``cpip freeze`` over the interpreter's search path or ``--path``
+    directories, one ``name==version`` (or ``name @ url``) line per
+    distribution, as the normal path prints it.
+
+    The normal path reads installed metadata through core.light_metadata:
+    per directory, entries in sorted name order, the first distribution of
+    a name across the directories wins. Anything it would answer with a
+    warning, a VCS command or the full version parser is declined: an
+    invalid distribution name, an editable install (unless excluded), an
+    egg-info entry, a version spelled other than as the parser renders it.
+    """
+    options = parse_freeze_arguments(args)
+    if options is None:
+        return None
+    if options.paths:
+        roots = options.paths
+    else:
+        if os.environ.get("CPIP_TARGET_PREFIX") or _other_distribution_finders():
+            return None
+        roots = [os.fspath(entry) for entry in sys.path]
+
+    entries = scan_installed(roots)
+    if entries is None:
+        return None
+    # light_metadata lists each directory in sorted entry order, and reads
+    # a dist-info directory's METADATA, then PKG-INFO, taking the first with
+    # a name and version.
+    ordered: list[InstalledEntry] = []
+    for root in roots:
+        here = sorted(
+            (entry for entry in entries if entry.root == root),
+            key=lambda entry: os.path.basename(entry.info_path),
+        )
+        ordered.extend(here)
+    chosen: dict[str, InstalledEntry] = {}
+    for entry in ordered:
+        info = entry.info_path
+        if info.lower().endswith(".egg-info"):
+            return None
+        if not os.path.isdir(info):
+            return None
+        metadata = os.path.join(info, "METADATA")
+        if not os.path.isfile(metadata) or _read_headers(metadata) != entry.headers:
+            return None
+        chosen.setdefault(entry.name, entry)
+
+    skip = set(STDLIB_NAMES)
+    if not options.all:
+        from cpip.core.cpip_version import CPIP_DISTRIBUTION_NAMES
+
+        skip.update(canonicalize_name(name) for name in CPIP_DISTRIBUTION_NAMES)
+        if sys.version_info < (3, 12):
+            skip.add("setuptools")
+
+    lines: list[tuple[str, str]] = []
+    for entry in chosen.values():
+        name = entry.headers["name"]
+        version = entry.headers["version"]
+        if not _valid_project_name(name):
+            return None
+        if entry.name in options.excludes or entry.name in skip:
+            continue
+        requirement = None
+        if os.path.exists(os.path.join(entry.info_path, "direct_url.json")):
+            from cpip.core.direct_url import DirectUrl
+
+            try:
+                with open(
+                    os.path.join(entry.info_path, "direct_url.json"), encoding="utf-8"
+                ) as file:
+                    direct_url = DirectUrl.from_json(file.read())
+            except (OSError, ValueError):
+                direct_url = None
+            if direct_url is not None:
+                if direct_url.is_local_editable():
+                    if options.exclude_editable:
+                        continue
+                    return None
+                requirement = direct_url.as_pep440_direct_reference(name)
+        if requirement is None:
+            if not canonical_release(version):
+                return None
+            requirement = f"{name}=={version}"
+        lines.append((name.lower(), requirement))
+
+    for _, requirement in sorted(lines, key=lambda item: item[0]):
+        print(requirement)
+    return 0
+
+
 class LockOptions:
     __slots__ = ("find_links", "no_index", "output", "requirements")
 
@@ -703,6 +848,9 @@ def run_before_startup(args: list[str]) -> tuple[int | None, bool]:
 
     if command == "list":
         return run_list(options), False
+
+    if command == "freeze":
+        return run_freeze(options), False
 
     if command != "install":
         return None, False

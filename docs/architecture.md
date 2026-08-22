@@ -33,7 +33,8 @@ cli.entrypoint:main
   |      +--> cli.fast_install:run_local_fallback  non-empty local target, --no-index wheelhouse
   |      +--> cli.fast_install:run                 empty target, --no-index wheelhouse
   |      +--> run_satisfied_install                 plain names, all already installed
-  |      `--> run_list
+  |      +--> run_list                             no index options; sys.path or --path
+  |      `--> run_freeze                           no -r/--user; no editables unless excluded
   +--> execution context, logging, temp dir (per CommandSpec flags)
   +--> cli.fast:run_install_after_startup / run_lock_after_startup
   `--> run_command -> CommandSpec.load_runner

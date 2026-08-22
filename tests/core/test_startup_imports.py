@@ -317,6 +317,34 @@ FAST_LIST_FORBIDDEN = frozenset(
 )
 
 
+def test_plain_freeze_stays_import_light(tmp_path: Path) -> None:
+    """``cpip freeze`` with no options is the fast path over sys.path."""
+    import os
+
+    from import_harness import SRC, import_snapshot
+
+    site = tmp_path / "site"
+    dist_info = site / "demo_pkg-1.2.dist-info"
+    dist_info.mkdir(parents=True)
+    dist_info.joinpath("METADATA").write_text(
+        "Metadata-Version: 2.1\nName: demo-pkg\nVersion: 1.2\n",
+        encoding="utf-8",
+    )
+    env = {"PYTHONPATH": f"{site}{os.pathsep}{SRC}"}
+
+    # --exclude-editable: the harness's own environment may hold editables.
+    snapshot = import_snapshot(["freeze", "--exclude-editable"], cwd=tmp_path, env=env)
+    assert "demo-pkg==1.2\n" in snapshot.stdout, snapshot.describe()
+    forbidden = FAST_LIST_FORBIDDEN | {
+        "cpip.cli.freeze",
+        "cpip.core.light_metadata",
+        "logging",
+    }
+    assert not (set(snapshot.modules) & forbidden), sorted(
+        set(snapshot.modules) & forbidden
+    )
+
+
 def test_plain_list_stays_import_light(tmp_path: Path) -> None:
     """``cpip list`` with no options is the fast path over sys.path."""
     import os
