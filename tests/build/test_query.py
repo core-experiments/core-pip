@@ -140,3 +140,40 @@ def test_dependent_index_reports_unreadable_metadata() -> None:
 
     assert unavailable
     assert dependents == {}
+
+
+def test_unsupported_distributions_computes_tags_only_when_needed(tmp_path) -> None:  # noqa: ANN001
+    from cpip.build.query import unsupported_distributions
+    from cpip.core.light_metadata import LightDistributionStore
+    from cpip.core.target_python import get_supported
+
+    def wheel(name: str, *tags: str) -> None:
+        info = tmp_path / f"{name}-1.0.dist-info"
+        info.mkdir(parents=True)
+        (info / "METADATA").write_text(f"Name: {name}\nVersion: 1.0\n")
+        (info / "WHEEL").write_text(
+            "Wheel-Version: 1.0\n" + "".join(f"Tag: {tag}\n" for tag in tags)
+        )
+
+    wheel("pure", "py3-none-any")
+    wheel("both", "py2-none-any", "py3-none-any")
+    wheel("notags")
+    calls: list[int] = []
+
+    def supported():  # noqa: ANN202
+        calls.append(1)
+        return get_supported()
+
+    distributions = LightDistributionStore(paths=[str(tmp_path)]).iter()
+    assert unsupported_distributions(distributions, supported) == []
+    assert calls == []
+
+    wheel("foreign", "cp27-cp27m-manylinux1_x86_64")
+    wheel(
+        "native",
+        *(f"{t.interpreter}-{t.abi}-{t.platform}" for t in get_supported()[:1]),
+    )
+    distributions = LightDistributionStore(paths=[str(tmp_path)]).iter()
+    unsupported = unsupported_distributions(distributions, supported)
+    assert [dist.raw_name for dist in unsupported] == ["foreign"]
+    assert calls == [1]

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import string
 from collections import namedtuple
-from collections.abc import Collection, Iterable, Iterator, Mapping
+from collections.abc import Callable, Collection, Iterable, Iterator, Mapping
 
 from cpip.core.cpip_version import CPIP_DISTRIBUTION_NAMES
 from cpip.core.light_metadata import LightDistributionStore, parse_metadata_text
@@ -499,12 +499,16 @@ def metadata_errors(
 
 def unsupported_distributions(
     distributions: Iterable[DistributionLike],
-    supported_tags: Iterable[WheelTag],
+    supported_tags: Callable[[], Iterable[WheelTag]],
 ) -> list[DistributionLike]:
-    """Return distributions whose wheel tags are unsupported."""
-    from cpip.core.wheel import WheelTag, wheel_tag_rank
+    """Return distributions whose wheel tags are unsupported.
 
-    supported = tuple(supported_tags)
+    ``supported_tags`` is called at most once, and only for a distribution
+    whose WHEEL carries a tag other than ``py3-none-any``: that tag is in
+    every Python 3 interpreter's supported set, so a wheel listing it ranks
+    without computing the set (and without importing the tag machinery).
+    """
+    supported: tuple[WheelTag, ...] | None = None
     result = []
     for dist in distributions:
         try:
@@ -517,8 +521,15 @@ def unsupported_distributions(
                 continue
             parts = line.split(":", 1)[1].strip().split("-")
             if len(parts) == 3:
-                tags.append(WheelTag(*parts))
-        if tags and wheel_tag_rank(tuple(tags), supported) is None:
+                tags.append(tuple(parts))
+        if not tags or ("py3", "none", "any") in tags:
+            continue
+        from cpip.core.wheel import WheelTag, wheel_tag_rank
+
+        if supported is None:
+            supported = tuple(supported_tags())
+        wheel_tags = tuple(WheelTag(*parts) for parts in tags)
+        if wheel_tag_rank(wheel_tags, supported) is None:
             result.append(dist)
     return result
 

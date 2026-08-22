@@ -180,6 +180,9 @@ class LightDistribution:
     """An importlib.metadata-free stand-in for ``InstalledMetadataDistribution``."""
 
     __slots__ = (
+        "_direct_url",
+        "_direct_url_read",
+        "_installer",
         "canonical_name",
         "info_location",
         "location",
@@ -206,6 +209,11 @@ class LightDistribution:
         self.info_location = info_location
         self.metadata = metadata
         self.user_site = user_site
+        # INSTALLER and direct_url.json are read once: list, freeze and
+        # inspect each ask for them more than once per distribution.
+        self._installer: str | None = None
+        self._direct_url: DirectUrl | None = None
+        self._direct_url_read = False
 
     @property
     def version(self) -> Version:
@@ -237,14 +245,16 @@ class LightDistribution:
 
     @property
     def installer(self) -> str:
-        try:
-            return next(
-                line.strip()
-                for line in self.read_text("INSTALLER").splitlines()
-                if line.strip()
-            )
-        except (FileNotFoundError, StopIteration):
-            return ""
+        if self._installer is None:
+            try:
+                self._installer = next(
+                    line.strip()
+                    for line in self.read_text("INSTALLER").splitlines()
+                    if line.strip()
+                )
+            except (FileNotFoundError, StopIteration):
+                self._installer = ""
+        return self._installer
 
     @property
     def requested(self) -> bool:
@@ -256,10 +266,15 @@ class LightDistribution:
 
     @property
     def direct_url(self) -> DirectUrl | None:
-        try:
-            return DirectUrl.from_json(self.read_text("direct_url.json"))
-        except (FileNotFoundError, ValueError):
-            return None
+        if not self._direct_url_read:
+            self._direct_url_read = True
+            try:
+                self._direct_url = DirectUrl.from_json(
+                    self.read_text("direct_url.json")
+                )
+            except (FileNotFoundError, ValueError):
+                self._direct_url = None
+        return self._direct_url
 
     @property
     def editable_project_location(self) -> str | None:
