@@ -19,7 +19,6 @@ from cpip.index.config import DEFAULT_INDEX_URL
 from cpip.index.links import Link
 from cpip.index.source_locations import resolve_source_location
 from cpip.core.appdirs import http_cache_path
-from cpip.network.http import NetworkSession
 from cpip.resolution.input_requirements import install_req_from_line
 
 RELEASE_OPTIONS = frozenset(("pre", "all-releases"))
@@ -165,6 +164,11 @@ class DeferredNetworkSession:
         with self.lock:
             if self.session is not None:
                 return self.session
+
+            # Deferred: network.http (and the auth, cache and platform
+            # modules under it) only when a session is actually built --
+            # never on a warm or local resolve that makes no request.
+            from cpip.network.http import NetworkSession
 
             session = NetworkSession(
                 index_urls=self.index_urls,
