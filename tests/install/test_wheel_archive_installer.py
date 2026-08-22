@@ -299,3 +299,97 @@ def test_transactional_install_with_compilation_takes_the_clone_route(
 
     assert (cache_dir / ARCHIVE_CACHE_BUCKET).is_dir(), "the clone route was not used"
     assert list(target.rglob("*.pyc")), "bytecode was not compiled"
+
+
+def _make_wheel_with_members(
+    directory: Path, name: str, members: dict[str, str]
+) -> Path:
+    """A wheel carrying arbitrary members besides its dist-info scaffolding."""
+    wheel = directory / f"{name}-1.0-py3-none-any.whl"
+    with zipfile.ZipFile(wheel, "w") as archive:
+        for path, text in members.items():
+            archive.writestr(path, text)
+        archive.writestr(
+            f"{name}-1.0.dist-info/METADATA",
+            f"Metadata-Version: 2.1\nName: {name}\nVersion: 1.0\n",
+        )
+        archive.writestr(
+            f"{name}-1.0.dist-info/WHEEL",
+            "Wheel-Version: 1.0\nRoot-Is-Purelib: true\nTag: py3-none-any\n",
+        )
+        archive.writestr(f"{name}-1.0.dist-info/RECORD", "")
+    return wheel
+
+
+def test_wheel_shipping_its_own_generated_pyc_is_rejected_under_compilation(
+    tmp_path: Path,
+) -> None:
+    """A wheel that ships both a module and the .pyc byte-compilation would
+    generate collides on one destination; the clone route rejects it rather
+    than overwrite the member and emit a duplicate RECORD row."""
+    import sys
+
+    cache_dir = tmp_path / "cache"
+    tag = sys.implementation.cache_tag
+    wheel = _make_wheel_with_members(
+        tmp_path,
+        "pkg_self_pyc",
+        {"selfmod.py": "x = 1\n", f"__pycache__/selfmod.{tag}.pyc": "stale\n"},
+    )
+    (candidate,) = _prevalidated_candidates_for(tmp_path, cache_dir, wheel)
+    install_target = InstallTarget.from_options(
+        "pkg-self-pyc", target=str(tmp_path / "target")
+    )
+
+    with pytest.raises(InstallationError, match="duplicate installation destination"):
+        install_wheels_from_archive_cache(
+            [(wheel, True, None)],
+            (candidate,),
+            target=install_target,
+            cache_dir=str(cache_dir),
+            pycompile=True,
+        )
+
+    # Without compilation the .pyc is just a member; nothing collides.
+    installed = install_wheels_from_archive_cache(
+        [(wheel, True, None)],
+        (candidate,),
+        target=InstallTarget.from_options("pkg-self-pyc", target=str(tmp_path / "t2")),
+        cache_dir=str(cache_dir),
+        pycompile=False,
+    )
+    assert installed is not None
+
+
+def test_unowned_target_pyc_declines_the_clone_route(tmp_path: Path) -> None:
+    """An unowned file already at a generated .pyc path makes the route
+    decline (to the transactional path) instead of overwriting it in the
+    clone after preflight."""
+    import sys
+
+    cache_dir = tmp_path / "cache"
+    tag = sys.implementation.cache_tag
+    wheel = _make_wheel_with_members(tmp_path, "pkg_new", {"newmod.py": "x = 1\n"})
+    (candidate,) = _prevalidated_candidates_for(tmp_path, cache_dir, wheel)
+
+    # A populated target holding an unrelated distribution and a stray file
+    # exactly where newmod's bytecode would land.
+    target = tmp_path / "target"
+    (target / "other-9.9.dist-info").mkdir(parents=True)
+    (target / "other-9.9.dist-info" / "RECORD").write_text("")
+    stray = target / "__pycache__" / f"newmod.{tag}.pyc"
+    stray.parent.mkdir(parents=True)
+    stray.write_text("not ours\n")
+
+    install_target = InstallTarget.from_options("pkg-new", target=str(target))
+
+    declined = install_wheels_from_archive_cache(
+        [(wheel, True, None)],
+        (candidate,),
+        target=install_target,
+        cache_dir=str(cache_dir),
+        pycompile=True,
+    )
+    assert declined is None
+    # The stray file is untouched: the route did not clone-and-swap.
+    assert stray.read_text() == "not ours\n"

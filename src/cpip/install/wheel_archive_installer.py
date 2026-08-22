@@ -148,6 +148,23 @@ def _normalized_destination(parts: tuple[str, ...]) -> tuple[str, ...]:
     return tuple(os.path.normcase(part) for part in parts)
 
 
+def _compiled_parts(mapped: tuple[str, ...]) -> tuple[str, ...] | None:
+    """Where byte-compiling ``mapped`` lands its ``.pyc``, as path parts, or
+    ``None`` when ``_compile_members`` would not compile this member.
+
+    Uses the interpreter's own ``cache_from_source`` so the reserved and
+    preflighted path is exactly the one ``compileall`` writes.
+    """
+    if not mapped[-1].endswith(".py") or mapped[0] in {"bin", "Scripts"}:
+        return None
+
+    import importlib.util
+
+    compiled = importlib.util.cache_from_source("/".join(mapped))
+
+    return tuple(compiled.split("/"))
+
+
 def _reserve_destination(
     trie: _DestinationNode,
     parts: tuple[str, ...],
@@ -195,6 +212,8 @@ def _build_plans(
     requests: tuple[WheelRequest, ...],
     candidates: tuple[WheelInstallCandidate, ...],
     archives: tuple[CachedWheelArchive, ...],
+    *,
+    pycompile: bool = False,
 ) -> tuple[_WheelInstallPlan, ...]:
     trie = _DestinationNode()
 
@@ -204,12 +223,15 @@ def _build_plans(
         zip(requests, candidates, archives, strict=True),
     ):
         for entry in archive.entries:
-            _reserve_destination(
-                trie,
-                _mapped_parts(entry[0]),
-                owner,
-                candidate,
-            )
+            mapped = _mapped_parts(entry[0])
+
+            _reserve_destination(trie, mapped, owner, candidate)
+
+            # A generated .pyc shares the trie so a wheel that also ships it
+            # as a member, or a second wheel producing the same path, is
+            # rejected here rather than overwritten during finalization.
+            if pycompile and (compiled := _compiled_parts(mapped)) is not None:
+                _reserve_destination(trie, compiled, owner, candidate)
 
         scripts = entry_point_scripts(
             os.path.join(archive.tree, archive.dist_info, "entry_points.txt"),
@@ -580,11 +602,21 @@ def _finalize_wheel(
     )
 
 
-def _plan_destinations(root: str, plan: _WheelInstallPlan) -> set[str]:
-    destinations = {
-        os.path.join(root, "/".join(_mapped_parts(relative)))
-        for relative, _, _, _ in plan.archive.entries
-    }
+def _plan_destinations(
+    root: str, plan: _WheelInstallPlan, *, pycompile: bool = False
+) -> set[str]:
+    destinations: set[str] = set()
+
+    for relative, _, _, _ in plan.archive.entries:
+        mapped = _mapped_parts(relative)
+
+        destinations.add(os.path.join(root, "/".join(mapped)))
+
+        # The preflight must see the generated .pyc too, so an unowned file
+        # already at that path declines this route rather than being
+        # overwritten in the clone after the check has passed.
+        if pycompile and (compiled := _compiled_parts(mapped)) is not None:
+            destinations.add(os.path.join(root, "/".join(compiled)))
 
     scripts_root = os.path.join(root, "Scripts" if os.name == "nt" else "bin")
 
@@ -685,7 +717,7 @@ def install_wheels_from_archive_cache(
     except OSError:
         return None
 
-    plans = _build_plans(requests, candidates, archives)
+    plans = _build_plans(requests, candidates, archives, pycompile=pycompile)
 
     parent = os.path.dirname(root)
 
@@ -762,7 +794,7 @@ def install_wheels_from_archive_cache(
                     if (normalized := _internal_comparison_path(path))
                 )
 
-                destinations = _plan_destinations(root, plan)
+                destinations = _plan_destinations(root, plan, pycompile=pycompile)
 
                 destinations_by_plan[plan] = destinations
 
@@ -791,7 +823,7 @@ def install_wheels_from_archive_cache(
                 destinations = destinations_by_plan.get(plan)
 
                 if destinations is None:
-                    destinations = _plan_destinations(root, plan)
+                    destinations = _plan_destinations(root, plan, pycompile=pycompile)
 
                 for destination in destinations:
                     if (

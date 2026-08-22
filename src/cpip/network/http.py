@@ -593,8 +593,6 @@ class NetworkSession:
             flight.event.set()
 
     def cached_response(self, request: HttpRequest) -> HttpResponse | None:
-        import email.message
-
         if self.cache is None:
             return None
 
@@ -628,6 +626,10 @@ class NetworkSession:
             body.close()
 
             return None
+
+        # Deferred: email.message only when a cached response is actually
+        # reconstructed, never on a cache-disabled or cache-miss request.
+        import email.message
 
         response_headers = email.message.Message()
 

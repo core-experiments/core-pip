@@ -14,6 +14,14 @@ from cpip.index.sqlite_cache import SqliteBackedCache
 MetadataHeaders: TypeAlias = dict[str, list[str]]
 MetadataIdentity: TypeAlias = tuple[str, int, int]
 
+_HEX_DIGITS = "0123456789abcdefABCDEF"
+
+
+def _valid_sha256(value: object) -> bool:
+    """A 64-character hex string, the shape put_digest writes."""
+    return isinstance(value, str) and len(value) == 64 and not value.strip(_HEX_DIGITS)
+
+
 NAME = "metadata.sqlite"
 _MAX_ENTRIES = 8_192
 _CACHE_INSTANCES: dict[str, WheelMetadataCache] = {}
@@ -161,7 +169,9 @@ class WheelMetadataCache(SqliteBackedCache):
                 )
             except sqlite3.Error:
                 return None
-        if row is None or not isinstance(row[0], str) or len(row[0]) != 64:
+        if row is None or not _valid_sha256(row[0]):
+            # A malformed persisted value is a miss, not a digest: returning
+            # it would key the archive cache on a non-hash.
             return None
         self.digests[identity] = row[0]
         return row[0]
@@ -192,7 +202,7 @@ class WheelMetadataCache(SqliteBackedCache):
                 return
         for path, size, mtime, digest in rows:
             identity = (path, size, mtime)
-            if identity in wanted and isinstance(digest, str) and len(digest) == 64:
+            if identity in wanted and _valid_sha256(digest):
                 self.digests[identity] = digest
 
     def put_digest(self, identity: MetadataIdentity, digest: str) -> None:
